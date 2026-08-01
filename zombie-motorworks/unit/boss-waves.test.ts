@@ -9,7 +9,6 @@ import type { ZombieSystem } from '../src/survival/zombies/ZombieSystem.ts';
 import type { ZombieKind } from '../src/survival/zombies/Zombie.ts';
 import {
   BOSS_DEFINITIONS,
-  BOSS_WAVE_INTERVAL,
   ELITE_BOSSES,
   bossForWave,
   isBossWave,

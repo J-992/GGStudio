@@ -66,6 +66,19 @@ export function withHotbarSlot(
 }
 
 /**
+ * Makes a block type the current build-bar pick without ever toggling it off.
+ * Returning a block to Inventory must make it immediately reachable: append it
+ * when room exists, or replace the most recent slot when the bar is full.
+ */
+export function selectHotbarSlot(
+  hotbar: readonly string[],
+  defId: string,
+): string[] {
+  if (hotbar.includes(defId) || !isPlaceableType(defId)) return [...hotbar];
+  return [...hotbar.slice(0, HOTBAR_CAPACITY - 1), defId];
+}
+
+/**
  * Inventory click: slotted types come off the bar, unslotted ones go on. A full
  * bar drops its most recent pick to make room, so a click always lands.
  */

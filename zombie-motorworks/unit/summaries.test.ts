@@ -5,7 +5,6 @@ import type { PlacedPart } from '../src/core/types.ts';
 import { zombieCompositionForWave } from '../src/survival/WaveManager.ts';
 import {
   formatWaveComposition,
-  newThreatsForWave,
   threatWarningsForWave,
 } from '../src/survival/waveBalance.ts';
 

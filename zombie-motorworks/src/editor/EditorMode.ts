@@ -83,7 +83,11 @@ import {
   type RunState,
 } from '../core/economy.ts';
 import type { PlayerProfile } from '../core/profile.ts';
-import { resolveHotbar, withHotbarSlot } from '../core/hotbar.ts';
+import {
+  resolveHotbar,
+  selectHotbarSlot,
+  withHotbarSlot,
+} from '../core/hotbar.ts';
 import { threatWarningsForWave } from '../survival/waveBalance.ts';
 import {
   decodeShareCode,
@@ -1069,7 +1073,9 @@ export class EditorMode {
     if (parts.length === 0) {
       const blocked = [...this.selected]
         .map((id) => getPart(this.bp, id))
-        .find((part) => part !== undefined && isFixedToRig(getPartDef(part.defId)));
+        .find(
+          (part) => part !== undefined && isFixedToRig(getPartDef(part.defId)),
+        );
       if (blocked !== undefined) {
         const def = getPartDef(blocked.defId);
         this.ui.setStatus(
@@ -1105,6 +1111,11 @@ export class EditorMode {
     if (!returned) return;
     const stock = this.inventory();
     for (const part of parts) stock[part.defId] = (stock[part.defId] ?? 0) + 1;
+    let nextHotbar = this.hotbar();
+    for (const part of parts) {
+      nextHotbar = selectHotbarSlot(nextHotbar, part.defId);
+    }
+    this.profile.hotbarDefIds = nextHotbar;
     this.persistProfile();
     this.selected.clear();
     this.refresh();
@@ -1482,7 +1493,9 @@ export class EditorMode {
     if (offer.action === 'unlock') return this.unlockPart(defId);
     if (!this.buyInventoryPart(defId)) return false;
     this.armGhost(defId);
-    this.ui.setStatus(`Bought ${def.name} and armed placement (-$${offer.price})`);
+    this.ui.setStatus(
+      `Bought ${def.name} and armed placement (-$${offer.price})`,
+    );
     return true;
   }
 

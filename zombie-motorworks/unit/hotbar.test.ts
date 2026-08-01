@@ -2,11 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   HOTBAR_CAPACITY,
   resolveHotbar,
+  selectHotbarSlot,
   seedHotbar,
   toggleHotbarSlot,
   withHotbarSlot,
 } from '../src/core/hotbar.ts';
-import { decodeProfile, defaultProfile, encodeProfile } from '../src/core/profile.ts';
+import {
+  decodeProfile,
+  defaultProfile,
+  encodeProfile,
+} from '../src/core/profile.ts';
 
 const STARTER_STOCK = defaultProfile().inventory ?? {};
 
@@ -64,9 +69,38 @@ describe('build bar editing', () => {
   });
 
   it('leaves a full bar untouched rather than evicting a chosen block', () => {
-    const full = ['frame-box', 'wheel-standard', 'engine-small', 'fuel-tank', 'turret'];
+    const full = [
+      'frame-box',
+      'wheel-standard',
+      'engine-small',
+      'fuel-tank',
+      'turret',
+    ];
 
     expect(withHotbarSlot(full, 'spike-ram')).toEqual(full);
+  });
+
+  it('selects a returned block into the bar, replacing the last slot if full', () => {
+    expect(selectHotbarSlot(['turret'], 'frame-box')).toEqual([
+      'turret',
+      'frame-box',
+    ]);
+    expect(selectHotbarSlot(['turret'], 'turret')).toEqual(['turret']);
+
+    const full = [
+      'frame-box',
+      'wheel-standard',
+      'engine-small',
+      'fuel-tank',
+      'turret',
+    ];
+    expect(selectHotbarSlot(full, 'spike-ram')).toEqual([
+      'frame-box',
+      'wheel-standard',
+      'engine-small',
+      'fuel-tank',
+      'spike-ram',
+    ]);
   });
 
   it('toggles a block type on and off the bar', () => {
@@ -80,7 +114,13 @@ describe('build bar editing', () => {
   });
 
   it('drops the most recent pick when the bar is already full', () => {
-    const full = ['frame-box', 'wheel-standard', 'engine-small', 'fuel-tank', 'turret'];
+    const full = [
+      'frame-box',
+      'wheel-standard',
+      'engine-small',
+      'fuel-tank',
+      'turret',
+    ];
 
     expect(toggleHotbarSlot(full, 'spike-ram')).toEqual([
       'frame-box',
