@@ -252,6 +252,9 @@ functions.
 | `onPhoneAddictKilled`         | Update lifetime kill gate                 | Real kill only; debug suppression is explicit          |
 | `onWaveCheckpoint`            | Commit survivor Blueprint/HP after clear  | Before a post-clear action can be processed            |
 | `onWaveAdvance`               | Continue in current Survival scene        | Uses the already resolved clear payload                |
+| `missingPartsQuote`           | Price earlier waves' unreplaced blocks    | Read-only; the card adds it to its own repair total    |
+| `onRepairAll`                 | Charge a heal-only full repair            | Charge before Survival heals the live vehicle          |
+| `onFullRepairRebuild`         | Charge, restore lost blocks, redeploy     | Replaces `onWaveAdvance`; disposes the calling mode    |
 | `onBuildPhase`                | Open run Garage                           | Commit/persist damage before editor actions            |
 | `onGameOver`                  | End run and show failure summary          | Receives discarded pending amount                      |
 | `onResetWave`                 | Rebuild from checkpoint                   | Must not use live HP/rewards                           |

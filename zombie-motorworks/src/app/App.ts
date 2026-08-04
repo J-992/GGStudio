@@ -19,6 +19,7 @@ import {
 } from '../core/blueprint.ts';
 import { serializeBlueprint, deserializeBlueprint } from '../core/serialize.ts';
 import { validateBlueprint } from '../core/placement.ts';
+import { planRebuild } from '../core/rebuild.ts';
 import { analyzeVehicle } from '../core/analysis.ts';
 import { getPartDef } from '../core/parts.ts';
 import { getEffectiveDef } from '../core/upgrades.ts';
@@ -544,6 +545,11 @@ export class App {
     this.chamber = null;
     this.survival?.dispose();
     this.survival = null;
+    // Reopening on top of a live garage (the new-game build pick does exactly
+    // that) used to orphan the old UI root: nothing held a reference to it any
+    // more, so the next mode change disposed the new editor and left the old
+    // panels floating over the arena.
+    this.editor?.dispose();
     this.editor = new EditorMode(
       this.root,
       this.renderer,
@@ -846,6 +852,23 @@ export class App {
       profileMoney: () => this.profile.money,
       runEarnings: () => this.runMoneyEarned,
       onRepairAll: (cost) => this.repairRunInPlace(cost),
+      missingPartsQuote: () => this.missingPartsQuote(),
+      onFullRepairRebuild: (
+        cost,
+        state,
+        survivingPartIds,
+        partHp,
+        kills,
+        score,
+      ) =>
+        this.repairRebuildAndRedeploy(
+          cost,
+          state,
+          survivingPartIds,
+          partHp,
+          kills,
+          score,
+        ),
       onReward: (amount) => this.creditRunReward(amount),
       onExit: () => this.abandonRun(),
       onWaveAdvance: (state, survivingPartIds, partHp, kills, score) => {
@@ -1160,10 +1183,12 @@ export class App {
   }
 
   /**
-   * The full repair bought from the wave-clear card. Unlike `repairAll` this
-   * runs mid-run rather than in a build phase, so it only charges the wallet
-   * and re-bases the checkpoint; SurvivalMode heals the live vehicle it is
-   * about to carry into the next wave.
+   * The wave-clear card's full repair when the rig has all its blocks and only
+   * needs healing. Unlike `repairAll` this runs mid-run rather than in a build
+   * phase, so it only charges the wallet and re-bases the checkpoint;
+   * SurvivalMode heals the live vehicle it is about to carry into the next
+   * wave. A rig with holes in it goes through `repairRebuildAndRedeploy`
+   * instead, because a live vehicle cannot regrow a part.
    */
   private repairRunInPlace(cost: number): boolean {
     if (!this.activeRun || this.checkpoint === null) return false;
@@ -1184,6 +1209,101 @@ export class App {
       }
     }
     return true;
+  }
+
+  /**
+   * What the wave-clear card has to add to its repair bill for blocks lost in
+   * an earlier wave and never bought back.
+   *
+   * Priced against the wave-start checkpoint, which is the only blueprint that
+   * exists here — so a block whose mount died during the wave now is still
+   * counted as restorable. The player pays the price they were quoted either
+   * way; the rebuild that follows re-plans against the committed rig and
+   * restores whatever is actually reachable.
+   */
+  private missingPartsQuote(): { cost: number; count: number } {
+    if (this.checkpoint === null) return { cost: 0, count: 0 };
+    const plan = planRebuild(
+      this.checkpoint.blueprint,
+      getPartDef,
+      this.checkpoint.missingParts,
+    );
+    return { cost: plan.totalCost, count: plan.parts.length };
+  }
+
+  /**
+   * The wave-clear card's full repair when the rig has holes in it: charge,
+   * commit the cleared wave, bolt every torn-off block back on at full HP, and
+   * redeploy into the next wave.
+   *
+   * The redeploy is the point. "Continue Now" keeps the live vehicle, and a
+   * live vehicle cannot regrow a part whose collider was removed the moment it
+   * died — so a rebuild has to reassemble from the blueprint, exactly as
+   * coming back out of the Garage does.
+   */
+  private repairRebuildAndRedeploy(
+    cost: number,
+    run: RunState,
+    survivingPartIds: readonly string[],
+    partHp: Record<string, number>,
+    kills: number,
+    score: number,
+  ): void {
+    if (!this.activeRun || this.checkpoint === null) return;
+    if (!Number.isSafeInteger(cost) || cost <= 0) return;
+    if (!canAfford(this.profile.money, cost)) return;
+    try {
+      this.changeMoney(-cost, true);
+    } catch {
+      return;
+    }
+
+    const partsBeforeWave = this.bp.parts;
+    const lostNamesBefore = this.committedDestroyedPartNames.length;
+    this.commitClearedWaveCheckpoint(
+      run.wave + 1,
+      survivingPartIds,
+      partHp,
+      kills,
+      score,
+      run.elapsedSeconds ?? 0,
+    );
+    const checkpoint = this.checkpoint;
+    if (checkpoint === null) return;
+
+    const plan = planRebuild(
+      checkpoint.blueprint,
+      getPartDef,
+      checkpoint.missingParts,
+    );
+    const restoredIds = new Set(plan.parts.map((part) => part.id));
+    checkpoint.blueprint = {
+      ...checkpoint.blueprint,
+      parts: [...checkpoint.blueprint.parts, ...plan.parts],
+    };
+    checkpoint.missingParts = checkpoint.missingParts.filter(
+      (part) => !restoredIds.has(part.id),
+    );
+    checkpoint.partHp = fullPartHp(checkpoint.blueprint);
+
+    // A block bought straight back was not lost, so it must not show up in the
+    // end-of-run "you lost these" list. Re-derive this wave's entries from what
+    // is still gone rather than trying to unpick names out of the tail.
+    const survivors = new Set(survivingPartIds);
+    this.committedDestroyedPartNames.length = lostNamesBefore;
+    this.committedDestroyedPartNames.push(
+      ...partsBeforeWave
+        .filter(
+          (part) => !survivors.has(part.id) && !restoredIds.has(part.id),
+        )
+        .map((part) => getPartDef(part.defId).name),
+    );
+
+    this.bp = checkpoint.blueprint;
+    this.activeRun = { wave: checkpoint.wave };
+    this.inBuildPhase = false;
+    this.enterSurvival(this.bp, runStateFromCheckpoint(checkpoint));
+    this.persistRunCheckpoint('wave');
   }
 
   private creditRunReward(amount: number): number {

@@ -21,7 +21,7 @@ import {
   isSignatureDefId,
 } from '../src/core/builds.ts';
 import { PART_CATALOG, getPartDef } from '../src/core/parts.ts';
-import { validateBlueprint } from '../src/core/placement.ts';
+import { canPlacePart, validateBlueprint } from '../src/core/placement.ts';
 import { SIMPLE_PART_IDS } from '../src/core/tutorial.ts';
 import { STARTER_UNLOCKS } from '../src/core/profile.ts';
 import { effectiveSignature } from '../src/core/signatures.ts';
@@ -91,13 +91,54 @@ describe('build catalog', () => {
   });
 
   it('needs its own wheels unlocked for the default rig', () => {
-    // The Sparkrunner rides on Motorcycle Wheels, which carry an unlock fee.
+    // The Sparkrunner rides on Off-road Wheels, which carry an unlock fee.
     // A new game therefore has to grant the default build's unlocks up front
     // (App.beginNewGame) rather than assume the opening rig is all starter
     // parts — otherwise the first wheel a zombie tears off is unbuyable.
     const light = buildStarterUnlocks(DEFAULT_BUILD_ID);
-    expect(light).toContain('wheel-moto');
-    expect(STARTER_UNLOCKS).not.toContain('wheel-moto');
+    expect(light).toContain('wheel-offroad');
+    expect(STARTER_UNLOCKS).not.toContain('wheel-offroad');
+  });
+
+  it('lays the Sparkrunner deck out as a T, not a cross', () => {
+    // A three-cell spine running forward off a three-cell rear beam. Asserted
+    // because the difference between the two shapes is one cell moved by one
+    // step, and the cross put the driven axle in the middle of the rig.
+    const deck = buildStarterRig('light')
+      .parts.filter((part) => part.defId === 'frame-box' || part.defId === 'chassis-core')
+      .map((part) => `${part.pos.x},${part.pos.y},${part.pos.z}`)
+      .sort();
+    expect(deck).toEqual(
+      ['0,1,1', '0,1,0', '0,1,-1', '-1,1,-2', '0,1,-2', '1,1,-2'].sort(),
+    );
+  });
+
+  it('gives the Sparkrunner twin matched motors over its drive axle', () => {
+    // Torque sums across engines, so the pair is the light build's launch.
+    // Asserted as a pair at one level because half a pair — two engines at
+    // different levels, or one moved off the beam — is a silent rebalance.
+    const engines = buildStarterRig('light').parts.filter(
+      (part) => part.defId === 'engine-small',
+    );
+    expect(engines).toHaveLength(2);
+    expect(engines.every((engine) => engine.config.level === 3)).toBe(true);
+    expect(
+      engines.map((engine) => `${engine.pos.x},${engine.pos.y},${engine.pos.z}`).sort(),
+    ).toEqual(['-1,2,-2', '1,2,-2']);
+  });
+
+  it('opens the Sparkrunner with a free weapon bay over the rear beam', () => {
+    // The whole point of the extra deck cell: (0, 2, -2) has to be empty and
+    // sitting on frame, or the first gun the player buys has nowhere to go.
+    const rig = buildStarterRig('light');
+    const occupied = new Set(
+      rig.parts.map((part) => `${part.pos.x},${part.pos.y},${part.pos.z}`),
+    );
+    expect(occupied.has('0,1,-2')).toBe(true);
+    expect(occupied.has('0,2,-2')).toBe(false);
+    expect(
+      canPlacePart(rig, getPartDef, 'turret', { x: 0, y: 2, z: -2 }, 0).ok,
+    ).toBe(true);
   });
 });
 

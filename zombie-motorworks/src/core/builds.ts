@@ -118,22 +118,23 @@ function driveWheel(): PartConfig {
 }
 
 /**
- * The Sparkrunner rides on Motorcycle Wheels — the racing wheel, not the road
- * one. They weigh less than half what a standard wheel does, run a bigger
- * rolling radius (so the same engine revs reach a higher road speed), and lock
- * over to 42 degrees instead of 40.
+ * The Sparkrunner rides on Off-road Wheels — the big knobbly monster wheel, not
+ * the road one. It was on the thin Motorcycle Wheel, and that wheel is a trap
+ * on the rig that most needs to survive being touched: a 45 HP hub with a 3.8 t
+ * load rating buckles the moment a player bolts anything on, so the fast build
+ * spent its first three waves losing wheels rather than being fast.
  *
- * The catalog cost of that is a narrow contact patch that lets go early in a
- * hard corner and a hub that buckles under load, which is exactly the right
- * trade for the lightest rig in the game and exactly the wrong one for anything
- * that grows heavy — a player who plates this build up will feel the wheels
- * give out and that is the lesson.
+ * The monster wheel is the opposite trade. Nearly three times the health, four
+ * times the load rating, more grip in both directions and half again the drive
+ * torque limit, paid for with weight and a 32-degree lock instead of 42. The
+ * rig stays the quickest thing in the graveyard because it is still the
+ * lightest chassis in the game — it just no longer falls apart from underneath.
  *
  * They run the off-road suspension preset on top: more travel and appreciably
  * more damping, which keeps all three planted over rubble and headstones
  * instead of skipping off and landing crooked with no steering authority.
  */
-const AGILE_WHEEL_DEF_ID = 'wheel-moto';
+const AGILE_WHEEL_DEF_ID = 'wheel-offroad';
 
 function agileWheel(): PartConfig {
   return { ...driveWheel(), suspensionPreset: 'off-road' };
@@ -163,24 +164,63 @@ const v = (x: number, y: number, z: number): Vec3i => ({ x, y, z });
  * Tight little triwheel: one steered wheel up front on a motorcycle fork, a
  * driven pair out back. The short spine keeps mass — and therefore health —
  * low, which is the trade the whole light build is built around.
+ *
+ * The deck is a T, not a cross: a three-cell spine running forward from a
+ * three-cell rear beam.
+ *
+ * ```text
+ *          W          front wheel, z = +2
+ *         [ ]         spine
+ *         [C]         chassis core
+ *         [ ]         spine
+ *    W [ ][ ][ ] W    rear beam and the driven pair, z = -2
+ * ```
+ *
+ * The beam is at the very back rather than one cell in, which is what makes it
+ * a T. That stretches the wheelbase to four cells, so the rig tracks straight
+ * under the weight of the monster wheels instead of pivoting around a
+ * mid-mounted axle, and it gives the twin motors somewhere symmetric to sit
+ * directly over the wheels they drive. The centre of the deck above it is left
+ * clear: (0, 2, -2) is the free, frame-topped weapon bay no other starting rig
+ * hands out, so the first gun the player buys has somewhere to go without
+ * selling the tank or the mast to make room.
  */
 function lightRig(): PlacedPart[] {
   return rig([
     ['chassis-core', v(0, 1, 0)],
     ['frame-box', v(0, 1, 1)],
     ['frame-box', v(0, 1, -1)],
-    ['frame-box', v(1, 1, -1)],
-    ['frame-box', v(-1, 1, -1)],
+    // The bar of the T.
+    ['frame-box', v(0, 1, -2)],
+    ['frame-box', v(1, 1, -2)],
+    ['frame-box', v(-1, 1, -2)],
     [AGILE_WHEEL_DEF_ID, v(0, 1, 2), 0, agileWheel()],
-    [AGILE_WHEEL_DEF_ID, v(2, 1, -1), YAW_180, agileWheel()],
-    [AGILE_WHEEL_DEF_ID, v(-2, 1, -1), 0, agileWheel()],
-    // The Sparkrunner is the only build that starts with an unlock already
-    // bought: its engine ships at level 2, the Turbocharger. It is a small
-    // gain on paper — a tenth off the mid-range — but it is the difference
-    // between the fast build feeling fast from the first wave and feeling
-    // like the medium build with less armour. The turbo can is on the model,
-    // so the star in the garage is visible on the rig too.
-    ['engine-small', v(0, 2, -1), 0, { level: 2 }],
+    [AGILE_WHEEL_DEF_ID, v(2, 1, -2), YAW_180, agileWheel()],
+    [AGILE_WHEEL_DEF_ID, v(-2, 1, -2), 0, agileWheel()],
+    // Twin motors, one over each driven wheel.
+    //
+    // Torque sums across engines and mass does not double the rig, so the
+    // second block is felt entirely in the launch: the Sparkrunner leaves a
+    // standing start ahead of anything else in the game, which is the one
+    // thing the fast build should never lose at. It does not raise flat-out
+    // speed — that is gearing and redline, and both engines share the same
+    // ceiling — so the rig stays quick rather than becoming untouchable.
+    //
+    // They sit on the beam ends rather than down the spine so the pair is
+    // symmetric about the centreline and the weight lands over the drive
+    // axle, where it buys traction instead of costing turn-in. That also
+    // leaves the whole spine above the deck open: (0, 2, -1) and the bay at
+    // (0, 2, -2) are both free mounts.
+    //
+    // Both ship at level 3 — Turbocharger and Intercooler already bought,
+    // the only starting rig with unlocks on it. The cans are on the model, so
+    // the stars in the garage are visible on the rig too.
+    //
+    // The bill for all of this is fuel: two engines burn a tank twice as fast
+    // as one, and the pair only carries 15 L more between them. The fast build
+    // is now the build that has to think about refuel crates.
+    ['engine-small', v(-1, 2, -2), 0, { level: 3 }],
+    ['engine-small', v(1, 2, -2), 0, { level: 3 }],
     ['fuel-tank', v(0, 2, 0)],
     // The mast rides high and central so the rod has a clear line up.
     ['storm-rod', v(0, 2, 1)],

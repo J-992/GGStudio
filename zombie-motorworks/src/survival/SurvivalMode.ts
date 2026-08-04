@@ -267,6 +267,27 @@ export interface SurvivalCallbacks {
    * cannot cover it.
    */
   onRepairAll(cost: number): boolean;
+  /**
+   * Shelf price and count of blocks destroyed in an *earlier* wave that the
+   * player has never bought back. They are absent from this mode's blueprint,
+   * so only App can price them into the wave-clear card's full repair.
+   */
+  missingPartsQuote?(): { cost: number; count: number };
+  /**
+   * The full repair when it has holes to fill as well as dents. Charges
+   * `cost`, commits the cleared wave, re-places every part torn off so far at
+   * full HP, and redeploys into the next wave on the rebuilt rig — the live
+   * vehicle cannot grow its lost blocks back, so it is replaced rather than
+   * patched. The mode is disposed by that redeploy.
+   */
+  onFullRepairRebuild(
+    cost: number,
+    run: RunState,
+    survivingPartIds: readonly string[],
+    partHp: Record<string, number>,
+    kills: number,
+    score: number,
+  ): void;
   onReward(amount: number): number;
   onExit(run: RunState): void;
   onWaveAdvance(
@@ -1725,21 +1746,46 @@ export class SurvivalMode {
    * Priced from the live vehicle rather than the checkpoint: "Continue Now"
    * carries the live rig straight into the next wave, so that is what the
    * player is actually paying to fix.
+   *
+   * It is a genuinely full repair, so it prices the holes as well as the
+   * dents: every block torn off this wave, plus anything still missing from an
+   * earlier one, is bought back at shelf price. Quoting only the surviving
+   * parts made the card read as "you are whole again" while the rig went into
+   * the next wave a wheel down.
    */
   private repairQuote(): WaveClearRepairOffer | null {
-    const items = [...this.vehicle.assembled.parts]
-      .filter(([, part]) => part.alive && !part.detached)
-      .map(([id, part]) => ({
+    const items: Parameters<typeof repairPlan>[0] = [];
+    let rebuildCost = 0;
+    let rebuiltParts = 0;
+    for (const [id, part] of this.vehicle.assembled.parts) {
+      const baseCost = getPartDef(part.placed.defId).cost;
+      if (!part.alive || part.detached) {
+        rebuildCost += baseCost;
+        rebuiltParts += 1;
+        continue;
+      }
+      items.push({
         id,
-        baseCost: getPartDef(part.placed.defId).cost,
+        baseCost,
         currentHp: Math.max(0, part.health),
         maxHp: part.def.health,
-      }));
-    const plan = repairPlan(items);
-    if (plan.totalCost <= 0) return null;
+      });
+    }
+    // Blocks lost in an earlier wave and never bought back are App's to price:
+    // they left the blueprint, so this mode has never seen them.
+    const carried = this.callbacks.missingPartsQuote?.() ?? {
+      cost: 0,
+      count: 0,
+    };
+    rebuildCost += Math.max(0, carried.cost);
+    rebuiltParts += Math.max(0, carried.count);
+
+    const totalCost = repairPlan(items).totalCost + rebuildCost;
+    if (totalCost <= 0) return null;
     return {
-      cost: plan.totalCost,
-      affordable: this.callbacks.profileMoney() >= plan.totalCost,
+      cost: totalCost,
+      affordable: this.callbacks.profileMoney() >= totalCost,
+      rebuiltParts,
     };
   }
 
@@ -1747,6 +1793,23 @@ export class SurvivalMode {
     if (this.disposed || this.phase !== 'cleared') return;
     const quote = this.repairQuote();
     if (quote === null || !quote.affordable) return;
+    if (quote.rebuiltParts > 0) {
+      // Bolting blocks back onto a live Rapier rig is not a thing this mode
+      // can do: their colliders are gone and their meshes with them. So the
+      // rebuild hands off to App, which commits the cleared wave, restores the
+      // parts into the checkpoint, and redeploys onto the whole rig.
+      const payload = this.clearedWavePayload();
+      this.waveClearCard.hide();
+      this.callbacks.onFullRepairRebuild(
+        quote.cost,
+        payload.clearedRun,
+        payload.survivingPartIds,
+        payload.partHp,
+        payload.kills,
+        payload.score,
+      );
+      return;
+    }
     // Charge first: if the wallet says no, nothing is healed.
     if (!this.callbacks.onRepairAll(quote.cost)) return;
     this.repairLiveVehicle();

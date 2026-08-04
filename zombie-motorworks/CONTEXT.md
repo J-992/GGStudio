@@ -158,6 +158,12 @@ helpers. `core` stays engine- and browser-independent.
 - `Continue Now` stays in Survival with current damage. `Garage / Repair` opens
   an in-run Editor backed by the same checkpoint. Without repair, both choices
   produce equivalent next-wave vehicle state.
+- The wave-clear card's full repair is priced as a **whole** rig: missing HP on
+  every surviving part plus the shelf price of every block torn off, this wave
+  or an earlier one. When there is nothing to buy back it heals the live vehicle
+  in place and continues. When there is, App commits the clear, re-places the
+  lost blocks on the checkpoint, and redeploys into the next wave — a live
+  Runtime Vehicle cannot regrow a part whose collider was already removed.
 
 ### Scuttle Charge
 

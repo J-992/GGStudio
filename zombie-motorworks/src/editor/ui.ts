@@ -237,6 +237,29 @@ export interface EditorUI {
    * owns its position; `buildEditorUI` only owns its contents.
    */
   selectionTip: HTMLDivElement;
+  /**
+   * The single upgrade coach mark. EditorMode owns its position and decides
+   * which block it hangs over; this only fills it in. Pass null to hide it.
+   */
+  setUpgradeAdvice(advice: UpgradeAdviceView | null): void;
+  /** The coach mark's element, so EditorMode can pin it to a block. */
+  upgradeTip: HTMLDivElement;
+}
+
+/** Everything the upgrade coach mark shows about the unlock it is offering. */
+export interface UpgradeAdviceView {
+  /** Placed part the mark hangs over; clicking it buys this part's upgrade. */
+  partId: string;
+  /** Block name, e.g. "Zombie Blaster". */
+  partName: string;
+  /** The unlock's single display glyph. */
+  icon: string;
+  /** The unlock's name, e.g. "Ammo Drum". */
+  stepName: string;
+  /** Stars the block already has, 0-5. */
+  stars: number;
+  /** Price of this one unlock. Known affordable before it is ever shown. */
+  price: number;
 }
 
 interface CollapsiblePanel {
@@ -1772,6 +1795,56 @@ export function buildEditorUI(
   }
   root.appendChild(selectionTip);
 
+  // The upgrade coach mark: one clickable card floating over the one block the
+  // garage thinks is worth a star next. Deliberately singular — a mark on every
+  // upgradeable block is wallpaper, and wallpaper is ignored.
+  const upgradeTip = document.createElement('div');
+  upgradeTip.className = 'upgrade-tip';
+  upgradeTip.style.display = 'none';
+  const upgradeTipButton = document.createElement('button');
+  upgradeTipButton.type = 'button';
+  upgradeTipButton.className = 'upgrade-tip__buy';
+  // Up-arrow badge: the card has to read as "upgrade" before the player has
+  // read a word of it, and the unlock's own glyph says which hardware, not
+  // which action.
+  const upgradeTipArrow = document.createElement('span');
+  upgradeTipArrow.className = 'upgrade-tip__arrow';
+  upgradeTipArrow.textContent = '▲';
+  upgradeTipArrow.setAttribute('aria-hidden', 'true');
+  const upgradeTipIcon = document.createElement('span');
+  upgradeTipIcon.className = 'upgrade-tip__icon';
+  upgradeTipIcon.setAttribute('aria-hidden', 'true');
+  const upgradeTipBody = document.createElement('span');
+  upgradeTipBody.className = 'upgrade-tip__body';
+  const upgradeTipStep = document.createElement('span');
+  upgradeTipStep.className = 'upgrade-tip__step';
+  const upgradeTipPart = document.createElement('span');
+  upgradeTipPart.className = 'upgrade-tip__part';
+  upgradeTipBody.append(upgradeTipStep, upgradeTipPart);
+  const upgradeTipPrice = document.createElement('span');
+  upgradeTipPrice.className = 'upgrade-tip__price';
+  upgradeTipButton.append(
+    upgradeTipArrow,
+    upgradeTipIcon,
+    upgradeTipBody,
+    upgradeTipPrice,
+  );
+  upgradeTip.appendChild(upgradeTipButton);
+  // Leader line down to the block the card is talking about. Its length is set
+  // per frame by EditorMode, which is the only thing that knows where the block
+  // projected to this frame.
+  const upgradeTipLeader = document.createElement('span');
+  upgradeTipLeader.className = 'upgrade-tip__leader';
+  upgradeTipLeader.setAttribute('aria-hidden', 'true');
+  upgradeTip.appendChild(upgradeTipLeader);
+  let upgradeAdvicePartId: string | null = null;
+  upgradeTipButton.addEventListener('click', () => {
+    if (upgradeAdvicePartId !== null) {
+      handlers.onUpgradePart(upgradeAdvicePartId);
+    }
+  });
+  root.appendChild(upgradeTip);
+
   const help = buildHelpOverlay();
   help.style.display = 'none';
   root.appendChild(help);
@@ -1825,6 +1898,21 @@ export function buildEditorUI(
     root,
     ghostTip,
     selectionTip,
+    upgradeTip,
+    setUpgradeAdvice: (advice) => {
+      upgradeAdvicePartId = advice?.partId ?? null;
+      if (!advice) {
+        upgradeTip.style.display = 'none';
+        return;
+      }
+      upgradeTipIcon.textContent = advice.icon;
+      upgradeTipStep.textContent = advice.stepName;
+      upgradeTipPart.textContent = `${advice.partName} ${'★'.repeat(
+        advice.stars,
+      )}${'☆'.repeat(Math.max(0, MAX_UPGRADE_STEPS - advice.stars))}`;
+      upgradeTipPrice.textContent = `$${advice.price}`;
+      upgradeTipButton.title = `Upgrade ${advice.partName}: ${advice.stepName} for $${advice.price}`;
+    },
     setBlueprintName: (name) => {
       nameInput.value = name;
     },

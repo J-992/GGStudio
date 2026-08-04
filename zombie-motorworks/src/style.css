@@ -2949,6 +2949,146 @@ button:disabled {
   gap: 6px;
 }
 
+/*
+ * Upgrade coach mark. Sits higher above the block than `.selection-tip` so the
+ * two can share a block without overlapping, and unlike that card it is a real
+ * control: it takes clicks.
+ */
+.upgrade-tip {
+  position: absolute;
+  z-index: 13;
+  /*
+   * The card sits on the anchor point and grows upward; the leader line then
+   * hangs off the bottom of it, so `--upgrade-tip-leader` is a straight
+   * card-bottom-to-block distance in screen pixels. EditorMode measures it
+   * every frame.
+   */
+  --upgrade-tip-leader: 0px;
+
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+}
+
+/* Leader line: card down to the block, with a pip on the end that lands on it. */
+.upgrade-tip__leader {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 2px;
+  height: var(--upgrade-tip-leader);
+  transform: translateX(-50%);
+  background: linear-gradient(
+    to bottom,
+    var(--ui-bone),
+    rgb(183 168 115 / 0.25)
+  );
+  pointer-events: none;
+}
+
+.upgrade-tip__leader::after {
+  content: '';
+  position: absolute;
+  bottom: -3px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  transform: translateX(-50%) rotate(45deg);
+  background: var(--ui-bone);
+}
+
+.upgrade-tip__buy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  /* Yellow all the way round, so the card reads as the one thing to click. */
+  border: 2px solid var(--ui-bone);
+  background: rgb(8 10 8 / 0.94);
+  box-shadow: 4px 5px 0 rgb(0 0 0 / 0.4);
+  color: var(--ui-bone);
+  cursor: pointer;
+  pointer-events: auto;
+  white-space: nowrap;
+  animation: upgrade-tip-pulse 2.2s ease-in-out infinite;
+}
+
+.upgrade-tip__buy:hover,
+.upgrade-tip__buy:focus-visible {
+  background: rgb(28 26 14 / 0.96);
+  animation: none;
+}
+
+/*
+ * The "this is an upgrade" badge, boxed off from the rest of the card.
+ *
+ * Deliberately the largest thing on it. The card is read at a glance from
+ * across the garage while the camera is moving, and at that distance a chunky
+ * arrow is the only part of it that lands.
+ */
+.upgrade-tip__arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-width: 30px;
+  margin: -6px 0 -6px -8px;
+  padding: 0 6px;
+  border-right: 2px solid var(--ui-bone);
+  background: var(--ui-bone);
+  color: var(--ui-ink);
+  font: var(--ui-text-20)/1 var(--ui-font-display);
+  /* Faint emboss so the dark glyph keeps an edge against the flat gold fill. */
+  text-shadow: 0 1px 0 rgb(255 255 255 / 0.25);
+}
+
+.upgrade-tip__icon {
+  font: var(--ui-text-16)/1 var(--ui-font-display);
+  color: var(--ui-signal);
+}
+
+.upgrade-tip__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+}
+
+.upgrade-tip__step {
+  font: var(--ui-text-12)/1 var(--ui-font-display);
+  letter-spacing: 0.04em;
+}
+
+.upgrade-tip__part {
+  font: var(--ui-text-10)/1 var(--ui-font-body);
+  color: var(--ui-text-muted);
+}
+
+.upgrade-tip__price {
+  font: var(--ui-text-12)/1 var(--ui-font-display);
+  color: var(--ui-bone);
+}
+
+@keyframes upgrade-tip-pulse {
+  0%,
+  100% {
+    box-shadow:
+      4px 5px 0 rgb(0 0 0 / 0.4),
+      0 0 0 rgb(183 168 115 / 0%);
+  }
+
+  50% {
+    box-shadow:
+      4px 5px 0 rgb(0 0 0 / 0.4),
+      0 0 14px rgb(183 168 115 / 60%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upgrade-tip__buy {
+    animation: none;
+  }
+}
+
 .selection-tip kbd {
   min-width: 16px;
   padding: 2px 4px;

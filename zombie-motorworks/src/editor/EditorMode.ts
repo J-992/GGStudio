@@ -16,6 +16,9 @@ import { CELL_SIZE, GRID_MAX, GRID_MIN } from '../core/types.ts';
 import { PART_CATALOG, getPartDef } from '../core/parts.ts';
 import { buildOccupancy, getPart, nextPartId } from '../core/blueprint.ts';
 import { canPlacePart, validateBlueprint } from '../core/placement.ts';
+import { planRebuild, type RebuildPlan } from '../core/rebuild.ts';
+import { recommendUpgrade } from '../core/upgradeAdvice.ts';
+import { upgradeStars, upgradeStepFor } from '../core/partUpgrades.ts';
 import { cellCentreM } from '../core/mass.ts';
 import { deriveConnections } from '../core/structural.ts';
 import { analyzeVehicle } from '../core/analysis.ts';
@@ -312,6 +315,11 @@ export class EditorMode {
   /** World point the selection shortcut card hangs above, or null when idle. */
   private selectionTipAnchor: THREE.Vector3 | null = null;
   private readonly tipProjection = new THREE.Vector3();
+  /** World point the upgrade coach mark hangs above, or null when it is off. */
+  private upgradeTipAnchor: THREE.Vector3 | null = null;
+  /** Top face of that block, so the card's leader line can reach down to it. */
+  private upgradeTipBlockAnchor: THREE.Vector3 | null = null;
+  private readonly blockProjection = new THREE.Vector3();
   private symmetry = false;
   private layer = -1;
   private readonly toggles: OverlayToggles = {
@@ -550,6 +558,7 @@ export class EditorMode {
   update(): void {
     this.controls.update();
     this.updateSelectionTip();
+    this.updateUpgradeTip();
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -575,6 +584,45 @@ export class EditorMode {
     tip.style.display = 'flex';
     tip.style.left = `${rect.left + ((projected.x + 1) / 2) * rect.width}px`;
     tip.style.top = `${rect.top + ((1 - projected.y) / 2) * rect.height}px`;
+  }
+
+  /** The upgrade coach mark rides its block the same way the shortcut card does. */
+  private updateUpgradeTip(): void {
+    const tip = this.ui.upgradeTip;
+    // Hidden while a block is armed (the ghost owns the viewport) and during
+    // the tour, which is already pointing the player somewhere else.
+    if (
+      !this.upgradeTipAnchor ||
+      !this.upgradeTipBlockAnchor ||
+      this.ghost ||
+      this.tutorialActive
+    ) {
+      tip.style.display = 'none';
+      return;
+    }
+    const projected = this.tipProjection
+      .copy(this.upgradeTipAnchor)
+      .project(this.camera);
+    if (projected.z > 1) {
+      tip.style.display = 'none';
+      return;
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const top = rect.top + ((1 - projected.y) / 2) * rect.height;
+    tip.style.display = 'block';
+    tip.style.left = `${rect.left + ((projected.x + 1) / 2) * rect.width}px`;
+    tip.style.top = `${top}px`;
+    // Measured rather than fixed: the gap between the card and the block it
+    // labels shrinks as the camera pulls back, and a leader line of constant
+    // length would either float short or stab through the model.
+    const block = this.blockProjection
+      .copy(this.upgradeTipBlockAnchor)
+      .project(this.camera);
+    const blockTop = rect.top + ((1 - block.y) / 2) * rect.height;
+    tip.style.setProperty(
+      '--upgrade-tip-leader',
+      `${Math.max(0, Math.round(blockTop - top))}px`,
+    );
   }
 
   resize(w: number, h: number): void {
@@ -1260,30 +1308,14 @@ export class EditorMode {
    * Only parts whose old cell is still free are restorable right now; one a
    * player has since built over is silently left out of the cost and the
    * action rather than blocking the rest of the rebuild.
+   *
+   * Resolved in passes by `planRebuild`, so a wheel whose frame died in the
+   * same wave goes back on in the same press as that frame instead of needing
+   * a second one.
    */
-  private currentRebuildPlan():
-    { parts: PlacedPart[]; totalCost: number } | undefined {
+  private currentRebuildPlan(): RebuildPlan | undefined {
     if (!this.runRepair) return undefined;
-    const restorable = this.runRepair
-      .missingParts()
-      .filter(
-        (part) =>
-          canPlacePart(
-            this.bp,
-            getPartDef,
-            part.defId,
-            part.pos,
-            part.orient,
-            part.config,
-          ).ok,
-      );
-    return {
-      parts: restorable,
-      totalCost: restorable.reduce(
-        (sum, part) => sum + getPartDef(part.defId).cost,
-        0,
-      ),
-    };
+    return planRebuild(this.bp, getPartDef, this.runRepair.missingParts());
   }
 
   private rebuildCar(): boolean {
@@ -1960,6 +1992,50 @@ export class EditorMode {
     this.selectionTipAnchor = anchor;
   }
 
+  /**
+   * Recompute the one upgrade the garage is recommending and park its mark
+   * over that block.
+   *
+   * Called from both refresh paths, so buying the recommendation immediately
+   * re-runs the advice and the mark walks on to the next block by itself —
+   * that hop is the whole interaction.
+   */
+  private refreshUpgradeAdvice(): void {
+    const advice = recommendUpgrade(this.bp.parts, this.profile.money);
+    const part = advice ? getPart(this.bp, advice.partId) : undefined;
+    if (!advice || !part) {
+      this.upgradeTipAnchor = null;
+      this.upgradeTipBlockAnchor = null;
+      this.ui.setUpgradeAdvice(null);
+      return;
+    }
+    const def = getPartDef(part.defId);
+    const step = upgradeStepFor(def, advice.targetLevel);
+    this.ui.setUpgradeAdvice({
+      partId: advice.partId,
+      partName: def.name,
+      icon: step?.icon ?? '★',
+      stepName: step?.name ?? `Level ${advice.targetLevel}`,
+      stars: upgradeStars(advice.targetLevel - 1),
+      price: advice.price,
+    });
+    // Lifted higher than the selection card so a block that is both selected
+    // and recommended shows the two stacked rather than on top of each other.
+    // The leader line then runs back down from the card to the block's top
+    // face, which is the second anchor.
+    const centre = cellCentreM(part.pos);
+    this.upgradeTipAnchor = new THREE.Vector3(
+      centre.x,
+      centre.y + CELL_SIZE * 1.4,
+      centre.z,
+    );
+    this.upgradeTipBlockAnchor = new THREE.Vector3(
+      centre.x,
+      centre.y + CELL_SIZE * 0.5,
+      centre.z,
+    );
+  }
+
   // ---------- pointer/keyboard ----------
 
   private onPointerMove = (e: PointerEvent): void => {
@@ -2162,6 +2238,7 @@ export class EditorMode {
     );
     this.refreshRunContext();
     this.refreshSelectionUI();
+    this.refreshUpgradeAdvice();
     this.refreshAbilityLoadout();
     this.refreshTutorial();
   }
@@ -2182,6 +2259,9 @@ export class EditorMode {
     );
     this.refreshRunContext();
     this.refreshSelectionUI();
+    // A reward or a repair moves the wallet, which moves what the player can
+    // afford, which moves the advice.
+    this.refreshUpgradeAdvice();
     // Buying goes through here rather than `refresh`, and the tour's first
     // action step is a purchase.
     this.refreshTutorial();

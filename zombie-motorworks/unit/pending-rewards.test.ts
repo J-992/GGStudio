@@ -104,6 +104,7 @@ function createHarness(options: { destroyed?: boolean } = {}): {
     onResetWave: (run: { wave: number }) => resetCalls.push(run.wave),
     onReturnToGarage: (run: { wave: number }) => garageCalls.push(run.wave),
     onCheatInfiniteMoney: vi.fn(),
+    onFullRepairRebuild: vi.fn(),
     onPhoneAddictKilled: vi.fn(),
     onWaveCleared: vi.fn(),
     onSaveAndQuit: (snapshot: { wave: number }) =>

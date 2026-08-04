@@ -6,10 +6,17 @@ import { recordFeel } from './devtuning/feelLog.ts';
 import type { FeelRating } from './devtuning/feelLog.ts';
 
 export interface WaveClearRepairOffer {
-  /** Total cost to restore every damaged part, in dollars. Always > 0. */
+  /**
+   * Total cost to put the rig back exactly as it left the garage, in dollars:
+   * every damaged part healed *and* every part torn off bought back. Always
+   * > 0. This is the only price the card shows, because a "full repair" that
+   * quietly left the holes in is the thing players kept being surprised by.
+   */
   cost: number;
   /** False when the player cannot afford it — show the price, disable the action. */
   affordable: boolean;
+  /** How many torn-off blocks the price buys back. 0 when nothing is missing. */
+  rebuiltParts: number;
 }
 
 export interface WaveClearCardView {
@@ -72,6 +79,7 @@ export class WaveClearCard {
   private readonly previewValue: HTMLDivElement;
   private readonly warningBlock: HTMLElement;
   private readonly repairButton: HTMLButtonElement;
+  private readonly repairLabel: HTMLSpanElement;
   private readonly repairPrice: HTMLSpanElement;
   private readonly continueButton: HTMLButtonElement;
   private readonly garageButton: HTMLButtonElement;
@@ -164,10 +172,10 @@ export class WaveClearCard {
     );
     this.repairButton.type = 'button';
     this.repairButton.hidden = true;
-    const repairLabel = element('span', 'wave-clear__button-label');
-    setTextIfChanged(repairLabel, 'Repair & Continue');
+    this.repairLabel = element('span', 'wave-clear__button-label');
+    setTextIfChanged(this.repairLabel, 'Full Repair & Continue');
     this.repairPrice = element('span', 'wave-clear__button-price');
-    this.repairButton.append(repairLabel, this.repairPrice);
+    this.repairButton.append(this.repairLabel, this.repairPrice);
     this.continueButton = element(
       'button',
       'wave-clear__button wave-clear__button--primary',
@@ -404,10 +412,25 @@ export class WaveClearCard {
     const repair = view.repair;
     this.repairButton.hidden = repair === null;
     this.repairButton.disabled = repair !== null && !repair.affordable;
+    // Say plainly that the price buys the missing blocks back too. Without it
+    // the number looks wrong: a rig that lost a wheel is quoted far above what
+    // its remaining dents are worth.
     this.repairButton.title =
-      repair !== null && !repair.affordable
-        ? 'You cannot afford this repair.'
-        : '';
+      repair === null
+        ? ''
+        : !repair.affordable
+          ? 'You cannot afford this repair.'
+          : repair.rebuiltParts > 0
+            ? `Heals every part and rebuilds ${repair.rebuiltParts} torn-off ${
+                repair.rebuiltParts === 1 ? 'block' : 'blocks'
+              }.`
+            : 'Heals every part on the rig.';
+    setTextIfChanged(
+      this.repairLabel,
+      repair !== null && repair.rebuiltParts > 0
+        ? 'Repair & Rebuild'
+        : 'Full Repair & Continue',
+    );
     this.repairButton.classList.toggle(
       'wave-clear__button--primary',
       repair !== null,
