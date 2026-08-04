@@ -57,6 +57,14 @@ export const VFX_PALETTE = {
   /** Pale witch-light at the heart of a raise. */
   necroPale: 0xe6ccff,
   necroDeep: 0x2c0a52,
+  /**
+   * Drone Swarm signal green, matching the bay's own block colour. It is
+   * deliberately nothing like the necro purple it is usually seen destroying —
+   * an intercept has to read at a glance as *the player's* hardware winning,
+   * not as another thing the horde threw.
+   */
+  drone: 0x3fbd7a,
+  dronePale: 0xd6ffe9,
   /** Kamikaze's chest-light blink — the one thing that reads as "about to go off". */
   kamikazeWarn: 0xff2a00,
   /** Matches the Alchemist boss's own tint and its acid puddles — one family for every toxin. */

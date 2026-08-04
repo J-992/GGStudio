@@ -1429,7 +1429,11 @@ export function buildBlockUpgrades(
     case 'melee-plow':
       addPlowUpgrades(kit, level, color, opacity);
       break;
+    // The drone bay wears the same emitter kit as the other ability blocks:
+    // both are caged field hardware, and the drones themselves are modelled by
+    // the block rather than by the kit.
     case 'ability':
+    case 'ability-drone':
       addAbilityUpgrades(kit, level, color, opacity);
       break;
     case 'signature-storm':

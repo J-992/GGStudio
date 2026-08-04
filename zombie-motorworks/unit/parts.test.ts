@@ -44,6 +44,7 @@ const EXPECTED_CATALOG_IDS = [
   'sniper-light',
   'flamethrower',
   'shield-generator',
+  'drone-swarm',
   'mind-control-beam',
   'missile-launcher',
   'thumper',

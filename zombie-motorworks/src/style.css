@@ -1363,15 +1363,159 @@ button:disabled {
   margin-left: auto;
 }
 
+/*
+ * The Fight button. Every run leaves the garage through this one control, so
+ * it is the only piece of chrome in the game allowed to be loud: a bed of
+ * flames licking up the inside, a skull, and a slow ember pulse. Everything
+ * animated respects `prefers-reduced-motion` further down.
+ */
 .btn-hero.btn-hero-fight {
-  background: var(--accent-orange);
-  border-color: var(--ui-edge);
-  color: #d6b8a7;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  padding: 9px 16px;
+  border-color: #7a3c1c;
+  background: linear-gradient(#8a3f1c, #521f0e 62%, #35150a);
+  color: #ffdcae;
+  text-shadow: 0 2px 0 rgb(0 0 0 / 0.55);
+  box-shadow:
+    inset 0 -3px 0 var(--ui-black),
+    inset 0 2px 0 rgb(255 190 110 / 0.28),
+    3px 4px 0 rgb(0 0 0 / 0.3),
+    0 0 0 0 rgb(255 122 40 / 0.5);
+  animation: fight-ember 2.4s ease-in-out infinite;
 }
 
-.btn-hero.btn-hero-fight:hover {
-  background: #623828;
-  border-color: var(--ui-edge);
+.btn-hero.btn-hero-fight:hover:not(:disabled) {
+  border-color: #a85327;
+  background: linear-gradient(#a64d21, #6a2811 62%, #421a0b);
+  color: #fff0d6;
+}
+
+.btn-hero.btn-hero-fight:disabled {
+  animation: none;
+}
+
+/* Ember breathing: a warm halo that swells and settles, never blinks. */
+@keyframes fight-ember {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 -3px 0 var(--ui-black),
+      inset 0 2px 0 rgb(255 190 110 / 0.28),
+      3px 4px 0 rgb(0 0 0 / 0.3),
+      0 0 6px 0 rgb(255 122 40 / 0.28);
+  }
+
+  50% {
+    box-shadow:
+      inset 0 -3px 0 var(--ui-black),
+      inset 0 2px 0 rgb(255 190 110 / 0.28),
+      3px 4px 0 rgb(0 0 0 / 0.3),
+      0 0 16px 2px rgb(255 138 48 / 0.6);
+  }
+}
+
+/* Metal sheen sweeping the plate every few seconds. */
+.btn-fight__sheen {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -60%;
+  width: 40%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    rgb(255 236 200 / 0.3),
+    transparent
+  );
+  pointer-events: none;
+  animation: fight-sheen 3.6s ease-in-out infinite;
+}
+
+@keyframes fight-sheen {
+  0%,
+  62% {
+    transform: translateX(0);
+  }
+
+  92%,
+  100% {
+    transform: translateX(420%);
+  }
+}
+
+.btn-hero.btn-hero-fight:disabled .btn-fight__sheen {
+  display: none;
+}
+
+.btn-fight__icon,
+.btn-fight__deploy {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.btn-fight__icon {
+  width: 18px;
+  height: 18px;
+  color: #ffe3ba;
+  filter: drop-shadow(0 0 5px rgb(255 132 44 / 0.7));
+  animation: fight-skull 2.4s ease-in-out infinite;
+}
+
+@keyframes fight-skull {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-3deg);
+  }
+
+  50% {
+    transform: translateY(-1.5px) rotate(3deg);
+  }
+}
+
+.btn-fight__deploy {
+  width: 14px;
+  height: 14px;
+  color: #ffc98d;
+  animation: fight-deploy 1.1s steps(2, end) infinite;
+}
+
+@keyframes fight-deploy {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  50% {
+    transform: translateX(3px);
+  }
+}
+
+.btn-fight__icon svg,
+.btn-fight__deploy svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.btn-fight__label {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-hero.btn-hero-fight,
+  .btn-fight__sheen,
+  .btn-fight__icon,
+  .btn-fight__deploy {
+    animation: none;
+  }
 }
 
 .cat-title {
@@ -2104,9 +2248,14 @@ button:disabled {
   padding-right: 2px;
 }
 
+/*
+ * Shelf tabs. Each one owns a colour and a glyph, and the active tab hands its
+ * colour to the whole panel through `--store-accent`, so the frames below, the
+ * search field, and the tab itself all read as one shelf.
+ */
 .store-filters {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 2px;
   flex: 0 0 auto;
   padding-bottom: 5px;
@@ -2114,17 +2263,58 @@ button:disabled {
 }
 
 .store-filters button {
+  display: grid;
   min-width: 0;
-  min-height: 36px;
-  padding: 4px;
-  font-size: var(--ui-text-10);
+  min-height: 46px;
+  align-content: center;
+  justify-items: center;
+  gap: 3px;
+  padding: 4px 2px;
+  border-color: var(--ui-edge);
+  color: var(--ui-text-faint);
+  font-size: 8px;
   line-height: 1.1;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
+.store-filters__label {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-filters__icon {
+  display: block;
+  width: 17px;
+  height: 17px;
+  color: var(--store-accent, var(--ui-text-faint));
+  opacity: 0.62;
+}
+
+.store-filters__icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.store-filters button:hover:not(:disabled) {
+  color: var(--ui-text-muted);
+}
+
+.store-filters button:hover:not(:disabled) .store-filters__icon {
+  opacity: 0.9;
+}
+
 .store-filters button.active {
-  color: var(--ui-signal-strong);
-  box-shadow: inset 0 -2px 0 var(--ui-signal);
+  background: color-mix(in srgb, var(--store-accent) 13%, var(--ui-surface-2));
+  color: var(--store-accent);
+  box-shadow: inset 0 -2px 0 var(--store-accent);
+}
+
+.store-filters button.active .store-filters__icon {
+  opacity: 1;
 }
 
 .store-search {
@@ -2145,17 +2335,26 @@ button:disabled {
 }
 
 .store-search:focus {
-  border-color: var(--ui-signal);
+  border-color: var(--store-accent, var(--ui-signal));
   box-shadow:
     inset 2px 2px 0 var(--ui-black),
-    0 0 0 1px var(--ui-signal-dark);
+    0 0 0 1px var(--store-accent, var(--ui-signal-dark));
 }
 
+/*
+ * Two big frames per row on a fixed row height. Definite rows are the whole
+ * point: an `auto` row has to ask the tile how tall it wants to be, and a tile
+ * whose height comes from its own width has no answer during that pass — which
+ * is how the shelf kept collapsing and overlapping on the busier categories.
+ */
 .store-list {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 148px;
+  gap: 6px;
 }
 
 .store-empty {
+  grid-column: 1 / -1;
   margin: 18px 8px;
   color: var(--ui-text-faint);
   font: var(--ui-text-11)/1.4 var(--ui-font-body);
@@ -2166,7 +2365,13 @@ button:disabled {
   display: none;
 }
 
-.store-item,
+/*
+ * Inventory tiles only. The store tile used to share this geometry and spent
+ * three rounds fighting it: `aspect-ratio` and percentage padding both feed a
+ * box's height back off its own width, and a grid item sized that way resolves
+ * to nothing during intrinsic row sizing. The store shelf owns its dimensions
+ * outright further down instead.
+ */
 .inventory-item {
   display: grid;
   width: 100%;
@@ -2283,204 +2488,302 @@ button:disabled {
   text-align: center;
 }
 
-.store-item .part-price {
-  top: auto;
-  right: 5px;
-  bottom: 5px;
-  left: 5px;
-  padding: 0;
-  overflow: hidden;
-  background: transparent;
-  font-size: 9px;
-  text-align: right;
-  text-overflow: ellipsis;
-}
-
+/*
+ * A store tile is a picture frame with a price rail under it. No name, no
+ * blurb — the part's own render is the label, and everything in words lives in
+ * the details card that follows the pointer.
+ */
+/*
+ * Height comes from the frame's own square ratio, never from an `aspect-ratio`
+ * on the tile itself: a stretched grid item ignores its ratio, so on a busy
+ * shelf like Weapons the rows collapsed to min-content and the artwork spilled
+ * over its neighbours. `align-self: start` plus a square frame sizes every row
+ * off a width that is always definite.
+ */
+/*
+ * A tile fills the fixed-height row `.store-list` hands it, top to bottom:
+ * frame takes the slack, price rail takes 20px. Nothing here derives a height
+ * from a width, which is what made the previous two attempts collapse.
+ */
 .store-item {
   display: flex;
   width: 100%;
-  min-height: 82px;
-  aspect-ratio: auto;
+  height: 100%;
+  min-height: 0;
   flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 4px;
-  padding: 10px 82px 24px 10px;
+  align-self: stretch;
+  aspect-ratio: auto;
+  gap: 0;
+  padding: 4px 4px 0;
+  overflow: hidden;
+  border-color: var(--ui-edge);
+  background: var(--ui-surface-2);
+  text-align: center;
 }
 
 .store-item[hidden] {
   display: none;
 }
 
-.store-item > strong {
-  position: static;
-  width: 100%;
-  overflow: hidden;
-  font-size: var(--ui-text-12);
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.store-item .part-description {
-  position: static;
-  display: -webkit-box;
-  width: auto;
-  height: auto;
-  overflow: hidden;
-  color: var(--ui-text-muted);
-  font: var(--ui-text-10)/1.35 var(--ui-font-body);
-  white-space: normal;
-  clip: auto;
-  clip-path: none;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.store-item .part-thumbnail {
-  position: absolute;
-  top: 50%;
-  right: 8px;
-  width: 62px;
-  transform: translateY(-50%);
-}
-
-.store-item .part-price {
-  top: auto;
-  right: 82px;
-  bottom: 7px;
-  left: 10px;
-  text-align: left;
-}
-
+/* Name and blurb stay in the DOM for screen readers and for search matching. */
+.store-item > strong,
+.store-item .part-description,
 .store-item .part-price-breakdown,
 .store-item .part-unlock-milestone {
   position: absolute;
-  right: 82px;
-  bottom: 7px;
-  left: 10px;
+  width: 1px;
+  height: 1px;
+  padding: 0;
   overflow: hidden;
-  color: var(--ui-text-muted);
-  font: var(--ui-text-10)/1 var(--ui-font-body);
-  text-align: left;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Takes whatever height the row has left after the 20px price rail. */
+.store-item__frame {
+  position: relative;
+  display: block;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--store-accent) 26%, #0b0d0b);
+  background:
+    radial-gradient(
+      circle at 50% 38%,
+      color-mix(in srgb, var(--store-accent) 16%, transparent) 0,
+      transparent 66%
+    ),
+    linear-gradient(#161a12, #0c0e0b);
+  box-shadow: inset 0 0 0 1px var(--ui-black);
+}
+
+/* Category glyph, watermarked into the frame's top-left corner. */
+.store-item__group {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  color: var(--store-accent);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.store-item__group svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * Fills the frame and lets `object-fit` do the centring and the letterboxing.
+ * `aspect-ratio: auto` is load-bearing: the shared `.part-thumbnail` rule sets
+ * a 1:1 ratio and a `min(58px, 82%)` width, and leaving either in place is what
+ * collapsed the artwork to a hairline.
+ */
+.store-item .part-thumbnail {
+  position: static;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  padding: 9px;
+  aspect-ratio: auto;
+  object-fit: contain;
+  background: none;
+  filter: drop-shadow(0 3px 3px rgb(0 0 0 / 0.65));
+  transition: transform 120ms steps(3, end);
+}
+
+.store-item .part-price {
+  position: static;
+  display: block;
+  height: 20px;
+  flex: 0 0 20px;
+  padding: 0 2px;
+  overflow: hidden;
+  border-top: 1px solid color-mix(in srgb, var(--store-accent) 20%, #0b0d0b);
+  background: transparent;
+  color: var(--store-accent) !important;
+  font: 700 var(--ui-text-11)/20px var(--ui-font-body);
+  letter-spacing: 0.02em;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.store-item.locked {
-  min-height: 94px;
-  padding-bottom: 38px;
-}
-
-.store-item.locked .part-price {
-  bottom: 20px;
-}
-
-.store-item.has-unlock-milestone {
-  min-height: 108px;
-  padding-bottom: 51px;
-}
-
-.store-item.has-unlock-milestone .part-price {
-  bottom: 34px;
-}
-
-.store-item.has-unlock-milestone .part-price-breakdown {
-  bottom: 20px;
-}
-
-.store-item .part-unlock-milestone {
+/* The padlock, stamped over the blacked-out silhouette of a locked part. */
+.store-item__lock {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: none;
+  width: 26px;
+  height: 26px;
   color: var(--gold);
+  filter: drop-shadow(0 2px 0 rgb(0 0 0 / 0.8));
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.store-item__lock svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.store-item.locked .store-item__lock {
+  display: block;
 }
 
 /*
- * Affordability read. A tile the player can buy right now is lit and carries a
- * signal edge; everything they cannot buy sinks into the panel, so the shelf
- * can be scanned without reading a single price.
+ * Affordability read. A frame the player can buy right now is lit and carries
+ * its shelf colour; everything they cannot buy sinks into the panel, so the
+ * shelf can be scanned without reading a single price.
  */
 .store-item.is-affordable {
-  background: #1d2119;
+  border-color: color-mix(in srgb, var(--store-accent) 48%, var(--ui-edge));
+  background: color-mix(in srgb, var(--store-accent) 10%, #1e231a);
   color: var(--ui-text);
-  box-shadow: inset 3px 0 0 var(--ui-signal);
+}
+
+/* A part you can buy is lit, not merely un-dimmed: the frame behind it comes
+   up several stops so the render reads as a product shot, not a shadow. */
+.store-item.is-affordable .store-item__frame {
+  border-color: color-mix(in srgb, var(--store-accent) 46%, #0b0d0b);
+  background:
+    radial-gradient(
+      circle at 50% 38%,
+      color-mix(in srgb, var(--store-accent) 32%, transparent) 0,
+      transparent 72%
+    ),
+    linear-gradient(#2d3426, #191e15);
+}
+
+.store-item.is-affordable .part-thumbnail {
+  filter: drop-shadow(0 3px 3px rgb(0 0 0 / 0.55));
 }
 
 .store-item.is-affordable:hover:not(:disabled) {
-  background: #262b1f;
-  box-shadow: inset 3px 0 0 var(--ui-signal-strong);
+  border-color: var(--store-accent);
+  background: color-mix(in srgb, var(--store-accent) 18%, #232a1c);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--store-accent) 55%, transparent);
 }
 
-.store-item.is-affordable > strong {
-  color: #eae6d6;
+.store-item.is-affordable:hover:not(:disabled) .store-item__frame {
+  border-color: var(--store-accent);
+  background:
+    radial-gradient(
+      circle at 50% 38%,
+      color-mix(in srgb, var(--store-accent) 42%, transparent) 0,
+      transparent 76%
+    ),
+    linear-gradient(#38412e, #1e241a);
 }
 
-.store-item.is-affordable .part-description {
-  color: #9ea294;
-}
-
-.store-item.is-affordable .part-price {
-  color: var(--ui-signal-strong) !important;
+.store-item:hover:not(:disabled) .part-thumbnail {
+  transform: scale(1.07);
 }
 
 /*
- * Not unlocked yet: the tile is blacked out to a silhouette. The name and the
- * unlock price are the only things left legible, because they are the only
- * things a locked part can tell you that matters.
+ * Not unlocked yet: the frame is blacked out to a silhouette behind a padlock,
+ * and the unlock price is the only thing left legible — the only thing a
+ * locked part can tell you that matters.
  */
 .store-item.locked,
 .store-item.locked.unaffordable {
-  background: #030403;
-  border-color: #0e100e;
+  border-color: #191c17;
+  background: #0c0e0b;
   color: #383c35;
   filter: none;
   opacity: 1;
   box-shadow: none;
 }
 
+/*
+ * The frame behind a locked part is a lit stage, not a void. A silhouette only
+ * teases if it can be seen: the shape stays crushed to near-black, and the
+ * field it sits on comes up far enough to read the outline against it.
+ */
+.store-item.locked .store-item__frame {
+  border-color: #2a2e25;
+  background:
+    radial-gradient(
+      circle at 50% 40%,
+      rgb(140 148 126 / 0.2) 0,
+      transparent 72%
+    ),
+    linear-gradient(#242820, #101309);
+}
+
+.store-item.locked .store-item__group {
+  opacity: 0.3;
+}
+
 .store-item.locked:hover:not(:disabled) {
-  background: #070907;
-}
-
-.store-item.locked > strong {
-  color: #4f544a;
-}
-
-.store-item.locked .part-description {
-  color: #2c2f2a;
+  border-color: #2e332a;
+  background: #14170f;
+  box-shadow: none;
 }
 
 .store-item.locked .part-thumbnail {
-  filter: grayscale(1) brightness(0.09);
+  opacity: 0.95;
+  filter: grayscale(1) brightness(0.14) contrast(1.7)
+    drop-shadow(0 2px 3px rgb(0 0 0 / 0.5));
+}
+
+/* Hovering lifts the shape a shade further out of the dark — the whole point
+   of the blackout is to make the player want to see the rest of it. */
+.store-item.locked:hover:not(:disabled) .part-thumbnail {
+  filter: grayscale(1) brightness(0.26) contrast(1.5)
+    drop-shadow(0 2px 3px rgb(0 0 0 / 0.5));
+}
+
+.store-item.locked:hover:not(:disabled) .store-item__frame {
+  background:
+    radial-gradient(
+      circle at 50% 40%,
+      rgb(160 170 142 / 0.26) 0,
+      transparent 74%
+    ),
+    linear-gradient(#2c3128, #14180f);
 }
 
 .store-item.locked .part-price {
+  border-top-color: #1a170f;
   color: #6b6144 !important;
 }
 
-.store-item.locked .part-price-breakdown {
-  color: #3a3e36;
-}
-
-.store-item.locked .part-unlock-milestone {
-  color: #55492c;
-}
-
-/* Locked but affordable: a gold edge says the blackout can be bought off. */
+/* Locked but affordable: a gold frame says the blackout can be bought off. */
 .store-item.locked.is-affordable {
+  border-color: #5b4e2c;
   background: #0a0906;
-  box-shadow: inset 3px 0 0 #6b5c33;
 }
 
-.store-item.locked.is-affordable > strong {
-  color: #7d7768;
+.store-item.locked.is-affordable:hover:not(:disabled) {
+  border-color: var(--gold);
+  background: #100d07;
+  box-shadow: 0 0 0 1px rgb(183 168 115 / 0.45);
+}
+
+.store-item.locked.is-affordable .store-item__frame {
+  border-color: #3d3520;
 }
 
 .store-item.locked.is-affordable .part-price {
+  border-top-color: #3d3520;
   color: var(--gold) !important;
 }
 
 .store-item.unaffordable .part-thumbnail,
 .store-item.limit-reached .part-thumbnail {
   opacity: 0.3;
+}
+
+.store-item.unaffordable .part-price {
+  color: #6a655c !important;
 }
 
 /* Landing flash for a part the build bar sent the player to find. */
@@ -2491,14 +2794,195 @@ button:disabled {
 @keyframes store-reveal {
   0%,
   100% {
-    box-shadow: inset 3px 0 0 var(--ui-signal);
+    box-shadow: 0 0 0 1px var(--store-accent, var(--ui-signal));
   }
 
   50% {
-    box-shadow:
-      inset 3px 0 0 var(--ui-signal-strong),
-      0 0 0 2px var(--ui-signal-strong);
+    box-shadow: 0 0 0 3px var(--store-accent, var(--ui-signal-strong));
   }
+}
+
+/*
+ * Details card. Parked to the right of the dock, pinned to whichever frame the
+ * pointer or keyboard focus is on. Inert to the pointer, so crossing it can
+ * never take the hover off the frame that opened it.
+ */
+.store-details {
+  position: absolute;
+  z-index: 16;
+  display: grid;
+  width: 268px;
+  grid-template-rows: auto auto;
+  border: 1px solid color-mix(in srgb, var(--store-accent) 42%, var(--ui-edge));
+  background: var(--panel-bg-strong);
+  box-shadow:
+    8px 10px 0 rgb(0 0 0 / 0.4),
+    inset 0 0 0 1px var(--ui-black);
+  pointer-events: none;
+  animation: store-details-in 90ms steps(2, end);
+}
+
+.store-details[hidden] {
+  display: none;
+}
+
+@keyframes store-details-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+}
+
+.store-details__art {
+  position: relative;
+  display: grid;
+  height: 148px;
+  place-items: center;
+  overflow: hidden;
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--store-accent) 30%, var(--ui-edge));
+  background:
+    radial-gradient(
+      circle at 50% 40%,
+      color-mix(in srgb, var(--store-accent) 22%, transparent) 0,
+      transparent 68%
+    ),
+    linear-gradient(#12150f, #070907);
+}
+
+.store-details__image {
+  width: 132px;
+  height: 132px;
+  object-fit: contain;
+  filter: drop-shadow(0 5px 4px rgb(0 0 0 / 0.7));
+  image-rendering: auto;
+}
+
+.store-details__lock {
+  position: absolute;
+  display: none;
+  width: 46px;
+  height: 46px;
+  color: var(--gold);
+  filter: drop-shadow(0 3px 0 rgb(0 0 0 / 0.8));
+}
+
+.store-details__lock svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.store-details.is-locked .store-details__lock {
+  display: block;
+}
+
+/* Same tease at card size: crushed shape, but on a field it can be read off. */
+.store-details.is-locked .store-details__art {
+  background:
+    radial-gradient(
+      circle at 50% 40%,
+      rgb(140 148 126 / 0.22) 0,
+      transparent 72%
+    ),
+    linear-gradient(#242820, #101309);
+}
+
+.store-details.is-locked .store-details__image {
+  filter: grayscale(1) brightness(0.16) contrast(1.6);
+}
+
+.store-details__body {
+  display: grid;
+  gap: 7px;
+  padding: 10px 12px 11px;
+}
+
+.store-details__group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--store-accent);
+  font: var(--ui-text-10)/1 var(--ui-font-body);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.store-details__group-icon {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+
+.store-details__group-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.store-details__name {
+  color: var(--ui-text);
+  font-size: var(--ui-text-16);
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.store-details__blurb {
+  color: var(--ui-text-muted);
+  font: var(--ui-text-11)/1.5 var(--ui-font-body);
+}
+
+.store-details__stats {
+  display: grid;
+  border-top: 1px solid var(--ui-edge);
+}
+
+.store-details__stats > div {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--ui-edge);
+  color: var(--ui-text-muted);
+  font: var(--ui-text-10)/1 var(--ui-font-body);
+  text-transform: uppercase;
+}
+
+.store-details__stats strong {
+  color: var(--ui-text);
+  font: var(--ui-text-11)/1 var(--ui-font-display);
+}
+
+.store-details__price {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.store-details__price strong {
+  color: var(--store-accent);
+  font: var(--ui-text-14)/1 var(--ui-font-display);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.store-details.is-locked .store-details__price strong {
+  color: var(--gold);
+}
+
+.store-details__price-note {
+  color: var(--ui-text-faint);
+  font: var(--ui-text-10)/1.2 var(--ui-font-body);
+  text-align: right;
+}
+
+.store-details__price-note[hidden] {
+  display: none;
 }
 
 .inventory-empty {
@@ -2579,6 +3063,53 @@ button:disabled {
 .selected-empty p {
   max-width: 26ch;
   font: var(--ui-text-11)/1.6 var(--ui-font-body);
+}
+
+/*
+ * Hero shot of the selected block, pinned above everything else in the panel.
+ * The player picked a shape out of a 3D scene; the first thing the inspector
+ * owes them back is that same shape, unambiguously and large.
+ */
+.selected-part__preview {
+  position: relative;
+  display: grid;
+  height: 132px;
+  margin-bottom: 12px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--store-accent) 38%, var(--ui-edge));
+  background:
+    radial-gradient(
+      circle at 50% 40%,
+      color-mix(in srgb, var(--store-accent) 20%, transparent) 0,
+      transparent 68%
+    ),
+    linear-gradient(#12150f, #070907);
+  box-shadow: inset 0 0 0 1px var(--ui-black);
+}
+
+.selected-part__preview .part-thumbnail {
+  width: 116px;
+  height: 116px;
+  background: none;
+  filter: drop-shadow(0 5px 4px rgb(0 0 0 / 0.7));
+}
+
+.selected-part__preview-group {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  display: block;
+  width: 15px;
+  height: 15px;
+  color: var(--store-accent);
+  opacity: 0.6;
+}
+
+.selected-part__preview-group svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .selected-part__title {
@@ -3034,16 +3565,53 @@ button:disabled {
   margin: -6px 0 -6px -8px;
   padding: 0 6px;
   border-right: 2px solid var(--ui-bone);
-  background: var(--ui-bone);
+  /* Lit from the top so the flat gold panel gets a little sheet-metal depth. */
+  background: linear-gradient(180deg, #d3c48d, var(--ui-bone) 55%, #9c8e5d);
   color: var(--ui-ink);
-  font: var(--ui-text-20)/1 var(--ui-font-display);
-  /* Faint emboss so the dark glyph keeps an edge against the flat gold fill. */
-  text-shadow: 0 1px 0 rgb(255 255 255 / 0.25);
 }
 
+.upgrade-tip__arrow svg {
+  width: 18px;
+  height: 18px;
+  /* Faint emboss so the dark mark keeps an edge against the gold fill. */
+  filter: drop-shadow(0 1px 0 rgb(255 255 255 / 0.3));
+  animation: upgrade-tip-lift 2.2s ease-in-out infinite;
+}
+
+/*
+ * The unlock's own glyph, chipped into a framed tile.
+ *
+ * Bare, the glyphs ran at whatever width the font gave them, so the card's
+ * text shifted sideways every time the advice hopped to a different part. The
+ * fixed tile pins that column and reads as a fitted component besides.
+ */
 .upgrade-tip__icon {
-  font: var(--ui-text-16)/1 var(--ui-font-display);
-  color: var(--ui-signal);
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgb(137 153 90 / 0.6);
+  background: linear-gradient(
+    160deg,
+    rgb(137 153 90 / 0.22),
+    rgb(137 153 90 / 0.04)
+  );
+  box-shadow: inset 0 0 0 1px rgb(11 13 11 / 0.75);
+  color: var(--ui-signal-strong);
+  font: var(--ui-text-14)/1 var(--ui-font-display);
+  text-shadow: 0 0 6px rgb(160 175 108 / 0.5);
+}
+
+.upgrade-tip__buy:hover .upgrade-tip__icon,
+.upgrade-tip__buy:focus-visible .upgrade-tip__icon {
+  border-color: rgb(160 175 108 / 0.9);
+  background: linear-gradient(
+    160deg,
+    rgb(160 175 108 / 0.34),
+    rgb(137 153 90 / 0.08)
+  );
 }
 
 .upgrade-tip__body {
@@ -3083,8 +3651,21 @@ button:disabled {
   }
 }
 
+/* The badge nudges up on the card's pulse beat, so the mark reads as "up". */
+@keyframes upgrade-tip-lift {
+  0%,
+  100% {
+    transform: translateY(1px);
+  }
+
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .upgrade-tip__buy {
+  .upgrade-tip__buy,
+  .upgrade-tip__arrow svg {
     animation: none;
   }
 }
@@ -3449,6 +4030,23 @@ button:disabled {
     width: 238px;
   }
 
+  .store-list {
+    grid-auto-rows: 132px;
+  }
+
+  .store-details {
+    width: 226px;
+  }
+
+  .store-details__art {
+    height: 118px;
+  }
+
+  .store-details__image {
+    width: 104px;
+    height: 104px;
+  }
+
   .selected-panel {
     width: 260px;
   }
@@ -3486,6 +4084,20 @@ button:disabled {
     width: 210px;
   }
 
+  .store-list {
+    grid-auto-rows: 120px;
+  }
+
+  /* No room beside the dock for a details card, and no pointer to hover with. */
+  .store-details {
+    display: none;
+  }
+
+  .store-filters button {
+    min-height: 40px;
+    font-size: 7px;
+  }
+
   .selected-panel {
     top: 112px;
     bottom: 70px;
@@ -3516,8 +4128,9 @@ button:disabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  /* Still two frames across: one column per row would letterbox every part. */
   .store-list {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .inventory-grid {

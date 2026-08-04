@@ -307,7 +307,9 @@ export interface AbilityDefinition {
    * 'flamelance' opens an unbroken sheet of flame along the rig's heading for
    * the whole duration, with no host weapon behind it; 'reinforce' throws up a
    * hex ward that soaks a pool of damage before the hull takes any — extra
-   * health on a timer, bought with a drivetrain that drags.
+   * health on a timer, bought with a drivetrain that drags;
+   * 'droneSwarm' launches the bay's whole flight at the zombies actually
+   * throwing things, killing them outright rather than damaging a crowd.
    */
   kind:
     | 'freeze'
@@ -321,7 +323,8 @@ export interface AbilityDefinition {
     | 'hellfire'
     | 'phase'
     | 'flamelance'
-    | 'reinforce';
+    | 'reinforce'
+    | 'droneSwarm';
   /**
    * Overrides the kind's entry in `ABILITY_KIND_META` for the HUD box and the
    * garage panel. Set when one kind backs two abilities the player should read
@@ -411,6 +414,29 @@ export interface AbilityDefinition {
    * early rather than waiting the player out.
    */
   baseShieldHp?: number;
+  /**
+   * Drone swarm only: how many throwers the flight can kill in one launch at
+   * level 1 (grows with upgrade level). `rangeM` is how far out it will hunt
+   * for them. The swarm kills what it reaches outright, so this count — not a
+   * damage number — is the whole cost control on the ability.
+   */
+  baseKills?: number;
+}
+
+/**
+ * A close-in point-defence bay: hardware that periodically swats an incoming
+ * zombie projectile out of the air on its own, with no key press behind it.
+ *
+ * The roll is deliberately unreliable at level 1 — a rig carrying one still
+ * takes most of what is thrown at it, and the upgrade chain is what turns the
+ * bay from a nuisance-reducer into real cover. See
+ * `droneInterceptChance` in `turretModules.ts` for the per-level ladder.
+ */
+export interface InterceptorDefinition {
+  /** Seconds between intercept attempts. One projectile per attempt, at most. */
+  intervalSeconds: number;
+  /** Metres from the rig within which a projectile can be swatted down. */
+  radiusM: number;
 }
 
 /** Contact weapon (grinder drum, spikes, sawblade): damages any zombie touching the part. */
@@ -519,6 +545,8 @@ export interface PartDefinition {
   /** Click-targeted primary fire; only Build signature blocks carry one. */
   signature?: SignatureDefinition;
   ability?: AbilityDefinition;
+  /** Passive point defence: shoots down incoming projectiles on its own. */
+  interceptor?: InterceptorDefinition;
   melee?: MeleeDefinition;
   armour?: ArmourDefinition;
   fuelCapacity?: number; // litres

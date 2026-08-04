@@ -31,6 +31,7 @@ export const SIMPLE_PART_IDS: readonly string[] = [
   'ice-cannon',
   'tesla-coil',
   'shield-generator',
+  'drone-swarm',
   'mind-control-beam',
   'missile-launcher',
   'thumper',
@@ -127,6 +128,12 @@ export const KID_LABELS: Record<string, PartLabel> = {
   'shield-generator': {
     name: 'Shield Bubble',
     blurb: 'Press its key for a blue bubble that keeps your truck safe for a bit!',
+  },
+  'drone-swarm': {
+    name: 'Drone Swarm',
+    blurb:
+      'Little drones knock some of the thrown junk out of the sky. Upgrade it ' +
+      'and they get much better at it!',
   },
   'mind-control-beam': {
     name: 'Mind Control Beam',

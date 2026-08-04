@@ -1195,6 +1195,73 @@ export class ZombieSystem {
   }
 
   /**
+   * Drone Swarm point defence: swat the nearest in-flight projectile within
+   * `radiusM` of the given point out of the air. Returns where it was killed,
+   * or null when nothing was in reach. The caller has already rolled the
+   * bay's chance — this seam only finds and removes the shot.
+   */
+  interceptProjectileNear(
+    x: number,
+    y: number,
+    z: number,
+    radiusM: number,
+  ): { x: number; y: number; z: number } | null {
+    if (this.disposed) return null;
+    return this.projectiles.interceptNearest(x, y, z, radiusM);
+  }
+
+  /**
+   * Drone Swarm activation: kill up to `maxCount` of the nearest throwers
+   * within `radiusM`, nearest first, and report where each one died so the
+   * caller can fly the drones to them.
+   *
+   * Throwers only. The ability exists to answer the one enemy the bay's passive
+   * screen is already fighting, and letting it clear whatever happened to be
+   * closest would make it a second, better Cryo Nova. It kills outright rather
+   * than damaging, so there is no damage number to scale — the count is the
+   * whole of it. Runs once per cooldown, so the sort allocation is fine.
+   */
+  swarmNearestThrowers(
+    origin: { x: number; z: number },
+    maxCount: number,
+    radiusM: number,
+  ): { x: number; y: number; z: number }[] {
+    if (this.disposed || maxCount <= 0 || radiusM <= 0) return [];
+    const radiusSq = radiusM * radiusM;
+    const candidates: { zombie: Zombie; distSq: number }[] = [];
+    for (const zombie of this.aliveTargets) {
+      if (zombie.kind !== 'thrower') continue;
+      const dx = zombie.position.x - origin.x;
+      const dz = zombie.position.z - origin.z;
+      const distSq = dx * dx + dz * dz;
+      if (distSq > radiusSq) continue;
+      candidates.push({ zombie, distSq });
+    }
+    candidates.sort((a, b) => a.distSq - b.distSq);
+    const limit = Math.min(Math.floor(maxCount), candidates.length);
+    const killed: { x: number; y: number; z: number }[] = [];
+    for (let i = 0; i < limit; i++) {
+      const { zombie } = candidates[i];
+      // Snapshot the position first: a killed zombie's slot is recycled, and
+      // the caller needs to know where the drones went.
+      const where = {
+        x: zombie.position.x,
+        y: zombie.position.y,
+        z: zombie.position.z,
+      };
+      // A full health bar's worth of damage always kills, and routing it
+      // through takeDamage rather than forceKill keeps the reward, the damage
+      // report and the death VFX on the path every other kill takes.
+      const damage = zombie.maxHealth;
+      const died = zombie.takeDamage(damage);
+      this.reportZombieDamage(zombie, damage, died);
+      if (died) killed.push(where);
+    }
+    if (killed.length > 0) this.rebuildAliveTargets();
+    return killed;
+  }
+
+  /**
    * Missile Launcher Q blast: pick the impact point that catches the most
    * zombies. Among alive targets within `seekRadiusM` of the origin, return the
    * position of the one that has the most alive targets within `blastRadiusM`

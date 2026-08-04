@@ -14,7 +14,11 @@ import { rotateVec } from '../core/grid.ts';
 import { cellCentreM } from '../core/mass.ts';
 import { boxWithEdges, partColor } from './parts/shared.ts';
 import { buildArmourPlateMesh, buildFaceArmourMesh } from './parts/armourPlate.ts';
-import { buildPulseEmitterMesh, buildShieldGeneratorMesh } from './parts/defence.ts';
+import {
+  buildDroneSwarmMesh,
+  buildPulseEmitterMesh,
+  buildShieldGeneratorMesh,
+} from './parts/defence.ts';
 import { buildEngineMesh } from './parts/engine.ts';
 import { buildFuelTankMesh } from './parts/fuelTank.ts';
 import { buildMeleeMesh } from './parts/melee.ts';
@@ -104,6 +108,11 @@ export function buildPartMesh(def: PartDefinition, placed: PlacedPart, opacity =
 
   if (def.id === 'pulse-emitter') {
     group.add(buildPulseEmitterMesh(placed, color, opacity));
+    return withUpgradeKit(group, def, placed, color, opacity);
+  }
+
+  if (def.id === 'drone-swarm') {
+    group.add(buildDroneSwarmMesh(placed, color, opacity));
     return withUpgradeKit(group, def, placed, color, opacity);
   }
 

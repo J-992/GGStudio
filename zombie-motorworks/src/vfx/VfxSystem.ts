@@ -2763,6 +2763,152 @@ export class VfxSystem {
   }
 
   /**
+   * A Drone Swarm bay catching a lobbed box mid-air.
+   *
+   * Read backwards from the moment: a hard little strike flash where the drone
+   * met it, the box's own witch-light blowing apart, and two green tracer
+   * streaks crossing the point — the drone's approach and its break-off. Kept
+   * cheap and short, because at a maxed bay this fires several times a second
+   * and it must never turn the sky over the rig into soup.
+   */
+  droneIntercept(x: number, y: number, z: number): void {
+    if (this.disposed) return;
+    const detail = this.detailAt(x, y, z);
+    if (detail <= 0) return;
+
+    this.flash(x, y, z, 0.9, 0.08, VFX_PALETTE.dronePale);
+    this.flash(x, y, z, 1.6, 0.14, VFX_PALETTE.drone);
+
+    // The shot coming apart: necro purple, so the player reads it as the thing
+    // that was thrown at them rather than as something the bay emitted.
+    const debris = this.count(8, detail);
+    for (let i = 0; i < debris; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = this.rand(1.8, 4.4);
+      this.reset0();
+      this.spec.x = x;
+      this.spec.y = y;
+      this.spec.z = z;
+      this.spec.vx = Math.cos(angle) * speed;
+      this.spec.vy = this.rand(0.6, 3);
+      this.spec.vz = Math.sin(angle) * speed;
+      this.spec.size = this.rand(0.08, 0.16);
+      this.spec.endSize = this.spec.size * 0.5;
+      this.spec.lifeSeconds = this.rand(0.3, 0.55);
+      this.spec.colorStart = VFX_PALETTE.necro;
+      this.spec.colorEnd = VFX_PALETTE.necroDeep;
+      this.spec.gravity = -12;
+      this.spec.drag = 0.8;
+      this.spec.spin = 7;
+      this.lit.spawn(this.take());
+    }
+
+    // The drone's pass: two short green streaks through the kill point, on
+    // opposite headings, so the strike reads as something that flew through
+    // rather than as an explosion that happened there.
+    for (const side of [1, -1]) {
+      const heading = Math.random() * Math.PI * 2;
+      const trail = this.count(4, detail);
+      for (let i = 0; i < trail; i++) {
+        const along = (i / Math.max(1, trail)) * 1.1;
+        this.reset0();
+        this.spec.x = x + Math.cos(heading) * along * side;
+        this.spec.y = y + this.randSigned(0.12);
+        this.spec.z = z + Math.sin(heading) * along * side;
+        this.spec.vx = Math.cos(heading) * 7 * side;
+        this.spec.vy = this.rand(0.2, 1);
+        this.spec.vz = Math.sin(heading) * 7 * side;
+        this.spec.size = this.rand(0.07, 0.13);
+        this.spec.endSize = 0.02;
+        this.spec.lifeSeconds = this.rand(0.12, 0.22);
+        this.spec.colorStart = VFX_PALETTE.dronePale;
+        this.spec.colorEnd = VFX_PALETTE.drone;
+        this.spec.gravity = 0;
+        this.spec.drag = 2.6;
+        this.glow.spawn(this.take());
+      }
+    }
+  }
+
+  /**
+   * The Drone Swarm ability: the flight crossing the gap from the rig to one
+   * thrower, and what is left of the thrower after it gets there.
+   *
+   * The line of motes is the whole point — the player has to see the swarm
+   * leave the bay and arrive somewhere specific, because an ability that just
+   * killed something across the arena with a flash would read as a bug. Motes
+   * are seeded along the path with staggered lifetimes so the stream appears to
+   * travel rather than existing all at once.
+   */
+  droneStrike(
+    fromX: number,
+    fromY: number,
+    fromZ: number,
+    toX: number,
+    toY: number,
+    toZ: number,
+  ): void {
+    if (this.disposed) return;
+    const detail = this.detailAt(toX, toY, toZ);
+    if (detail <= 0) return;
+
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const dz = toZ - fromZ;
+    const distance = Math.hypot(dx, dy, dz) || 1;
+
+    // The flight itself: motes strung down the path, each drifting a little off
+    // the line so the stream reads as a swarm rather than a beam.
+    const flight = this.count(Math.min(34, 10 + distance * 1.4), detail);
+    for (let i = 0; i < flight; i++) {
+      const along = i / Math.max(1, flight - 1);
+      this.reset0();
+      this.spec.x = fromX + dx * along + this.randSigned(0.45);
+      // Arc the stream over the ground rather than through it.
+      this.spec.y = fromY + dy * along + Math.sin(along * Math.PI) * 1.6;
+      this.spec.z = fromZ + dz * along + this.randSigned(0.45);
+      this.spec.vx = (dx / distance) * this.rand(3, 7);
+      this.spec.vy = this.rand(-0.4, 1);
+      this.spec.vz = (dz / distance) * this.rand(3, 7);
+      this.spec.size = this.rand(0.12, 0.22);
+      this.spec.endSize = 0.04;
+      // Motes further down the line live longer, so the head of the stream
+      // fades first and the tail is still arriving.
+      this.spec.lifeSeconds = 0.2 + along * 0.4;
+      this.spec.colorStart = VFX_PALETTE.dronePale;
+      this.spec.colorEnd = VFX_PALETTE.drone;
+      this.spec.gravity = 0;
+      this.spec.drag = 1.4;
+      this.spec.spin = 5;
+      this.glow.spawn(this.take());
+    }
+
+    // Arrival: a tight swarm boiling around the target for a moment.
+    this.flash(toX, toY + 0.8, toZ, 2.2, 0.16, VFX_PALETTE.drone);
+    const swarm = this.count(18, detail);
+    for (let i = 0; i < swarm; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = this.rand(1.6, 4.2);
+      this.reset0();
+      this.spec.x = toX + this.randSigned(0.4);
+      this.spec.y = toY + this.rand(0.3, 1.7);
+      this.spec.z = toZ + this.randSigned(0.4);
+      this.spec.vx = Math.cos(angle) * speed;
+      this.spec.vy = this.rand(-1.4, 1.8);
+      this.spec.vz = Math.sin(angle) * speed;
+      this.spec.size = this.rand(0.1, 0.2);
+      this.spec.endSize = 0.03;
+      this.spec.lifeSeconds = this.rand(0.35, 0.7);
+      this.spec.colorStart = VFX_PALETTE.dronePale;
+      this.spec.colorEnd = VFX_PALETTE.drone;
+      this.spec.gravity = 0;
+      this.spec.drag = 1.1;
+      this.spec.spin = 8;
+      this.glow.spawn(this.take());
+    }
+  }
+
+  /**
    * One puff of the vial boss's trailing gas cloud, vented repeatedly by
    * `GasTrail` along the hazard chain behind it — slow, drifting motes rather
    * than a burst, so consecutive puffs blend into one hanging cloud that

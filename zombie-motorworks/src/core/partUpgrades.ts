@@ -42,6 +42,7 @@ export type UpgradeTrackId =
   | 'wheel'
   | 'armour'
   | 'ability'
+  | 'ability-drone'
   | 'tank'
   | 'frame'
   | 'signature-storm'
@@ -166,6 +167,17 @@ export const UPGRADE_TRACKS: Record<UpgradeTrackId, readonly UpgradeStep[]> = {
     ['✦', 'Emitter Prongs', 'Extra prongs push the field wider'],
     ['⚡', 'Reactor Core', 'Lit core drives it to full power'],
   ]),
+  // The Drone Swarm bay. Every link is either more drones in the air or a
+  // better chance of one reaching a lobbed box in time, so the chain reads as
+  // the intercept ladder it actually drives — and the second link is where the
+  // ability itself arrives.
+  'ability-drone': track([
+    ['✦', 'Second Flight', 'More drones up, more junk swatted'],
+    ['⋇', 'Swarm Command', 'Unlocks the Drone Swarm ability'],
+    ['⊙', 'Fast Charger', 'Drones turn around quicker'],
+    ['◎', 'Tracking Optics', 'They pick up an arc sooner'],
+    ['⚡', 'Reactor Core', 'Full flight, almost nothing gets through'],
+  ]),
   tank: track([
     ['⊙', 'Reserve Bottle', 'Spare bottle strapped on top'],
     ['≣', 'Baffle Bands', 'Banding stops the fuel sloshing'],
@@ -254,6 +266,7 @@ export function upgradeTrackFor(def: PartDefinition): UpgradeTrackId {
   if (def.wheel) return 'wheel';
   if (def.engine) return 'engine';
   if (def.armour) return 'armour';
+  if (def.interceptor) return 'ability-drone';
   if (def.ability) return 'ability';
   if (def.fuelCapacity !== undefined) return 'tank';
   return 'frame';

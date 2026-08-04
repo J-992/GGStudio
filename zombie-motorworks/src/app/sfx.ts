@@ -31,6 +31,8 @@ export type SfxName =
   | 'signatureNukeBlast'
   | 'abilityFlameLance'
   | 'abilityReinforce'
+  | 'abilityDroneSwarm'
+  | 'droneIntercept'
   | 'fuelPickup'
   | 'garagePlace'
   | 'garageRemove'
@@ -712,6 +714,21 @@ export function playSfx(name: SfxName, options: { pitch?: number } = {}): void {
     case 'abilityReinforce':
       playCue('mechanical', { gain: 0.32, playbackRate: 0.64 * rate });
       playCue('shield', { gain: 0.2, playbackRate: 0.8 * rate });
+      break;
+    case 'abilityDroneSwarm':
+      // The flight leaving the bay: a high whirr over a mechanical clack, so
+      // it lands as small machines launching rather than a field going up.
+      playCue('mechanical', { gain: 0.26, playbackRate: 1.5 * rate });
+      playCue('powerUp', { gain: 0.22, playbackRate: 1.35 * rate });
+      break;
+    case 'droneIntercept':
+      // Fires up to once a second all wave, so it is quiet, short and rate
+      // limited — a tick that says "that one did not reach you", nothing more.
+      playCue('metalImpact', {
+        gain: 0.16,
+        playbackRate: 1.7 * rate,
+        cooldownSeconds: 0.25,
+      });
       break;
     case 'partBreak':
       playCue('metalImpact', { gain: 0.36, playbackRate: 0.82 * rate });

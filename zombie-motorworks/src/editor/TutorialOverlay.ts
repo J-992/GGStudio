@@ -11,6 +11,8 @@ interface TutorialUI {
   tourAnchor(anchor: TourAnchor): HTMLElement | null;
   /** Un-collapse the Store so a store-anchored step has something to spotlight. */
   openStorePanel(): void;
+  /** Same for Vehicle Stats, which the garage now opens folded away. */
+  openVehicleStats(): void;
   highlightPaletteButton(defId: string | null): void;
 }
 
@@ -147,6 +149,7 @@ export class TutorialOverlay {
   private render(): void {
     const step = this.step();
     if (step.anchor === 'store') this.ui.openStorePanel();
+    if (step.anchor === 'stats') this.ui.openVehicleStats();
     this.count.textContent = `Step ${Math.min(this.stepIndex, GARAGE_TOUR_STEPS.length - 1) + 1} of ${GARAGE_TOUR_STEPS.length}`;
     this.title.textContent = step.title;
     this.body.textContent = step.text;

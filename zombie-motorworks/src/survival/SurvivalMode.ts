@@ -10,6 +10,7 @@ import {
   ABILITY_SLOT_KEYS,
   abilityUnlocked,
   effectiveCharm,
+  effectiveDroneSwarm,
   effectiveFlameLance,
   effectiveFreeze,
   effectiveHellfire,
@@ -57,6 +58,7 @@ import { getPartDef } from '../core/parts.ts';
 import { addScore, killScore, waveClearScore } from '../core/score.ts';
 import { deriveConnections } from '../core/structural.ts';
 import {
+  droneInterceptChance,
   MINE_SWEEPER_MINIMAP_LEVEL,
   mineSweeperRadius,
 } from '../core/turretModules.ts';
@@ -735,6 +737,12 @@ export class SurvivalMode {
   private pendingTransition: PendingTransition | null = null;
   private stuckSeconds = 0;
   private currentMineSweeperLevel = 0;
+  /**
+   * Counts down to the next point-defence pass. One timer for the whole rig,
+   * but every live bay rolls its own chance on each pass — two bays are two
+   * rolls, which is what makes a second one worth bolting on.
+   */
+  private droneInterceptTimer = 0;
   private mineWarningPulseSeconds = 0;
   private recoveryCooldown = 0;
   private recoverySettleSeconds = 0;
@@ -1983,6 +1991,9 @@ export class SurvivalMode {
     this.fuelPickups.step(FIXED_DT);
     this.waves.fixedUpdate(FIXED_DT);
     this.zombies.step(FIXED_DT);
+    // After the zombie step, so a pass sees the projectiles as they are right
+    // now rather than one frame's travel behind them.
+    this.updateDroneInterceptors();
     this.updateMineWarningPulse(mineRevealRadius);
 
     this.world.step(this.eventQueue);
@@ -2821,6 +2832,48 @@ export class SurvivalMode {
   }
 
   /**
+   * Run one point-defence pass for every live Drone Swarm bay on the rig.
+   *
+   * A pass is a single attempt at a single projectile: roll the bay's level
+   * chance, and on a hit swat the closest incoming shot out of the air. That
+   * shape is deliberate — the bay thins what is coming in rather than sealing
+   * the rig off, so a wave of throwers is still a wave of throwers, just a
+   * survivable one. The chance ladder is the whole upgrade payoff (see
+   * `droneInterceptChance`).
+   *
+   * The interval comes off the first bay found; every bay in the catalog uses
+   * the same one, and mixing intervals would need a timer each for no gain the
+   * player could feel.
+   */
+  private updateDroneInterceptors(): void {
+    this.droneInterceptTimer -= FIXED_DT;
+    if (this.droneInterceptTimer > 0) return;
+
+    let interval = 0;
+    const position = this.vehicle.body.translation();
+    for (const part of this.vehicle.assembled.parts.values()) {
+      const interceptor = part.def.interceptor;
+      if (interceptor === undefined) continue;
+      if (!this.isAttachedAlivePart(part)) continue;
+      interval = interval === 0 ? interceptor.intervalSeconds : interval;
+      if (Math.random() >= droneInterceptChance(part.placed.config.level ?? 1))
+        continue;
+      const hit = this.zombies.interceptProjectileNear(
+        position.x,
+        position.y,
+        position.z,
+        interceptor.radiusM,
+      );
+      if (hit === null) continue;
+      this.vfx.droneIntercept(hit.x, hit.y, hit.z);
+      playSfx('droneIntercept');
+    }
+    // No bay on the rig: check again next step rather than every frame forever,
+    // so a bay bolted on mid-run starts working within one interval.
+    this.droneInterceptTimer = interval > 0 ? interval : 1;
+  }
+
+  /**
    * Rebuild the ability bar's loadout from the rig as it stands right now.
    * Only attached, living parts count, so an ability disappears the moment a
    * zombie tears its emitter off — and comes back if the part is repaired.
@@ -3287,6 +3340,29 @@ export class SurvivalMode {
       this.vfx.pulseRing(pos.x, pos.y, pos.z, pulse.radiusM);
       playSfx('abilityPulse');
       return pulse.cooldownSeconds;
+    }
+    if (ability.kind === 'droneSwarm') {
+      const swarm = effectiveDroneSwarm(ability, level);
+      // Throwers only, nearest first. An empty sky still spends the cooldown:
+      // the flight launched, and letting the press be free whenever nothing
+      // was in range would make the ability something to mash.
+      const killed = this.zombies.swarmNearestThrowers(
+        { x: pos.x, z: pos.z },
+        swarm.kills,
+        swarm.rangeM,
+      );
+      for (const target of killed) {
+        this.vfx.droneStrike(
+          pos.x,
+          pos.y + 1,
+          pos.z,
+          target.x,
+          target.y,
+          target.z,
+        );
+      }
+      playSfx('abilityDroneSwarm');
+      return swarm.cooldownSeconds;
     }
     if (ability.kind === 'phase') {
       return this.firePhase(ability, level);

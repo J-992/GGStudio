@@ -33,6 +33,12 @@ import type { VfxSystem } from '../../vfx/VfxSystem.ts';
 const GRAVITY_MPS2 = 9.81;
 const GROUND_DESPAWN_Y = 0.1;
 const SPIN_RATE = 5; // rad/s, visual only
+/**
+ * Point defence ignores anything below this height: a shot already at the
+ * player's doorstep is not something a drone got to in time, and crediting the
+ * bay for it would make the intercept read as damage that vanished.
+ */
+const INTERCEPT_MIN_HEIGHT_M = 1.2;
 /** How often a box vents a trail mote, seconds. Independent of the step rate
  * so a physics substep never doubles the emission. */
 const BOX_TRAIL_INTERVAL = 0.045;
@@ -262,6 +268,46 @@ export class ThrowerProjectiles {
       });
     }
     return out;
+  }
+
+  /**
+   * Point defence: despawn the closest in-flight projectile within `radiusM` of
+   * the given point and return where it was, or null when nothing is in reach.
+   *
+   * The shot is simply removed — no impact, no puddle, no `onLand` — because it
+   * never got where it was going. Only shots still above the ground plane count,
+   * so a bay cannot claim a box that was about to land anyway.
+   */
+  interceptNearest(
+    x: number,
+    y: number,
+    z: number,
+    radiusM: number,
+  ): { x: number; y: number; z: number } | null {
+    if (this.disposed || radiusM <= 0) return null;
+    const radiusSq = radiusM * radiusM;
+    let best: Projectile | null = null;
+    let bestDistSq = radiusSq;
+    for (const projectile of this.pool) {
+      if (!projectile.active) continue;
+      const position = projectile.mesh.position;
+      if (position.y <= INTERCEPT_MIN_HEIGHT_M) continue;
+      const dx = position.x - x;
+      const dy = position.y - y;
+      const dz = position.z - z;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq > bestDistSq) continue;
+      best = projectile;
+      bestDistSq = distSq;
+    }
+    if (best === null) return null;
+    const hit = {
+      x: best.mesh.position.x,
+      y: best.mesh.position.y,
+      z: best.mesh.position.z,
+    };
+    this.despawn(best);
+    return hit;
   }
 
   /**

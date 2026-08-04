@@ -10,6 +10,9 @@ import {
 test('editor boots with palette, build card, and a non-black scene', async ({ page }) => {
   await boot(page);
   await expect(page.locator('.garage-dock')).toBeVisible();
+  // Vehicle Stats now arrives folded away; the bars are one click behind it.
+  await expect(page.getByText('Mass', { exact: true })).toBeHidden();
+  await page.getByRole('button', { name: 'Expand Vehicle Stats' }).click();
   await expect(page.getByText('Mass', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Test Drive' })).toBeVisible();
   const shot = await page.locator('canvas.viewport').screenshot();

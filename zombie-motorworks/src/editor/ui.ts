@@ -7,10 +7,7 @@ import {
   withHotbarSlot,
 } from '../core/hotbar.ts';
 import { ABILITY_SLOT_KEYS, abilityMeta } from '../core/abilities.ts';
-import {
-  SIGNATURE_KIND_META,
-  effectiveSignature,
-} from '../core/signatures.ts';
+import { SIGNATURE_KIND_META, effectiveSignature } from '../core/signatures.ts';
 import {
   KID_LABELS,
   SIMPLE_PART_IDS,
@@ -28,7 +25,12 @@ import {
   upgradeStepsFor,
 } from '../core/partUpgrades.ts';
 import { storeOffer } from '../core/economy.ts';
-import { BUILDS, BUILD_IDS, buildStarterRig, type BuildId } from '../core/builds.ts';
+import {
+  BUILDS,
+  BUILD_IDS,
+  buildStarterRig,
+  type BuildId,
+} from '../core/builds.ts';
 import { mountSpinningRigPreview } from './BuildPreview.ts';
 import { upgradePrice } from '../core/upgrades.ts';
 
@@ -161,6 +163,9 @@ const DEFENSIVE_WEAPON_PART_IDS = new Set([
   'pulse-emitter',
   // Pure knockback, no damage: the Thumper buys breathing room, not kills.
   'thumper',
+  // Point defence. Its passive is the reason it is bought at all, and that
+  // passive only ever stops damage — nothing on it shoots the horde.
+  'drone-swarm',
 ]);
 
 /** Catalog parts filed under `weapon` that are really about getting around. */
@@ -175,6 +180,75 @@ function storeGroupForPart(def: PartDefinition): StoreGroup {
   }
   if (def.category === 'weapon') return 'weapons';
   return 'essentials';
+}
+
+const STORE_GROUP_ORDER: readonly StoreGroup[] = [
+  'essentials',
+  'weapons',
+  'defence',
+  'mobility',
+];
+
+/**
+ * One colour and one mark per shelf. The shelves are told apart by their edge
+ * and their glyph before a word is read, which is the whole point of dropping
+ * the tile text: the frame has to carry the category on its own.
+ */
+const STORE_GROUP_META: Record<
+  StoreGroup,
+  { label: string; accent: string; icon: string }
+> = {
+  essentials: {
+    label: 'Essentials',
+    accent: '#9ab45f',
+    // Hex nut: the shelf of frames, engines, and tanks reads as hardware.
+    icon:
+      `<path d="M12 2 21 7.2v9.6L12 22 3 16.8V7.2Z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>` +
+      `<circle cx="12" cy="12" r="3.4" fill="currentColor"/>`,
+  },
+  weapons: {
+    label: 'Weapons',
+    accent: '#cf6440',
+    // Crosshair: the shelf you buy to point at something.
+    icon:
+      `<circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2.2"/>` +
+      `<path d="M12 1v4.5M12 18.5V23M1 12h4.5M18.5 12H23" stroke="currentColor" stroke-width="2.2"/>` +
+      `<circle cx="12" cy="12" r="2.2" fill="currentColor"/>`,
+  },
+  defence: {
+    label: 'Defence',
+    accent: '#5f9fcc',
+    // Shield with a rivet down the boss.
+    icon:
+      `<path d="M12 2 4 5v7.2C4 17 7.4 20.6 12 22c4.6-1.4 8-5 8-9.8V5Z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>` +
+      `<path d="M11 8h2v8h-2Z" fill="currentColor"/>`,
+  },
+  mobility: {
+    label: 'Mobility',
+    accent: '#dda641',
+    // Tyre: wheels, treads, and the two boosters that move the rig.
+    icon:
+      `<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.4"/>` +
+      `<circle cx="12" cy="12" r="3" fill="currentColor"/>` +
+      `<path d="M12 3v3.2M12 17.8V21M3 12h3.2M17.8 12H21" stroke="currentColor" stroke-width="2.2"/>`,
+  },
+};
+
+/** Padlock stamped over a blacked-out tile: this part is not unlocked yet. */
+const LOCK_ICON_SVG =
+  `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+  `<path d="M7.4 11V8.2a4.6 4.6 0 0 1 9.2 0V11" fill="none" stroke="currentColor" stroke-width="2.6"/>` +
+  `<path d="M4.5 10.6h15v10.2h-15Z" fill="currentColor"/>` +
+  `<path d="M11 14h2v4h-2Z" fill="#050605"/>` +
+  `</svg>`;
+
+/** Small square carrying one category glyph, tinted by that category. */
+function storeGroupIcon(group: StoreGroup, className: string): HTMLElement {
+  const mark = document.createElement('span');
+  mark.className = className;
+  mark.setAttribute('aria-hidden', 'true');
+  mark.innerHTML = `<svg viewBox="0 0 24 24" focusable="false">${STORE_GROUP_META[group].icon}</svg>`;
+  return mark;
 }
 
 export interface EditorUI {
@@ -218,6 +292,8 @@ export interface EditorUI {
   tourAnchor(anchor: TourAnchor): HTMLElement | null;
   /** Expand the Store dock panel so a tour step has something to point at. */
   openStorePanel(): void;
+  /** Same for Vehicle Stats, which the garage opens folded away by default. */
+  openVehicleStats(): void;
   setStatus(text: string): void;
   /**
    * Ask where an imported build should go. Resolves to the player's choice, or
@@ -631,6 +707,23 @@ function partThumbnail(
       <path d="M12 20 20 16M52 20 44 16M12 32 20 28M52 32 44 28" stroke="#b79bf0" stroke-width="4" fill="none"/>
       <path d="M4 26 12 21M60 26 52 21" stroke="#7a53c8" stroke-width="4" fill="none"/>
     `,
+    // Open bay with two drones up over it and a swatted box breaking apart:
+    // the icon has to say "something leaves this block and stops that".
+    'drone-swarm': `
+      ${common}
+      <path d="M20 26H44V34H20Z" fill="#2c4a3a"/>
+      <path d="M23 28H41V32H23Z" fill="#3fbd7a"/>
+      <path d="M14 16H30V20H14Z" fill="#7fe0ad" opacity="0.8"/>
+      <path d="M19 18H25V23H19Z" fill="#6c7a72"/>
+      <circle cx="22" cy="20" r="1.6" fill="#ff5a3c"/>
+      <path d="M15 22 19 20M29 20 33 22" stroke="#4a544e" stroke-width="2" fill="none"/>
+      <path d="M34 9H48V12H34Z" fill="#7fe0ad" opacity="0.8"/>
+      <path d="M38 11H44V15H38Z" fill="#6c7a72"/>
+      <circle cx="41" cy="13" r="1.4" fill="#ff5a3c"/>
+      <path d="M35 14 38 12M44 12 47 14" stroke="#4a544e" stroke-width="2" fill="none"/>
+      <path d="M50 20 56 18 54 24 58 26 48 28Z" fill="#7a4fc0"/>
+      <path d="M52 21 55 20 54 23Z" fill="#cbb4ff"/>
+    `,
     // Strapped pressure bottles over a solenoid, venting a jet out the back.
     'nitro-injector': `
       ${common}
@@ -711,6 +804,19 @@ const TURN_ICON_SVG =
   `<svg class="selected-part__action-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
   `<path d="M12 5a7 7 0 1 0 7 7" fill="none" stroke="currentColor" stroke-width="2.4"/>` +
   `<path d="M12 1 8 5l4 4z" fill="currentColor"/>` +
+  `</svg>`;
+
+/** Skull the Fight button leads with, so the action reads before the label. */
+const SKULL_ICON_SVG =
+  `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+  `<path d="M12 1.5c5.2 0 8.3 3.4 8.3 8.2 0 2.8-1.2 4.8-2.8 5.9v4.9h-2.4v-2.3h-1.9v2.3h-2.4v-2.3H8.9v2.3H6.5v-4.9C4.9 14.5 3.7 12.5 3.7 9.7 3.7 4.9 6.8 1.5 12 1.5Z" fill="currentColor"/>` +
+  `<path d="M7.6 8.4h3.1v3.3H7.6ZM13.3 8.4h3.1v3.3h-3.1ZM10.8 13.2h2.4v2.3h-2.4Z" fill="#180b05"/>` +
+  `</svg>`;
+/** Double chevron: the button that throws the rig out of the garage. */
+const DEPLOY_ICON_SVG =
+  `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+  `<path d="M3 3.5 11.5 12 3 20.5Z" fill="currentColor" opacity="0.5"/>` +
+  `<path d="M12.5 3.5 21 12l-8.5 8.5Z" fill="currentColor"/>` +
   `</svg>`;
 
 /** Crate-of-blocks mark for the inventory button on the build bar. */
@@ -975,7 +1081,6 @@ export function buildEditorUI(
     cancelNewGarage.focus();
   };
 
-
   // Where should an imported build go? Modelled on the New Garage dialog above
   // rather than window.confirm/prompt: native dialogs are unusable on mobile
   // and are suppressed outright inside the sandboxed iframes portals embed the
@@ -1155,8 +1260,33 @@ export function buildEditorUI(
   top.appendChild(utilityButtons);
   const testBtn = btn('Test Drive', handlers.onTestDrive);
   testBtn.className = 'primary btn-hero btn-hero-first';
-  const fightBtn = btn('Fight Zombies', handlers.onFightZombies);
+
+  // The Fight button is the one control every run funnels through, so it is
+  // built rather than labelled: a skull, the label, and a deploy chevron over a
+  // hot plate that breathes. Everything except the label is aria-hidden, so the
+  // button still announces exactly "Fight Zombies".
+  //
+  // Discrete flame shapes were tried here and read as pasted-on emoji at this
+  // size; the heat is carried by the plate's own ember pulse instead.
+  const fightBtn = document.createElement('button');
+  fightBtn.type = 'button';
   fightBtn.className = 'primary btn-hero btn-hero-fight';
+  const fightSheen = document.createElement('span');
+  fightSheen.className = 'btn-fight__sheen';
+  fightSheen.setAttribute('aria-hidden', 'true');
+  const fightIcon = document.createElement('span');
+  fightIcon.className = 'btn-fight__icon';
+  fightIcon.setAttribute('aria-hidden', 'true');
+  fightIcon.innerHTML = SKULL_ICON_SVG;
+  const fightLabel = document.createElement('span');
+  fightLabel.className = 'btn-fight__label';
+  fightLabel.textContent = 'Fight Zombies';
+  const fightDeploy = document.createElement('span');
+  fightDeploy.className = 'btn-fight__deploy';
+  fightDeploy.setAttribute('aria-hidden', 'true');
+  fightDeploy.innerHTML = DEPLOY_ICON_SVG;
+  fightBtn.append(fightSheen, fightIcon, fightLabel, fightDeploy);
+  fightBtn.addEventListener('click', handlers.onFightZombies);
   const moneyReadout = document.createElement('span');
   moneyReadout.className = 'panel money-readout';
   moneyReadout.textContent = '$0';
@@ -1208,29 +1338,23 @@ export function buildEditorUI(
   storeSearch.autocomplete = 'off';
   const storeFilters = document.createElement('div');
   storeFilters.className = 'store-filters';
-  const essentialsFilter = document.createElement('button');
-  essentialsFilter.type = 'button';
-  essentialsFilter.textContent = 'Essentials';
-  essentialsFilter.className = 'active';
-  essentialsFilter.setAttribute('aria-pressed', 'true');
-  const weaponsFilter = document.createElement('button');
-  weaponsFilter.type = 'button';
-  weaponsFilter.textContent = 'Weapons';
-  weaponsFilter.setAttribute('aria-pressed', 'false');
-  const defenceFilter = document.createElement('button');
-  defenceFilter.type = 'button';
-  defenceFilter.textContent = 'Defence';
-  defenceFilter.setAttribute('aria-pressed', 'false');
-  const mobilityFilter = document.createElement('button');
-  mobilityFilter.type = 'button';
-  mobilityFilter.textContent = 'Mobility';
-  mobilityFilter.setAttribute('aria-pressed', 'false');
-  storeFilters.append(
-    essentialsFilter,
-    weaponsFilter,
-    defenceFilter,
-    mobilityFilter,
-  );
+  // One tab per shelf, each carrying its own glyph and its own colour so the
+  // shelf the player is standing in front of is obvious without reading.
+  const storeFilterButtons = new Map<StoreGroup, HTMLButtonElement>();
+  for (const group of STORE_GROUP_ORDER) {
+    const filter = document.createElement('button');
+    filter.type = 'button';
+    filter.dataset.storeGroup = group;
+    filter.style.setProperty('--store-accent', STORE_GROUP_META[group].accent);
+    const label = document.createElement('span');
+    label.className = 'store-filters__label';
+    label.textContent = STORE_GROUP_META[group].label;
+    filter.append(storeGroupIcon(group, 'store-filters__icon'), label);
+    filter.setAttribute('aria-pressed', String(group === 'essentials'));
+    if (group === 'essentials') filter.className = 'active';
+    storeFilters.appendChild(filter);
+    storeFilterButtons.set(group, filter);
+  }
   const storeContent = document.createElement('div');
   storeContent.className = 'dock-list store-list';
   const storeEmpty = document.createElement('p');
@@ -1309,16 +1433,150 @@ export function buildEditorUI(
   let hotbar: string[] = [];
   let stock: Readonly<Record<string, number>> = {};
 
+  // Details card. The shelf shows pictures; this is where the words went. It
+  // rides alongside whichever frame the pointer (or keyboard focus) is on, out
+  // of the dock's `overflow: hidden`, and never takes pointer events itself so
+  // moving towards it cannot make it flicker.
+  const storeDetails = document.createElement('aside');
+  storeDetails.className = 'store-details';
+  storeDetails.hidden = true;
+  storeDetails.setAttribute('aria-hidden', 'true');
+  const storeDetailsArt = document.createElement('div');
+  storeDetailsArt.className = 'store-details__art';
+  const storeDetailsImage = document.createElement('img');
+  storeDetailsImage.className = 'store-details__image';
+  storeDetailsImage.alt = '';
+  storeDetailsImage.draggable = false;
+  const storeDetailsLock = document.createElement('span');
+  storeDetailsLock.className = 'store-details__lock';
+  storeDetailsLock.innerHTML = LOCK_ICON_SVG;
+  storeDetailsArt.append(storeDetailsImage, storeDetailsLock);
+  const storeDetailsBody = document.createElement('div');
+  storeDetailsBody.className = 'store-details__body';
+  const storeDetailsGroup = document.createElement('span');
+  storeDetailsGroup.className = 'store-details__group';
+  const storeDetailsGroupLabel = document.createElement('span');
+  const storeDetailsName = document.createElement('h3');
+  storeDetailsName.className = 'store-details__name';
+  const storeDetailsBlurb = document.createElement('p');
+  storeDetailsBlurb.className = 'store-details__blurb';
+  const storeDetailsStats = document.createElement('div');
+  storeDetailsStats.className = 'store-details__stats';
+  const storeDetailsPrice = document.createElement('div');
+  storeDetailsPrice.className = 'store-details__price';
+  const storeDetailsPriceMain = document.createElement('strong');
+  const storeDetailsPriceNote = document.createElement('span');
+  storeDetailsPriceNote.className = 'store-details__price-note';
+  storeDetailsPrice.append(storeDetailsPriceMain, storeDetailsPriceNote);
+  storeDetailsBody.append(
+    storeDetailsGroup,
+    storeDetailsName,
+    storeDetailsBlurb,
+    storeDetailsStats,
+    storeDetailsPrice,
+  );
+  storeDetails.append(storeDetailsArt, storeDetailsBody);
+  root.appendChild(storeDetails);
+
+  let storeDetailsFor: string | null = null;
+
+  const hideStoreDetails = (defId?: string): void => {
+    if (defId !== undefined && storeDetailsFor !== defId) return;
+    storeDetailsFor = null;
+    storeDetails.hidden = true;
+  };
+
+  /** Pins the card beside `tile`, clamped so a bottom-shelf part stays on screen. */
+  const positionStoreDetails = (tile: HTMLElement): void => {
+    const rootRect = root.getBoundingClientRect();
+    const tileRect = tile.getBoundingClientRect();
+    const panelRect = store.panel.getBoundingClientRect();
+    const cardHeight = storeDetails.offsetHeight;
+    const gutter = 10;
+    const top = Math.min(
+      Math.max(gutter, tileRect.top - rootRect.top - 12),
+      Math.max(gutter, rootRect.height - cardHeight - gutter),
+    );
+    storeDetails.style.top = `${Math.round(top)}px`;
+    storeDetails.style.left = `${Math.round(panelRect.right - rootRect.left + gutter)}px`;
+  };
+
+  const showStoreDetails = (defId: string, tile: HTMLElement): void => {
+    const def = catalog[defId];
+    if (!def || tile.hidden) return;
+    storeDetailsFor = defId;
+    const group = storeGroupForPart(def);
+    const meta = STORE_GROUP_META[group];
+    storeDetails.dataset.storeGroup = group;
+    storeDetails.style.setProperty('--store-accent', meta.accent);
+
+    const locked = tile.classList.contains('locked');
+    storeDetails.classList.toggle('is-locked', locked);
+    const iconUrl = partIconUrls.get(defId);
+    if (iconUrl) storeDetailsImage.src = iconUrl;
+    else storeDetailsImage.src = partThumbnail(def).src;
+
+    storeDetailsGroup.replaceChildren(
+      storeGroupIcon(group, 'store-details__group-icon'),
+      storeDetailsGroupLabel,
+    );
+    storeDetailsGroupLabel.textContent = locked
+      ? `${meta.label} · Locked`
+      : meta.label;
+    storeDetailsName.textContent = KID_LABELS[defId]?.name ?? def.name;
+    storeDetailsBlurb.textContent = KID_LABELS[defId]?.blurb ?? def.description;
+
+    // Five rows is as much as the card can carry before it turns into the
+    // inspector; the inspector is one click away once the part is on the rig.
+    storeDetailsStats.replaceChildren(
+      ...effectiveStatLabels(def)
+        .slice(0, 5)
+        .map(([labelText, valueText]) => {
+          const row = document.createElement('div');
+          const label = document.createElement('span');
+          label.textContent = labelText;
+          const value = document.createElement('strong');
+          value.textContent = valueText;
+          row.append(label, value);
+          return row;
+        }),
+    );
+
+    storeDetailsPriceMain.textContent =
+      tile.dataset.offerLabel ?? storePriceLabels.get(defId)?.textContent ?? '';
+    const breakdown = storePriceBreakdowns.get(defId);
+    const milestone = storeUnlockMilestones.get(defId);
+    const notes = [
+      breakdown?.hidden === false ? breakdown.textContent : null,
+      milestone?.hidden === false ? milestone.textContent : null,
+    ].filter((note): note is string => Boolean(note));
+    storeDetailsPriceNote.textContent = notes.join(' · ');
+    storeDetailsPriceNote.hidden = notes.length === 0;
+
+    storeDetails.hidden = false;
+    positionStoreDetails(tile);
+  };
+
   for (const id of SIMPLE_PART_IDS) {
     const def = catalog[id];
     if (!def) continue;
     const displayName = KID_LABELS[id]?.name ?? def.name;
     const description = KID_LABELS[id]?.blurb ?? def.description;
 
+    // A store tile is a picture frame and a price, nothing else. The name, the
+    // blurb, and the two unlock notes are all still built — the details card
+    // that follows the pointer reads them back out — but on the shelf itself
+    // they would shrink the one thing worth looking at, which is the part.
+    const group = storeGroupForPart(def);
     const storeButton = document.createElement('button');
+    storeButton.type = 'button';
     storeButton.className = 'part-btn store-item';
     storeButton.dataset.partId = id;
-    storeButton.dataset.storeGroup = storeGroupForPart(def);
+    storeButton.dataset.storeGroup = group;
+    storeButton.style.setProperty(
+      '--store-accent',
+      STORE_GROUP_META[group].accent,
+    );
     storeButton.dataset.searchText = [
       displayName,
       def.name,
@@ -1329,7 +1587,18 @@ export function buildEditorUI(
       .toLocaleLowerCase();
     const storeName = document.createElement('strong');
     storeName.textContent = displayName;
+    const storeFrame = document.createElement('span');
+    storeFrame.className = 'store-item__frame';
     const storePreview = partThumbnail(def, partIconUrls.get(def.id));
+    const storeLock = document.createElement('span');
+    storeLock.className = 'store-item__lock';
+    storeLock.setAttribute('aria-hidden', 'true');
+    storeLock.innerHTML = LOCK_ICON_SVG;
+    storeFrame.append(
+      storeGroupIcon(group, 'store-item__group'),
+      storePreview,
+      storeLock,
+    );
     const storeBlurb = document.createElement('small');
     storeBlurb.className = 'part-description';
     storeBlurb.textContent = description;
@@ -1343,7 +1612,7 @@ export function buildEditorUI(
     unlockMilestone.hidden = true;
     storeButton.append(
       storeName,
-      storePreview,
+      storeFrame,
       storeBlurb,
       price,
       priceBreakdown,
@@ -1356,6 +1625,14 @@ export function buildEditorUI(
     storeButton.addEventListener('animationend', () =>
       storeButton.classList.remove('is-revealed'),
     );
+    storeButton.addEventListener('pointerenter', () =>
+      showStoreDetails(id, storeButton),
+    );
+    storeButton.addEventListener('focus', () =>
+      showStoreDetails(id, storeButton),
+    );
+    storeButton.addEventListener('pointerleave', () => hideStoreDetails(id));
+    storeButton.addEventListener('blur', () => hideStoreDetails(id));
     storeContent.appendChild(storeButton);
     storeButtons.set(id, storeButton);
     storePriceLabels.set(id, price);
@@ -1394,6 +1671,14 @@ export function buildEditorUI(
   }
   storeContent.appendChild(storeEmpty);
   inventoryContent.appendChild(inventoryEmpty);
+
+  // Scrolling the shelf, or folding the panel away, moves the frame the card is
+  // pinned to; drop it rather than leave it hanging over empty air.
+  storeContent.addEventListener('scroll', () => hideStoreDetails(), {
+    passive: true,
+  });
+  storeContent.addEventListener('pointerleave', () => hideStoreDetails());
+  store.toggle.addEventListener('click', () => hideStoreDetails());
 
   // The build bar: a fixed row of slots, one per chosen block type. A type the
   // player has run down to zero leaves the bar along with its inventory tile,
@@ -1636,30 +1921,31 @@ export function buildEditorUI(
         !query || button.dataset.searchText?.includes(query);
       button.hidden = !matchesGroup || !matchesSearch;
       if (!button.hidden) visibleCount += 1;
+      if (button.hidden && button.dataset.partId === storeDetailsFor) {
+        hideStoreDetails();
+      }
     }
     storeEmpty.hidden = visibleCount > 0;
   };
   const setStoreFilter = (group: StoreGroup): void => {
     activeStoreGroup = group;
-    const filters = [
-      [essentialsFilter, 'essentials'],
-      [weaponsFilter, 'weapons'],
-      [defenceFilter, 'defence'],
-      [mobilityFilter, 'mobility'],
-    ] as const;
-    for (const [filter, filterGroup] of filters) {
+    for (const [filterGroup, filter] of storeFilterButtons) {
       const active = group === filterGroup;
       filter.classList.toggle('active', active);
       filter.setAttribute('aria-pressed', String(active));
     }
+    // The shelf's colour rides on the panel, so the search box, the scrollbar,
+    // and the frames all shift together when the tab changes.
+    store.panel.dataset.storeGroup = group;
+    store.panel.style.setProperty(
+      '--store-accent',
+      STORE_GROUP_META[group].accent,
+    );
     applyStoreFilters();
   };
-  essentialsFilter.addEventListener('click', () =>
-    setStoreFilter('essentials'),
-  );
-  weaponsFilter.addEventListener('click', () => setStoreFilter('weapons'));
-  defenceFilter.addEventListener('click', () => setStoreFilter('defence'));
-  mobilityFilter.addEventListener('click', () => setStoreFilter('mobility'));
+  for (const [group, filter] of storeFilterButtons) {
+    filter.addEventListener('click', () => setStoreFilter(group));
+  }
   storeSearch.addEventListener('input', applyStoreFilters);
   setStoreFilter('essentials');
 
@@ -1706,16 +1992,21 @@ export function buildEditorUI(
   const vehicleStatsToggle = document.createElement('button');
   vehicleStatsToggle.type = 'button';
   vehicleStatsToggle.className = 'dock-panel__toggle';
-  vehicleStatsToggle.setAttribute('aria-label', 'Collapse Vehicle Stats');
-  vehicleStatsToggle.setAttribute('aria-expanded', 'true');
-  vehicleStatsToggle.addEventListener('click', () => {
-    const collapsed = vehicleStats.classList.toggle('is-collapsed');
+  const setVehicleStatsCollapsed = (collapsed: boolean): void => {
+    vehicleStats.classList.toggle('is-collapsed', collapsed);
     vehicleStatsToggle.setAttribute('aria-expanded', String(!collapsed));
     vehicleStatsToggle.setAttribute(
       'aria-label',
       `${collapsed ? 'Expand' : 'Collapse'} Vehicle Stats`,
     );
-  });
+  };
+  vehicleStatsToggle.addEventListener('click', () =>
+    setVehicleStatsCollapsed(!vehicleStats.classList.contains('is-collapsed')),
+  );
+  // Folded away on arrival. Five bars of mass and power/weight are something
+  // players consult, not something they read on every visit to the garage, and
+  // the space they were holding is the space the model wants.
+  setVehicleStatsCollapsed(true);
   vehicleStatsHeader.append(vehicleStatsTitle, vehicleStatsToggle);
   const vehicleStatsContent = document.createElement('div');
   vehicleStatsContent.className = 'vehicle-stats__content';
@@ -1809,7 +2100,14 @@ export function buildEditorUI(
   // which action.
   const upgradeTipArrow = document.createElement('span');
   upgradeTipArrow.className = 'upgrade-tip__arrow';
-  upgradeTipArrow.textContent = '▲';
+  // Drawn rather than typed: the old '▲' came out at whatever weight and
+  // baseline the display font felt like, and an arrow sitting on a bar is the
+  // shape people already read as "level this up".
+  upgradeTipArrow.innerHTML =
+    `<svg viewBox="0 0 24 24" focusable="false">` +
+    `<path d="M12 2.5 21.5 12h-5v3.5h-9V12h-5Z" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>` +
+    `<path d="M7.5 18.5h9v3h-9Z" fill="currentColor"/>` +
+    `</svg>`;
   upgradeTipArrow.setAttribute('aria-hidden', 'true');
   const upgradeTipIcon = document.createElement('span');
   upgradeTipIcon.className = 'upgrade-tip__icon';
@@ -2000,6 +2298,21 @@ export function buildEditorUI(
       root.classList.add('has-selection');
       selectedPanel.classList.add('is-visible');
       selectedContent.replaceChildren();
+      // Hero shot of the block, above everything else in the panel: the player
+      // clicked a shape in a 3D scene, and the first thing the inspector owes
+      // them is confirmation that it is the shape they meant.
+      const preview = document.createElement('div');
+      preview.className = 'selected-part__preview';
+      preview.dataset.storeGroup = storeGroupForPart(def);
+      preview.style.setProperty(
+        '--store-accent',
+        STORE_GROUP_META[storeGroupForPart(def)].accent,
+      );
+      preview.append(
+        storeGroupIcon(storeGroupForPart(def), 'selected-part__preview-group'),
+        partThumbnail(def, partIconUrls.get(def.id)),
+      );
+      selectedContent.append(preview);
       const title = document.createElement('div');
       title.className = 'selected-part__title';
       const name = document.createElement('h3');
@@ -2209,6 +2522,12 @@ export function buildEditorUI(
           // Cheapest first. `order` reshuffles the grid without touching the
           // DOM, so a live search or a focused tile keeps its place.
           storeButton.style.order = String(price);
+          // The long form of the price, for the details card to read back.
+          storeButton.dataset.offerLabel = atOwnershipLimit
+            ? 'Limit 1 owned'
+            : locked
+              ? `Unlock $${price}`
+              : `Buy & Place $${price}`;
           storeButton.disabled = unaffordable || atOwnershipLimit;
           storeButton.setAttribute(
             'aria-label',
@@ -2218,19 +2537,17 @@ export function buildEditorUI(
                 ? `${def.name} — Unlock $${price}`
                 : `${def.name} — Buy & Place $${price}`,
           );
-          storeButton.title = atOwnershipLimit
-            ? `${def.name} limit reached: 1 owned or installed`
-            : locked
-              ? `Unlock ${def.name} permanently for $${price}; buy one later for $${def.cost}`
-              : `Buy one ${def.name} and arm it for placement for $${price}`;
+          // No `title`: the details card already says all of this, and the
+          // browser's own tooltip only turns up a second later to sit on top
+          // of it in a different typeface.
+          storeButton.title = '';
         }
         const priceLabel = storePriceLabels.get(id);
         if (priceLabel) {
-          priceLabel.textContent = atOwnershipLimit
-            ? 'Limit 1'
-            : locked
-              ? `Unlock $${price}`
-              : `Buy & Place $${price}`;
+          // The frame has room for a figure, not a sentence — the lock badge
+          // already says which of the two kinds of price this is, and the
+          // details card spells the whole offer out.
+          priceLabel.textContent = atOwnershipLimit ? 'OWNED' : `$${price}`;
         }
         const priceBreakdown = storePriceBreakdowns.get(id);
         if (priceBreakdown) {
@@ -2288,10 +2605,10 @@ export function buildEditorUI(
         runBanner.style.display = 'block';
         runBanner.classList.remove('run-summary');
         runBanner.classList.add('run-active');
-        fightBtn.textContent = `Start Wave ${wave + 1}`;
+        fightLabel.textContent = `Start Wave ${wave + 1}`;
         return;
       }
-      fightBtn.textContent = 'Fight Zombies';
+      fightLabel.textContent = 'Fight Zombies';
       runBanner.classList.remove('run-active');
       if (summary) {
         const primary = document.createElement('div');
@@ -2355,6 +2672,9 @@ export function buildEditorUI(
     },
     openStorePanel: () => {
       store.setCollapsed(false);
+    },
+    openVehicleStats: () => {
+      setVehicleStatsCollapsed(false);
     },
     setStatus,
     askShareImportTarget: (buildName) =>
@@ -2532,10 +2852,7 @@ function effectiveStatLabels(
     labels.push(
       ['Ability', abilityMeta(def.ability).label],
       ['Effect', 'Invulnerable'],
-      [
-        'Mobility',
-        `x${formatStat(def.ability.mobilityMultiplier ?? 1)}`,
-      ],
+      ['Mobility', `x${formatStat(def.ability.mobilityMultiplier ?? 1)}`],
       ['Duration', `${formatStat(def.ability.baseDurationSeconds)} S`],
       ['Cooldown', `${formatStat(def.ability.cooldownSeconds)} S`],
     );

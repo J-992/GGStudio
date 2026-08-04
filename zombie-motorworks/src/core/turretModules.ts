@@ -16,6 +16,27 @@ export const EMP_SHIELD_LEAK_BY_LEVEL = [0.1, 0.35, 0.5, 0.65] as const;
 /** Fraction of primary damage dealt to a piercing round's second target. */
 export const PIERCING_DAMAGE_BY_LEVEL = [0, 0.3, 0.45, 0.6] as const;
 
+/**
+ * Chance one Drone Swarm intercept pass swats an incoming projectile out of the
+ * air, by the bay's upgrade level (index = level - 1).
+ *
+ * It opens at a third on purpose: an un-upgraded bay is a bad day for the
+ * thrower rather than an answer to it, and the player still eats most of what
+ * is lobbed at them. The chain is where the bay earns its shelf price — a maxed
+ * flight clears nearly everything that comes in, which is the point at which a
+ * rig can hold ground against a field of throwers instead of driving away from
+ * it.
+ */
+export const DRONE_INTERCEPT_CHANCE_BY_LEVEL = [
+  1 / 3, 0.45, 0.55, 0.68, 0.8, 0.92,
+] as const;
+
+/** Intercept chance (0..1) for a Drone Swarm bay at this upgrade level. */
+export function droneInterceptChance(level: number): number {
+  const index = clampedLevel(level, MAX_PART_LEVEL) - 1;
+  return index < 0 ? 0 : DRONE_INTERCEPT_CHANCE_BY_LEVEL[index];
+}
+
 /** Mine reveal radius in metres by Mine Sweeper upgrade level; index 0 = no part. */
 export const MINE_SWEEPER_RADIUS_BY_LEVEL = [0, 14, 22, 30] as const;
 /** Level at which revealed mines also appear on the minimap. */

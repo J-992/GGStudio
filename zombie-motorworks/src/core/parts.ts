@@ -850,6 +850,49 @@ export const PART_CATALOG: Record<string, PartDefinition> = {
       baseDurationSeconds: 4,
     },
   },
+  'drone-swarm': {
+    id: 'drone-swarm',
+    name: 'Drone Swarm',
+    category: 'weapon',
+    description:
+      'Point-defence bay. A flight of little drones patrols the rig and swats ' +
+      'incoming thrown junk out of the air — only about a third of it at ' +
+      'first, and upgrades are what turn that into real cover. At level 3 the ' +
+      'bay also unlocks the Drone Swarm ability: send the whole flight after ' +
+      'the zombies doing the throwing (20s cooldown).',
+    cells: oneCell,
+    clearanceCells: [v(0, 1, 0)],
+    sockets: [singleSocket('hardpoint-ny', 'frame', ORIGIN, 'ny')],
+    massKg: 95,
+    health: 130,
+    // On the shelf from the first garage visit with no unlock beat in front of
+    // it: throwers are an early problem, and an answer to them the player has
+    // to reach a later wave to even see on the shelf is an answer arriving
+    // after the lesson. The price is the gate instead.
+    cost: 150,
+    upgrade: upgrade(150),
+    reinforcement: 1.15,
+    // Passive point defence. The chance itself lives on the upgrade ladder in
+    // turretModules.ts, because it is the number the whole part is balanced
+    // around and it belongs next to the other per-level ladders.
+    interceptor: {
+      intervalSeconds: 1,
+      radiusM: 16,
+    },
+    // Arrives with the second unlock (level 3). The bay is bought for its
+    // passive screen; the swarm is what the chain leads to, so it cannot be a
+    // free ability slot on a cheap block.
+    ability: {
+      kind: 'droneSwarm',
+      unlockLevel: 3,
+      cooldownSeconds: 20,
+      // Fixed: the flight is drawn crossing the gap and coming home, and that
+      // read is the same however upgraded the bay is.
+      baseDurationSeconds: 1.2,
+      rangeM: 26,
+      baseKills: 1,
+    },
+  },
   'mind-control-beam': {
     id: 'mind-control-beam',
     name: 'Mind Control Beam',

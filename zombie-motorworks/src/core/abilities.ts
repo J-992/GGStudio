@@ -351,6 +351,41 @@ export function effectiveThump(def: AbilityDefinition, level = 1): ThumpStats {
   };
 }
 
+/** Resolved drone-swarm stats after applying a placed part's upgrade level. */
+export interface DroneSwarmStats {
+  /** Throwers the flight kills outright in one launch. */
+  kills: number;
+  /** Metres from the rig the swarm will hunt throwers out to. */
+  rangeM: number;
+  /** Seconds the drones stay out; purely how long the effect is drawn for. */
+  durationSeconds: number;
+  /** Seconds between activations. */
+  cooldownSeconds: number;
+}
+
+/**
+ * Scales a drone swarm by the placed part's upgrade level. Every second level
+ * beyond the first puts one more thrower in reach of the same launch, so the
+ * ability grows on the same rhythm as the passive intercept ladder underneath
+ * it rather than doubling on the first upgrade. Range and duration are fixed —
+ * the bay buys kills, not a longer leash.
+ *
+ * The ability itself does not exist below the level its `unlockLevel` names
+ * (3), so level 3 → 2 kills and level 6 → 3 with the default bay payload.
+ */
+export function effectiveDroneSwarm(
+  def: AbilityDefinition,
+  level = 1,
+): DroneSwarmStats {
+  const steps = upgradeSteps(level);
+  return {
+    kills: (def.baseKills ?? 1) + Math.floor(steps / 2),
+    rangeM: def.rangeM ?? 0,
+    durationSeconds: def.baseDurationSeconds,
+    cooldownSeconds: def.cooldownSeconds,
+  };
+}
+
 /**
  * Scales a phase ability by the placed part's upgrade level. Each level beyond
  * the first adds a metre of blink; the cooldown is fixed, because reach is the
@@ -545,6 +580,13 @@ export const ABILITY_KIND_META: Record<
     blurb:
       'Hold the core wide open: an unbroken lance of flame along your ' +
       'heading, so steering is aiming for as long as it burns.',
+  },
+  droneSwarm: {
+    label: 'Drone Swarm',
+    glyph: '⋇',
+    blurb:
+      'Launch the whole flight at the zombies throwing things at you — the ' +
+      'drones swarm them and the throwers do not get back up.',
   },
   reinforce: {
     label: 'Reinforce',

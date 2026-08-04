@@ -33,6 +33,10 @@ const COLORS: Record<string, number> = {
   'tesla-coil': 0x5ac8ff,
   'shield-generator': 0x2f7bd6,
   'pulse-emitter': 0x7a53c8,
+  // Signal green, not the blue of the shield: the bay is the one defensive
+  // block whose hardware leaves the rig, so it is lit like a tool that goes
+  // somewhere rather than a field that stays put (see `parts/defence.ts`).
+  'drone-swarm': 0x3fbd7a,
   // Bare bottle metal with a green tint left in it: the injector's colour is
   // the charge decal and the armed light, not the tanks (see `parts/mobility.ts`).
   'nitro-injector': 0x76837c,
