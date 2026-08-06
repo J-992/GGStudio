@@ -9,7 +9,6 @@ import type { WaveComposition } from './WaveManager.ts';
 import {
   bossEncounterWarning,
   bossForWave,
-  isBossWave,
   type BossEncounter,
 } from './zombies/bossConfig.ts';
 import {
@@ -84,18 +83,29 @@ const THREAT_WARNINGS: Record<SpecialistZombieKind, string> = {
 };
 
 /**
- * Specialist kinds that first appear on the requested wave. The comparison
- * skips back over boss waves, which field no specialists at all — otherwise
- * every specialist would re-announce itself as new on the wave after each boss.
+ * Specialist kinds that appear on `wave` and have never appeared before it.
+ *
+ * "New" is measured against every earlier wave, not against the one directly
+ * behind. Several waves field no specialists at all — a boss duel, and the
+ * wave-8 kamikaze swarm — and comparing with the wave behind made all six
+ * kinds already in rotation announce themselves again on wave 9, which is
+ * where the timeline's milestone markers and the clear card's threat preview
+ * both got their idea of what was new.
  */
 export function newThreatsForWave(wave: number): SpecialistZombieKind[] {
-  let previousWave = wave - 1;
-  while (previousWave > 0 && isBossWave(previousWave)) previousWave -= 1;
-  const previous = zombieCompositionForWave(previousWave);
   const current = zombieCompositionForWave(wave);
-  return SPECIALIST_KINDS.filter(
-    (kind) => previous[kind] === 0 && current[kind] > 0,
-  );
+  const candidates = SPECIALIST_KINDS.filter((kind) => current[kind] > 0);
+  if (candidates.length === 0) return [];
+
+  const seen = new Set<SpecialistZombieKind>();
+  for (let earlier = 1; earlier < wave; earlier += 1) {
+    const composition = zombieCompositionForWave(earlier);
+    for (const kind of candidates) {
+      if (composition[kind] > 0) seen.add(kind);
+    }
+    if (seen.size === candidates.length) break;
+  }
+  return candidates.filter((kind) => !seen.has(kind));
 }
 
 /**

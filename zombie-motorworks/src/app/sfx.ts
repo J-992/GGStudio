@@ -42,6 +42,8 @@ export type SfxName =
   | 'partBreak'
   | 'waveCountdown'
   | 'waveStart'
+  | 'threatReveal'
+  | 'bossAlarm'
   | 'gameOver'
   | 'mineWarning'
   | 'vehicleRecover'
@@ -597,6 +599,33 @@ function pulseFlamethrower(overcharged: boolean): void {
   }, 180);
 }
 
+/**
+ * Fire a cue after a delay, so a one-shot can be built out of layers that do
+ * not all land on the same frame. Deliberately unscheduled against the audio
+ * clock: these are UI accents tens of milliseconds apart, not a rhythm part.
+ */
+function scheduleCue(delayMs: number, cue: SampleCue, options: PlayOptions): void {
+  globalThis.setTimeout(() => playCue(cue, options), delayMs);
+}
+
+/** Klaxon blasts for the wave-clear card's boss warning. */
+const BOSS_ALARM_BLAST_MS = [140, 560, 980] as const;
+
+/**
+ * The boss alert: a slammed floodlight, something very large registering that
+ * you are there, and three klaxon blasts over the top of it. Assembled from
+ * existing cues rather than mixed new — this plays once every fifth wave, and
+ * an unfamiliar one-shot at that cadence is a sound players learn to dread by
+ * its shape, which is exactly the job.
+ */
+function soundBossAlarm(rate: number): void {
+  playCue('heavyImpact', { gain: 0.36, playbackRate: 0.68 * rate });
+  playCue('zombieGrowl', { gain: 0.34, playbackRate: 0.58 * rate });
+  for (const delay of BOSS_ALARM_BLAST_MS) {
+    scheduleCue(delay, 'uiDeny', { gain: 0.2, playbackRate: 0.66 * rate });
+  }
+}
+
 export function playSfx(name: SfxName, options: { pitch?: number } = {}): void {
   const rate = clamp(options.pitch ?? 1, 0.75, 1.35);
   switch (name) {
@@ -754,6 +783,15 @@ export function playSfx(name: SfxName, options: { pitch?: number } = {}): void {
         playbackRate: 0.82 * rate,
         cooldownSeconds: 0.18,
       });
+      break;
+    // The wave-clear card's threat spotlight. Both are the lamp striking on
+    // followed by whatever is standing under it noticing you.
+    case 'threatReveal':
+      playCue('mechanical', { gain: 0.16, playbackRate: 0.78 * rate });
+      scheduleCue(90, 'zombieGrowl', { gain: 0.26, playbackRate: 0.86 * rate });
+      break;
+    case 'bossAlarm':
+      soundBossAlarm(rate);
       break;
     case 'vehicleRecover':
       playCue('heavyImpact', { gain: 0.27, playbackRate: 0.8 * rate });

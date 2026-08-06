@@ -1,0 +1,333 @@
+/* Full-screen warning that runs over the arena between a cleared wave and its
+   payout card. Deliberately spare: a headline, the models, a name each, and a
+   row of part icons. Every element that is not the models is sized and spaced
+   to get out of their way. */
+
+.threat-alert {
+  position: absolute;
+  inset: 0;
+  z-index: 75;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 20px 16px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 45%, rgb(20 26 18 / 0.55), transparent 75%),
+    color-mix(in srgb, var(--ui-black) 92%, transparent);
+  color: var(--ui-text);
+  font-family: var(--ui-font-body);
+  cursor: pointer;
+}
+
+.threat-alert[hidden] {
+  display: none;
+}
+
+.threat-alert--visible {
+  animation: threat-alert-in 200ms linear both;
+}
+
+.threat-alert__headline {
+  margin: 0;
+  color: var(--ui-signal-strong);
+  font: 400 clamp(20px, 5vw, 30px) / 1 var(--ui-font-display);
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  text-transform: uppercase;
+  text-shadow: 3px 3px 0 var(--ui-signal-dark);
+}
+
+.threat-alert--visible .threat-alert__headline {
+  animation: threat-alert-slam 320ms cubic-bezier(0.2, 0.85, 0.28, 1.15) both;
+}
+
+/* The models get every pixel that is going spare. */
+.threat-alert__stage {
+  position: relative;
+  width: min(760px, 100%);
+  height: min(46vh, 340px);
+  flex: 0 1 auto;
+}
+
+.threat-alert__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.threat-alert__fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ui-text-muted);
+  font: 400 clamp(18px, 4vw, 26px) / 1.2 var(--ui-font-display);
+  letter-spacing: 0.1em;
+}
+
+.threat-alert__fallback[hidden] {
+  display: none;
+}
+
+.threat-alert__plates {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 34px;
+  text-align: center;
+}
+
+.threat-alert__plate {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.threat-alert__plate-name {
+  color: var(--ui-text);
+  font: 400 clamp(20px, 4.6vw, 30px) / 1 var(--ui-font-display);
+  letter-spacing: 0.09em;
+}
+
+.threat-alert__plate-tagline {
+  color: var(--ui-signal-strong);
+  font: 400 clamp(11px, 2.4vw, 14px) / 1.2 var(--ui-font-display);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.threat-alert__counters[hidden] {
+  display: none;
+}
+
+.threat-alert__counters-title {
+  margin: 0 0 8px;
+  color: var(--ui-text-muted);
+  font: 400 10px/1 var(--ui-font-display);
+  letter-spacing: 0.18em;
+  text-align: center;
+  text-indent: 0.18em;
+}
+
+.threat-alert__counter-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.threat-alert__counter {
+  display: flex;
+  width: 92px;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 5px 6px;
+  border: 1px solid var(--ui-edge);
+  background: var(--ui-surface-1);
+}
+
+/* Already bolted on: shown so the player can see the answer is on the rig, but
+   dimmed so the row still reads as a shopping list. */
+.threat-alert__counter--owned {
+  border-color: var(--ui-signal-dark);
+  opacity: 0.55;
+}
+
+.threat-alert__counter-icon {
+  width: 54px;
+  height: 54px;
+  image-rendering: pixelated;
+  object-fit: contain;
+}
+
+.threat-alert__counter-name {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--ui-text-muted);
+  font: 400 10px/1.1 var(--ui-font-display);
+  letter-spacing: 0.03em;
+  text-align: center;
+}
+
+.threat-alert__dismiss {
+  min-height: 40px;
+  padding: 8px 26px;
+  border: 1px solid var(--ui-edge);
+  border-radius: 0;
+  background: var(--ui-surface-3);
+  box-shadow: inset 0 -3px 0 var(--ui-black);
+  color: var(--ui-text);
+  font: 400 14px/1 var(--ui-font-display);
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.threat-alert__dismiss:hover {
+  background: var(--ui-surface-2);
+  color: var(--ui-signal-strong);
+}
+
+/* ---- Boss variant ---------------------------------------------------- */
+
+.threat-alert--boss {
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 45%, rgb(70 12 6 / 0.6), transparent 75%),
+    color-mix(in srgb, var(--ui-black) 94%, transparent);
+}
+
+/* Hazard cordon top and bottom, so a boss alert is a different object at a
+   glance rather than the same popup in another colour. */
+.threat-alert--boss::before,
+.threat-alert--boss::after {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  height: 10px;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--ui-damage-high) 0 10px,
+    #1a0703 10px 20px
+  );
+  content: '';
+  pointer-events: none;
+}
+
+.threat-alert--boss::before {
+  top: 0;
+}
+
+.threat-alert--boss::after {
+  bottom: 0;
+}
+
+.threat-alert--boss.threat-alert--visible {
+  animation:
+    threat-alert-in 200ms linear both,
+    threat-alert-shake 520ms steps(9, end) 100ms 1;
+}
+
+.threat-alert--boss .threat-alert__headline {
+  color: var(--ui-damage-high);
+  font-size: clamp(26px, 7vw, 44px);
+  text-shadow: 4px 4px 0 #2a0a06;
+}
+
+.threat-alert--boss.threat-alert--visible .threat-alert__headline {
+  animation:
+    threat-alert-slam 320ms cubic-bezier(0.2, 0.85, 0.28, 1.15) both,
+    threat-alert-klaxon 820ms steps(2, end) 320ms 6;
+}
+
+.threat-alert--boss .threat-alert__plate-name {
+  color: var(--ui-damage-medium);
+  font-size: clamp(26px, 6vw, 40px);
+}
+
+.threat-alert--boss .threat-alert__plate-tagline {
+  color: var(--ui-damage-medium);
+}
+
+.threat-alert--boss .threat-alert__counter {
+  border-color: var(--ui-rust);
+}
+
+@keyframes threat-alert-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes threat-alert-slam {
+  0% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+
+  70% {
+    opacity: 1;
+    transform: scale(0.96);
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes threat-alert-shake {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+
+  20% {
+    transform: translate(-5px, 2px);
+  }
+
+  40% {
+    transform: translate(5px, -2px);
+  }
+
+  60% {
+    transform: translate(-3px, -2px);
+  }
+
+  80% {
+    transform: translate(3px, 2px);
+  }
+}
+
+@keyframes threat-alert-klaxon {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (max-width: 520px) {
+  .threat-alert {
+    gap: 10px;
+  }
+
+  .threat-alert__stage {
+    height: min(38vh, 220px);
+  }
+
+  .threat-alert__counter {
+    width: 76px;
+  }
+
+  .threat-alert__counter-icon {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .threat-alert,
+  .threat-alert--visible,
+  .threat-alert--boss.threat-alert--visible,
+  .threat-alert__headline,
+  .threat-alert--visible .threat-alert__headline,
+  .threat-alert--boss.threat-alert--visible .threat-alert__headline {
+    animation: none !important;
+    opacity: 1;
+    transform: none !important;
+  }
+}

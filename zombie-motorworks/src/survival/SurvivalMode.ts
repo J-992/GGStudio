@@ -64,6 +64,7 @@ import {
 } from '../core/turretModules.ts';
 import type {
   AbilityDefinition,
+  PartDefinition,
   Vec3,
   VehicleBlueprint,
 } from '../core/types.ts';
@@ -142,8 +143,14 @@ import {
 import {
   formatWaveComposition,
   newThreatsForWave,
-  threatWarningsForWave,
 } from './waveBalance.ts';
+import {
+  bossEncounterWarning,
+  bossForWave,
+} from './zombies/bossConfig.ts';
+import { threatPreviewForWave } from './threatPreview.ts';
+import { ThreatAlert, type ThreatAlertView } from './ThreatAlert.ts';
+import { renderPartIconUrls } from '../editor/PartIconRenderer.ts';
 import {
   WaveClearCard,
   type WaveClearCardView,
@@ -683,6 +690,12 @@ export class SurvivalMode {
   private readonly countdownOverlay: HTMLDivElement;
   private readonly countdownValue: HTMLDivElement;
   private readonly waveClearCard: WaveClearCard;
+  /**
+   * Full-screen warning about the next wave, shown over the arena before the
+   * payout card. Mounted directly rather than through `buildUi` because it
+   * owns its own DOM and its own GL context and needs nothing back.
+   */
+  private readonly threatAlert = new ThreatAlert();
   private readonly gameOverOverlay: HTMLDivElement;
   private readonly gameOverBest: HTMLDivElement;
   private readonly gameOverScore: HTMLDivElement;
@@ -1043,6 +1056,7 @@ export class SurvivalMode {
       },
     );
     this.scopeCursor = new ScopeCursor(this.ui, this.renderer.domElement);
+    this.ui.appendChild(this.threatAlert.root);
     this.warningHud = new WarningHud(this.ui);
     this.damageNumbers = new DamageNumbersOverlay(this.ui);
     this.zombies.setDamageListener((report) => {
@@ -1807,7 +1821,8 @@ export class SurvivalMode {
       // rebuild hands off to App, which commits the cleared wave, restores the
       // parts into the checkpoint, and redeploys onto the whole rig.
       const payload = this.clearedWavePayload();
-      this.waveClearCard.hide();
+      this.threatAlert.hide();
+    this.waveClearCard.hide();
       this.callbacks.onFullRepairRebuild(
         quote.cost,
         payload.clearedRun,
@@ -1839,6 +1854,7 @@ export class SurvivalMode {
   private readonly onGoToGarage = (): void => {
     if (this.disposed || this.phase !== 'cleared') return;
     const payload = this.clearedWavePayload();
+    this.threatAlert.hide();
     this.waveClearCard.hide();
     this.callbacks.onBuildPhase(
       payload.clearedRun,
@@ -2324,6 +2340,7 @@ export class SurvivalMode {
     this.flameLanceSeconds = 0;
     this.flameLanceStats = null;
     this.stuckPrompt.classList.remove('is-visible');
+    this.threatAlert.hide();
     this.waveClearCard.hide();
     this.damageNumbers?.clear();
     this.countdownOverlay.style.display = 'block';
@@ -2569,7 +2586,6 @@ export class SurvivalMode {
         return `${def.name} ($${def.cost})`;
       });
     const nextWave = this.currentWave + 1;
-    const warnings = threatWarningsForWave(nextWave);
     const killsThisWave = Math.max(0, this.kills - this.waveStartKills);
     const integrityPct = this.vehicle.integrityPct();
     this.cleanWaveStreak =
@@ -2612,12 +2628,70 @@ export class SurvivalMode {
       nextWaveComposition: formatWaveComposition(
         zombieCompositionForWave(nextWave),
       ),
-      warnings,
+      // Only a boss earns a line on the payout card. Everything else the next
+      // wave brings has just been shown, full screen, by the threat alert.
+      bossWarning: (() => {
+        const boss = bossForWave(nextWave);
+        return boss === null ? null : bossEncounterWarning(boss);
+      })(),
       badges: awards,
       newBadgeIds,
       repair: this.repairQuote(),
     };
-    this.waveClearCard.show(view);
+
+    // The alert runs first, over the quiet arena, and hands off to the card:
+    // "here is what is coming" lands before "here is what you earned", so the
+    // threat is already in the player's head when they reach the garage button.
+    const alert = this.threatAlertView(nextWave);
+    if (alert === null) {
+      this.waveClearCard.show(view);
+      return;
+    }
+    this.threatAlert.show(alert, () => {
+      // The run can end or reset while the alert is up — a self-destruct
+      // resolving on the same frame, say — so the card is only shown if the
+      // mode is still sitting on the wave it cleared.
+      if (this.phase === 'cleared') this.waveClearCard.show(view);
+    });
+  }
+
+  /**
+   * Assemble the threat alert for `wave`, or null when the wave brings nothing
+   * new to warn about.
+   *
+   * The alert stays free of the part catalog: the counter thumbnails are
+   * rendered here through the garage's own icon pipeline — the same meshes the
+   * store shows, so a recommendation is recognisable when the player goes
+   * looking for it — and handed over as PNGs. `this.renderer` is only the
+   * cache key; the pipeline builds and drops its own short-lived context.
+   */
+  private threatAlertView(wave: number): ThreatAlertView | null {
+    const preview = threatPreviewForWave(wave);
+    if (preview === null) return null;
+
+    const definitions = preview.counters
+      .map((partId) => {
+        try {
+          return getPartDef(partId);
+        } catch {
+          // A counter naming a part the catalog has dropped loses its tile
+          // rather than the whole alert. `unit/threat-preview.test.ts` is what
+          // stops one from shipping.
+          return null;
+        }
+      })
+      .filter((def): def is PartDefinition => def !== null);
+
+    return {
+      preview,
+      counterIcons: renderPartIconUrls(this.renderer, definitions),
+      counterNames: new Map(definitions.map((def) => [def.id, def.name])),
+      ownedPartIds: new Set(
+        [...this.vehicle.assembled.parts.values()].map(
+          (part) => part.placed.defId,
+        ),
+      ),
+    };
   }
 
   private queueGameOver(pendingMoneyDiscarded = 0): void {
@@ -2632,6 +2706,7 @@ export class SurvivalMode {
     this.pointerFiring = false;
     this.keys.clear();
     this.countdownOverlay.style.display = 'none';
+    this.threatAlert.hide();
     this.waveClearCard.hide();
     this.stuckPrompt.classList.remove('is-visible');
     this.stopVehicleMotion();
@@ -4487,6 +4562,7 @@ export class SurvivalMode {
     this.pointerFiring = false;
     this.keys.clear();
     this.countdownOverlay.style.display = 'none';
+    this.threatAlert.hide();
     this.waveClearCard.hide();
     this.resetWaveStats();
     this.waves.startWave(this.currentWave);
@@ -4658,6 +4734,7 @@ export class SurvivalMode {
     this.scopeCursor.dispose();
     this.warningHud.dispose();
     this.waveTimelineHud.dispose();
+    this.threatAlert.dispose();
     this.waveClearCard.dispose();
     this.abilityBar.dispose();
     this.ui.remove();

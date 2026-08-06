@@ -424,6 +424,8 @@
   font: 400 13px/1.4 var(--ui-font-display);
 }
 
+/* Shown only when the next wave summons a boss. Ordinary new threats are the
+   threat alert's job — this card stays a payout. */
 .wave-clear__warnings {
   padding: 9px 11px;
   border: 1px solid var(--ui-danger);
@@ -439,6 +441,26 @@
 
 .wave-clear__warnings--visible {
   animation: wave-clear-row-in 220ms steps(5, end) both;
+}
+
+/* A boss wave re-liveries the whole card. A player who has cleared twenty
+   waves reads this card by its silhouette, and changing the silhouette is what
+   stops the skim. */
+.wave-clear--boss .wave-clear__card {
+  border-color: var(--ui-damage-high);
+  box-shadow:
+    7px 8px 0 rgb(0 0 0 / 0.45),
+    inset 3px 0 0 var(--ui-damage-high);
+}
+
+.wave-clear--boss .wave-clear__header {
+  background: linear-gradient(180deg, var(--ui-danger-dark), transparent);
+  box-shadow: inset 0 -2px 0 var(--ui-damage-high);
+}
+
+.wave-clear--boss .wave-clear__title {
+  color: var(--ui-damage-medium);
+  text-shadow: 3px 3px 0 #2a0a06;
 }
 
 .wave-clear__actions {

@@ -30,7 +30,15 @@ export interface WaveClearCardView {
   elapsedSeconds: number;
   integrityPct: number;
   nextWaveComposition: string;
-  warnings: readonly string[];
+  /**
+   * Set only when the next wave summons a boss, and then it is that boss's
+   * warning copy. A boss is the one thing worth interrupting the payout for:
+   * the card goes red and carries the line, so a player who skipped straight
+   * past the threat alert still cannot miss it on the way to the garage.
+   *
+   * Everything else the next wave brings is the alert's job, not the card's.
+   */
+  bossWarning: string | null;
   badges: readonly BadgeAward[];
   newBadgeIds: readonly string[];
   /** null when the rig is undamaged, so there is nothing to offer. */
@@ -406,8 +414,13 @@ export class WaveClearCard {
     });
 
     setTextIfChanged(this.previewValue, view.nextWaveComposition);
-    setTextIfChanged(this.warningBlock, view.warnings.join(' '));
-    this.warningBlock.hidden = view.warnings.length === 0;
+    // A boss wave repaints the whole card, not just its own block: a player
+    // skimming for the Continue button reads the card by its silhouette, and
+    // changing the silhouette is what stops the skim.
+    const bossNext = view.bossWarning !== null;
+    this.root.classList.toggle('wave-clear--boss', bossNext);
+    setTextIfChanged(this.warningBlock, view.bossWarning ?? '');
+    this.warningBlock.hidden = !bossNext;
 
     const repair = view.repair;
     this.repairButton.hidden = repair === null;

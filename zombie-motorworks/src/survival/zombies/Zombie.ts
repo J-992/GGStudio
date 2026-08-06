@@ -227,7 +227,14 @@ const REST_POSE: CharacterPose = { bones: {}, rootLift: 0 };
 const CHANNEL_CLIP_RELEASE = 0.65;
 /** How fast the summoning sigil burns off once the channel ends, per second. */
 const SIGIL_FADE_OUT_RATE = 2.6;
-const BASE_VISUAL_SCALE = 1.85;
+/**
+ * Scale every non-boss zombie's fitted model is multiplied by, so a kind's
+ * `KIND_MODELS` height is "pre-baseScale" metres rather than world metres. A
+ * boss sets `baseScale` to 1 instead and fits straight to `visualHeightM`.
+ * Exported so the threat spotlight can put both on one stage at their true
+ * relative sizes.
+ */
+export const BASE_VISUAL_SCALE = 1.85;
 const BODY_TINTS = [0x4c6b3f, 0x5a7247, 0x3f5c48, 0x6b5a3f, 0x556b4c, 0x47614a];
 const warnedVisualModels = new Set<string>();
 
@@ -299,10 +306,38 @@ export function modelFileFor(
 }
 
 /**
+ * Nominal rendered height of a `Zed_*` walker, in world metres. Unlike every
+ * fitted kind this is not a target the model is scaled to — the walkers keep
+ * their voxel grid's own proportions at `ZED_MODEL_SCALE` — so it exists only
+ * as the yardstick a preview sizes an unfitted kind against.
+ */
+export const WALKER_VISUAL_HEIGHT_M = 1.85;
+
+/**
+ * How tall a kind stands on the field, in world metres, with `baseScale`
+ * already folded in. The horde's silhouettes only read as a hierarchy — a
+ * kamikaze underfoot, a behemoth towering — when something puts them side by
+ * side at these ratios, which is exactly what the threat spotlight does.
+ *
+ * The numbered Zed walkers have no fitted height at all — they are scaled by
+ * their shared voxel grid — so they fall back to `WALKER_VISUAL_HEIGHT_M`.
+ */
+export function visualHeightMFor(
+  kind: ZombieKind,
+  bossDef: BossDefinition | null,
+): number {
+  if (kind === 'boss') return bossDef?.visualHeightM ?? WALKER_VISUAL_HEIGHT_M;
+  const kindModel = KIND_MODELS[kind];
+  return kindModel
+    ? kindModel.height * BASE_VISUAL_SCALE
+    : WALKER_VISUAL_HEIGHT_M;
+}
+
+/**
  * Pose curves for the rigged GLB kinds. Every rig in `glb-rigger` shares one
  * bone vocabulary, so a kind only has to name which curves drive it.
  */
-interface RigClips {
+export interface RigClips {
   readonly walk: (
     time: number,
     options?: { readonly cadence?: number },
@@ -369,6 +404,24 @@ const BOSS_RIG_CLIPS: Record<BossPoseSet, RigClips> = {
     cadence: ALCHEMIST_WALK_CADENCE,
   },
 };
+
+/**
+ * Which pose curves drive a given spawn's rig, or null when it has none.
+ *
+ * A boss's clips come from its definition, not its kind: every classic boss
+ * shares the one `'boss'` kind, so `RIG_CLIPS` has nothing to key on. Exported
+ * because the threat spotlight animates the very same rigs off-field — a
+ * preview of a kind that stood in its T-pose would be worse than no preview.
+ */
+export function rigClipsFor(
+  kind: ZombieKind,
+  bossDef: BossDefinition | null,
+): RigClips | null {
+  if (kind === 'boss') {
+    return bossDef?.poseSet ? BOSS_RIG_CLIPS[bossDef.poseSet] : null;
+  }
+  return RIG_CLIPS[kind] ?? null;
+}
 
 /** Shared soft radial gradients for kind-marking ground glows, cached per palette. */
 const glowTextures = new Map<string, THREE.CanvasTexture>();
@@ -3561,16 +3614,10 @@ export class Zombie {
       this.rigBones.set(name, node);
       this.rigRestRotations.set(name, node.rotation.clone());
     }
-    // A boss's clips come from its definition, not its kind: every classic boss
-    // shares the one `'boss'` kind, so `RIG_CLIPS` has nothing to key on.
     this.rigClips =
       this.rigBones.size === 0
         ? null
-        : this.bossDef
-          ? this.bossDef.poseSet
-            ? BOSS_RIG_CLIPS[this.bossDef.poseSet]
-            : null
-          : (RIG_CLIPS[this.kind] ?? null);
+        : rigClipsFor(this.kind, this.bossDef);
     // A T-pose rig is wrong-looking in bind, so put it into its rest pose
     // immediately rather than leaving one frame of splayed arms up between the
     // model arriving and the first updateVisuals.
