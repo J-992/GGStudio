@@ -21,6 +21,11 @@ import type { AssembledVehicle, GetDef, RuntimeWheel } from './assembler.ts';
 import { assembleVehicle } from './assembler.ts';
 import type { AckermannGeometry, WheelTelemetry } from './wheels.ts';
 import { MIRROR_PLANE_X_M, computeAckermann, stepWheels } from './wheels.ts';
+import {
+  assistedYawRate,
+  commandedYawRate,
+  maxSteerLockRad,
+} from './steering.ts';
 import type { EngineOutput, GearboxState } from './drivetrain.ts';
 import { distributeTorque, engineStep, updateGearbox } from './drivetrain.ts';
 import type { RuntimeWeapon, TracerShot, WeaponAimInput } from './weapons.ts';
@@ -829,7 +834,13 @@ export class RuntimeVehicle {
       hazardMuAt,
     );
 
-    this.applyStabilityForces(dt, mass, steer);
+    this.applyStabilityForces(
+      dt,
+      mass,
+      steer,
+      maxSteerLockRad(attachedWheels),
+      forwardSpeed,
+    );
     this.applyOverdriveThrust(dt, mass, reversing);
 
     const weaponResult = stepWeapons(
@@ -1028,6 +1039,8 @@ export class RuntimeVehicle {
     dt: number,
     mass: number,
     steerInput: number,
+    steerLockRad: number,
+    forwardSpeed: number,
   ): void {
     const body = this.assembled.body;
     const velocity = body.linvel();
@@ -1087,17 +1100,43 @@ export class RuntimeVehicle {
     this.stabilityImpulse.z = right.z * mass * lateralDeltaVelocity;
     body.applyImpulse(this.stabilityImpulse, true);
 
-    // Turn bracing without suspension impulses: damp only chassis roll and
-    // pitch while grounded, leaving yaw free for responsive steering.
+    // Turn bracing without suspension impulses: damp chassis roll and pitch
+    // while grounded, and pull yaw onto the rate the steering geometry is
+    // asking for (see steering.ts). Driving the rotation directly is what
+    // makes the rig trace the arc its wheels point at rather than a radius set
+    // by whatever front/rear grip balance the player's build happens to have —
+    // and, with the input centred, it settles the rig back onto a straight
+    // line instead of leaving it rotating.
+    //
+    // Tread rigs have no hub lock (`steerLockRad` is 0) and steer by belt
+    // torque instead, so they are left to their own controller.
     const angularVelocity = body.angvel();
     const angularDamping =
       GROUNDED_ROLL_PITCH_DAMPING_PER_S +
       Math.abs(steerInput) * TURN_ROLL_PITCH_DAMPING_BONUS_PER_S;
     const angularFactor = Math.exp(-angularDamping * dt);
+    const liveWheelCount = this.assembled.wheels.reduce(
+      (live, w) => live + (w.broken ? 0 : 1),
+      0,
+    );
+    const yawRate =
+      steerLockRad > 0
+        ? assistedYawRate(
+            angularVelocity.y,
+            commandedYawRate(
+              steerInput,
+              forwardSpeed,
+              this.geom.wheelbase,
+              steerLockRad,
+            ),
+            this.lastWheelTelemetry.groundedCount / Math.max(1, liveWheelCount),
+            dt,
+          )
+        : angularVelocity.y;
     body.setAngvel(
       {
         x: angularVelocity.x * angularFactor,
-        y: angularVelocity.y,
+        y: yawRate,
         z: angularVelocity.z * angularFactor,
       },
       true,

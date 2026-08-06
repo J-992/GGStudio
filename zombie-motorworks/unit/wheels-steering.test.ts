@@ -3,7 +3,7 @@ import { buildStarterBlueprint } from '../src/app/App.ts';
 import { getPartDef } from '../src/core/parts.ts';
 import { deriveAutomaticWheelLayout, resolveDrivenPartIds } from '../src/core/wheelLayout.ts';
 import type { RuntimeWheel } from '../src/runtime/assembler.ts';
-import { computeAckermann, steerTargets, steeringActuatorRate, steeringSpeedMultiplier } from '../src/runtime/wheels.ts';
+import { computeAckermann, steerTargets, steeringActuatorRate } from '../src/runtime/wheels.ts';
 
 function wheel(partId: string, x: number, z: number, steering = true): RuntimeWheel {
   return {
@@ -56,13 +56,6 @@ describe('steering geometry and actuator', () => {
   it('returns all steering targets to zero for zero input', () => {
     const wheels = [wheel('l', 0, 2), wheel('r', 1, 2)];
     expect([...steerTargets(wheels, computeAckermann(wheels), 0).values()]).toEqual([0, 0]);
-  });
-
-  it('fades speed-sensitive steering from one to a bounded floor', () => {
-    expect(steeringSpeedMultiplier(0)).toBe(1);
-    expect(steeringSpeedMultiplier(13)).toBeLessThan(1);
-    expect(steeringSpeedMultiplier(42)).toBeGreaterThanOrEqual(0.38);
-    expect(steeringSpeedMultiplier(1000)).toBe(0.38);
   });
 
   it('returns to centre faster than it turns in', () => {

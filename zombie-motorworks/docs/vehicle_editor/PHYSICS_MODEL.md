@@ -28,7 +28,15 @@ Consequences that emerge without special-casing: wheels above ground don't prope
 
 ## Steering
 
-Configured steering wheels get a steer angle each frame. For a recognized left/right pair (same z, mirrored x) we apply **approximate Ackermann**: inner wheel `atan(L / (L/tanδ − T/2))`, outer `atan(L / (L/tanδ + T/2))` with L = wheelbase, T = track. Unpaired/odd steering wheels get the raw angle — scrubbing and instability are allowed outcomes. `steerInverted` supports rear-steer.
+Steer input is read as a request for a **yaw rate** — how fast the chassis should rotate — and both halves of the system come off that one number (`src/runtime/steering.ts`).
+
+- **Commanded rate**: `ω = steer · min(v/R, A_max/v, ω_max)` with `R = L/tan(δ_max)`, the tightest circle the rig's own geometry can point at. The `A_max` term is a lateral-acceleration ceiling set deliberately above tyre grip, so a fast corner scrubs speed off until it can hold the tight line instead of running wide; `ω_max` stops anything pirouetting. Signed by forward speed, so steering in reverse rotates the other way.
+- **Hubs** take the lock that traces `ω` at the current speed: `δ = atan(L·ω/v)`, which is full lock at walking pace and a few degrees flat out. That is where speed-sensitive steering comes from — there is no separate fade multiplier.
+- **Chassis** yaw is blended toward `ω` each step while wheels are down, with authority = grounded fraction. This is what makes the arc match the request: without it the radius is set by whatever front/rear grip balance a given build happens to have, so every rig understeers by a different amount.
+
+Per-wheel angles still spread around the commanded centreline by **approximate Ackermann**, solved against one shared turn centre so asymmetric layouts need no left/right pairing: the inner hub, sitting closer to that centre, takes the larger angle. A rig where every wheel steers has no pivot axle and no Ackermann solution, so its hubs all take the commanded angle directly. `steerInverted` supports rear-steer.
+
+Treads have no hub to angle (`maxSteerAngleDeg` 0). They sit outside all of the above and steer by belt-torque difference under their own yaw-rate controller in `vehicle.ts`.
 
 ## Drivetrain
 

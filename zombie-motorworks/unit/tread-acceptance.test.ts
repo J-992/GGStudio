@@ -189,7 +189,11 @@ describe('tread rigs steer', () => {
     // Baseline before and after the tread work: 2.36 rad/s, 19.3 m/s.
     expect(car.peakYawRate).toBeGreaterThan(2);
     expect(car.peakYawRate).toBeLessThan(2.8);
-    expect(car.speed).toBeGreaterThan(15);
+    // The cornering speed is lower than that 19.3 m/s baseline on purpose: the
+    // steering law (steering.ts) buys its tighter arc by letting a full-lock
+    // corner scrub speed off. What this guards is that the belt logic still
+    // does not touch a wheeled rig — it is driving hard, not pivoting.
+    expect(car.speed).toBeGreaterThan(9);
   });
 });
 

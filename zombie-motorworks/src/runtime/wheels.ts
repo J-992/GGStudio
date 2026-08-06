@@ -19,6 +19,7 @@ import type { Vec3 } from '../core/types.ts';
 import { CELL_SIZE } from '../core/types.ts';
 import type { RuntimeWheel } from './assembler.ts';
 import { WHEEL_RAY_GROUPS } from './assembler.ts';
+import { maxSteerLockRad, steerLockFraction } from './steering.ts';
 import { add, clamp, cross, dot, len, norm, rotateAroundAxis, rotateByQuat, scale, sub, v3 } from './vec.ts';
 
 /** Grid cell centres sit at (i+0.5)·CELL_SIZE, so the lateral mirror plane
@@ -75,12 +76,11 @@ const SUSPENSION_RELAX_PER_S = 12; // visual compression decay while airborne
 // pitch-flip it under hard acceleration.
 const TIRE_FORCE_ANCHOR_LIFT = 0.75;
 // Steering feel. A brisker slew rate makes the wheels reach the commanded
-// angle quickly so turn-in no longer lags the key press, and a gentler
-// high-speed fade keeps the response consistent instead of going numb.
+// angle quickly so turn-in no longer lags the key press. How much lock is
+// commanded in the first place is the steering law's job (see steering.ts) —
+// this is only how fast the hub gets there.
 const STEER_RATE = 9; // rad/s: progressive turn-in avoids an abrupt weight transfer.
 const STEER_RETURN_RATE = 18; // rad/s: centring faster makes recovery responsive.
-const STEER_SPEED_FADE_REFERENCE_MPS = 26;
-const MIN_HIGH_SPEED_STEER_MULTIPLIER = 0.38;
 
 export interface WheelStepInput {
   throttle: number; // 0..1
@@ -97,14 +97,6 @@ export interface AckermannGeometry {
   track: number;
   /** partIds of paired steering wheels: [leftId, rightId][] */
   pairs: [string, string][];
-}
-
-export function steeringSpeedMultiplier(speedMps: number): number {
-  return clamp(
-    1 / (1 + Math.max(0, speedMps) / STEER_SPEED_FADE_REFERENCE_MPS),
-    MIN_HIGH_SPEED_STEER_MULTIPLIER,
-    1,
-  );
 }
 
 /**
@@ -175,8 +167,7 @@ export function steerTargets(
     (w.wheelDef.maxSteerAngleDeg * Math.PI) / 180;
   // Commanded centreline angle. A wheel sitting on the centreline would take
   // exactly this angle; the geometry below spreads the others around it.
-  const delta =
-    Math.abs(steerInput) * Math.max(...steered.map(maxAngleOf), 0);
+  const delta = Math.abs(steerInput) * maxSteerLockRad(wheels);
   const tanDelta = Math.tan(delta);
 
   // The turn centre lies on the axle that does not steer. With every wheel
@@ -250,11 +241,17 @@ export function stepWheels(
   const angvel = body.angvel();
   const com = body.worldCom();
   const horizontalSpeed = Math.hypot(linvel.x, linvel.z);
-  const steeringMultiplier = steeringSpeedMultiplier(horizontalSpeed);
+  // The hubs take the lock that traces the commanded yaw rate at this speed:
+  // full lock at parking pace, a handful of degrees flat out.
   const targets = steerTargets(
     wheels,
     geom,
-    input.steer * steeringMultiplier,
+    steerLockFraction(
+      input.steer,
+      horizontalSpeed,
+      geom.wheelbase,
+      maxSteerLockRad(wheels),
+    ),
   );
   let groundedCount = 0;
   let drivenOmegaSum = 0;
