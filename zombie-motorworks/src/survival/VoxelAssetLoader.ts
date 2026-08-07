@@ -159,10 +159,50 @@ async function loadTemplate(baseUrl: string): Promise<THREE.Group> {
   return root;
 }
 
+/** Attempts a template gets before its placements fall back to placeholders. */
+const TEMPLATE_LOAD_ATTEMPTS = 3;
+const TEMPLATE_RETRY_DELAY_MS = 160;
+
+function afterDelay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * An arena asks for a hundred-odd assets at once, so a single dropped fetch is
+ * the ordinary case rather than the exceptional one, and the cost of treating
+ * it as fatal is a placeholder box standing where a prop should be for the
+ * rest of the run. Retry before giving up.
+ */
+async function loadTemplateWithRetries(baseUrl: string): Promise<THREE.Group> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < TEMPLATE_LOAD_ATTEMPTS; attempt++) {
+    if (attempt > 0) await afterDelay(TEMPLATE_RETRY_DELAY_MS * attempt);
+    try {
+      return await loadTemplate(baseUrl);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 function templateFor(baseUrl: string): Promise<THREE.Group> {
   let pending = templates.get(baseUrl);
   if (!pending) {
-    pending = loadTemplate(baseUrl);
+    // A rejection must never stay in the cache. Props are placed across many
+    // async callbacks, so one transient failure used to be inherited by every
+    // later placement of that asset — one dropped fetch turned every crate,
+    // tomb or fence of that kind into a grey placeholder box, scattered around
+    // wherever that prop happens to be authored.
+    const load: Promise<THREE.Group> = loadTemplateWithRetries(baseUrl).catch(
+      (error: unknown) => {
+        // Only evict our own entry: a cache clear may already have replaced it
+        // with a fresh load for the next arena.
+        if (templates.get(baseUrl) === load) templates.delete(baseUrl);
+        throw error;
+      },
+    );
+    pending = load;
     templates.set(baseUrl, pending);
   }
   return pending;

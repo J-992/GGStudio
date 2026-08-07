@@ -1219,6 +1219,9 @@ export class SurvivalMode {
 
     for (const [id, part] of vehicle.assembled.parts) {
       const mesh = buildPartMesh(part.def, part.placed);
+      // Named whichever group it ends up in, so `findPartMesh` can still reach
+      // a wheel after it has broken off and moved into an island's group.
+      mesh.name = `part:${id}`;
       if (part.def.wheel) {
         const spin = mesh.getObjectByName('wheel-spin');
         if (spin) spin.userData.baseQuat = spin.quaternion.clone();
@@ -1231,7 +1234,6 @@ export class SurvivalMode {
         this.wheelSpin.set(id, 0);
         this.scene.add(mesh);
       } else {
-        mesh.name = `part:${id}`;
         this.vehicleGroup.add(mesh);
       }
     }
@@ -2366,6 +2368,25 @@ export class SurvivalMode {
       this.controls.fire && this.controls.aimPoint !== undefined;
   }
 
+  /**
+   * The mesh drawing one block, wherever it currently lives. A block that has
+   * broken off is no longer under `vehicleGroup` — `attachNewIslands` moved it
+   * into that island's own group and dropped its wheel-mesh entry — so a
+   * lookup that only searched the rig left the wreckage of a chunk that died
+   * after it detached standing in the arena for the rest of the run.
+   */
+  private findPartMesh(partId: string): THREE.Object3D | undefined {
+    const mesh = this.vehicleGroup.getObjectByName(`part:${partId}`);
+    if (mesh) return mesh;
+    const wheelMesh = this.wheelMeshes.get(partId);
+    if (wheelMesh) return wheelMesh;
+    for (const group of this.islandGroups.values()) {
+      const detached = group.getObjectByName(`part:${partId}`);
+      if (detached) return detached;
+    }
+    return undefined;
+  }
+
   private attachNewIslands(
     islands: ReturnType<RuntimeVehicle['finishStep']>,
   ): void {
@@ -2901,10 +2922,8 @@ export class SurvivalMode {
 
     for (const [id, part] of this.vehicle.assembled.parts) {
       if (part.alive) continue;
-      const mesh = this.vehicleGroup.getObjectByName(`part:${id}`);
+      const mesh = this.findPartMesh(id);
       if (mesh) mesh.visible = false;
-      const wheelMesh = this.wheelMeshes.get(id);
-      if (wheelMesh) wheelMesh.visible = false;
     }
 
     // Turn each gun to where it is actually shooting.
@@ -3165,10 +3184,8 @@ export class SurvivalMode {
    * repair kit put it back.
    */
   private showRepairedPart(partId: string): void {
-    const mesh = this.vehicleGroup.getObjectByName(`part:${partId}`);
+    const mesh = this.findPartMesh(partId);
     if (mesh) mesh.visible = true;
-    const wheelMesh = this.wheelMeshes.get(partId);
-    if (wheelMesh) wheelMesh.visible = true;
   }
 
   /** Float what a crate just did off the top of the screen. */
