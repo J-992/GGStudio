@@ -95,17 +95,6 @@ export interface SelectedPartEconomy {
   };
 }
 
-export interface RunSummary {
-  failedWave: number;
-  /** Final arcade score recorded on the leaderboard. */
-  score: number;
-  kills: number;
-  isPersonalBest: boolean;
-  /** 1-based local-board rank, or null when the run did not place. */
-  rank: number | null;
-  destroyedPartNames: string[];
-}
-
 export interface NewGarageDisposalSummary {
   partCount: number;
   investment: number;
@@ -281,11 +270,7 @@ export interface EditorUI {
     /** Chosen build-bar block types; omit to seed one from the inventory. */
     hotbarDefIds?: readonly string[],
   ): void;
-  setRunContext(
-    wave?: number,
-    summary?: RunSummary,
-    repair?: RunRepairEconomy,
-  ): void;
+  setRunContext(wave?: number, repair?: RunRepairEconomy): void;
   setArmedPart(defId: string | null): void;
   highlightPaletteButton(defId: string | null): void;
   /** Garage furniture the guided tour spotlights, by anchor name. */
@@ -2566,7 +2551,7 @@ export function buildEditorUI(
       }
       renderInventory();
     },
-    setRunContext: (wave, summary, repair) => {
+    setRunContext: (wave, repair) => {
       menuBtn.style.display = wave === undefined ? '' : 'none';
       saveAndQuitBtn.style.display = wave === undefined ? 'none' : '';
       if (wave !== undefined) {
@@ -2603,42 +2588,16 @@ export function buildEditorUI(
           runBanner.replaceChildren(runBannerText, runBannerWarning);
         }
         runBanner.style.display = 'block';
-        runBanner.classList.remove('run-summary');
         runBanner.classList.add('run-active');
         fightLabel.textContent = `Start Wave ${wave + 1}`;
         return;
       }
+      // Outside a run the banner has nothing to say: the game-over card has
+      // already reported the result and offered the restart, so repeating it
+      // over a freshly reset garage is one screen too late.
       fightLabel.textContent = 'Fight Zombies';
       runBanner.classList.remove('run-active');
-      if (summary) {
-        const primary = document.createElement('div');
-        primary.className = 'run-banner__summary-line';
-        primary.textContent =
-          `Run ended on Wave ${summary.failedWave} · ` +
-          `Score ${summary.score.toLocaleString()} · ` +
-          `${summary.kills.toLocaleString()} zombies killed`;
-        const recovery = document.createElement('div');
-        recovery.className = 'run-banner__summary-line';
-        const resetNote = 'Rig and cash reset · Unlocked parts kept';
-        recovery.textContent = summary.isPersonalBest
-          ? `New best score! · ${resetNote}`
-          : summary.rank === null
-            ? resetNote
-            : `Ranked #${summary.rank} · ${resetNote}`;
-        const losses = document.createElement('div');
-        losses.className = 'run-banner__summary-line';
-        losses.textContent = `Earlier cleared-wave losses: ${
-          summary.destroyedPartNames.length > 0
-            ? summary.destroyedPartNames.join(', ')
-            : 'None'
-        }`;
-        runBanner.replaceChildren(primary, recovery, losses);
-        runBanner.style.display = 'block';
-        runBanner.classList.add('run-summary');
-      } else {
-        runBanner.style.display = 'none';
-        runBanner.classList.remove('run-summary');
-      }
+      runBanner.style.display = 'none';
     },
     setArmedPart: (defId) => {
       armed = defId;

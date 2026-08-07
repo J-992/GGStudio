@@ -21,7 +21,7 @@ import { serializeBlueprint, deserializeBlueprint } from '../core/serialize.ts';
 import { validateBlueprint } from '../core/placement.ts';
 import { planRebuild } from '../core/rebuild.ts';
 import { analyzeVehicle } from '../core/analysis.ts';
-import { getPartDef } from '../core/parts.ts';
+import { getPartDef, PART_CATALOG } from '../core/parts.ts';
 import { getEffectiveDef } from '../core/upgrades.ts';
 import { composeOrientations, orientationFromSteps } from '../core/grid.ts';
 import {
@@ -30,7 +30,6 @@ import {
   type EditorSfxCue,
   type EditorViewState,
 } from '../editor/EditorMode.ts';
-import type { RunSummary } from '../editor/ui.ts';
 import { CommandHistory } from '../core/commands.ts';
 import { ChamberMode, type ScenarioName } from '../chamber/ChamberMode.ts';
 import type { VehicleControls } from '../runtime/vehicle.ts';
@@ -328,6 +327,26 @@ export function recordPhoneAddictKilled(profile: PlayerProfile): void {
 }
 
 /**
+ * Bank a block a salvage crate handed the player mid-wave: one more in the
+ * Inventory, and the catalog entry unlocked if it was not already, since a
+ * block they cannot arm in the Garage would be no reward at all. Unknown
+ * definition IDs are ignored rather than persisted into a profile the decoder
+ * would strip on the next load.
+ */
+export function recordSalvagedPart(
+  profile: PlayerProfile,
+  defId: string,
+): boolean {
+  if (PART_CATALOG[defId] === undefined) return false;
+  if (!profile.unlockedDefIds.includes(defId)) {
+    profile.unlockedDefIds.push(defId);
+  }
+  profile.inventory ??= {};
+  profile.inventory[defId] = (profile.inventory[defId] ?? 0) + 1;
+  return true;
+}
+
+/**
  * Reset what a finished run costs: money, inventory, and the vehicle its
  * upgrades lived on. Permanently unlocked parts and lifetime progression
  * counters survive, so the catalog a player earned carries into the next run.
@@ -369,7 +388,6 @@ export class App {
   private checkpoint: RunCheckpoint | null = null;
   private inBuildPhase = false;
   private runMoneyEarned = 0;
-  private runSummary: RunSummary | undefined;
   /** Map the next run starts on. Chosen on the title screen, kept in the Profile. */
   private preferredBiomeId: BiomeId;
   /**
@@ -379,7 +397,6 @@ export class App {
    * has to be the build the player is playing.
    */
   private preferredBuildId: BuildId;
-  private readonly committedDestroyedPartNames: string[] = [];
   private profileDirty = false;
   private profileFlushTimer: number | undefined;
   private saveFailureNotified = false;
@@ -502,7 +519,6 @@ export class App {
     this.clearSessionState();
     this.bp = savedRun.blueprint;
     this.runMoneyEarned = savedRun.bankedEarnings;
-    this.runSummary = undefined;
     this.checkpoint = {
       wave: savedRun.wave,
       blueprint: savedRun.blueprint,
@@ -575,7 +591,6 @@ export class App {
                 missingParts: () => this.checkpointMissingParts(),
               }
             : undefined,
-        runSummary: this.runSummary,
         notice: this.pendingEditorNotice,
         isNewGame: this.pendingIsNewGame,
         onChooseBuild: (buildId) => this.applyChosenBuild(buildId),
@@ -709,8 +724,6 @@ export class App {
     this.checkpoint = null;
     this.inBuildPhase = false;
     this.runMoneyEarned = 0;
-    this.runSummary = undefined;
-    this.committedDestroyedPartNames.length = 0;
   }
 
   private disposeTitle(): void {
@@ -788,8 +801,6 @@ export class App {
       wave,
     };
     this.runMoneyEarned = 0;
-    this.runSummary = undefined;
-    this.committedDestroyedPartNames.length = 0;
     // The Garage banner reads the next wave off `activeRun.wave + 1`, matching
     // how a Build Phase between cleared waves is described.
     this.activeRun = { wave: wave - 1 };
@@ -810,8 +821,6 @@ export class App {
   private startRun(bp: VehicleBlueprint, biomeId: BiomeId): void {
     runSaveStore.clear();
     this.runMoneyEarned = 0;
-    this.runSummary = undefined;
-    this.committedDestroyedPartNames.length = 0;
     this.checkpoint = createInitialRunCheckpoint(bp, biomeId);
     this.activeRun = { wave: this.checkpoint.wave };
     this.inBuildPhase = false;
@@ -899,12 +908,16 @@ export class App {
       onGameOver: (state, pendingMoneyDiscarded, score, kills) =>
         this.concludeRun(state, pendingMoneyDiscarded, score, kills),
       onGameOverContinue: () => this.openEditor(),
+      onGameOverMenu: () => this.leaveFinishedRun(),
       onResetWave: (state) => this.resetSurvivalWave(state),
       onReturnToGarage: (state) => this.returnToGarageMidWave(state),
       onCheatInfiniteMoney: () => this.grantInfiniteMoney(),
       onPhoneAddictKilled: () => {
         recordPhoneAddictKilled(this.profile);
         this.markProfileDirty();
+      },
+      onPartSalvaged: (defId) => {
+        if (recordSalvagedPart(this.profile, defId)) this.markProfileDirty();
       },
       onWaveCleared: (wave) => {
         recordWaveCleared(this.profile, wave);
@@ -925,12 +938,6 @@ export class App {
     elapsedSeconds: number,
   ): void {
     if (this.checkpoint === null) return;
-    const survivors = new Set(survivingPartIds);
-    this.committedDestroyedPartNames.push(
-      ...this.bp.parts
-        .filter((part) => !survivors.has(part.id))
-        .map((part) => getPartDef(part.defId).name),
-    );
     this.checkpoint = createClearedWaveCheckpoint({
       blueprint: this.bp,
       nextWave,
@@ -966,7 +973,6 @@ export class App {
     );
     this.activeRun = { wave: run.wave };
     this.inBuildPhase = true;
-    this.runSummary = undefined;
     this.openEditor();
     // Persist permanent wave damage immediately; the history was intentionally
     // cleared because its pre-wave commands can reference parts that are gone.
@@ -976,8 +982,8 @@ export class App {
 
   /**
    * Record a finished run and wipe the garage back to a fresh start. Survival
-   * stays on screen showing the result until `onGameOverContinue` opens the
-   * new garage, so the reset is never a surprise.
+   * stays on screen showing the result until the player picks a way out of the
+   * game-over card, so the reset is never a surprise.
    */
   private concludeRun(
     run: RunState,
@@ -985,7 +991,6 @@ export class App {
     score: number,
     kills: number,
   ): RunOutcome {
-    const destroyedPartNames = [...this.committedDestroyedPartNames];
     const recorded = leaderboardStore.record({
       score,
       wave: run.wave,
@@ -999,14 +1004,6 @@ export class App {
     void submitCrazyGamesScore(score);
 
     this.resetProgressionForNewRun();
-    this.runSummary = {
-      failedWave: run.wave,
-      score,
-      kills,
-      isPersonalBest: recorded.isPersonalBest,
-      rank: recorded.rank,
-      destroyedPartNames,
-    };
     return {
       score,
       wave: run.wave,
@@ -1015,6 +1012,17 @@ export class App {
       rank: recorded.rank,
       entries: recorded.entries,
     };
+  }
+
+  /**
+   * The other exit from the game-over card. The garage has already been reset
+   * by `concludeRun`, so there is nothing left to save or carry — drop the
+   * arena and go back to the title screen.
+   */
+  private leaveFinishedRun(): void {
+    this.survival?.dispose();
+    this.survival = null;
+    this.showTitle();
   }
 
   /**
@@ -1043,7 +1051,6 @@ export class App {
       this.bp = recoverRunFromCheckpoint(this.checkpoint).blueprint;
     }
     this.history.clear();
-    this.runSummary = undefined;
     this.activeRun = null;
     this.checkpoint = null;
     this.inBuildPhase = false;
@@ -1079,7 +1086,6 @@ export class App {
       this.activeRun = { wave: run.wave };
     }
     this.inBuildPhase = true;
-    this.runSummary = undefined;
     // The pre-wave commands can reference parts destroyed in the abandoned
     // wave, so the undo stack cannot survive the trip back.
     this.history.clear();
@@ -1258,8 +1264,6 @@ export class App {
       return;
     }
 
-    const partsBeforeWave = this.bp.parts;
-    const lostNamesBefore = this.committedDestroyedPartNames.length;
     this.commitClearedWaveCheckpoint(
       run.wave + 1,
       survivingPartIds,
@@ -1285,19 +1289,6 @@ export class App {
       (part) => !restoredIds.has(part.id),
     );
     checkpoint.partHp = fullPartHp(checkpoint.blueprint);
-
-    // A block bought straight back was not lost, so it must not show up in the
-    // end-of-run "you lost these" list. Re-derive this wave's entries from what
-    // is still gone rather than trying to unpick names out of the tail.
-    const survivors = new Set(survivingPartIds);
-    this.committedDestroyedPartNames.length = lostNamesBefore;
-    this.committedDestroyedPartNames.push(
-      ...partsBeforeWave
-        .filter(
-          (part) => !survivors.has(part.id) && !restoredIds.has(part.id),
-        )
-        .map((part) => getPartDef(part.defId).name),
-    );
 
     this.bp = checkpoint.blueprint;
     this.activeRun = { wave: checkpoint.wave };

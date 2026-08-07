@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { getPartDef } from '../src/core/parts.ts';
+import { EMP_SHIELD_LEAK_BY_LEVEL } from '../src/core/turretModules.ts';
 import {
   allCounterPartIds,
   assertThreatCountersExist,
@@ -10,7 +11,10 @@ import {
   newThreatsForWave,
   threatWarningsForWave,
 } from '../src/survival/waveBalance.ts';
-import { modelFileFor, visualHeightMFor } from '../src/survival/zombies/Zombie.ts';
+import {
+  modelFileFor,
+  visualHeightMFor,
+} from '../src/survival/zombies/Zombie.ts';
 import {
   BOSS_WAVE_INTERVAL,
   bossForWave,
@@ -71,7 +75,9 @@ describe('threat alert previews', () => {
       expect(preview.boss).toBe(false);
       expect(preview.subjects.map((subject) => subject.id)).toEqual(kinds);
       for (const subject of preview.subjects) {
-        expect(subject.modelFile).toBe(modelFileFor(subject.id as never, 0, null));
+        expect(subject.modelFile).toBe(
+          modelFileFor(subject.id as never, 0, null),
+        );
         expect(subject.heightM).toBeGreaterThan(0);
         // Every specialist gets its few words. A boss may not — the copy is
         // per-boss, and a boss added without one still has to alert.
@@ -102,10 +108,65 @@ describe('threat alert previews', () => {
     // Two kinds arriving together used to hand both tiles to whichever sorted
     // first, so the second threat arrived with no advice at all.
     const shared = WAVES.map(threatPreviewForWave).find(
-      (preview) => preview !== null && !preview.boss && preview.subjects.length > 1,
+      (preview) =>
+        preview !== null && !preview.boss && preview.subjects.length > 1,
     );
     if (!shared) return;
     expect(shared.counters.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('teaches the Phone Addict rule with melee, not with the gun', () => {
+    // The alert used to send the player to the garage for EMP, which does not
+    // exist as a purchase — it unlocks at turret level 4, several waves after
+    // this kind arrives. Melee is the answer that is actually on the shelf.
+    const wave = WAVES.find((w) =>
+      newThreatsForWave(w).includes('phone-addict'),
+    );
+    expect(wave).toBeDefined();
+    const preview = threatPreviewForWave(wave!)!;
+    const addict = preview.subjects.find((s) => s.id === 'phone-addict')!;
+
+    expect(addict.rule).not.toBeNull();
+    for (const partId of preview.counters) {
+      // Every tile on this alert has to be something that hits the bubble.
+      expect(getPartDef(partId).melee).toBeDefined();
+    }
+  });
+
+  it('prices the Phone Addict bars off the code that resolves the hit', () => {
+    // The chart claims bullets are nearly useless and ramming is not. Both
+    // numbers come from the shipped tables rather than from the copy, so the
+    // day someone retunes the shield the alert cannot keep teaching the old
+    // rule — this test fails instead.
+    const wave = WAVES.find((w) =>
+      newThreatsForWave(w).includes('phone-addict'),
+    )!;
+    const addict = threatPreviewForWave(wave)!.subjects.find(
+      (s) => s.id === 'phone-addict',
+    )!;
+    const bars = addict.rule!.bars;
+
+    const guns = bars.find((bar) => bar.tone === 'bad')!;
+    const melee = bars.find((bar) => bar.tone === 'good')!;
+    // An un-upgraded turret is level 0 on the EMP ladder.
+    expect(guns.fraction).toBe(EMP_SHIELD_LEAK_BY_LEVEL[0]);
+    // Melee never enters the shield branch in `hitZombieHandle` at all.
+    expect(melee.fraction).toBe(1);
+    expect(melee.fraction).toBeGreaterThan(guns.fraction * 2);
+  });
+
+  it('charts a damage rule only for the threat that needs one', () => {
+    // The chart works because it is rare. If a second kind ever earns one this
+    // test is the place to say so deliberately.
+    const charted = new Set<string>();
+    for (const wave of WAVES) {
+      const preview = threatPreviewForWave(wave);
+      if (preview === null) continue;
+      for (const subject of preview.subjects) {
+        if (subject.rule !== null) charted.add(subject.id);
+      }
+    }
+    expect([...charted]).toEqual(['phone-addict']);
   });
 
   it('quotes counters the store can actually sell', () => {

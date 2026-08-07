@@ -50,7 +50,6 @@ import {
   type AbilitySlotStatus,
   type EditorUI,
   type NewGarageDisposalSummary,
-  type RunSummary,
 } from './ui.ts';
 import { TutorialOverlay } from './TutorialOverlay.ts';
 import {
@@ -292,7 +291,6 @@ export interface EditorModeContext {
     /** Parts destroyed in a prior wave, not yet bought back and re-placed. */
     missingParts(): PlacedPart[];
   };
-  runSummary?: RunSummary;
 }
 
 export class EditorMode {
@@ -343,7 +341,6 @@ export class EditorMode {
   private readonly runContext: RunState | undefined;
   private readonly runRepair: EditorModeContext['runRepair'];
   private readonly runPartMaxHpAtEntry: ReadonlyMap<string, number>;
-  private readonly runSummary: RunSummary | undefined;
   private readonly keyHandler = (e: KeyboardEvent) => this.onKey(e);
   private readonly onUiButtonClick = (event: MouseEvent): void => {
     const target = event.target;
@@ -370,7 +367,6 @@ export class EditorMode {
     this.runPartMaxHpAtEntry = new Map(
       initial.parts.map((part) => [part.id, getEffectiveDef(part).health]),
     );
-    this.runSummary = context.runSummary;
     this.history =
       context.history ??
       new CommandHistory((moneyDelta) => this.mutateMoney(moneyDelta));
@@ -2275,7 +2271,6 @@ export class EditorMode {
     const nextWaveNotice = threatNotice || undefined;
     this.ui.setRunContext(
       this.runContext?.wave,
-      this.runSummary,
       plan
         ? {
             integrityPct: plan.integrityPct,

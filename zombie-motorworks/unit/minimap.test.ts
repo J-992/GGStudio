@@ -188,14 +188,14 @@ describe('Minimap mine markers', () => {
     delete (globalThis as { window?: Window & typeof globalThis }).window;
   });
 
-  it('draws mine markers when revealed mines are passed', () => {
+  it('draws a marker for every mine it is passed', () => {
     const harness = installMinimapDom();
     vi.spyOn(performance, 'now').mockReturnValue(1000);
     const minimap = new Minimap(harness.parent, BOUNDS);
     const foreground = harness.contexts[0];
     foreground.operations.length = 0;
 
-    minimap.update(20, 10, 0, [], [{ x: 10, z: 0, revealed: true }]);
+    minimap.update(20, 10, 0, [], [{ x: 10, z: 0 }]);
 
     expect(foreground.operations).toContain('fillStyle:#ffae3d');
     expect(foreground.operations).toContain(
@@ -204,21 +204,10 @@ describe('Minimap mine markers', () => {
     minimap.dispose();
   });
 
-  it('does not draw markers for unrevealed mines', () => {
-    const harness = installMinimapDom();
-    vi.spyOn(performance, 'now').mockReturnValue(1000);
-    const minimap = new Minimap(harness.parent, BOUNDS);
-    const foreground = harness.contexts[0];
-    foreground.operations.length = 0;
-
-    minimap.update(20, 10, 0, [], [{ x: 10, z: 0, revealed: false }]);
-
-    expect(foreground.operations).toContain('fillStyle:#ffae3d');
-    expect(foreground.operations).not.toContain(
-      mineMarkerLineTo(10, 0, 20, 10, 188),
-    );
-    minimap.dispose();
-  });
+  // There is no longer an unrevealed mine to filter here: mines are always
+  // drawn in the world, and whether they reach the minimap at all is decided
+  // one level up, by SurvivalMode passing `undefined` below the Mine Sweeper's
+  // minimap level.
 
   it('does not draw mine markers when the mines argument is omitted', () => {
     const harness = installMinimapDom();
@@ -251,6 +240,23 @@ describe('Minimap fuel-crate markers', () => {
     minimap.update(20, 10, 0, [], undefined, [{ x: 22, z: 12 }]);
 
     expect(foreground.operations).toContain('fillStyle:#54e07a');
+    minimap.dispose();
+  });
+
+  it('draws each crate in its own kind colour', () => {
+    const harness = installMinimapDom();
+    vi.spyOn(performance, 'now').mockReturnValue(1000);
+    const minimap = new Minimap(harness.parent, BOUNDS);
+    const foreground = harness.contexts[0];
+    foreground.operations.length = 0;
+
+    minimap.update(20, 10, 0, [], undefined, [
+      { x: 22, z: 12, color: '#ffd257' },
+      { x: 18, z: 8, color: '#c07dff' },
+    ]);
+
+    expect(foreground.operations).toContain('fillStyle:#ffd257');
+    expect(foreground.operations).toContain('fillStyle:#c07dff');
     minimap.dispose();
   });
 

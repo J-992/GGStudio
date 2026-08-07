@@ -17,8 +17,9 @@ import {
   type EnvironmentModifiers,
 } from '../core/biomes.ts';
 import type { SurfaceKind } from '../core/surfaces.ts';
+import { chooseRepairTarget, type RepairCandidate } from '../core/repairKit.ts';
 import type { AssembledVehicle, GetDef, RuntimeWheel } from './assembler.ts';
-import { assembleVehicle } from './assembler.ts';
+import { assembleVehicle, attachPartColliders } from './assembler.ts';
 import type { AckermannGeometry, WheelTelemetry } from './wheels.ts';
 import { MIRROR_PLANE_X_M, computeAckermann, stepWheels } from './wheels.ts';
 import {
@@ -266,9 +267,13 @@ export class RuntimeVehicle {
   private fuelCapacity = 0;
   /** Seconds of remaining shield invulnerability; >0 blocks all damage. */
   private invulnTimer = 0;
+  /** Seconds the live bubble started from, so a HUD can draw it draining. */
+  private invulnGranted = 0;
   private environment = NEUTRAL_ENVIRONMENT;
   /** Seconds of remaining Reinforce; while >0 mobility is scaled down. */
   private reinforceTimer = 0;
+  /** Seconds the live ward started from, so a HUD can draw it draining. */
+  private reinforceGranted = 0;
   /** Drive-torque and top-speed multiplier while `reinforceTimer` runs. */
   private reinforceMobility = 1;
   /** Damage the Reinforce ward can still soak; 0 once it has shattered. */
@@ -281,6 +286,8 @@ export class RuntimeVehicle {
   private wardShatteredSinceRead = false;
   /** Seconds of remaining overdrive torque surge; 0 when not boosting. */
   private overdriveTimer = 0;
+  /** Seconds the live surge started from, so a HUD can draw it draining. */
+  private overdriveGranted = 0;
   /** Drive-torque multiplier applied while `overdriveTimer` runs. */
   private overdriveMultiplier = 1;
   /**
@@ -294,6 +301,16 @@ export class RuntimeVehicle {
    * independent of throttle and of whether the drive wheels have any grip.
    */
   private overdriveThrustAccel = 0;
+  /** Seconds of Colossus left; 0 when the rig is its ordinary size. */
+  private colossusTimer = 0;
+  /** Linear size multiplier the presentation layer draws the rig at. */
+  private colossusSize = 1;
+  /** Outgoing damage multiplier while Colossus runs. */
+  private colossusDamage = 1;
+  /** Incoming damage is divided by this while Colossus runs. */
+  private colossusToughness = 1;
+  /** Drive-torque and top-speed multiplier while Colossus runs; < 1. */
+  private colossusMobility = 1;
   private topSpeedCap = BASE_TOP_SPEED_MPS;
   private lastWheelTelemetry: WheelTelemetry = {
     groundedCount: 0,
@@ -359,9 +376,28 @@ export class RuntimeVehicle {
 
   applyDirectDamage(partId: string, amount: number): void {
     if (this.damageBlocked) return;
-    const through = this.soakWithWard(amount);
+    const through = this.soakWithWard(amount * this.incomingDamageScale);
     if (through <= 0) return;
     damagePart(this.assembled, partId, through);
+  }
+
+  /**
+   * What a hit is worth by the time it reaches the hull. A Colossus rig is
+   * built out of the same blocks at twice the size, so everything that hits it
+   * lands proportionally lighter rather than each block being given more HP —
+   * which would have to be unwound, block by block, when the buff lapses.
+   */
+  private get incomingDamageScale(): number {
+    return this.colossusTimer > 0 ? 1 / this.colossusToughness : 1;
+  }
+
+  /**
+   * Multiplier on every point of damage the rig deals out — guns through
+   * `stepWeapons`, rams through `ZombieSystem`. 1 unless a Colossus crate is
+   * running.
+   */
+  get outgoingDamageMultiplier(): number {
+    return this.colossusTimer > 0 ? this.colossusDamage : 1;
   }
 
   /**
@@ -385,6 +421,7 @@ export class RuntimeVehicle {
     this.wardHp = 0;
     this.wardShatteredSinceRead = true;
     this.reinforceTimer = 0;
+    this.reinforceGranted = 0;
     this.reinforceMobility = 1;
   }
 
@@ -395,11 +432,17 @@ export class RuntimeVehicle {
   grantInvulnerability(seconds: number): void {
     if (seconds <= 0) return;
     this.invulnTimer = Math.max(this.invulnTimer, seconds);
+    this.invulnGranted = Math.max(this.invulnGranted, seconds);
   }
 
   /** True while the shield bubble is holding. */
   get isInvulnerable(): boolean {
     return this.invulnTimer > 0;
+  }
+
+  /** Seconds of bubble left, and what it started from. Both 0 when down. */
+  get invulnerableSeconds(): { remaining: number; total: number } {
+    return { remaining: this.invulnTimer, total: this.invulnGranted };
   }
 
   /**
@@ -417,6 +460,7 @@ export class RuntimeVehicle {
   ): void {
     if (seconds <= 0 || multiplier <= 1) return;
     this.overdriveTimer = Math.max(this.overdriveTimer, seconds);
+    this.overdriveGranted = Math.max(this.overdriveGranted, seconds);
     this.overdriveMultiplier = Math.max(this.overdriveMultiplier, multiplier);
     this.overdriveSpeedMultiplier = Math.max(
       this.overdriveSpeedMultiplier,
@@ -438,14 +482,63 @@ export class RuntimeVehicle {
     // Reinforce drags the ceiling down by the same factor it drags torque, so
     // a plated rig is slow at the top end and not just slow off the line.
     const drag = this.reinforceTimer > 0 ? this.reinforceMobility : 1;
-    const scale = lift * drag;
+    // Colossus drags it down the same way, for the same reason: the whole
+    // point of being twice the size is that you cannot get anywhere quickly.
+    const bulk = this.colossusTimer > 0 ? this.colossusMobility : 1;
+    const scale = lift * drag * bulk;
     if (scale === 1) return this.topSpeedCap;
     return Math.min(HARD_MAX_SPEED_MPS, this.topSpeedCap * scale);
+  }
+
+  /**
+   * Colossus crate: run the rig at `size` times its drawn scale for `seconds`,
+   * hitting `damageMultiplier` times as hard, taking `toughness` times less,
+   * and moving at `mobilityMultiplier` of its usual pace.
+   *
+   * Only the presentation layer grows — the colliders are the ones the rig was
+   * assembled with, because rebuilding a compound body mid-wave would relaunch
+   * the vehicle out of whatever it was standing in. What the player feels is
+   * the damage, the toughness, and the weight.
+   *
+   * Re-activation takes the longer time and the stronger numbers rather than
+   * stacking, matching how overdrive and reinforce resolve overlapping grants.
+   */
+  grantColossus(
+    seconds: number,
+    size: number,
+    damageMultiplier: number,
+    toughness: number,
+    mobilityMultiplier: number,
+  ): void {
+    if (seconds <= 0 || size <= 1) return;
+    this.colossusTimer = Math.max(this.colossusTimer, seconds);
+    this.colossusSize = Math.max(this.colossusSize, size);
+    this.colossusDamage = Math.max(this.colossusDamage, damageMultiplier, 1);
+    this.colossusToughness = Math.max(this.colossusToughness, toughness, 1);
+    this.colossusMobility = Math.min(
+      this.colossusMobility,
+      Math.max(0.05, Math.min(1, mobilityMultiplier)),
+    );
+  }
+
+  /** Size the rig should be drawn at right now: 1 unless Colossus is running. */
+  get colossusScale(): number {
+    return this.colossusTimer > 0 ? this.colossusSize : 1;
+  }
+
+  /** Seconds of Colossus left, for the HUD. */
+  get colossusSecondsRemaining(): number {
+    return this.colossusTimer;
   }
 
   /** True while the overdrive surge is running. */
   get isOverdriving(): boolean {
     return this.overdriveTimer > 0;
+  }
+
+  /** Seconds of surge left, and what it started from. Both 0 when idle. */
+  get overdriveSeconds(): { remaining: number; total: number } {
+    return { remaining: this.overdriveTimer, total: this.overdriveGranted };
   }
 
   /**
@@ -467,6 +560,7 @@ export class RuntimeVehicle {
   ): void {
     if (seconds <= 0 || shieldHp <= 0) return;
     this.reinforceTimer = Math.max(this.reinforceTimer, seconds);
+    this.reinforceGranted = Math.max(this.reinforceGranted, seconds);
     this.wardHp = Math.max(this.wardHp, shieldHp);
     this.wardHpMax = Math.max(this.wardHp, shieldHp);
     this.reinforceMobility = Math.min(
@@ -478,6 +572,16 @@ export class RuntimeVehicle {
   /** True while the ward is up: the timer is running and the pool has points left. */
   get isReinforced(): boolean {
     return this.reinforceTimer > 0 && this.wardHp > 0;
+  }
+
+  /**
+   * Seconds of ward left, and what it started from. A ward that shatters is
+   * down whatever the clock says, so a spent pool reports zero: the HUD timer
+   * and the shell on the hull disappear together.
+   */
+  get reinforceSeconds(): { remaining: number; total: number } {
+    if (!this.isReinforced) return { remaining: 0, total: 0 };
+    return { remaining: this.reinforceTimer, total: this.reinforceGranted };
   }
 
   /** Ward pool left, 0..1 of what this activation started with. */
@@ -557,6 +661,25 @@ export class RuntimeVehicle {
   /** True while any weapon on the rig is running a Hellfire overcharge. */
   get isOvercharged(): boolean {
     return this.weapons.some((w) => w.overcharge !== null);
+  }
+
+  /**
+   * Seconds of Hellfire left on whichever nozzle has the most, and what that
+   * one started from. A rig with two flamethrowers lights them separately, and
+   * the HUD should say when the last of it goes out.
+   */
+  get overchargeSeconds(): { remaining: number; total: number } {
+    let remaining = 0;
+    let total = 0;
+    for (const weapon of this.weapons) {
+      const overcharge = weapon.overcharge;
+      if (overcharge === null || overcharge.secondsRemaining <= remaining) {
+        continue;
+      }
+      remaining = overcharge.secondsRemaining;
+      total = overcharge.totalSeconds;
+    }
+    return { remaining, total };
   }
 
   /** Find the closest attached, living part by its collider-centre centroid. */
@@ -661,6 +784,95 @@ export class RuntimeVehicle {
   }
 
   /**
+   * The rig as a repair kit sees it: what is missing, what is hurt, and which
+   * of the missing blocks still has something to be bolted back onto.
+   */
+  repairCandidates(): RepairCandidate[] {
+    const out: RepairCandidate[] = [];
+    for (const [id, part] of this.assembled.parts) {
+      out.push({
+        id,
+        isWheel: part.def.wheel !== undefined,
+        alive: part.alive,
+        detached: part.detached,
+        hasLiveNeighbour: this.hasLiveNeighbour(id),
+        health: part.health,
+        maxHealth: part.def.health,
+      });
+    }
+    return out;
+  }
+
+  private hasLiveNeighbour(partId: string): boolean {
+    for (const ci of this.assembled.connectionsByPart.get(partId) ?? []) {
+      const conn = this.assembled.connections[ci];
+      const otherId = conn.aId === partId ? conn.bId : conn.aId;
+      const other = this.assembled.parts.get(otherId);
+      if (other && other.alive && !other.detached) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Spend one repair kit: rebuild a destroyed block, or failing that top up
+   * whichever surviving block is hurt worst. `chooseRepairTarget` decides which
+   * (tires before anything else); this only carries the decision out.
+   *
+   * Returns what was done so the caller can say so on the HUD, or `null` when
+   * the rig was already whole.
+   */
+  repairOne(): { action: 'rebuild' | 'heal'; partId: string; name: string } | null {
+    const choice = chooseRepairTarget(this.repairCandidates());
+    if (choice.action === 'none') return null;
+    const part = this.assembled.parts.get(choice.id);
+    if (!part) return null;
+
+    part.health = part.def.health;
+    if (choice.action === 'heal') {
+      return { action: 'heal', partId: choice.id, name: part.def.name };
+    }
+
+    // Rebuild: give the block its colliders back on the main body, re-weld the
+    // mounts it shares with living neighbours, and un-break its wheel. The
+    // structure solver sees an ordinary attached part from the next step on.
+    part.alive = true;
+    part.detached = false;
+    const colliders = attachPartColliders(
+      this.world,
+      this.assembled.body,
+      part.placed,
+      part.def,
+    );
+    part.colliderHandles = colliders.handles;
+    part.colliderCentresM = colliders.centres;
+    for (const handle of colliders.handles) {
+      this.colliderToPart.set(handle, choice.id);
+    }
+    for (const ci of this.assembled.connectionsByPart.get(choice.id) ?? []) {
+      const conn = this.assembled.connections[ci];
+      const otherId = conn.aId === choice.id ? conn.bId : conn.aId;
+      const other = this.assembled.parts.get(otherId);
+      if (!other || !other.alive || other.detached) continue;
+      conn.health = 1;
+    }
+    const wheel = this.assembled.wheels.find((w) => w.partId === choice.id);
+    if (wheel) {
+      wheel.broken = false;
+      wheel.omega = 0;
+      wheel.steerAngle = 0;
+      wheel.compression = 0;
+      wheel.grounded = false;
+      wheel.contactPointW = null;
+      wheel.loadN = 0;
+    }
+    // A rebuilt tank is capacity again and a rebuilt engine is power again;
+    // a rebuilt wheel changes the axle the steering geometry is solved for.
+    this.recomputeResources();
+    this.geom = computeAckermann(this.assembled.wheels);
+    return { action: 'rebuild', partId: choice.id, name: part.def.name };
+  }
+
+  /**
    * Scuttle the rig: every part goes at once, root included, so `isDestroyed`
    * is true from the next check onward. Nothing is left attached, so no island
    * can survive the split — the returned array is empty in practice and is
@@ -697,10 +909,12 @@ export class RuntimeVehicle {
     this.updateTopSpeedCap();
     if (this.invulnTimer > 0) {
       this.invulnTimer = Math.max(0, this.invulnTimer - dt);
+      if (this.invulnTimer === 0) this.invulnGranted = 0;
     }
     if (this.overdriveTimer > 0) {
       this.overdriveTimer = Math.max(0, this.overdriveTimer - dt);
       if (this.overdriveTimer === 0) {
+        this.overdriveGranted = 0;
         this.overdriveMultiplier = 1;
         this.overdriveSpeedMultiplier = 1;
         this.overdriveThrustAccel = 0;
@@ -711,8 +925,18 @@ export class RuntimeVehicle {
       // Timing out is not a shatter: the ward is simply let down, so what is
       // left of the pool is dropped without the break being reported.
       if (this.reinforceTimer === 0) {
+        this.reinforceGranted = 0;
         this.reinforceMobility = 1;
         this.wardHp = 0;
+      }
+    }
+    if (this.colossusTimer > 0) {
+      this.colossusTimer = Math.max(0, this.colossusTimer - dt);
+      if (this.colossusTimer === 0) {
+        this.colossusSize = 1;
+        this.colossusDamage = 1;
+        this.colossusToughness = 1;
+        this.colossusMobility = 1;
       }
     }
     const body = this.assembled.body;
@@ -791,6 +1015,7 @@ export class RuntimeVehicle {
     // who lit both at once gets a boosted-but-still-bogged rig rather than one
     // effect silently cancelling the other.
     if (this.reinforceTimer > 0) totalTorque *= this.reinforceMobility;
+    if (this.colossusTimer > 0) totalTorque *= this.colossusMobility;
 
     const torques = distributeTorque(
       totalTorque,
@@ -856,6 +1081,7 @@ export class RuntimeVehicle {
         aimPoint: controls.aimPoint,
         weaponAim: controls.weaponAim,
         manualOverride: controls.manualAim,
+        damageMultiplier: this.outgoingDamageMultiplier,
       },
       dt,
     );
@@ -1152,7 +1378,8 @@ export class RuntimeVehicle {
       // the same rate the hull would have paid in health. A ram heavy enough to
       // empty the pool still lands as one absorbed hit — the ward is gone from
       // the next one on, which is where the player feels it.
-      const cost = partDamage(impactImpulseNs(forceMagnitude));
+      const cost =
+        partDamage(impactImpulseNs(forceMagnitude)) * this.incomingDamageScale;
       if (cost > 0) this.soakWithWard(cost);
       return;
     }
@@ -1161,6 +1388,7 @@ export class RuntimeVehicle {
       this.colliderToPart,
       colliderHandle,
       forceMagnitude,
+      this.incomingDamageScale,
     );
   }
 

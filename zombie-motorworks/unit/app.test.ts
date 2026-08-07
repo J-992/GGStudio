@@ -3,6 +3,7 @@ import {
   App,
   buildStarterBlueprint,
   recordPhoneAddictKilled,
+  recordSalvagedPart,
   recordWaveCleared,
   resetProfileForNewGame,
   type RunCheckpoint,
@@ -171,6 +172,25 @@ describe('application profile progression', () => {
     recordPhoneAddictKilled(profile);
 
     expect(decodeProfile(encodeProfile(profile)).phoneAddictsKilled).toBe(2);
+  });
+
+  it('banks a salvaged part into the inventory and unlocks its catalog entry', () => {
+    const profile = defaultProfile();
+
+    expect(recordSalvagedPart(profile, 'cannon-heavy')).toBe(true);
+    expect(recordSalvagedPart(profile, 'cannon-heavy')).toBe(true);
+
+    const restored = decodeProfile(encodeProfile(profile));
+    expect(restored.inventory?.['cannon-heavy']).toBe(2);
+    expect(restored.unlockedDefIds).toContain('cannon-heavy');
+  });
+
+  it('ignores a salvage drop naming a part the catalog does not have', () => {
+    const profile = defaultProfile();
+
+    expect(recordSalvagedPart(profile, 'not-a-part')).toBe(false);
+    expect(profile.inventory).toEqual({});
+    expect(profile.unlockedDefIds).toEqual(defaultProfile().unlockedDefIds);
   });
 
   it('clears both progression fields for a New Game profile reset', () => {

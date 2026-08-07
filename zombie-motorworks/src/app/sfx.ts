@@ -34,6 +34,11 @@ export type SfxName =
   | 'abilityDroneSwarm'
   | 'droneIntercept'
   | 'fuelPickup'
+  | 'pickupCash'
+  | 'pickupPower'
+  | 'pickupSalvage'
+  | 'pickupSentry'
+  | 'pickupRepair'
   | 'garagePlace'
   | 'garageRemove'
   | 'garagePurchase'
@@ -642,6 +647,23 @@ export function playSfx(name: SfxName, options: { pitch?: number } = {}): void {
       break;
     case 'garagePurchase':
       playCue('cashRegister', { gain: 0.14, playbackRate: rate });
+      break;
+    // Supply crates. Each kind gets its own cue so the driver can tell what
+    // they drove over without looking away from the road.
+    case 'pickupCash':
+      playCue('cashRegister', { gain: 0.2, playbackRate: 1.08 * rate });
+      break;
+    case 'pickupPower':
+      playCue('powerUp', { gain: 0.34, playbackRate: 0.7 * rate });
+      break;
+    case 'pickupSalvage':
+      playCue('upgrade', { gain: 0.3, playbackRate: 1.1 * rate });
+      break;
+    case 'pickupSentry':
+      playCue('mechanical', { gain: 0.26, playbackRate: 0.85 * rate });
+      break;
+    case 'pickupRepair':
+      playCue('upgrade', { gain: 0.26, playbackRate: 0.9 * rate });
       break;
     case 'garageUpgrade':
       playCue('upgrade', { gain: 0.34, playbackRate: rate });

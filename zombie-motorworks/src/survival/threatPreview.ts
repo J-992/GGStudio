@@ -13,6 +13,7 @@
  */
 
 import { getPartDef } from '../core/parts.ts';
+import { EMP_SHIELD_LEAK_BY_LEVEL } from '../core/turretModules.ts';
 import {
   bossEncounterName,
   bossForWave,
@@ -27,6 +28,35 @@ import {
   type ZombieKind,
 } from './zombies/Zombie.ts';
 import { newThreatsForWave, type SpecialistZombieKind } from './waveBalance.ts';
+
+/**
+ * One row of the damage rule: how much of a hit actually lands, drawn as a bar.
+ * `fraction` is the bar's own length, so the two rows are the argument — a
+ * stubby red bar next to a full green one says "stop shooting it" faster than
+ * any sentence can.
+ */
+export interface ThreatDamageBar {
+  /** What is doing the hitting, two words at most. */
+  readonly label: string;
+  /** Why it lands or does not. */
+  readonly detail: string;
+  /** Share of the hit that reaches the zombie, 0..1. */
+  readonly fraction: number;
+  readonly tone: 'bad' | 'good';
+}
+
+/**
+ * The "hit it with THIS, not THAT" block. Only threats whose whole trick is a
+ * damage rule carry one — a zombie you beat by driving well does not need a
+ * chart, and one that appears on every alert stops being read.
+ */
+export interface ThreatDamageRule {
+  /** Imperative, shouted: the one instruction the player must leave with. */
+  readonly headline: string;
+  readonly bars: readonly ThreatDamageBar[];
+  /** The mechanism in one line, under the bars. */
+  readonly footnote: string;
+}
 
 /** One thing the alert puts on screen. */
 export interface ThreatSubject {
@@ -44,6 +74,8 @@ export interface ThreatSubject {
    * description — just the one thing that changes how you drive.
    */
   readonly tagline: string;
+  /** Damage-rule chart for this kind, or null for the kinds that need none. */
+  readonly rule: ThreatDamageRule | null;
 }
 
 export interface ThreatPreview {
@@ -65,7 +97,40 @@ interface SpecialistPreview {
   readonly name: string;
   readonly tagline: string;
   readonly counters: readonly string[];
+  readonly rule?: ThreatDamageRule;
 }
+
+/**
+ * The Phone Addict's bubble is the one mechanic in the game that punishes the
+ * thing every player does by reflex — hold the trigger — so it gets the chart.
+ *
+ * Both numbers are read off the code that actually resolves the hit rather than
+ * written down here: `ZombieSystem.hitZombieHandle` scales gun damage by
+ * `empShieldLeak` and an un-upgraded turret sits at level 0, while melee and ram
+ * damage never enter that branch at all — it goes through
+ * `Zombie.applyVehicleImpact`, which the bubble does not touch. If either rule
+ * changes, this chart changes with it instead of quietly starting to lie.
+ */
+const PHONE_ADDICT_RULE: ThreatDamageRule = {
+  headline: 'RAM IT — DON’T SHOOT IT',
+  bars: [
+    {
+      label: 'GUNS',
+      detail: 'bubble eats the rest',
+      fraction: EMP_SHIELD_LEAK_BY_LEVEL[0],
+      tone: 'bad',
+    },
+    {
+      label: 'BLADES & RAMMING',
+      detail: 'bubble does nothing',
+      fraction: 1,
+      tone: 'good',
+    },
+  ],
+  footnote:
+    'The shield only stops bullets. Drive through it with a blade, spikes or ' +
+    'the nose of your rig and it takes every point.',
+};
 
 /**
  * The pool index a preview model is requested at. Only the phone addict varies
@@ -100,10 +165,12 @@ const SPECIALIST_PREVIEWS: Record<SpecialistZombieKind, SpecialistPreview> = {
   },
   'phone-addict': {
     name: 'Phone Addict',
-    // The one specialist whose counter is a specific upgrade rather than a
-    // part, so the tagline has to say the word the store search needs.
-    tagline: 'Shielded — bring EMP',
-    counters: ['turret', 'tesla-coil'],
+    tagline: 'Shielded — bullets bounce',
+    // Melee, not the turret it used to name: the gun is the wrong answer here
+    // until the turret reaches the level-4 EMP Coil, and on this kind's debut
+    // wave nobody has that yet. Both of these are on the shelf from wave 1.
+    counters: ['sawblade', 'spike-ram'],
+    rule: PHONE_ADDICT_RULE,
   },
   kamikaze: {
     name: 'Kamikaze',
@@ -155,6 +222,7 @@ function bossSubject(boss: BossEncounter): ThreatSubject {
     // A boss added to the rotation without a brief still gets an alert; it
     // just arrives without advice, which beats not arriving.
     tagline: BOSS_BRIEFS[id]?.tagline ?? '',
+    rule: null,
   };
 }
 
@@ -167,6 +235,7 @@ function specialistSubject(kind: SpecialistZombieKind): ThreatSubject {
     heightM: visualHeightMFor(kind, null),
     clips: rigClipsFor(kind, null),
     tagline: preview.tagline,
+    rule: preview.rule ?? null,
   };
 }
 

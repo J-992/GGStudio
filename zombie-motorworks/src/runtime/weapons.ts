@@ -47,6 +47,8 @@ import {
  */
 export interface WeaponOvercharge {
   secondsRemaining: number;
+  /** Seconds this overcharge started from, so a HUD can draw it draining. */
+  totalSeconds: number;
   damageMultiplier: number;
   rangeMultiplier: number;
   coneMultiplier: number;
@@ -181,6 +183,7 @@ export function overchargeWeapon(
   const current = wpn.overcharge;
   wpn.overcharge = {
     secondsRemaining: Math.max(current?.secondsRemaining ?? 0, seconds),
+    totalSeconds: Math.max(current?.totalSeconds ?? 0, seconds),
     damageMultiplier: Math.max(
       current?.damageMultiplier ?? 1,
       multipliers.damageMultiplier,
@@ -244,6 +247,12 @@ export interface WeaponStepInput extends WeaponAimInput {
    * the player is aiming at the world with the cursor.
    */
   manualOverride?: boolean;
+  /**
+   * Whole-vehicle multiplier on every shot's damage, from a buff the rig is
+   * carrying (Colossus). Separate from a weapon's own Hellfire overcharge, and
+   * multiplied on top of it: a rig running both hits for both.
+   */
+  damageMultiplier?: number;
 }
 
 export function stepWeapons(
@@ -366,7 +375,10 @@ export function stepWeapons(
 
     // A Hellfire overcharge scales what the shot is worth without touching the
     // catalog definition, so the weapon reverts the moment the buff lapses.
-    const damage = wpn.def.damage * (overcharge?.damageMultiplier ?? 1);
+    const damage =
+      wpn.def.damage *
+      (overcharge?.damageMultiplier ?? 1) *
+      Math.max(0, input.damageMultiplier ?? 1);
     const rangeM = wpn.def.rangeM * (overcharge?.rangeMultiplier ?? 1);
 
     // Cone weapons fan raysPerShot rays across coneDeg around the fire

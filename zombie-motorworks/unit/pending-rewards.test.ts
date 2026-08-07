@@ -36,6 +36,7 @@ interface PendingRewardsHarness {
     clearGasTrail(): void;
     forceKillAll(): void;
   };
+  sentries: { clear(): void };
   vehicle: {
     isDestroyed(): boolean;
     partHpSnapshot(): Record<string, number>;
@@ -101,6 +102,7 @@ function createHarness(options: { destroyed?: boolean } = {}): {
       entries: [],
     })),
     onGameOverContinue: vi.fn(),
+    onGameOverMenu: vi.fn(),
     onResetWave: (run: { wave: number }) => resetCalls.push(run.wave),
     onReturnToGarage: (run: { wave: number }) => garageCalls.push(run.wave),
     onCheatInfiniteMoney: vi.fn(),
@@ -139,6 +141,7 @@ function createHarness(options: { destroyed?: boolean } = {}): {
       clearGasTrail: vi.fn(),
       forceKillAll: vi.fn(),
     },
+    sentries: { clear: vi.fn() },
     vehicle: {
       isDestroyed: () => options.destroyed ?? false,
       partHpSnapshot: () => ({ chassis: 75 }),

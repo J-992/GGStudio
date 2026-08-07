@@ -4,30 +4,33 @@ import {
   LANDMINE_EXPLOSION_DURATION,
   LANDMINE_EXPLOSION_POOL_SIZE,
   LANDMINE_EXPLOSION_RADIUS,
-  LANDMINE_GLINT_RADIUS,
   LANDMINE_HEIGHT,
   LANDMINE_POOL_SIZE,
   LANDMINE_PULSE_AMPLITUDE,
   LANDMINE_PULSE_FREQUENCY,
   LANDMINE_RADIUS,
-  LANDMINE_VISIBLE_THROUGH_WAVE,
 } from './zombieConfig.ts';
 
 export type MineState = 'arming' | 'armed';
 
+/**
+ * Mines are always drawn. They used to be hidden after a tutorial window, and
+ * finding them was the Mine Sweeper's job — but an invisible instant-damage
+ * hazard in a game played at speed reads as the game cheating rather than as a
+ * thing you failed to spot, so the mine is now always on screen and the skill
+ * is avoiding it. The Sweeper still earns its slot off-screen: minimap markers
+ * at level 2 and the proximity warning at level 3.
+ */
 export interface MineSnapshot {
   readonly x: number;
   readonly z: number;
   readonly state: MineState;
-  /** True when the player can currently see it (wave rule, sweeper, or glint). */
-  readonly revealed: boolean;
 }
 
 interface MutableMineSnapshot {
   x: number;
   z: number;
   state: MineState;
-  revealed: boolean;
 }
 
 interface Landmine {
@@ -64,7 +67,6 @@ export class Landmines {
   private readonly geometry: THREE.CylinderGeometry;
   private readonly armedMaterial: THREE.MeshLambertMaterial;
   private readonly armingMaterial: THREE.MeshLambertMaterial;
-  private readonly glintMaterial: THREE.MeshLambertMaterial;
   private readonly blastGeometry: THREE.SphereGeometry;
   private disposed = false;
 
@@ -85,21 +87,12 @@ export class Landmines {
       emissive: 0x8a4b08,
       flatShading: true,
     });
-    this.glintMaterial = new THREE.MeshLambertMaterial({
-      color: 0xffa23a,
-      emissive: 0x5a2b08,
-      transparent: true,
-      opacity: 0.28,
-      flatShading: true,
-      depthWrite: false,
-    });
     for (let i = 0; i < LANDMINE_POOL_SIZE; i++) {
       const mesh = new THREE.Mesh(this.geometry, this.armingMaterial);
       const snapshot = {
         x: 0,
         z: 0,
         state: 'arming',
-        revealed: false,
       } satisfies MutableMineSnapshot;
       mesh.castShadow = true;
       mesh.visible = false;
@@ -139,7 +132,7 @@ export class Landmines {
     slot.pulsePhase = Math.random() * Math.PI * 2;
     slot.age = 0;
     slot.active = true;
-    slot.snapshot = { x, z, state: 'arming', revealed: true };
+    slot.snapshot = { x, z, state: 'arming' };
     slot.mesh.position.set(x, LANDMINE_HEIGHT / 2, z);
     slot.mesh.scale.setScalar(1);
     slot.mesh.material = this.armingMaterial;
@@ -163,16 +156,8 @@ export class Landmines {
   update(
     dt: number,
     tryDetonate: (x: number, y: number, z: number) => boolean,
-    reveal: {
-      vehicleX: number;
-      vehicleZ: number;
-      wave: number;
-      radiusM: number;
-    },
   ): void {
     if (this.disposed) return;
-    const revealRadiusSq = reveal.radiusM * reveal.radiusM;
-    const glintRadiusSq = LANDMINE_GLINT_RADIUS * LANDMINE_GLINT_RADIUS;
     for (const mine of this.pool) {
       if (!mine.active) continue;
       mine.age += dt;
@@ -185,22 +170,9 @@ export class Landmines {
       mine.mesh.scale.set(pulse, 1, pulse);
 
       const position = mine.mesh.position;
-      const dx = position.x - reveal.vehicleX;
-      const dz = position.z - reveal.vehicleZ;
-      const distanceSq = dx * dx + dz * dz;
-      const visibleByWave = reveal.wave <= LANDMINE_VISIBLE_THROUGH_WAVE;
-      const visibleBySweeper =
-        reveal.radiusM > 0 && distanceSq <= revealRadiusSq;
-      const visibleByGlint = distanceSq <= glintRadiusSq;
-      const revealed = state === 'arming' || visibleByWave || visibleBySweeper;
-      mine.snapshot.revealed = revealed;
-      mine.mesh.visible = revealed || visibleByGlint;
+      mine.mesh.visible = true;
       mine.mesh.material =
-        state === 'arming'
-          ? this.armingMaterial
-          : revealed
-            ? this.armedMaterial
-            : this.glintMaterial;
+        state === 'arming' ? this.armingMaterial : this.armedMaterial;
 
       if (
         state === 'armed' &&
@@ -249,7 +221,6 @@ export class Landmines {
     this.geometry.dispose();
     this.armedMaterial.dispose();
     this.armingMaterial.dispose();
-    this.glintMaterial.dispose();
     this.blastGeometry.dispose();
   }
 

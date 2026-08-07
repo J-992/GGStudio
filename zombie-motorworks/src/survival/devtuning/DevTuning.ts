@@ -248,14 +248,27 @@ export function defaultTuning(): DevTuningState {
       composition: {
         walker: { startWave: 1, base: 13, perStep: 3, every: 1, cap: 70 },
         gunslinger: { startWave: 4, base: 1, perStep: 2, every: 1, cap: 10 },
-        necromancer: { startWave: 6, base: 1, perStep: 1, every: 5, cap: 4 },
+        // Wave 9, so wave 6 belongs to the kamikaze alone. Note that behemoths
+        // (wave 8, first fielded on 9) and zambonis also land here, so 9 is now
+        // the crowded intro wave the way 6 briefly was.
+        necromancer: { startWave: 9, base: 1, perStep: 1, every: 5, cap: 4 },
         // Wave 3 is the ranged wave: a squad of four throwers arrives together
         // so the lesson lands ("that damage came from over there") a wave
         // before gunslingers turn up to muddle it.
         thrower: { startWave: 3, base: 4, perStep: 1, every: 2, cap: 10 },
-        worker: { startWave: 7, base: 1, perStep: 1, every: 3, cap: 6 },
-        'phone-addict': { startWave: 10, base: 1, perStep: 1, every: 4, cap: 6 },
-        kamikaze: { startWave: 4, base: 2, perStep: 1, every: 2, cap: 10 },
+        worker: { startWave: 11, base: 1, perStep: 1, every: 3, cap: 6 },
+        // Wave 7, not the old 10: 10 is a boss wave and zeroes every specialist
+        // curve, so a start there actually meant wave 11. Seven is a real wave,
+        // so this is where the shield first shows up. One at a time — an
+        // un-upgraded turret only leaks 10% through a bubble, so the first one
+        // is meant to be slow to kill, not a wall.
+        'phone-addict': { startWave: 7, base: 1, perStep: 1, every: 4, cap: 6 },
+        // Held back to wave 6 on purpose. Waves 3-5 already teach ranged
+        // (throwers), return fire (gunslingers) and the first boss; a chaser
+        // that deletes itself on your bumper on top of that is one lesson too
+        // many. Six is the first wave with room for it, and it leaves wave 8's
+        // bomber swarm two waves of warning instead of arriving cold.
+        kamikaze: { startWave: 6, base: 2, perStep: 1, every: 2, cap: 10 },
         behemoth: { startWave: 8, base: 1, perStep: 1, every: 6, cap: 3 },
         zamboni: { startWave: 9, base: 1, perStep: 1, every: 6, cap: 2 },
         // Degenerate on purpose: boss waves short-circuit ahead of the curves in

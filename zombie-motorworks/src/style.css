@@ -910,13 +910,6 @@ canvas.viewport {
     inset 3px 0 0 var(--ui-signal-dark);
 }
 
-.run-banner.run-summary {
-  width: min(780px, calc(100% - 32px));
-  color: #bf876c;
-  border-color: var(--ui-edge);
-  white-space: normal;
-}
-
 .run-banner.run-active {
   display: grid !important;
   grid-template-columns: auto auto;
@@ -936,10 +929,6 @@ canvas.viewport {
   font-size: var(--ui-text-11);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-}
-
-.run-banner__summary-line + .run-banner__summary-line {
-  margin-top: 3px;
 }
 
 .run-banner__actions {
@@ -4709,6 +4698,74 @@ button:disabled {
   display: none;
 }
 
+/*
+ * Crate-effect timers, stacked directly over the ability boxes. Abilities
+ * recharge, so their boxes fill; these are running out, so their bars empty —
+ * the two must never be mistaken for each other at a glance. Nothing is drawn
+ * while nothing is running.
+ */
+.survival-buffs {
+  position: absolute;
+  bottom: 116px;
+  left: 50%;
+  z-index: 16;
+  display: flex;
+  width: 232px;
+  flex-direction: column;
+  gap: 5px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.survival-buffs[hidden] {
+  display: none;
+}
+
+.survival-buff {
+  --buff-color: var(--ui-bone);
+
+  display: grid;
+  gap: 2px;
+}
+
+.survival-buff__header {
+  display: flex;
+  justify-content: space-between;
+  color: var(--buff-color);
+  font: 400 var(--ui-text-10)/1 var(--ui-font-display);
+  letter-spacing: 0.08em;
+  text-shadow:
+    -1px 0 0 var(--ui-black),
+    1px 0 0 var(--ui-black),
+    0 -1px 0 var(--ui-black),
+    0 1px 0 var(--ui-black),
+    2px 2px 0 rgb(0 0 0 / 0.5);
+}
+
+.survival-buff__track {
+  height: 9px;
+  border: 2px solid var(--ui-black);
+  background: rgb(8 11 14 / 0.72);
+}
+
+/* Scaled from the left, so the bar drains toward the edge it started at. */
+.survival-buff__fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  background: var(--buff-color);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--buff-color) 70%, transparent);
+}
+
+/* Narrow viewports: the boxes shrink, so the timers sit lower with them. */
+@media (max-width: 900px) {
+  .survival-buffs {
+    bottom: 98px;
+    width: 196px;
+  }
+}
+
 .survival-ability-slot {
   position: relative;
   display: grid;
@@ -4959,6 +5016,83 @@ button:disabled {
   @keyframes survival-cash-gain-still {
     0%,
     70% {
+      opacity: 1;
+    }
+
+    100% {
+      opacity: 0;
+    }
+  }
+}
+
+/*
+ * Supply-crate readout: what the crate the player just drove over did, in the
+ * crate's own colour, stacked under the wallet and gone in a second. It is a
+ * receipt rather than a status panel — the effects themselves are visible in
+ * the world (a sentry standing, a rig twice its size, a wheel back on).
+ */
+.survival-pickup {
+  position: absolute;
+  top: 74px;
+  left: 16px;
+  z-index: 16;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.survival-pickup__chit {
+  --pickup-color: var(--ui-bone);
+
+  color: var(--pickup-color);
+  font: 400 var(--ui-text-20)/1.1 var(--ui-font-display);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-shadow:
+    -2px 0 0 var(--ui-black),
+    2px 0 0 var(--ui-black),
+    0 -2px 0 var(--ui-black),
+    0 2px 0 var(--ui-black),
+    3px 3px 0 rgb(0 0 0 / 0.5);
+  animation: survival-pickup-chit 1600ms ease-out forwards;
+}
+
+@keyframes survival-pickup-chit {
+  0% {
+    opacity: 0;
+    transform: translateX(-12px) scale(0.9);
+  }
+
+  10% {
+    opacity: 1;
+    transform: translateX(0) scale(1.06);
+  }
+
+  20% {
+    transform: translateX(0) scale(1);
+  }
+
+  75% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(0) scale(1);
+  }
+}
+
+/* Reduced motion keeps the reading time and drops the slide and the pop. */
+@media (prefers-reduced-motion: reduce) {
+  .survival-pickup__chit {
+    animation-name: survival-pickup-chit-still;
+  }
+
+  @keyframes survival-pickup-chit-still {
+    0%,
+    75% {
       opacity: 1;
     }
 
@@ -5562,7 +5696,9 @@ button:disabled {
 
 .survival-gameover__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  gap: 10px;
   margin-top: 18px;
 }
 

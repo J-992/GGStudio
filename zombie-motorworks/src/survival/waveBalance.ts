@@ -70,11 +70,12 @@ const THREAT_WARNINGS: Record<SpecialistZombieKind, string> = {
   necromancer:
     'Necromancers next — they stop and raise ranged throwers. Kill them mid-cast.',
   thrower: 'Ranged throwers next!',
-  worker: 'Mine-laying workers next — mines go hidden from wave 8',
+  worker: 'Mine-laying workers next — mines go hidden from wave 12',
   // No wave number in the copy: boss waves shift when each specialist first
   // reaches the field, and this warning always fires on the wave before.
   'phone-addict':
-    'Shielded Phone Addicts next — bring EMP. Buy EMP in the garage now.',
+    'Shielded Phone Addicts next — their bubble stops bullets, not blades. ' +
+    'Ram them or fit a melee weapon.',
   kamikaze: 'Kamikazes incoming — small, fast, and they explode on contact.',
   behemoth:
     'Behemoths incoming — they hit like a wrecking ball. Watch the red ring and keep moving.',

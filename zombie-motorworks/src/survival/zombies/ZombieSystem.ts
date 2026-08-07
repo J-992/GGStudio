@@ -370,8 +370,6 @@ export class ZombieSystem {
   private attackDamageMultiplier = 1;
   /** Set by WaveManager at wave start; null on ordinary horde waves. */
   private bossEncounter: BossEncounter | null = null;
-  private mineRevealRadiusM = 0;
-  private currentWave = 1;
   private damageListener: ((report: ZombieDamageReport) => void) | null = null;
   private disposed = false;
 
@@ -544,22 +542,6 @@ export class ZombieSystem {
   /** Targetable zombies, backed by a stable reused array. */
   getAliveTargets(): readonly Zombie[] {
     return this.aliveTargets;
-  }
-
-  /** 0 disables reveal; SurvivalMode recomputes it from the live Mine Sweeper part. */
-  setMineRevealRadius(radiusM: number): void {
-    this.mineRevealRadiusM = Math.max(
-      0,
-      Number.isFinite(radiusM) ? radiusM : 0,
-    );
-  }
-
-  /** Wave number, so the wave-7 tutorial rule can be evaluated. */
-  setCurrentWave(wave: number): void {
-    this.currentWave = Math.max(
-      1,
-      Math.floor(Number.isFinite(wave) ? wave : 1),
-    );
   }
 
   /** Report every damage event without making gameplay depend on presentation. */
@@ -782,16 +764,10 @@ export class ZombieSystem {
       this.tryProjectileImpact,
       this.onProjectileLand,
     );
-    const vehiclePosition = this.vehicle.body.translation();
-    this.landmines.update(dt, this.tryMineDetonation, {
-      vehicleX: vehiclePosition.x,
-      vehicleZ: vehiclePosition.z,
-      wave: this.currentWave,
-      radiusM: this.mineRevealRadiusM,
-    });
+    this.landmines.update(dt, this.tryMineDetonation);
     this.acidPuddles.update(dt);
     this.gasTrail.update(dt);
-    this.applyAcidDrag(dt, vehiclePosition);
+    this.applyAcidDrag(dt, this.vehicle.body.translation());
     this.tickAcidPoison(dt);
     this.rebuildAliveTargets();
   }
@@ -2134,6 +2110,10 @@ export class ZombieSystem {
     // Heavier builds ram harder, lighter ones softer; the speed side of the
     // formula below is unchanged.
     const massFactor = vehicleImpactMassFactor(this.vehicle.body.mass());
+    // A Colossus rig rams (and grinds) for what its size is worth. The lethal
+    // one-shot above the top speed band is already absolute, so this only
+    // moves the band in between.
+    const ramScale = this.vehicle.outgoingDamageMultiplier;
     let contacts = 0;
 
     for (const zombie of active) {
@@ -2170,9 +2150,9 @@ export class ZombieSystem {
         vehicleSpeed >= LETHAL_IMPACT_SPEED
           ? Number.MAX_SAFE_INTEGER
           : vehicleSpeed >= MIN_IMPACT_SPEED
-            ? vehicleSpeed * IMPACT_DAMAGE_PER_SPEED * massFactor
+            ? vehicleSpeed * IMPACT_DAMAGE_PER_SPEED * massFactor * ramScale
             : 0;
-      const damage = Math.max(impactDamage, melee?.damage ?? 0);
+      const damage = Math.max(impactDamage, (melee?.damage ?? 0) * ramScale);
       // The lethal ram sentinel intentionally bypasses health; display the
       // remaining health instead of a 16-digit implementation detail.
       const damageForReport =

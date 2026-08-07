@@ -47,6 +47,7 @@ function createHarness(wave = 1): ScoreHarness {
       clearAcidPuddles: vi.fn(),
       clearGasTrail: vi.fn(),
     },
+    sentries: { clear: vi.fn() },
     countdownOverlay: { style: { display: 'block' } },
     stuckPrompt: { classList: { remove: vi.fn() } },
     syncGameplayActivity: vi.fn(),

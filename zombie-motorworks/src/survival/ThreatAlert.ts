@@ -30,7 +30,11 @@ import {
   preloadVoxelAsset,
 } from './VoxelAssetLoader.ts';
 import { ZOMBIE_ASSET_ROOT } from './zombies/Zombie.ts';
-import type { ThreatPreview, ThreatSubject } from './threatPreview.ts';
+import type {
+  ThreatDamageRule,
+  ThreatPreview,
+  ThreatSubject,
+} from './threatPreview.ts';
 import { CAMERA_FOV_DEG, layoutThreatStage } from './threatStageLayout.ts';
 import { BONE_NAMES, type BoneName } from '../tools/rigPose.ts';
 
@@ -65,6 +69,7 @@ export class ThreatAlert {
   private readonly stage: HTMLDivElement;
   private readonly fallback: HTMLDivElement;
   private readonly plates: HTMLDivElement;
+  private readonly ruleBlock: HTMLElement;
   private readonly counterBlock: HTMLElement;
   private readonly counterRow: HTMLDivElement;
   private readonly dismissButton: HTMLButtonElement;
@@ -108,6 +113,10 @@ export class ThreatAlert {
     this.plates = document.createElement('div');
     this.plates.className = 'threat-alert__plates';
 
+    this.ruleBlock = document.createElement('section');
+    this.ruleBlock.className = 'threat-alert__rule';
+    this.ruleBlock.hidden = true;
+
     this.counterBlock = document.createElement('section');
     this.counterBlock.className = 'threat-alert__counters';
     const counterTitle = document.createElement('h3');
@@ -126,6 +135,7 @@ export class ThreatAlert {
       this.headline,
       this.stage,
       this.plates,
+      this.ruleBlock,
       this.counterBlock,
       this.dismissButton,
     );
@@ -158,6 +168,7 @@ export class ThreatAlert {
       ? `⚠ ${view.preview.headline} ⚠`
       : view.preview.headline;
     this.renderPlates(view.preview);
+    this.renderRule(view.preview);
     this.renderCounters(view);
     this.fallback.hidden = true;
 
@@ -245,6 +256,88 @@ export class ThreatAlert {
       }
       this.plates.appendChild(plate);
     }
+  }
+
+  /**
+   * The damage-rule chart, for the threats that live or die by one — today
+   * only the Phone Addict's bubble.
+   *
+   * Two labelled bars, drawn to scale against each other, above the counter
+   * tiles. The bar lengths carry the message on their own: a player who reads
+   * nothing at all still sees a stub next to a full bar and takes away "one of
+   * these does nothing". The percentages and the footnote are for the player
+   * who does read, in that order.
+   */
+  private renderRule(preview: ThreatPreview): void {
+    this.ruleBlock.replaceChildren();
+    const owner = preview.subjects.find((subject) => subject.rule !== null);
+    const rule: ThreatDamageRule | undefined = owner?.rule ?? undefined;
+    if (owner === undefined || rule === undefined) {
+      this.ruleBlock.hidden = true;
+      return;
+    }
+    this.ruleBlock.hidden = false;
+
+    // On a wave introducing several kinds the chart has to say whose rule it
+    // is; on a solo introduction the plate directly above already did.
+    if (preview.subjects.length > 1) {
+      const kicker = document.createElement('p');
+      kicker.className = 'threat-alert__rule-kicker';
+      kicker.textContent = `${owner.name.toUpperCase()} ONLY`;
+      this.ruleBlock.appendChild(kicker);
+    }
+
+    const headline = document.createElement('h3');
+    headline.className = 'threat-alert__rule-headline';
+    headline.textContent = rule.headline;
+    this.ruleBlock.appendChild(headline);
+
+    const chart = document.createElement('div');
+    chart.className = 'threat-alert__rule-chart';
+    for (const bar of rule.bars) {
+      const row = document.createElement('div');
+      row.className = `threat-alert__rule-row threat-alert__rule-row--${bar.tone}`;
+
+      const label = document.createElement('span');
+      label.className = 'threat-alert__rule-label';
+      // Decorative: the bar, the number and the colour already carry this, and
+      // a screen reader announcing "check mark" adds nothing to "100%".
+      const mark = document.createElement('span');
+      mark.className = 'threat-alert__rule-mark';
+      mark.setAttribute('aria-hidden', 'true');
+      mark.textContent = bar.tone === 'good' ? '✓' : '✕';
+      label.append(mark, document.createTextNode(bar.label));
+
+      const track = document.createElement('div');
+      track.className = 'threat-alert__rule-track';
+      const fill = document.createElement('div');
+      fill.className = 'threat-alert__rule-fill';
+      const percent = Math.round(clamp01(bar.fraction) * 100);
+      // Floored so a tiny share still draws something. A bar of literally no
+      // width reads as a broken chart rather than as "almost nothing lands".
+      fill.style.width = `${Math.max(percent, 4)}%`;
+      track.appendChild(fill);
+
+      // Outside the bar, in its own column: at 10% there is no room to print
+      // inside the fill, and a number that lands in a different place per row
+      // is one the eye has to hunt for.
+      const value = document.createElement('span');
+      value.className = 'threat-alert__rule-value';
+      value.textContent = `${percent}%`;
+
+      const detail = document.createElement('span');
+      detail.className = 'threat-alert__rule-detail';
+      detail.textContent = bar.detail;
+
+      row.append(label, track, value, detail);
+      chart.appendChild(row);
+    }
+    this.ruleBlock.appendChild(chart);
+
+    const footnote = document.createElement('p');
+    footnote.className = 'threat-alert__rule-footnote';
+    footnote.textContent = rule.footnote;
+    this.ruleBlock.appendChild(footnote);
   }
 
   private renderCounters(view: ThreatAlertView): void {
@@ -569,6 +662,11 @@ interface MountedSubject {
   readonly rest: Map<BoneName, THREE.Euler>;
   /** Posed width in metres, used to space the stage. */
   width: number;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
 }
 
 function prefersReducedMotion(): boolean {

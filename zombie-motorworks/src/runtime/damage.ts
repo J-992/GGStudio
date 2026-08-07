@@ -62,12 +62,20 @@ export function impactFelt(def: { impactResistance?: number }): number {
   return 1 - Math.min(1, Math.max(0, resistance));
 }
 
-/** Apply impact damage to a part (by collider handle) and its connections. */
+/**
+ * Apply impact damage to a part (by collider handle) and its connections.
+ *
+ * `damageScale` is the whole-vehicle multiplier a buff puts on incoming damage
+ * (a Colossus rig takes collisions at a fraction of their force). It scales the
+ * impulse rather than the part's health, so the connections around the hit are
+ * spared in the same proportion as the block itself.
+ */
 export function applyImpactDamage(
   vehicle: AssembledVehicle,
   colliderToPart: Map<number, string>,
   colliderHandle: number,
   forceMagnitude: number,
+  damageScale = 1,
 ): void {
   const partId = colliderToPart.get(colliderHandle);
   if (!partId) return;
@@ -75,7 +83,8 @@ export function applyImpactDamage(
   if (!part || !part.alive) return;
   // The blade's own resistance covers its mounts too: surviving the hit only
   // to be shaken off the nose is the same failure from the driver's seat.
-  const impulseNs = impactImpulseNs(forceMagnitude) * impactFelt(part.def);
+  const impulseNs =
+    impactImpulseNs(forceMagnitude) * impactFelt(part.def) * damageScale;
   part.health -= partDamage(impulseNs);
 
   const liveConnections = (vehicle.connectionsByPart.get(partId) ?? [])

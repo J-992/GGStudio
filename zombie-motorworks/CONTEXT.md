@@ -65,6 +65,20 @@ They describe work at the time they were written and can be stale.
   kills, and banked run earnings.
 - **Pending Reward**: kill money earned during the active wave. It is visible but
   unspendable until the wave clears.
+- **Supply Crate**: one of the beacons scattered across the arena, collected by
+  driving into it. A fixed number of slots exist at once and each rolls its kind
+  from `survival/dropTable.ts` — fuel, cash, repair kit, sentry, Colossus, or
+  salvaged block. Balance and the roll live in that pure module; `Pickups` owns
+  the crates in the world (each kind's hovering block comes from
+  `pickupModels.ts`, over a ground glow and under a labelled arrow), and
+  `SurvivalMode` owns what collecting one does.
+  A collector that returns false leaves the crate standing (a full tank drives
+  over fuel), which is also how a crate declines to pay outside a live wave.
+  A salvage crate draws the block it is carrying, so which block that is gets
+  rolled when the crate spawns rather than when it is collected.
+- **Colossus**: the temporary buff a Colossus crate grants. The Runtime Vehicle
+  keeps its assembled colliders and only the drawn rig grows; what changes is
+  outgoing damage, incoming damage, and drive torque plus speed ceiling.
 - **Build Phase**: the in-run Garage between cleared waves. It exposes repairs
   and preserves the checkpoint's damage; it is not an ordinary full-heal Garage.
 - **Boss**: single enemy that replaces the whole horde every fifth wave. It is a
@@ -287,6 +301,7 @@ the task crosses their Interface.
 | Survival HUD/transitions           | `src/survival/SurvivalMode.ts`               | `App.ts`, `WaveManager.ts`, `style.css`                                 | `unit/summaries.test.ts`, `tests/runloop.spec.ts`, `tests/failure.spec.ts`                                      |
 | Next-wave threat/boss warning      | `src/survival/threatPreview.ts`              | `ThreatAlert.ts`, `threatStageLayout.ts`, `WaveClearCard.ts`, `waveBalance.ts` | `unit/threat-preview.test.ts`, `unit/threat-stage-layout.test.ts`                                     |
 | Minimap/mine detection             | `src/survival/Minimap.ts`                    | `arena/Arena.ts`, `Landmines.ts`, `turretModules.ts`                    | `unit/minimap.test.ts`, `unit/landmines.test.ts`                                                                |
+| Supply crates/drops                | `src/survival/dropTable.ts`                  | `Pickups.ts`, `pickupModels.ts`, `SentryTurrets.ts`, `core/repairKit.ts`, `SurvivalMode.ts`, `App.ts` | `unit/drops.test.ts`, `unit/pickup-effects.test.ts`                                                  |
 | Biome recipes/arena generation     | `src/survival/arena/recipes/index.ts`        | `arena/ArenaBuilder.ts`, `core/biomes.ts`, `core/rng.ts`                | `unit/biome-recipes.test.ts`, `unit/arena.test.ts`, `unit/arena-perimeter.test.ts`                              |
 | Surface grip/biome handling        | `src/core/surfaces.ts`                       | `core/biomes.ts`, `runtime/wheels.ts`, `runtime/vehicle.ts`             | `unit/surfaces.test.ts`, `unit/biome-hazard.test.ts`, `unit/biome-selection.test.ts`                            |
 | Garage Tour (tutorial)             | `src/core/tutorial.ts`                       | `editor/TutorialOverlay.ts`, `EditorMode.ts`, `ui.ts`, `style.css`      | none — verified by playing the tour                                                                             |

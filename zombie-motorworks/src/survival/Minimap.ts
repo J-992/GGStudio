@@ -16,12 +16,13 @@ export interface MinimapZombie {
 export interface MinimapMine {
   readonly x: number;
   readonly z: number;
-  readonly revealed: boolean;
 }
 
 export interface MinimapCrate {
   readonly x: number;
   readonly z: number;
+  /** Kind colour; omitted crates fall back to the fuel green. */
+  readonly color?: string;
 }
 
 export interface MinimapSnapshotSource {
@@ -235,10 +236,11 @@ export class Minimap {
     }
 
     if (crates !== undefined && crates.length > 0) {
-      context.fillStyle = FUEL_MARKER_COLOR;
-      context.strokeStyle = 'rgba(12, 46, 26, 0.95)';
+      // Crates come in kinds now, so each square is filled in its own colour
+      // rather than the whole set being batched into one path. There are only
+      // ever a handful on the map, so the extra fills cost nothing.
+      context.strokeStyle = 'rgba(12, 24, 18, 0.95)';
       context.lineWidth = 1;
-      context.beginPath();
       for (let index = 0; index < crates.length; index += 1) {
         const crate = crates[index];
         const point = worldToViewport(
@@ -250,14 +252,16 @@ export class Minimap {
         );
         if (Math.hypot(point.x - half, point.y - half) > cullRadiusPx) continue;
         const r = FUEL_MARKER_RADIUS_PX;
+        context.fillStyle = crate.color ?? FUEL_MARKER_COLOR;
+        context.beginPath();
         context.moveTo(point.x - r, point.y - r);
         context.lineTo(point.x + r, point.y - r);
         context.lineTo(point.x + r, point.y + r);
         context.lineTo(point.x - r, point.y + r);
         context.closePath();
+        context.fill();
+        context.stroke();
       }
-      context.fill();
-      context.stroke();
     }
 
     if (mines !== undefined) {
@@ -267,7 +271,6 @@ export class Minimap {
       context.beginPath();
       for (let index = 0; index < mines.length; index += 1) {
         const mine = mines[index];
-        if (!mine.revealed) continue;
         const point = worldToViewport(
           mine.x,
           mine.z,

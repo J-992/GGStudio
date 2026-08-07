@@ -146,6 +146,87 @@ export function lowestPointM(bp: VehicleBlueprint, getDef: GetDef): number {
   return minY === Infinity ? 0 : minY;
 }
 
+/**
+ * Build one part's colliders on `body` and report where they went. Assembly
+ * calls this once per blueprint part; a repair kit calls it again to bolt a
+ * destroyed part back onto the same body, so the two can never disagree about
+ * what a wheel, a face-mounted plate, or a solid block is shaped like.
+ */
+export function attachPartColliders(
+  world: RAPIER.World,
+  body: RAPIER.RigidBody,
+  placed: PlacedPart,
+  def: PartDefinition,
+): { handles: number[]; centres: Vec3[] } {
+  const half = CELL_SIZE / 2;
+  const handles: number[] = [];
+  const centres: Vec3[] = [];
+
+  if (def.wheel) {
+    const centre = cellCentreM(placed.pos);
+    const w = def.wheel;
+    const suspLocal = rotateVec(placed.orient, w.suspensionDir);
+    const wheelCentre = {
+      x: centre.x + suspLocal.x * w.suspension.restLength,
+      y: centre.y + suspLocal.y * w.suspension.restLength,
+      z: centre.z + suspLocal.z * w.suspension.restLength,
+    };
+    // Wheel colliders contribute mass only. All terrain support comes from
+    // per-wheel ray-suspension spring forces applied at each wheel anchor.
+    const desc = RAPIER.ColliderDesc.ball(w.radius)
+      .setTranslation(wheelCentre.x, wheelCentre.y, wheelCentre.z)
+      .setMass(def.massKg)
+      .setFriction(0)
+      .setRestitution(0)
+      .setCollisionGroups(ATTACHED_WHEEL_GROUPS);
+    const col = world.createCollider(desc, body);
+    handles.push(col.handle);
+    centres.push(wheelCentre);
+    return { handles, centres };
+  }
+
+  if (def.cells.length === 0) {
+    // Face-mounted armour/shell: thin slab on the covered face.
+    const socket = def.sockets[0];
+    const face = rotateFace(placed.orient, socket?.face ?? 'pz');
+    const fv = FACE_VECTORS[face];
+    const centre = cellCentreM(placed.pos);
+    const t = 0.06; // slab thickness, m
+    const off = half - t / 2;
+    const hx = fv.x !== 0 ? t / 2 : half;
+    const hy = fv.y !== 0 ? t / 2 : half;
+    const hz = fv.z !== 0 ? t / 2 : half;
+    const cx = centre.x + fv.x * off;
+    const cy = centre.y + fv.y * off;
+    const cz = centre.z + fv.z * off;
+    const desc = RAPIER.ColliderDesc.cuboid(hx, hy, hz)
+      .setTranslation(cx, cy, cz)
+      .setMass(def.massKg)
+      .setFriction(0.5)
+      .setCollisionGroups(VEHICLE_GROUPS)
+      .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+      .setContactForceEventThreshold(100_000);
+    const col = world.createCollider(desc, body);
+    handles.push(col.handle);
+    centres.push({ x: cx, y: cy, z: cz });
+    return { handles, centres };
+  }
+
+  for (const cm of placedCellMasses(def, placed)) {
+    const desc = RAPIER.ColliderDesc.cuboid(half, half, half)
+      .setTranslation(cm.centreM.x, cm.centreM.y, cm.centreM.z)
+      .setMass(cm.massKg)
+      .setFriction(0.5)
+      .setCollisionGroups(VEHICLE_GROUPS)
+      .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+      .setContactForceEventThreshold(100_000);
+    const col = world.createCollider(desc, body);
+    handles.push(col.handle);
+    centres.push(cm.centreM);
+  }
+  return { handles, centres };
+}
+
 export function assembleVehicle(
   world: RAPIER.World,
   bp: VehicleBlueprint,
@@ -178,18 +259,18 @@ export function assembleVehicle(
   const parts = new Map<string, RuntimePart>();
   const wheels: RuntimeWheel[] = [];
   let rootPartId = '';
-  const half = CELL_SIZE / 2;
 
   for (const placed of bp.parts) {
     const def = resolvePlacedDef(placed, getDef);
     if (def.isRoot) rootPartId = placed.id;
+    const colliders = attachPartColliders(world, body, placed, def);
     const entry: RuntimePart = {
       placed,
       def,
       health: def.health,
       alive: true,
-      colliderHandles: [],
-      colliderCentresM: [],
+      colliderHandles: colliders.handles,
+      colliderCentresM: colliders.centres,
       detached: false,
     };
 
@@ -197,22 +278,6 @@ export function assembleVehicle(
       const centre = cellCentreM(placed.pos);
       const w = def.wheel;
       const suspLocal = rotateVec(placed.orient, w.suspensionDir);
-      const wheelCentre = {
-        x: centre.x + suspLocal.x * w.suspension.restLength,
-        y: centre.y + suspLocal.y * w.suspension.restLength,
-        z: centre.z + suspLocal.z * w.suspension.restLength,
-      };
-      // Wheel colliders contribute mass only. All terrain support comes from
-      // per-wheel ray-suspension spring forces applied at each wheel anchor.
-      const desc = RAPIER.ColliderDesc.ball(w.radius)
-        .setTranslation(wheelCentre.x, wheelCentre.y, wheelCentre.z)
-        .setMass(def.massKg)
-        .setFriction(0)
-        .setRestitution(0)
-        .setCollisionGroups(ATTACHED_WHEEL_GROUPS);
-      const col = world.createCollider(desc, body);
-      entry.colliderHandles.push(col.handle);
-      entry.colliderCentresM.push(wheelCentre);
       // Normalize axle handedness: a mirrored wheel is physically the same
       // wheel (the differential spins each side opposite so both roll the
       // vehicle forward). If the wheel's rolling direction opposes vehicle
@@ -254,43 +319,6 @@ export function assembleVehicle(
         loadN: 0,
         broken: false,
       });
-    } else if (def.cells.length === 0) {
-      // Face-mounted armour/shell: thin slab on the covered face.
-      const socket = def.sockets[0];
-      const face = rotateFace(placed.orient, socket?.face ?? 'pz');
-      const fv = FACE_VECTORS[face];
-      const centre = cellCentreM(placed.pos);
-      const t = 0.06; // slab thickness, m
-      const off = half - t / 2;
-      const hx = fv.x !== 0 ? t / 2 : half;
-      const hy = fv.y !== 0 ? t / 2 : half;
-      const hz = fv.z !== 0 ? t / 2 : half;
-      const cx = centre.x + fv.x * off;
-      const cy = centre.y + fv.y * off;
-      const cz = centre.z + fv.z * off;
-      const desc = RAPIER.ColliderDesc.cuboid(hx, hy, hz)
-        .setTranslation(cx, cy, cz)
-        .setMass(def.massKg)
-        .setFriction(0.5)
-        .setCollisionGroups(VEHICLE_GROUPS)
-        .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
-        .setContactForceEventThreshold(100_000);
-      const col = world.createCollider(desc, body);
-      entry.colliderHandles.push(col.handle);
-      entry.colliderCentresM.push({ x: cx, y: cy, z: cz });
-    } else {
-      for (const cm of placedCellMasses(def, placed)) {
-        const desc = RAPIER.ColliderDesc.cuboid(half, half, half)
-          .setTranslation(cm.centreM.x, cm.centreM.y, cm.centreM.z)
-          .setMass(cm.massKg)
-          .setFriction(0.5)
-          .setCollisionGroups(VEHICLE_GROUPS)
-          .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
-          .setContactForceEventThreshold(100_000);
-        const col = world.createCollider(desc, body);
-        entry.colliderHandles.push(col.handle);
-        entry.colliderCentresM.push(cm.centreM);
-      }
     }
     parts.set(placed.id, entry);
   }

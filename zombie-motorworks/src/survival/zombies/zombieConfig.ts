@@ -514,10 +514,6 @@ export const LANDMINE_DAMAGE = 36;
 export const LANDMINE_BLAST_RADIUS = 1.5;
 /** Visible, harmless arming window after a worker drops a mine. */
 export const LANDMINE_ARM_SECONDS = 1.25;
-/** Last wave on which mines stay permanently visible, as the tutorial encounter. */
-export const LANDMINE_VISIBLE_THROUGH_WAVE = 7;
-/** Every mine glints faintly this close, regardless of Mine Sweeper — last-second fairness. */
-export const LANDMINE_GLINT_RADIUS = 3.5;
 export const LANDMINE_PULSE_FREQUENCY = 6; // rad/s
 export const LANDMINE_PULSE_AMPLITUDE = 0.2; // fraction of base scale
 export const LANDMINE_EXPLOSION_POOL_SIZE = 6;

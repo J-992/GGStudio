@@ -7,6 +7,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import {
   abilityMeta,
+  ABILITY_KIND_META,
   ABILITY_SLOT_KEYS,
   abilityUnlocked,
   effectiveCharm,
@@ -101,6 +102,7 @@ import type { TracerShot } from '../runtime/weapons.ts';
 import { wheelVisualCentre } from '../runtime/wheels.ts';
 import { createToggle } from '../ui/system.ts';
 import { AbilityBar, type AbilitySlotView } from '../ui/AbilityBar.ts';
+import { BuffBar, type BuffView } from '../ui/BuffBar.ts';
 import {
   createAudioVolumeControl,
   type AudioVolumeControl,
@@ -117,7 +119,20 @@ import {
   type VehicleWarning,
 } from './vehicleWarnings.ts';
 import { impactKindForShot, muzzleStyleForShot } from '../vfx/shotVfx.ts';
-import { FuelPickups } from './FuelPickups.ts';
+import { Pickups, type CollectedPickup } from './Pickups.ts';
+import { SentryTurrets, type SentryTarget } from './SentryTurrets.ts';
+import {
+  cashDropAmount,
+  COLOSSUS_DAMAGE_MULTIPLIER,
+  COLOSSUS_MOBILITY,
+  COLOSSUS_SCALE,
+  COLOSSUS_SECONDS,
+  COLOSSUS_TOUGHNESS,
+  FUEL_REFILL_FRACTION,
+  PICKUP_KINDS,
+  rollPartDrop,
+  SENTRY_SECONDS,
+} from './dropTable.ts';
 import { AutoAim } from './AutoAim.ts';
 import { FollowCamera } from './FollowCamera.ts';
 import { PhaseGhosts } from './PhaseGhosts.ts';
@@ -168,7 +183,7 @@ import {
   ZOMBIE_HALF_HEIGHT,
   ZOMBIE_RADIUS,
 } from './zombies/zombieConfig.ts';
-import type { ZombieKind } from './zombies/Zombie.ts';
+import type { Zombie, ZombieKind } from './zombies/Zombie.ts';
 
 const FIXED_DT = 1 / 60;
 const COUNTDOWN_SECONDS = 3;
@@ -224,6 +239,24 @@ const EMPTY_TARGETS: readonly ThreatTarget[] = [];
  * merged total. It only catches payouts landing in the same handful of frames.
  */
 const CASH_GAIN_MERGE_MS = 45;
+/**
+ * Row colours for the effect timers over the ability boxes. Each one is the
+ * colour that effect already puts on screen — the shield's bubble, the ward's
+ * hex shell, Hellfire's yellow core — so the bar names the thing the player can
+ * see rather than introducing a second, unrelated code. The two crate effects
+ * take their colours from the crate table for the same reason.
+ */
+const BUFF_COLORS = {
+  overdrive: '#ffb03a',
+  reinforce: '#9d8cff',
+  shield: '#35d7ff',
+  hellfire: '#ffe14a',
+  flamelance: '#ff6b2b',
+} as const;
+/** How fast the drawn rig grows into (and back out of) a Colossus, per second. */
+const RIG_SCALE_RATE = 4;
+/** Ride height assumed while no wheel is on the ground, m. */
+const NOMINAL_RIDE_HEIGHT_M = 1;
 
 /**
  * Scuttle charge ("self-destruct", K).
@@ -324,7 +357,7 @@ export interface SurvivalCallbacks {
   /**
    * The run is over. App records the score, wipes the garage back to a fresh
    * start, and returns where this run placed so the overlay can show it.
-   * The mode stays alive until `onGameOverContinue`.
+   * The mode stays alive until the player picks one of the two exits below.
    */
   onGameOver(
     run: RunState,
@@ -334,6 +367,8 @@ export interface SurvivalCallbacks {
   ): RunOutcome;
   /** Dismiss the game-over overlay and open the freshly reset garage. */
   onGameOverContinue(): void;
+  /** Dismiss the game-over overlay and return to the title screen. */
+  onGameOverMenu(): void;
   onResetWave(run: RunState): void;
   /**
    * Leave the arena mid-wave and open the Garage at this wave's checkpoint.
@@ -344,6 +379,13 @@ export interface SurvivalCallbacks {
   onCheatInfiniteMoney(): void;
   /** Lifetime progression: a Phone Addict died, which unlocks the EMP module. */
   onPhoneAddictKilled(): void;
+  /**
+   * A salvage crate handed the player a free block. It goes straight into the
+   * Profile's Inventory (unlocking the catalog entry if it was still locked),
+   * so it is theirs to bolt on in the next Garage rather than something this
+   * wave has to find room for.
+   */
+  onPartSalvaged?(defId: string): void;
   /** Lifetime progression: `wave` was fully cleared. */
   onWaveCleared(wave: number): void;
   /**
@@ -510,6 +552,7 @@ interface SurvivalUi {
   cashCounter: HTMLDivElement;
   cashValue: HTMLSpanElement;
   cashGains: HTMLDivElement;
+  pickupToasts: HTMLDivElement;
   stuckPrompt: HTMLDivElement;
   selfDestructButton: HTMLButtonElement;
   selfDestructHint: HTMLSpanElement;
@@ -565,7 +608,12 @@ export class SurvivalMode {
   private readonly vfx: VfxSystem;
   private readonly zombies: ZombieSystem;
   private readonly autoAim: AutoAim;
-  private readonly fuelPickups: FuelPickups;
+  private readonly pickups: Pickups;
+  private readonly sentries: SentryTurrets;
+  /** Size the rig is currently drawn at; eased toward the Colossus scale. */
+  private rigScale = 1;
+  /** Reused answer for the sentries' target query — read before the next ask. */
+  private readonly sentryTarget = { x: 0, y: 0, z: 0, colliderHandle: 0 };
   private readonly waves: WaveManager;
   private readonly followCamera: FollowCamera;
   private readonly vehicleGroup = new THREE.Group();
@@ -636,6 +684,9 @@ export class SurvivalMode {
   private lastHudFuel = -1;
   /** Centre-screen bar of special abilities, one box per special. */
   private readonly abilityBar: AbilityBar;
+  private readonly buffBar: BuffBar;
+  /** Rebuilt in place each frame, so a running buff allocates nothing. */
+  private readonly buffViews: BuffView[] = [];
   /** Onion-skin copies of the rig left along a phase blink. */
   private readonly phaseGhosts: PhaseGhosts;
   /** Ground chevron orbiting the rig, aimed at the nearest live zombie. */
@@ -683,6 +734,7 @@ export class SurvivalMode {
   private readonly cashCounter: HTMLDivElement;
   private readonly cashValue: HTMLSpanElement;
   private readonly cashGains: HTMLDivElement;
+  private readonly pickupToasts: HTMLDivElement;
   private readonly stuckPrompt: HTMLDivElement;
   private readonly selfDestructButton: HTMLButtonElement;
   private readonly selfDestructHint: HTMLSpanElement;
@@ -802,6 +854,8 @@ export class SurvivalMode {
    * has no host weapon to ride, so unlike Hellfire the mode owns it outright.
    */
   private flameLanceSeconds = 0;
+  /** What that lance started from, so the HUD can draw it draining. */
+  private flameLanceDuration = 0;
   private flameLanceTickTimer = 0;
   private flameLanceStats: {
     damage: number;
@@ -962,12 +1016,23 @@ export class SurvivalMode {
     this.zombieVisualRoot.add(...zombieVisuals);
     this.scene.add(this.zombieVisualRoot);
     this.autoAim = new AutoAim(this.vehicle, this.zombies, this.world);
-    this.fuelPickups = new FuelPickups(
+    this.pickups = new Pickups(
       this.scene,
       this.vehicle,
       this.arena.bounds,
-      () => playSfx('fuelPickup'),
+      (pickup) => this.collectPickup(pickup),
+      () => this.rollSalvageBlock(),
     );
+    this.sentries = new SentryTurrets(this.scene, {
+      nearestTarget: (x, z, radiusM) => this.nearestSentryTarget(x, z, radiusM),
+      hit: (handle, damage) =>
+        this.zombies.hitZombieHandle(handle, damage) !== 'miss',
+      onShot: (from, to) => {
+        this.tracerRenderer.spawn(from, to, 'turret');
+        this.vfx.muzzleFlash(from, to);
+        playSfx('gunLight', { pitch: 1.12 });
+      },
+    });
     this.waves = new WaveManager(this.zombies, {
       onRemainingChanged: () => undefined,
       onWaveComplete: (wave, reward) => this.onWaveComplete(wave, reward),
@@ -1018,6 +1083,7 @@ export class SurvivalMode {
     this.cashCounter = builtUi.cashCounter;
     this.cashValue = builtUi.cashValue;
     this.cashGains = builtUi.cashGains;
+    this.pickupToasts = builtUi.pickupToasts;
     this.stuckPrompt = builtUi.stuckPrompt;
     this.selfDestructButton = builtUi.selfDestructButton;
     this.selfDestructHint = builtUi.selfDestructHint;
@@ -1070,6 +1136,7 @@ export class SurvivalMode {
       );
       playDamageNumberSfx(report.amount, report.killed);
     });
+    this.buffBar = new BuffBar(this.ui);
     this.abilityBar = new AbilityBar(this.ui, MAX_ABILITY_SLOTS, (slot) =>
       this.requestAbility(slot),
     );
@@ -1300,6 +1367,14 @@ export class SurvivalMode {
     cashCounter.append(cashValue, cashGains);
     root.appendChild(cashCounter);
 
+    // Supply crates say what they did in their own column under the wallet:
+    // a crate is a thing that just happened, not a state to keep reading.
+    const pickupToasts = document.createElement('div');
+    pickupToasts.className = 'survival-pickup';
+    pickupToasts.setAttribute('role', 'status');
+    pickupToasts.setAttribute('aria-label', 'Supply crates');
+    root.appendChild(pickupToasts);
+
     // Both driver prompts live in one centred row, so whichever are up sit
     // side by side and read as the same kind of offer: a key, right now.
     const promptRow = document.createElement('div');
@@ -1406,12 +1481,17 @@ export class SurvivalMode {
       'Your rig, cash and upgrades are gone. Parts you unlocked stay unlocked — build again and go further.';
     const gameOverActions = document.createElement('div');
     gameOverActions.className = 'survival-gameover__actions';
+    const gameOverMenuButton = document.createElement('button');
+    gameOverMenuButton.type = 'button';
+    gameOverMenuButton.className = 'ui-button ui-button--medium';
+    gameOverMenuButton.textContent = 'Return to Menu';
+    gameOverMenuButton.addEventListener('click', this.onGameOverMenu);
     const gameOverButton = document.createElement('button');
     gameOverButton.type = 'button';
     gameOverButton.className = 'primary';
-    gameOverButton.textContent = 'Back to Garage';
+    gameOverButton.textContent = 'Restart Run';
     gameOverButton.addEventListener('click', this.onGameOverContinue);
-    gameOverActions.appendChild(gameOverButton);
+    gameOverActions.append(gameOverMenuButton, gameOverButton);
     gameOverOverlay.append(
       gameOverTitle,
       gameOverBest,
@@ -1610,6 +1690,7 @@ export class SurvivalMode {
       cashCounter,
       cashValue,
       cashGains,
+      pickupToasts,
       stuckPrompt,
       selfDestructButton,
       selfDestructHint,
@@ -1986,8 +2067,6 @@ export class SurvivalMode {
     const mineRevealRadius = mineSweeperRadius(
       mineSweeper === null ? 0 : (mineSweeper.placed.config.level ?? 1),
     );
-    this.zombies.setCurrentWave(this.currentWave);
-    this.zombies.setMineRevealRadius(mineRevealRadius);
     this.vehicle.preStep(
       FIXED_DT,
       this.controls,
@@ -2004,9 +2083,13 @@ export class SurvivalMode {
       terrain: this.terrainSfx,
     });
 
-    this.fuelPickups.step(FIXED_DT);
+    this.pickups.step(FIXED_DT);
     this.waves.fixedUpdate(FIXED_DT);
     this.zombies.step(FIXED_DT);
+    // After the zombies moved, so a sentry shoots where they are now. It also
+    // runs after the pickup pass, so a sentry crate collected this step gets
+    // its first shot off on the same step it was taken.
+    this.sentries.step(FIXED_DT);
     // After the zombie step, so a pass sees the projectiles as they are right
     // now rather than one frame's travel behind them.
     this.updateDroneInterceptors();
@@ -2338,6 +2421,7 @@ export class SurvivalMode {
     this.signatureRequested = false;
     this.strikes.clear();
     this.flameLanceSeconds = 0;
+    this.flameLanceDuration = 0;
     this.flameLanceStats = null;
     this.stuckPrompt.classList.remove('is-visible');
     this.threatAlert.hide();
@@ -2429,6 +2513,9 @@ export class SurvivalMode {
     this.zombies.clearIceTrail();
     this.zombies.clearAcidPuddles();
     this.zombies.clearGasTrail();
+    // A dropped sentry belongs to the fight that dropped it; it does not stand
+    // guard over an empty arena between waves.
+    this.sentries.clear();
     fadeOutDriveSfx();
     this.phase = 'cleared';
     this.pointerFiring = false;
@@ -2770,6 +2857,12 @@ export class SurvivalMode {
     this.callbacks.onGameOverContinue();
   };
 
+  private readonly onGameOverMenu = (): void => {
+    if (this.disposed) return;
+    this.gameOverOverlay.style.display = 'none';
+    this.callbacks.onGameOverMenu();
+  };
+
   private stopVehicleMotion(): void {
     this.vehicle.body.setLinvel(this.stoppedVelocity, false);
     this.vehicle.body.setAngvel(this.stoppedVelocity, false);
@@ -2787,7 +2880,18 @@ export class SurvivalMode {
   private syncView(frameDt: number): void {
     const position = this.vehicle.body.translation();
     const rotation = this.vehicle.body.rotation();
-    this.vehicleGroup.position.set(position.x, position.y, position.z);
+    // Colossus grows the rig on screen while its colliders stay the size they
+    // were assembled at. The growth is anchored to the ground the wheels are
+    // standing on rather than the body origin, so a rig twice the size still
+    // sits on the road instead of half-buried in it.
+    const scale = this.updateRigScale(frameDt);
+    const groundY = this.rigGroundY(position.y);
+    this.vehicleGroup.scale.setScalar(scale);
+    this.vehicleGroup.position.set(
+      position.x,
+      groundY + (position.y - groundY) * scale,
+      position.z,
+    );
     this.vehicleGroup.quaternion.set(
       rotation.x,
       rotation.y,
@@ -2814,7 +2918,15 @@ export class SurvivalMode {
       const mesh = this.wheelMeshes.get(wheel.partId);
       if (!mesh || wheel.broken) continue;
       const centre = wheelVisualCentre(this.vehicle.body, wheel);
-      mesh.position.set(centre.x, centre.y, centre.z);
+      // Wheels are parented to the scene, not the chassis group, so Colossus
+      // has to push them out from the hull by hand — around the same body axis
+      // and ground plane the chassis was grown about.
+      mesh.scale.setScalar(scale);
+      mesh.position.set(
+        position.x + (centre.x - position.x) * scale,
+        groundY + (centre.y - groundY) * scale,
+        position.z + (centre.z - position.z) * scale,
+      );
       mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
       const visualSpin =
         (this.wheelSpin.get(wheel.partId) ?? 0) + wheel.omega * frameDt;
@@ -2849,7 +2961,8 @@ export class SurvivalMode {
     }
 
     this.zombies.updateVisuals(frameDt);
-    this.fuelPickups.updateVisuals(frameDt);
+    this.pickups.updateVisuals(frameDt);
+    this.sentries.updateVisuals(frameDt);
     this.syncShieldBubble(frameDt);
     this.syncReinforceWard(frameDt);
     this.syncZapBlast(frameDt);
@@ -2892,9 +3005,180 @@ export class SurvivalMode {
       this.currentMineSweeperLevel >= MINE_SWEEPER_MINIMAP_LEVEL
         ? this.zombies.activeMines()
         : undefined,
-      this.fuelPickups.activeCrates(),
+      this.pickups.activeMarkers(),
       this.zombies.activeBoss(),
     );
+  }
+
+  /**
+   * Ease the drawn size of the rig toward whatever Colossus says it should be.
+   * The buff switches on and off in one step; growing into it over a fraction
+   * of a second is what makes it read as the rig swelling rather than the
+   * camera cutting to a different vehicle.
+   */
+  private updateRigScale(frameDt: number): number {
+    const target = this.vehicle.colossusScale;
+    if (this.rigScale !== target) {
+      const step = RIG_SCALE_RATE * Math.max(0, frameDt);
+      this.rigScale =
+        Math.abs(target - this.rigScale) <= step
+          ? target
+          : this.rigScale + Math.sign(target - this.rigScale) * step;
+    }
+    return this.rigScale;
+  }
+
+  /**
+   * The plane the rig should be grown about: the ground its wheels are on.
+   * Airborne (or wheel-less) rigs fall back to a nominal ride height, which
+   * only has to be close — nothing but the visual anchor depends on it.
+   */
+  private rigGroundY(bodyY: number): number {
+    let total = 0;
+    let count = 0;
+    for (const wheel of this.vehicle.wheels()) {
+      if (wheel.broken || !wheel.grounded || wheel.contactPointW === null) {
+        continue;
+      }
+      total += wheel.contactPointW.y;
+      count += 1;
+    }
+    return count > 0 ? total / count : bodyY - NOMINAL_RIDE_HEIGHT_M;
+  }
+
+  /** Closest live zombie to a dropped sentry, in the sentry's own terms. */
+  private nearestSentryTarget(
+    x: number,
+    z: number,
+    radiusM: number,
+  ): SentryTarget | null {
+    let bestSq = radiusM * radiusM;
+    let best: Zombie | null = null;
+    for (const zombie of this.zombies.getAliveTargets()) {
+      const dx = zombie.position.x - x;
+      const dz = zombie.position.z - z;
+      const distanceSq = dx * dx + dz * dz;
+      if (distanceSq > bestSq) continue;
+      bestSq = distanceSq;
+      best = zombie;
+    }
+    if (best === null) return null;
+    this.sentryTarget.x = best.position.x;
+    this.sentryTarget.y = best.position.y;
+    this.sentryTarget.z = best.position.z;
+    this.sentryTarget.colliderHandle = best.collider.handle;
+    return this.sentryTarget;
+  }
+
+  /** The block a salvage crate spawning right now should be carrying. */
+  private rollSalvageBlock(): { defId: string; name: string } | null {
+    const defId = rollPartDrop(Math.random, this.currentWave);
+    if (defId === null) return null;
+    return { defId, name: getPartDef(defId).name };
+  }
+
+  /**
+   * Spend one supply crate. Returning false leaves it standing — a full tank
+   * drives over fuel and comes back for it later.
+   */
+  private collectPickup(pickup: CollectedPickup): boolean {
+    // Three of the kinds are only worth anything to a wave in progress: kill
+    // money has nowhere to go, a sentry would guard an empty arena, and a
+    // twelve-second buff would burn down before the horde arrived. Those are
+    // left standing for the fight instead of being spent on the countdown.
+    if (
+      this.phase !== 'active' &&
+      (pickup.kind === 'cash' ||
+        pickup.kind === 'sentry' ||
+        pickup.kind === 'colossus')
+    ) {
+      return false;
+    }
+    switch (pickup.kind) {
+      case 'fuel': {
+        if (this.vehicle.refuel(FUEL_REFILL_FRACTION) <= 0) return false;
+        playSfx('fuelPickup');
+        this.popPickupToast('Refuelled', PICKUP_KINDS.fuel.minimapColor);
+        return true;
+      }
+      case 'cash': {
+        const amount = cashDropAmount(this.currentWave);
+        this.addPendingWaveKillReward(amount);
+        playSfx('pickupCash');
+        this.popPickupToast(`+$${amount}`, PICKUP_KINDS.cash.minimapColor);
+        return true;
+      }
+      case 'colossus': {
+        this.vehicle.grantColossus(
+          COLOSSUS_SECONDS,
+          COLOSSUS_SCALE,
+          COLOSSUS_DAMAGE_MULTIPLIER,
+          COLOSSUS_TOUGHNESS,
+          COLOSSUS_MOBILITY,
+        );
+        playSfx('pickupPower');
+        this.popPickupToast('COLOSSUS', PICKUP_KINDS.colossus.minimapColor);
+        return true;
+      }
+      case 'part': {
+        // The crate has been showing this exact block since it spawned, so it
+        // hands over what the player drove across the arena for.
+        if (pickup.defId === null) return false;
+        this.callbacks.onPartSalvaged?.(pickup.defId);
+        playSfx('pickupSalvage');
+        this.popPickupToast(
+          `SALVAGED ${getPartDef(pickup.defId).name}`,
+          PICKUP_KINDS.part.minimapColor,
+        );
+        return true;
+      }
+      case 'sentry': {
+        this.sentries.deploy(pickup.x, pickup.z, SENTRY_SECONDS);
+        playSfx('pickupSentry');
+        this.popPickupToast('SENTRY UP', PICKUP_KINDS.sentry.minimapColor);
+        return true;
+      }
+      case 'repair': {
+        const repaired = this.vehicle.repairOne();
+        playSfx(repaired === null ? 'uiDeny' : 'pickupRepair');
+        if (repaired === null) {
+          this.popPickupToast('RIG INTACT', PICKUP_KINDS.repair.minimapColor);
+          return true;
+        }
+        if (repaired.action === 'rebuild') this.showRepairedPart(repaired.partId);
+        this.popPickupToast(
+          repaired.action === 'rebuild'
+            ? `REBUILT ${repaired.name}`
+            : `PATCHED ${repaired.name}`,
+          PICKUP_KINDS.repair.minimapColor,
+        );
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * A rebuilt block is alive again, but `syncView` hid its mesh the frame it
+   * died and never looks at living parts. Show it here, once, on the step the
+   * repair kit put it back.
+   */
+  private showRepairedPart(partId: string): void {
+    const mesh = this.vehicleGroup.getObjectByName(`part:${partId}`);
+    if (mesh) mesh.visible = true;
+    const wheelMesh = this.wheelMeshes.get(partId);
+    if (wheelMesh) wheelMesh.visible = true;
+  }
+
+  /** Float what a crate just did off the top of the screen. */
+  private popPickupToast(text: string, color: string): void {
+    const chit = document.createElement('span');
+    chit.className = 'survival-pickup__chit';
+    chit.textContent = text;
+    chit.style.setProperty('--pickup-color', color);
+    chit.addEventListener('animationend', () => chit.remove());
+    this.pickupToasts.appendChild(chit);
   }
 
   private resolveLiveMineSweeper(): RuntimePart | null {
@@ -2987,7 +3271,10 @@ export class SurvivalMode {
     if (this.flameLanceSeconds <= 0 || this.flameLanceStats === null) return;
     const lance = this.flameLanceStats;
     this.flameLanceSeconds = Math.max(0, this.flameLanceSeconds - FIXED_DT);
-    if (this.flameLanceSeconds === 0) this.flameLanceStats = null;
+    if (this.flameLanceSeconds === 0) {
+      this.flameLanceStats = null;
+      this.flameLanceDuration = 0;
+    }
 
     const pos = this.vehicle.body.translation();
     const rotation = this.vehicle.body.rotation();
@@ -3460,6 +3747,10 @@ export class SurvivalMode {
         this.flameLanceSeconds,
         lance.durationSeconds,
       );
+      this.flameLanceDuration = Math.max(
+        this.flameLanceDuration,
+        lance.durationSeconds,
+      );
       this.flameLanceStats = {
         damage: lance.damage,
         ticksPerSecond: lance.ticksPerSecond,
@@ -3830,7 +4121,7 @@ export class SurvivalMode {
     const mines = this.zombies.activeMines();
     for (let index = 0; index < mines.length; index += 1) {
       const mine = mines[index];
-      if (mine.state !== 'armed' || !mine.revealed) continue;
+      if (mine.state !== 'armed') continue;
       const dx = mine.x - position.x;
       const dz = mine.z - position.z;
       const distanceSq = dx * dx + dz * dz;
@@ -3912,6 +4203,98 @@ export class SurvivalMode {
       view.remainingSeconds = this.abilityCooldowns.get(assignment.partId) ?? 0;
     }
     this.abilityBar.render(this.abilitySlotViews);
+    this.syncBuffHud();
+  }
+
+  /**
+   * Timers for the two crate effects that run on a clock: how much Colossus is
+   * left, and how long the last dropped sentry has to live. Both empty on their
+   * own, so the bar exists to answer "how long have I got" at a glance without
+   * the player counting seconds in their head.
+   */
+  private syncBuffHud(): void {
+    this.buffViews.length = 0;
+    // Only while there is a fight to spend them on. Outside one the timers are
+    // not being stepped, and a frozen bar over the victory or game-over panel
+    // would read as an effect the player still has.
+    if (this.phase !== 'countdown' && this.phase !== 'active') {
+      this.buffBar.render(this.buffViews);
+      return;
+    }
+    // Fixed order, so a row never jumps to a different line when another
+    // effect starts or stops underneath it.
+    this.pushBuffView(
+      'colossus',
+      PICKUP_KINDS.colossus.label,
+      PICKUP_KINDS.colossus.minimapColor,
+      this.vehicle.colossusSecondsRemaining,
+      COLOSSUS_SECONDS,
+    );
+    const overdrive = this.vehicle.overdriveSeconds;
+    this.pushBuffView(
+      'overdrive',
+      ABILITY_KIND_META.overdrive.label,
+      BUFF_COLORS.overdrive,
+      overdrive.remaining,
+      overdrive.total,
+    );
+    const reinforce = this.vehicle.reinforceSeconds;
+    this.pushBuffView(
+      'reinforce',
+      ABILITY_KIND_META.reinforce.label,
+      BUFF_COLORS.reinforce,
+      reinforce.remaining,
+      reinforce.total,
+    );
+    const shield = this.vehicle.invulnerableSeconds;
+    this.pushBuffView(
+      'shield',
+      ABILITY_KIND_META.shield.label,
+      BUFF_COLORS.shield,
+      shield.remaining,
+      shield.total,
+    );
+    const hellfire = this.vehicle.overchargeSeconds;
+    this.pushBuffView(
+      'hellfire',
+      ABILITY_KIND_META.hellfire.label,
+      BUFF_COLORS.hellfire,
+      hellfire.remaining,
+      hellfire.total,
+    );
+    this.pushBuffView(
+      'flamelance',
+      ABILITY_KIND_META.flamelance.label,
+      BUFF_COLORS.flamelance,
+      this.flameLanceSeconds,
+      this.flameLanceDuration,
+    );
+    this.pushBuffView(
+      'sentry',
+      PICKUP_KINDS.sentry.label,
+      PICKUP_KINDS.sentry.minimapColor,
+      this.sentries.secondsRemaining,
+      this.sentries.longestLifetime || SENTRY_SECONDS,
+    );
+    this.buffBar.render(this.buffViews);
+  }
+
+  /** Add one row for an effect that is actually running; skip it otherwise. */
+  private pushBuffView(
+    id: string,
+    label: string,
+    color: string,
+    remainingSeconds: number,
+    totalSeconds: number,
+  ): void {
+    if (remainingSeconds <= 0 || totalSeconds <= 0) return;
+    this.buffViews.push({
+      id,
+      label: label.toUpperCase(),
+      color,
+      remainingSeconds,
+      totalSeconds,
+    });
   }
 
   /**
@@ -4721,7 +5104,8 @@ export class SurvivalMode {
       this.onMusicVolumeInput,
     );
     this.ui.removeEventListener('click', this.onUiButtonClick, true);
-    this.fuelPickups.dispose();
+    this.pickups.dispose();
+    this.sentries.dispose();
     this.zombies.setDamageListener(null);
     this.damageNumbers.dispose();
     this.zombies.dispose();
@@ -4737,6 +5121,7 @@ export class SurvivalMode {
     this.threatAlert.dispose();
     this.waveClearCard.dispose();
     this.abilityBar.dispose();
+    this.buffBar.dispose();
     this.ui.remove();
     this.tracerRenderer.dispose();
     // Before the scene walk below: the ghosts share the vehicle's geometry, so

@@ -97,8 +97,6 @@ describe('jumping into a wave', () => {
       activeRun: null,
       inBuildPhase: false,
       runMoneyEarned: 999,
-      runSummary: { placeholder: true },
-      committedDestroyedPartNames: ['stale'],
       changeMoney,
       markProfileDirty: () => undefined,
       disposeTitle: () => undefined,
@@ -152,8 +150,6 @@ describe('jumping into a wave', () => {
     app.devWaveJump(12);
 
     expect(state.runMoneyEarned).toBe(0);
-    expect(state.runSummary).toBeUndefined();
-    expect(state.committedDestroyedPartNames).toEqual([]);
   });
 
   it('prefers the saved garage rig over whatever was in memory', () => {

@@ -38,11 +38,13 @@ describe('legible consequence summaries', () => {
     }
   });
 
-  it('flags the Phone Addict and garage EMP recommendation on wave 11', () => {
-    // No wave number in the copy: the boss wave shifted this by one, and it will
-    // shift again for anything the boss interval displaces later.
-    expect(threatWarningsForWave(11)).toEqual([
-      'Shielded Phone Addicts next — bring EMP. Buy EMP in the garage now.',
+  it('flags the Phone Addict and garage EMP recommendation on its debut wave', () => {
+    // No wave number in the copy: this has already moved twice — a boss wave
+    // displaced it once and the composition curve moved it again — and the
+    // warning always fires on whichever wave the shield first reaches the field.
+    expect(threatWarningsForWave(7)).toEqual([
+      'Shielded Phone Addicts next — their bubble stops bullets, not blades. ' +
+        'Ram them or fit a melee weapon.',
     ]);
   });
 
@@ -55,7 +57,7 @@ describe('legible consequence summaries', () => {
     );
     // Wave 11, not 10: wave 10 is a boss duel, asserted separately below.
     expect(formatWaveComposition(zombieCompositionForWave(11))).toBe(
-      '43 walkers / 10 gunslingers / 2 necromancers / 8 throwers / 2 workers / 1 phone-addict / 5 kamikazes / 1 behemoth / 1 zamboni',
+      '43 walkers / 10 gunslingers / 1 necromancer / 8 throwers / 1 worker / 2 phone-addicts / 4 kamikazes / 1 behemoth / 1 zamboni',
     );
     // A boss wave still fields a small horde of walkers and gunslingers
     // alongside the boss, both times it comes round.

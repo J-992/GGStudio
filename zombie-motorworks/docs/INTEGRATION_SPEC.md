@@ -250,6 +250,7 @@ functions.
 | `onReward`                    | Credit Profile and banked run earnings    | Clear only, exactly once, before checkpoint commit     |
 | `onWaveCleared`               | Update highest wave and milestone unlocks | Valid clear only                                       |
 | `onPhoneAddictKilled`         | Update lifetime kill gate                 | Real kill only; debug suppression is explicit          |
+| `onPartSalvaged`              | Unlock and stock a crate-dropped block    | Optional; mid-wave, independent of clear or checkpoint |
 | `onWaveCheckpoint`            | Commit survivor Blueprint/HP after clear  | Before a post-clear action can be processed            |
 | `onWaveAdvance`               | Continue in current Survival scene        | Uses the already resolved clear payload                |
 | `missingPartsQuote`           | Price earlier waves' unreplaced blocks    | Read-only; the card adds it to its own repair total    |
@@ -277,6 +278,11 @@ and lifetime Phone Addict kills.
 - Mine Sweeper and turret-module gates are derived from Profile progression
   helpers. Presentation should consume those helpers rather than restating
   thresholds in independent UI logic.
+- Inventory is written mid-wave as well as in the Garage: a salvage Supply Crate
+  unlocks its catalog entry and adds one to the Inventory through
+  `onPartSalvaged`. It banks immediately rather than through the wave-start
+  checkpoint, so a failed wave keeps the block; the unlock outlives the run and
+  the Inventory count is wiped with every other purchase when the run ends.
 
 ## Storage Contract
 
