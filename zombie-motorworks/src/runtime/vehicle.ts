@@ -247,11 +247,10 @@ const MAX_POST_SOLVE_SPEED_GAIN_MPS = 1.25;
 const MAX_POST_SOLVE_ANGULAR_SPEED = 8;
 const MAX_POST_SOLVE_ANGULAR_GAIN = 1.5;
 
-// Reverse: engages only below this forward speed (S is a brake above it),
-// locks the gearbox to first gear with the torque negated, and stops pushing
-// once reverse speed reaches the cap.
+// Reverse: engages only below this forward speed (S is a brake above it), then
+// drives with the same gearbox and the same speed ceiling as forward — the
+// torque is simply negated — so backing up accelerates like driving forward.
 const REVERSE_ENGAGE_MAX_FORWARD_MPS = 0.6;
-const REVERSE_MAX_SPEED_MPS = 5;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -960,7 +959,7 @@ export class RuntimeVehicle {
     const reversing =
       reverseInput > 0 &&
       forwardSpeed < REVERSE_ENGAGE_MAX_FORWARD_MPS &&
-      forwardSpeed > -REVERSE_MAX_SPEED_MPS;
+      forwardSpeed > -this.currentSpeedCeiling();
     const demand = reversing ? reverseInput : throttle;
 
     // Live drivetrain: engines attached+alive with fuel; wheels attached+driven.
@@ -978,11 +977,10 @@ export class RuntimeVehicle {
     let totalTorque = 0;
     let rpmDisplay = 0;
     for (const eng of liveEngines) {
-      // Reverse locks first gear (its ratio doubles as the reverse ratio)
-      // and negates the wheel torque; the automatic gearbox stays frozen.
-      if (reversing && eng.gearbox.gear !== 0) {
-        eng.gearbox = { gear: 0, shiftCooldown: eng.gearbox.shiftCooldown };
-      }
+      // Reverse runs the same automatic through the same ratios and only
+      // negates the wheel torque, so backing up pulls exactly as hard as
+      // driving forward. The rpm the box shifts on comes from |wheel speed|,
+      // which is direction-agnostic, so no separate reverse ladder is needed.
       const out: EngineOutput = engineStep(
         eng.def,
         eng.gearbox,
@@ -990,9 +988,7 @@ export class RuntimeVehicle {
         this.lastWheelTelemetry.meanDrivenOmega,
         dt,
       );
-      if (!reversing) {
-        eng.gearbox = updateGearbox(eng.gearbox, out.rpm, eng.def, dt);
-      }
+      eng.gearbox = updateGearbox(eng.gearbox, out.rpm, eng.def, dt);
       eng.rpm = out.rpm;
       totalTorque +=
         drivenWheels.length > 0
