@@ -4,15 +4,15 @@
 > edit by hand. Search this file for a path or exported symbol; do not read
 > it end to end as routine task setup.
 
-- Source Modules: 136
-- Source lines: 61,471
-- Test files scanned: 118
+- Source Modules: 137
+- Source lines: 62,049
+- Test files scanned: 120
 
 ## Largest Modules
 
 | Module | LOC |
 | --- | ---: |
-| [`src/survival/SurvivalMode.ts`](../../src/survival/SurvivalMode.ts) | 5226 |
+| [`src/survival/SurvivalMode.ts`](../../src/survival/SurvivalMode.ts) | 5282 |
 | [`src/survival/zombies/Zombie.ts`](../../src/survival/zombies/Zombie.ts) | 3649 |
 | [`src/vfx/VfxSystem.ts`](../../src/vfx/VfxSystem.ts) | 3551 |
 | [`src/editor/ui.ts`](../../src/editor/ui.ts) | 2914 |
@@ -447,7 +447,7 @@
 - External packages: `three`
 - Direct tests: none
 
-### [`src/editor/parts/defence.ts`](../../src/editor/parts/defence.ts) (366 LOC)
+### [`src/editor/parts/defence.ts`](../../src/editor/parts/defence.ts) (494 LOC)
 
 - Exports: `buildDroneSwarmMesh`, `buildPulseEmitterMesh`, `buildShieldGeneratorMesh`
 - Imports: `src/core/mass.ts`, `src/core/types.ts`, `src/editor/parts/shared.ts`
@@ -491,7 +491,7 @@
 
 - Exports: `boltRing`, `BoltRingOptions`, `boxWithEdges`, `DARK_STEEL`, `EDGE_COLOR`, `edgesOf`, `glowLambert`, `lambert`, `orientationQuaternion`, `partColor`, `shade`, `STEEL`, `toVector3`
 - Imports: `src/core/grid.ts`, `src/core/types.ts`
-- Imported by: `src/editor/meshes.ts`, `src/editor/parts/armourPlate.ts`, `src/editor/parts/defence.ts`, `src/editor/parts/engine.ts`, `src/editor/parts/fuelTank.ts`, `src/editor/parts/melee.ts`, `src/editor/parts/mobility.ts`, `src/editor/parts/signature.ts`, `src/editor/parts/upgradeKit.ts`, `src/editor/parts/weapons.ts`, `src/editor/parts/wheels.ts`, `src/survival/pickupModels.ts`
+- Imported by: `src/editor/meshes.ts`, `src/editor/parts/armourPlate.ts`, `src/editor/parts/defence.ts`, `src/editor/parts/engine.ts`, `src/editor/parts/fuelTank.ts`, `src/editor/parts/melee.ts`, `src/editor/parts/mobility.ts`, `src/editor/parts/signature.ts`, `src/editor/parts/upgradeKit.ts`, `src/editor/parts/weapons.ts`, `src/editor/parts/wheels.ts`, `src/survival/DroneEscort.ts`, `src/survival/pickupModels.ts`
 - External packages: `three`
 - Direct tests: none
 
@@ -627,6 +627,14 @@
 - External packages: `three`
 - Direct tests: none
 
+### [`src/survival/DroneEscort.ts`](../../src/survival/DroneEscort.ts) (354 LOC)
+
+- Exports: `DroneEscort`
+- Imports: `src/editor/parts/shared.ts`, `src/vfx/vfxConfig.ts`
+- Imported by: `src/survival/SurvivalMode.ts`
+- External packages: `three`
+- Direct tests: `unit/drone-escort.test.ts`
+
 ### [`src/survival/FollowCamera.ts`](../../src/survival/FollowCamera.ts) (141 LOC)
 
 - Exports: `FollowBounds`, `FollowCamera`
@@ -683,10 +691,10 @@
 - External packages: none
 - Direct tests: `unit/builds.test.ts`, `unit/signature-strikes.test.ts`
 
-### [`src/survival/SurvivalMode.ts`](../../src/survival/SurvivalMode.ts) (5226 LOC)
+### [`src/survival/SurvivalMode.ts`](../../src/survival/SurvivalMode.ts) (5282 LOC)
 
 - Exports: `applyZombieShot`, `createWaveClearPayload`, `SurvivalCallbacks`, `SurvivalMode`, `SurvivalPhase`, `SurvivalTelemetry`, `WaveClearPayload`
-- Imports: `src/app/badgeStore.ts`, `src/app/sfx.ts`, `src/core/abilities.ts`, `src/core/badges.ts`, `src/core/biomes.ts`, `src/core/economy.ts`, `src/core/leaderboard.ts`, `src/core/parts.ts`, `src/core/rng.ts`, `src/core/score.ts`, `src/core/signatures.ts`, `src/core/structural.ts`, `src/core/turretModules.ts`, `src/core/types.ts`, `src/core/waveTimeline.ts`, `src/editor/PartIconRenderer.ts`, `src/editor/meshes.ts`, `src/runtime/assembler.ts`, `src/runtime/vehicle.ts`, `src/runtime/weapons.ts`, `src/runtime/wheels.ts`, `src/survival/AutoAim.ts`, `src/survival/DamageNumbers.ts`, `src/survival/FollowCamera.ts`, `src/survival/Minimap.ts`, `src/survival/PhaseGhosts.ts`, `src/survival/Pickups.ts`, `src/survival/ReinforceWard.ts`, `src/survival/SentryTurrets.ts`, `src/survival/SignatureStrikes.ts`, `src/survival/ThreatAlert.ts`, `src/survival/ThreatPointer.ts`, `src/survival/Tracers.ts`, `src/survival/WarningHud.ts`, `src/survival/WaveClearCard.ts`, `src/survival/WaveManager.ts`, `src/survival/WaveTimelineHud.ts`, `src/survival/arena/Arena.ts`, `src/survival/arena/ArenaBuilder.ts`, `src/survival/arena/recipes/index.ts`, `src/survival/devtuning/DevTunerPanel.ts`, `src/survival/devtuning/DevTuning.ts`, `src/survival/devtuning/devMode.ts`, `src/survival/dropTable.ts`, `src/survival/threatPreview.ts`, `src/survival/vehicleWarnings.ts`, `src/survival/waveBalance.ts`, `src/survival/zombies/Zombie.ts`, `src/survival/zombies/ZombieSystem.ts`, `src/survival/zombies/bossConfig.ts`, `src/survival/zombies/zombieConfig.ts`, `src/ui/AbilityBar.ts`, `src/ui/BuffBar.ts`, `src/ui/ScopeCursor.ts`, `src/ui/audioVolumeControl.ts`, `src/ui/leaderboardTable.ts`, `src/ui/system.ts`, `src/vfx/VfxSystem.ts`, `src/vfx/shotVfx.ts`
+- Imports: `src/app/badgeStore.ts`, `src/app/sfx.ts`, `src/core/abilities.ts`, `src/core/badges.ts`, `src/core/biomes.ts`, `src/core/economy.ts`, `src/core/leaderboard.ts`, `src/core/parts.ts`, `src/core/rng.ts`, `src/core/score.ts`, `src/core/signatures.ts`, `src/core/structural.ts`, `src/core/turretModules.ts`, `src/core/types.ts`, `src/core/waveTimeline.ts`, `src/editor/PartIconRenderer.ts`, `src/editor/meshes.ts`, `src/runtime/assembler.ts`, `src/runtime/vehicle.ts`, `src/runtime/weapons.ts`, `src/runtime/wheels.ts`, `src/survival/AutoAim.ts`, `src/survival/DamageNumbers.ts`, `src/survival/DroneEscort.ts`, `src/survival/FollowCamera.ts`, `src/survival/Minimap.ts`, `src/survival/PhaseGhosts.ts`, `src/survival/Pickups.ts`, `src/survival/ReinforceWard.ts`, `src/survival/SentryTurrets.ts`, `src/survival/SignatureStrikes.ts`, `src/survival/ThreatAlert.ts`, `src/survival/ThreatPointer.ts`, `src/survival/Tracers.ts`, `src/survival/WarningHud.ts`, `src/survival/WaveClearCard.ts`, `src/survival/WaveManager.ts`, `src/survival/WaveTimelineHud.ts`, `src/survival/arena/Arena.ts`, `src/survival/arena/ArenaBuilder.ts`, `src/survival/arena/recipes/index.ts`, `src/survival/devtuning/DevTunerPanel.ts`, `src/survival/devtuning/DevTuning.ts`, `src/survival/devtuning/devMode.ts`, `src/survival/dropTable.ts`, `src/survival/threatPreview.ts`, `src/survival/vehicleWarnings.ts`, `src/survival/waveBalance.ts`, `src/survival/zombies/Zombie.ts`, `src/survival/zombies/ZombieSystem.ts`, `src/survival/zombies/bossConfig.ts`, `src/survival/zombies/zombieConfig.ts`, `src/ui/AbilityBar.ts`, `src/ui/BuffBar.ts`, `src/ui/ScopeCursor.ts`, `src/ui/audioVolumeControl.ts`, `src/ui/leaderboardTable.ts`, `src/ui/system.ts`, `src/vfx/VfxSystem.ts`, `src/vfx/shotVfx.ts`
 - Imported by: `src/app/App.ts`
 - External packages: `@dimforge/rapier3d-compat`, `three`
 - Direct tests: `unit/ice-cannon-slow.test.ts`, `unit/pending-rewards.test.ts`, `unit/run-checkpoint.test.ts`, `unit/run-score.test.ts`, `unit/turret-piercing.test.ts`, `unit/wave-clear-repair.test.ts`
@@ -715,13 +723,13 @@
 - External packages: `three`
 - Direct tests: `unit/tracers.test.ts`
 
-### [`src/survival/VoxelAssetLoader.ts`](../../src/survival/VoxelAssetLoader.ts) (257 LOC)
+### [`src/survival/VoxelAssetLoader.ts`](../../src/survival/VoxelAssetLoader.ts) (297 LOC)
 
 - Exports: `clearVoxelAssetCache`, `instantiateVoxelAsset`, `loadVoxelInstanceSource`, `preloadVoxelAsset`
 - Imports: none
 - Imported by: `src/survival/ThreatAlert.ts`, `src/survival/arena/ArenaBuilder.ts`, `src/survival/arena/placement.ts`, `src/survival/zombies/Zombie.ts`, `src/survival/zombies/ZombieSystem.ts`
 - External packages: `three`
-- Direct tests: none
+- Direct tests: `unit/voxel-asset-cache.test.ts`
 
 ### [`src/survival/WarningHud.ts`](../../src/survival/WarningHud.ts) (185 LOC)
 
@@ -1125,6 +1133,6 @@
 
 - Exports: `FRAME_SPAWN_BUDGET`, `GLOW_PARTICLE_CAPACITY`, `LIT_PARTICLE_CAPACITY`, `LOD_CULL_DISTANCE_M`, `LOD_FULL_DISTANCE_M`, `LOD_HALF_DISTANCE_M`, `SPLAT_FLATTEN`, `SPLAT_SPREAD`, `VFX_GROUND_Y`, `VFX_PALETTE`
 - Imports: none
-- Imported by: `src/chamber/ChamberMode.ts`, `src/survival/Tracers.ts`, `src/survival/zombies/ThrowerProjectiles.ts`, `src/survival/zombies/Zombie.ts`, `src/vfx/VfxSystem.ts`, `src/vfx/VoxelParticles.ts`
+- Imported by: `src/chamber/ChamberMode.ts`, `src/survival/DroneEscort.ts`, `src/survival/Tracers.ts`, `src/survival/zombies/ThrowerProjectiles.ts`, `src/survival/zombies/Zombie.ts`, `src/vfx/VfxSystem.ts`, `src/vfx/VoxelParticles.ts`
 - External packages: none
 - Direct tests: `unit/vfx.test.ts`

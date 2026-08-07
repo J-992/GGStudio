@@ -137,6 +137,7 @@ import { AutoAim } from './AutoAim.ts';
 import { FollowCamera } from './FollowCamera.ts';
 import { PhaseGhosts } from './PhaseGhosts.ts';
 import { ReinforceWard } from './ReinforceWard.ts';
+import { DroneEscort } from './DroneEscort.ts';
 import {
   chassisFootprintRadiusM,
   ORBIT_MARGIN_M,
@@ -691,6 +692,10 @@ export class SurvivalMode {
   private readonly phaseGhosts: PhaseGhosts;
   /** Ground chevron orbiting the rig, aimed at the nearest live zombie. */
   private readonly threatPointer: ThreatPointer;
+  /** The Drone Swarm bays' flight, loitering in the air around the rig. */
+  private readonly droneEscort: DroneEscort;
+  /** Scratch list of live bay levels, refilled on each escort recount. */
+  private readonly droneEscortLevels: number[] = [];
   /** Yellow hex shell shown while the Reinforce ward is soaking damage. */
   private reinforceWard: ReinforceWard | null = null;
   /** Translucent blue bubble shown while the shield special is active. */
@@ -990,10 +995,15 @@ export class SurvivalMode {
     // Measured while the chassis group still sits at the origin under an
     // identity transform (syncView is what first moves it), so this world box
     // is also the vehicle-local one.
+    const chassisRadiusM = chassisFootprintRadiusM(this.vehicleGroup);
     this.threatPointer = new ThreatPointer(
       this.scene,
-      chassisFootprintRadiusM(this.vehicleGroup) + ORBIT_MARGIN_M,
+      chassisRadiusM + ORBIT_MARGIN_M,
     );
+    // Measured off the same footprint: the flight loiters outside the rig
+    // whatever shape it is, and stays hidden until a bay is actually on it.
+    this.droneEscort = new DroneEscort(chassisRadiusM);
+    this.scene.add(this.droneEscort.root);
     this.followCamera = new FollowCamera(
       this.camera,
       this.vehicle,
@@ -2983,6 +2993,7 @@ export class SurvivalMode {
     this.pickups.updateVisuals(frameDt);
     this.sentries.updateVisuals(frameDt);
     this.syncShieldBubble(frameDt);
+    this.syncDroneEscort(frameDt, position);
     this.syncReinforceWard(frameDt);
     this.syncZapBlast(frameDt);
     this.syncCharmPulse(frameDt);
@@ -3242,6 +3253,11 @@ export class SurvivalMode {
       );
       if (hit === null) continue;
       this.vfx.droneIntercept(hit.x, hit.y, hit.z);
+      // The catch happens out where the box was; the bubble is what says the
+      // rig itself was covered, so both go off together — and the flight is
+      // handed the kill point so the nearest drones are seen going out to it,
+      // rather than the shot popping on its own with the escort still loitering.
+      this.droneEscort.flashIntercept(hit);
       playSfx('droneIntercept');
     }
     // No bay on the rig: check again next step rather than every frame forever,
@@ -4429,6 +4445,30 @@ export class SurvivalMode {
   }
 
   /**
+   * Keep the Drone Swarm flight in the air over the rig.
+   *
+   * The count is the sum of what every live bay is worth at its level, so
+   * upgrading a bay puts another drone up immediately and losing one to a
+   * grabber takes its flight home. Recounting is throttled by the escort
+   * itself; between recounts this is just the ring flying.
+   */
+  private syncDroneEscort(
+    frameDt: number,
+    position: { x: number; y: number; z: number },
+  ): void {
+    if (this.droneEscort.needsRecount()) {
+      this.droneEscortLevels.length = 0;
+      for (const part of this.vehicle.assembled.parts.values()) {
+        if (part.def.interceptor === undefined) continue;
+        if (!this.isAttachedAlivePart(part)) continue;
+        this.droneEscortLevels.push(part.placed.config.level ?? 1);
+      }
+      this.droneEscort.setDroneCount(DroneEscort.droneCount(this.droneEscortLevels));
+    }
+    this.droneEscort.update(frameDt, position);
+  }
+
+  /**
    * Drive the Reinforce ward's hex shell from the vehicle's ward pool. The
    * shell is a child of the vehicle group, so it follows the chassis; it is
    * built on the first activation of the run and reused from then on, since a
@@ -5146,6 +5186,7 @@ export class SurvivalMode {
     this.phaseGhosts.dispose();
     this.reinforceWard?.dispose();
     this.reinforceWard = null;
+    this.droneEscort.dispose();
     this.threatPointer.dispose();
     disposeObject(this.scene);
     this.scene.clear();
