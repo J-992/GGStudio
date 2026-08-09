@@ -11,7 +11,7 @@
  */
 
 import RAPIER from '@dimforge/rapier3d-compat';
-import type { AssembledVehicle } from './assembler.ts';
+import type { AssembledVehicle, RuntimePart } from './assembler.ts';
 import { DEBRIS_GROUPS } from './assembler.ts';
 import { CELL_SIZE } from '../core/types.ts';
 import { computeIslands } from '../core/structural.ts';
@@ -97,6 +97,47 @@ export function applyImpactDamage(
   }
 }
 
+/**
+ * Share of a hit landing on a tire or tread that the wheel itself keeps; the
+ * rest is carried into whatever it is bolted to.
+ *
+ * A wheel is one part with one health bar, but losing it costs the player a
+ * corner of the car — far more than the block next to it is worth — and it is
+ * the part every hazard reaches first, sitting lowest and furthest out. Passing
+ * most of a hit up into the mount and the frame around it spreads a beating
+ * across the rig instead of shooting out one corner, so a run ends with a car
+ * that has been ground down rather than one that lost a tire and then died.
+ */
+export const WHEEL_DAMAGE_SHARE = 0.4;
+
+/** One part eating one hit: armour first, and never fully absorbed. */
+function dealTo(part: RuntimePart, amount: number): void {
+  const absorb =
+    part.def.armour && !part.def.armour.cosmetic
+      ? part.def.armour.protection
+      : 0;
+  part.health -= Math.max(1, amount - absorb);
+}
+
+/** Live, still-attached parts this one is bolted to through a live connection. */
+function loadBearingNeighbours(
+  vehicle: AssembledVehicle,
+  partId: string,
+): RuntimePart[] {
+  const out: RuntimePart[] = [];
+  for (const ci of vehicle.connectionsByPart.get(partId) ?? []) {
+    const conn = vehicle.connections[ci];
+    if (conn.health <= 0) continue;
+    const otherId = conn.aId === partId ? conn.bId : conn.aId;
+    const other = vehicle.parts.get(otherId);
+    // Wheels pass a hit on to structure, never to another wheel — a bogie of
+    // treads would otherwise just trade the same damage back and forth.
+    if (!other || !other.alive || other.detached || other.def.wheel) continue;
+    out.push(other);
+  }
+  return out;
+}
+
 export function applyDirectDamage(
   vehicle: AssembledVehicle,
   partId: string,
@@ -104,11 +145,19 @@ export function applyDirectDamage(
 ): void {
   const part = vehicle.parts.get(partId);
   if (!part || !part.alive) return;
-  const absorb =
-    part.def.armour && !part.def.armour.cosmetic
-      ? part.def.armour.protection
-      : 0;
-  part.health -= Math.max(1, amount - absorb);
+  if (part.def.wheel === undefined) {
+    dealTo(part, amount);
+    return;
+  }
+  const carriers = loadBearingNeighbours(vehicle, partId);
+  if (carriers.length === 0) {
+    // A wheel hanging off a broken mount has nothing to share with.
+    dealTo(part, amount);
+    return;
+  }
+  dealTo(part, amount * WHEEL_DAMAGE_SHARE);
+  const carried = (amount * (1 - WHEEL_DAMAGE_SHARE)) / carriers.length;
+  for (const carrier of carriers) dealTo(carrier, carried);
 }
 
 /**

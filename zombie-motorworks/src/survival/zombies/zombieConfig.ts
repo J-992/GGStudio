@@ -1,4 +1,4 @@
-import type { PlowDefinition } from '../../core/types.ts';
+import type { PartDefinition, PlowDefinition } from '../../core/types.ts';
 
 /** Wave-one zombie stats. WaveManager supplies health/speed/damage multipliers. */
 export const BASE_ZOMBIE_STATS = {
@@ -43,6 +43,36 @@ export const ZOMBIE_ATTACK_RANGE = 2.4;
 /** Nearest-part-centroid distance used for true ram/swarm contact. */
 export const ZOMBIE_CONTACT_RADIUS = 1.1;
 export const ZOMBIE_ATTACK_EXIT_MARGIN = 0.35;
+
+/**
+ * What the horde bites once it is actually up against the rig, lowest tier
+ * first. Purely geometric targeting made every fight the same fight: the tires
+ * are the lowest, most exposed thing on the car, so they were always the
+ * nearest anchor to a zombie standing beside it, and a run ended with one
+ * corner shot out while the hull was untouched. Losing a wheel is the most
+ * punishing single loss on the vehicle, so it should be the last thing the
+ * horde chews through, not the first.
+ *
+ * Tiers only decide between parts a zombie could already reach
+ * ({@link ZOMBIE_ATTACK_RANGE}); the walk in is still plain nearest-part, so
+ * nothing marches past the car toward a gun it cannot get to.
+ */
+export const BITE_TIER = {
+  /** Guns, rams and blades — the hardware that is out in the horde's face. */
+  weapon: 0,
+  /** Frame, armour, engines, gadgets: the bulk of the rig. */
+  block: 1,
+  /** Tires and treads: bitten only when nothing else is within reach. */
+  wheel: 2,
+} as const;
+
+/** Which {@link BITE_TIER} a part belongs to. */
+export function bitePriority(def: PartDefinition): number {
+  if (def.wheel !== undefined) return BITE_TIER.wheel;
+  if (def.weapon !== undefined || def.melee !== undefined)
+    return BITE_TIER.weapon;
+  return BITE_TIER.block;
+}
 
 export const ZOMBIE_RADIUS = 0.32;
 export const ZOMBIE_HALF_HEIGHT = 0.55;

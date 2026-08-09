@@ -12,6 +12,7 @@ import { getPartDef } from '../src/core/parts.ts';
 import { deserializeBlueprint } from '../src/core/serialize.ts';
 import { deriveConnections } from '../src/core/structural.ts';
 import { GROUP_TERRAIN, lowestPointM } from '../src/runtime/assembler.ts';
+import { WHEEL_DAMAGE_SHARE } from '../src/runtime/damage.ts';
 import type { VehicleControls } from '../src/runtime/vehicle.ts';
 import { RuntimeVehicle } from '../src/runtime/vehicle.ts';
 import {
@@ -84,8 +85,12 @@ describe('colossus crate', () => {
   it('doubles what the rig deals and halves what reaches its blocks', () => {
     const world = makeWorld();
     const vehicle = spawnVehicle(world);
-    const wheel = vehicle.wheels()[0];
-    const part = vehicle.assembled.parts.get(wheel.partId)!;
+    // A hull block, not a wheel: wheel hits are shared out across the parts the
+    // wheel is bolted to (see WHEEL_DAMAGE_SHARE), which would hide the
+    // toughness multiplier this test is measuring.
+    const part = [...vehicle.assembled.parts.values()].find(
+      (candidate) => candidate.def.id === 'frame-box',
+    )!;
 
     expect(vehicle.outgoingDamageMultiplier).toBe(1);
     expect(vehicle.colossusScale).toBe(1);
@@ -95,7 +100,7 @@ describe('colossus crate', () => {
     expect(vehicle.colossusScale).toBe(COLOSSUS_SCALE);
 
     const before = part.health;
-    vehicle.applyDirectDamage(wheel.partId, 40);
+    vehicle.applyDirectDamage(part.placed.id, 40);
     expect(before - part.health).toBeCloseTo(40 / COLOSSUS_TOUGHNESS, 5);
 
     world.free();
@@ -141,7 +146,12 @@ describe('repair crate', () => {
 
     const wheel = vehicle.wheels()[0];
     const part = vehicle.assembled.parts.get(wheel.partId)!;
-    vehicle.applyDirectDamage(wheel.partId, part.def.health * 2);
+    // Only WHEEL_DAMAGE_SHARE of a hit stays on the tire; the rest goes into
+    // the block it is bolted to, so a killing blow costs proportionally more.
+    vehicle.applyDirectDamage(
+      wheel.partId,
+      (part.def.health / WHEEL_DAMAGE_SHARE) * 1.05,
+    );
     vehicle.finishStep();
     expect(part.alive).toBe(false);
     expect(wheel.broken).toBe(true);

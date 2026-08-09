@@ -41,6 +41,7 @@ import {
   ACID_PUDDLE_DAMAGE_PER_SECOND,
   ACID_PUDDLE_DRAG_PER_SECOND,
   BEHEMOTH_BOULDER_LAUNCH_HEIGHT,
+  bitePriority,
   HORDE_SCATTER_RADIUS,
   IMPACT_DAMAGE_PER_SPEED,
   LANDMINE_BLAST_RADIUS,
@@ -70,6 +71,7 @@ import {
   STUCK_TELEPORT_SECONDS,
   SWARM_DRAG_ACCELERATION,
   SWARM_DRAG_PER_CONTACT,
+  ZOMBIE_ATTACK_RANGE,
   ZOMBIE_CONTACT_RADIUS,
   ZOMBIE_HALF_HEIGHT,
   ZOMBIE_POOL_COUNTS,
@@ -179,6 +181,14 @@ function separationCellKey(x: number, z: number): number {
 const FULL_TARGET_SCAN_RANGE_M = 14;
 /** How often a distant zombie re-scans, in fixed steps (staggered by index). */
 const DISTANT_TARGET_RESCAN_STEPS = 8;
+
+/**
+ * Bite-tier preference only sorts parts a zombie can hit from where it stands,
+ * so the envelope is exactly the attack range: whatever tier wins here is in
+ * range the moment it is picked, and nothing gets chosen that the zombie would
+ * have to shoulder further into the hull to reach.
+ */
+const BITE_SELECT_RANGE_SQ = ZOMBIE_ATTACK_RANGE * ZOMBIE_ATTACK_RANGE;
 
 /** Contact effect for a touched part: its melee visual, or a bare ram. */
 function meleeVfxKindFor(visual: string | undefined): MeleeVfxKind {
@@ -1779,11 +1789,21 @@ export class ZombieSystem {
     );
   }
 
+  /**
+   * Nearest live part, except among the ones already within biting distance,
+   * where {@link bitePriority} picks the tier first and distance only breaks
+   * ties. Restricting the preference to what is in reach keeps the approach
+   * purely geometric — a zombie still walks at the closest corner of the rig —
+   * while stopping the whole horde from eating the tires simply because tires
+   * hang lowest and closest.
+   */
   private scanNearestVehiclePart(zombie: Zombie): void {
     const target = zombie.vehicleTarget;
     let nearestDistanceSq = Infinity;
-    target.partId = null;
-    target.distance = Infinity;
+    let nearest: VehiclePartAnchor | null = null;
+    let biteTier = Infinity;
+    let biteDistanceSq = Infinity;
+    let bite: VehiclePartAnchor | null = null;
 
     for (const anchor of this.vehicleAnchors) {
       if (!anchor.part.alive || anchor.part.detached || anchor.part.health <= 0)
@@ -1792,14 +1812,35 @@ export class ZombieSystem {
       const dy = anchor.worldY - zombie.position.y;
       const dz = anchor.worldZ - zombie.position.z;
       const distanceSq = dx * dx + dy * dy + dz * dz;
-      if (distanceSq >= nearestDistanceSq) continue;
-      nearestDistanceSq = distanceSq;
-      target.partId = anchor.partId;
-      target.x = anchor.worldX;
-      target.y = anchor.worldY;
-      target.z = anchor.worldZ;
+      if (distanceSq < nearestDistanceSq) {
+        nearestDistanceSq = distanceSq;
+        nearest = anchor;
+      }
+      if (distanceSq > BITE_SELECT_RANGE_SQ) continue;
+      const tier = bitePriority(anchor.part.def);
+      if (
+        tier > biteTier ||
+        (tier === biteTier && distanceSq >= biteDistanceSq)
+      )
+        continue;
+      biteTier = tier;
+      biteDistanceSq = distanceSq;
+      bite = anchor;
     }
-    if (target.partId !== null) target.distance = Math.sqrt(nearestDistanceSq);
+
+    const chosen = bite ?? nearest;
+    if (chosen === null) {
+      target.partId = null;
+      target.distance = Infinity;
+      return;
+    }
+    target.partId = chosen.partId;
+    target.x = chosen.worldX;
+    target.y = chosen.worldY;
+    target.z = chosen.worldZ;
+    target.distance = Math.sqrt(
+      bite !== null ? biteDistanceSq : nearestDistanceSq,
+    );
   }
 
   /** Nearest targetable enemy zombie for a charmed ally to attack. */
