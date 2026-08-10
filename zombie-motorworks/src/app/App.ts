@@ -31,7 +31,11 @@ import {
   type EditorViewState,
 } from '../editor/EditorMode.ts';
 import { CommandHistory } from '../core/commands.ts';
-import { isCoarsePointer, maxPixelRatio } from '../ui/device.ts';
+import {
+  isCoarsePointer,
+  maxPixelRatio,
+  shouldUseTouchControls,
+} from '../ui/device.ts';
 import { ChamberMode, type ScenarioName } from '../chamber/ChamberMode.ts';
 import type { VehicleControls } from '../runtime/vehicle.ts';
 import { SurvivalMode } from '../survival/SurvivalMode.ts';
@@ -685,7 +689,10 @@ export class App {
     // Reopened rather than refreshed: the editor caches meshes, selection and
     // overlays off the blueprint it was constructed with, and every one of
     // those is stale the moment the rig underneath changes.
-    this.pendingEditorNotice = buildWelcomeNotice(buildId);
+    this.pendingEditorNotice = buildWelcomeNotice(
+      buildId,
+      shouldUseTouchControls() ? 'touch' : 'pointer',
+    );
     this.openEditor();
   }
 

@@ -441,7 +441,9 @@ export class ChamberMode {
     const help = document.createElement('div');
     help.className = 'hud-note';
     help.textContent =
-      'W throttle · S brake/reverse · A/D steer · Space brake · F or click: fire · mouse: aim';
+      shouldUseTouchControls()
+        ? 'Left thumb: steer and throttle · right thumb: aim and fire'
+        : 'W throttle · S brake/reverse · A/D steer · Space brake · F or click: fire · mouse: aim';
     this.ui.appendChild(help);
 
     this.banner = document.createElement('div');

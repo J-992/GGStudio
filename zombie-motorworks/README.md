@@ -32,6 +32,25 @@ The game is a static Three.js + Rapier web build: no game engine and no server.
 - Mouse click or `F` — fire manual weapons
 - Auto turrets find and fire at live zombies on their own. The Heavy Cannon is manual.
 
+### Touch
+
+Phones and tablets get on-screen controls instead; they never appear on a
+pointer-precise device. Detection is by pointer type, not screen width, so a
+tablet gets them too. Append `?touch=1` to force them on for testing, `?touch=0`
+to force them off.
+
+- Left half — floating joystick. It appears wherever your thumb lands rather
+  than in a fixed corner. Push up for throttle; push down to brake while
+  rolling and to reverse once stopped; left and right steer.
+- Right half — drag to aim the manual weapons; they fire while you hold. A
+  touch also calls down the signature strike, exactly as a click does.
+- Ability boxes move into the right thumb's reach. The two keybinds with no
+  on-screen twin get buttons: a handbrake, and a self-right that appears only
+  while the rig is stuck.
+- In the garage, the parts store is a bottom drawer — tap **PARTS** to open it,
+  and it closes itself when you pick a block so you can tap the grid. The build
+  report and the minimap fold away and remember it.
+
 ## Build rules
 
 Every part must stay within the grid and connect to the Chassis Core through face-to-face structural sockets. The editor tracks a 24-orientation integer grid, so rotations and mirrored builds remain exact. Wheels are normalized as driven and braking, and wheels ahead of the axle midpoint steer unless you tick the box yourself — an explicit choice is never overwritten. The play gate requires a root chassis, a control part, an engine, and one connected structure; analysis warns about poor wheel setups.

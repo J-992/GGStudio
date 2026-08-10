@@ -342,19 +342,31 @@ export function buildStarterRig(buildId: unknown): VehicleBlueprint {
  * which button fires it.
  *
  * A player who has just picked a build has never seen its weapon and has no
- * reason to guess that left-click does anything — every other gun in the game
- * aims itself. This is the only place that is explained, so it names the block,
- * the strike, and the control together.
+ * reason to guess that the fire control does anything — every other gun in the
+ * game aims itself. This is the only place that is explained, so it names the
+ * block, the strike, and the control together.
+ *
+ * The control is a parameter rather than something this module works out for
+ * itself: `core` is engine-independent and must not reach for a pointer type.
+ * Telling a phone player to left-click is worse than saying nothing, so the
+ * caller — which does know what it is running on — supplies the gesture.
  */
-export function buildWelcomeNotice(buildId: unknown): string {
+export function buildWelcomeNotice(
+  buildId: unknown,
+  input: 'pointer' | 'touch' = 'pointer',
+): string {
   const build = getBuild(buildId);
   const def = PART_CATALOG[build.signatureDefId];
   const strike = def?.signature
     ? SIGNATURE_KIND_META[def.signature.kind].label
     : build.signatureName;
+  const gesture =
+    input === 'touch'
+      ? 'touch anywhere on the right of the arena'
+      : 'left-click anywhere in the arena';
   return (
     `${build.name} it is. Your ${def?.name ?? 'signature block'} is already ` +
-    `fitted — left-click anywhere in the arena to fire ${strike}, and watch ` +
+    `fitted — ${gesture} to fire ${strike}, and watch ` +
     `the reticle for when it is ready. Upgrade the block here to hit harder ` +
     `and reload faster.`
   );
