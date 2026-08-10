@@ -18,6 +18,22 @@ const BUILD_CARD_STORAGE_KEY = 'zm.garage.buildcard';
 const COMPACT_BREAKPOINT = Number.POSITIVE_INFINITY;
 const SWIPE_THRESHOLD_PX = 24;
 
+const COMPACT_BUTTON_GLYPHS: Readonly<Record<string, string>> = {
+  'New Garage': '+',
+  Menu: '☰',
+  'Save & Quit': '⇥',
+  Tutorial: '?',
+  Help: 'i',
+  Share: '↗',
+  'Test Drive': '▶',
+};
+
+interface RestoredAttribute {
+  element: HTMLElement;
+  name: string;
+  value: string | null;
+}
+
 let nextPaletteId = 1;
 
 /** Controls the touch-only presentation layered over the ordinary garage DOM. */
@@ -63,6 +79,52 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
   let pointerSwiped = false;
   let suppressNextClick = false;
   let suppressClickTimer: number | null = null;
+  const restoredAttributes: RestoredAttribute[] = [];
+
+  const setTemporaryAttribute = (
+    element: HTMLElement,
+    name: string,
+    value: string,
+  ): void => {
+    restoredAttributes.push({
+      element,
+      name,
+      value: element.getAttribute(name),
+    });
+    element.setAttribute(name, value);
+  };
+
+  const decorateCompactTopbar = (): void => {
+    if (!topbar) return;
+
+    const nameInput = topbar.querySelector<HTMLElement>('.garage-name');
+    if (nameInput && !nameInput.hasAttribute('aria-label')) {
+      setTemporaryAttribute(nameInput, 'aria-label', 'Vehicle name');
+    }
+
+    const viewSelect = topbar.querySelector<HTMLElement>('select');
+    if (viewSelect && !viewSelect.hasAttribute('aria-label')) {
+      setTemporaryAttribute(viewSelect, 'aria-label', 'Garage view');
+    }
+
+    for (const button of topbar.querySelectorAll<HTMLButtonElement>('button')) {
+      const label = button.textContent?.trim();
+      if (!label) continue;
+      if (!button.hasAttribute('aria-label')) {
+        setTemporaryAttribute(button, 'aria-label', label);
+      }
+      const glyph = COMPACT_BUTTON_GLYPHS[label];
+      if (glyph) setTemporaryAttribute(button, 'data-mobile-glyph', glyph);
+    }
+  };
+
+  const restoreTemporaryAttributes = (): void => {
+    for (const { element, name, value } of restoredAttributes.reverse()) {
+      if (value === null) element.removeAttribute(name);
+      else element.setAttribute(name, value);
+    }
+    restoredAttributes.length = 0;
+  };
 
   const readStoredBoolean = (key: string): boolean | null => {
     try {
@@ -139,7 +201,21 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     if (!installed) return;
 
     const narrow = root.getBoundingClientRect().width < COMPACT_BREAKPOINT;
-    topbar?.toggleAttribute('data-density', narrow);
+    // `toggleAttribute` writes an empty value, and every compact rule selects
+    // on `[data-density='compact']` — so the whole compact layer silently never
+    // applied. The value has to be set explicitly.
+    if (narrow) topbar?.setAttribute('data-density', 'compact');
+    else topbar?.removeAttribute('data-density');
+
+    // The notice card and anything else pinned below the bar cannot use a fixed
+    // offset: the bar wraps to two rows on a narrow screen and to one on a wide
+    // one. Publishing its measured height lets the stylesheet follow it.
+    if (topbar) {
+      root.style.setProperty(
+        '--garage-topbar-h',
+        `${Math.round(topbar.getBoundingClientRect().height)}px`,
+      );
+    }
 
     if (!buildCardHasPreference) {
       buildCardCollapsedPreference = narrow;
@@ -231,6 +307,7 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     palette = root.querySelector<HTMLElement>('.palette, .garage-dock');
     buildCard = root.querySelector<HTMLElement>('.build-card, .vehicle-stats');
     topbar = root.querySelector<HTMLElement>('.topbar');
+    decorateCompactTopbar();
 
     paletteOpenPreference = readStoredBoolean(PALETTE_STORAGE_KEY) ?? false;
 
@@ -346,6 +423,8 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
       }
     }
     topbar?.removeAttribute('data-density');
+    root.style.removeProperty('--garage-topbar-h');
+    restoreTemporaryAttributes();
     root.removeAttribute('data-palette-open');
     root.removeAttribute('data-mobile-garage');
 
