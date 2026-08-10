@@ -133,3 +133,34 @@ right half the time and silently off by one the rest.
 
 Schema 5 migrates 1-4 to `phase: 'wave'`, `activeWave: wave`, which is what
 those saves already meant. No existing save is rejected.
+
+## Mobile support (2026-08-10)
+
+Touch is a separate input path, not a keyboard emulation. `VehicleControls` was
+already analog, so the stick writes throttle/steer/brake straight into it;
+faking key presses would have thrown away the analog range the physics can use.
+
+Control scheme resolves the standard "three inputs, two thumbs" problem for a
+driving-plus-combat game: left thumb is a **floating** joystick (spawns under
+the thumb, no hunt for a fixed corner), right thumb is an aim pad that aims and
+fires in one gesture. Auto-accelerate — the other common resolution — was left
+out: down-on-the-stick already carries the keyboard's brake-versus-reverse
+rule, and a builder game where reversing out of a pile-up matters should not
+take the throttle away from the player. It is the obvious thing to revisit if
+playtesting says the right thumb is overloaded.
+
+`shouldUseTouchControls()` gates everything on **pointer type, not width**, so
+tablets get touch controls and a desktop browser is never handed an invisible
+input shield over the arena. `?touch=1` / `?touch=0` force it either way, which
+is the only way to exercise the mobile layout without holding a phone.
+
+Layout rules live in per-screen files (`mobile.css`, `touch.css`,
+`editor-mobile.css`, `survival-mobile.css`) rather than in `style.css`. That
+kept four agents off one shared file, and it keeps the desktop layout provably
+untouched: every rule is behind `pointer: coarse`, `hover: none`, or a
+`data-mobile-*` attribute that only a coarse pointer ever sets.
+
+Panels collapse on **any** coarse pointer rather than below a width threshold.
+Width was the wrong axis — a phone in landscape is wide but ~390 px tall, which
+is where the crowding actually is.
+
