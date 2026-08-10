@@ -219,3 +219,104 @@ export function driveFromJoystick(
   }
   return NEUTRAL_DRIVE;
 }
+
+/**
+ * Fold an angle into (-PI, PI], so a heading error is always the short way
+ * round rather than the long one.
+ *
+ * The boundary is normalised to +PI: a modulo lands an exact half-turn on -PI,
+ * which is the same direction but reads as the opposite sign to any caller
+ * branching on it.
+ */
+export function wrapAngle(radians: number): number {
+  if (!Number.isFinite(radians)) return 0;
+  const wrapped = (radians + Math.PI) % (2 * Math.PI);
+  const folded = (wrapped < 0 ? wrapped + 2 * Math.PI : wrapped) - Math.PI;
+  return folded === -Math.PI ? Math.PI : folded;
+}
+
+export interface HeadingDriveOptions {
+  /** Steering demand per radian of heading error. */
+  readonly steerGain?: number;
+  /** Below this forward speed, a stick pushed backwards reverses. */
+  readonly reverseSpeedThresholdMps?: number;
+  /** Heading error past which a near-stopped rig backs up instead of arcing. */
+  readonly reverseArcRadians?: number;
+  /** Throttle retained at a full 180-degree error, so hard turns still bite. */
+  readonly minTurnThrottle?: number;
+}
+
+/**
+ * Steer toward wherever the stick points, rather than mapping stick-x to the
+ * front wheels.
+ *
+ * The follow camera is world-aligned — it never rotates with the rig — so
+ * "left" on the stick and "left" for the driver are the same thing only while
+ * the car happens to be pointing up the screen. After a 180 they are opposites,
+ * and the car fights every correction the player makes. Treating the stick as a
+ * *destination heading* removes the problem outright: push where you want to
+ * go, and the rig turns until it is going there, whichever way it started.
+ *
+ * Yaw is this codebase's `atan2(x, z)` convention, and positive steer produces
+ * a negative rotation about +Y (see `commandedYawRate`), so the demand carries
+ * the opposite sign to the heading error.
+ */
+export function driveTowardHeading(
+  stick: JoystickVector,
+  desiredYaw: number,
+  vehicleYaw: number,
+  forwardSpeedMps: number,
+  options: HeadingDriveOptions = {},
+): JoystickDrive {
+  if (
+    !stick.active ||
+    !Number.isFinite(desiredYaw) ||
+    !Number.isFinite(vehicleYaw) ||
+    !Number.isFinite(forwardSpeedMps)
+  ) {
+    return NEUTRAL_DRIVE;
+  }
+
+  const steerGain = finiteOr(options.steerGain ?? 2.2, 2.2);
+  const reverseSpeedThresholdMps = finiteOr(
+    options.reverseSpeedThresholdMps ?? 1.2,
+    1.2,
+  );
+  const reverseArcRadians = finiteOr(
+    options.reverseArcRadians ?? (Math.PI * 3) / 4,
+    (Math.PI * 3) / 4,
+  );
+  const minTurnThrottle = clamp(finiteOr(options.minTurnThrottle ?? 0.45, 0.45), 0, 1);
+
+  const error = wrapAngle(desiredYaw - vehicleYaw);
+  const magnitude = clamp(stick.magnitude, 0, 1);
+
+  // Asked to go back the way it came while barely moving: reversing is what a
+  // driver would do, and arcing forward would only bury the rig deeper into
+  // whatever it just backed into. The tail is what has to point at the target,
+  // so the error is measured against the rig's back and the sign flips with it.
+  if (
+    Math.abs(error) > reverseArcRadians &&
+    Math.abs(forwardSpeedMps) < reverseSpeedThresholdMps
+  ) {
+    const tailError = wrapAngle(desiredYaw - vehicleYaw + Math.PI);
+    return {
+      throttle: 0,
+      reverse: magnitude,
+      brake: 0,
+      steer: clamp(tailError * steerGain, -1, 1),
+    };
+  }
+
+  // Ease off the throttle as the error grows, so a hard turn is a turn rather
+  // than a wide understeering arc — but never to zero, or the rig cannot rotate
+  // at all once it has stopped.
+  const turnScale =
+    1 - (1 - minTurnThrottle) * Math.min(Math.abs(error) / Math.PI, 1);
+  return {
+    throttle: magnitude * turnScale,
+    reverse: 0,
+    brake: 0,
+    steer: clamp(-error * steerGain, -1, 1),
+  };
+}

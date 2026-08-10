@@ -117,7 +117,7 @@ import {
   installSurvivalMobileHud,
   type SurvivalMobileHud,
 } from './MobileHud.ts';
-import { driveFromJoystick } from '../core/joystick.ts';
+import { driveTowardHeading } from '../core/joystick.ts';
 import { buildLeaderboardTable } from '../ui/leaderboardTable.ts';
 import { VfxSystem } from '../vfx/VfxSystem.ts';
 import { WarningHud } from './WarningHud.ts';
@@ -707,6 +707,11 @@ export class SurvivalMode {
   private touchUnsubscribe: (() => void) | null = null;
   /** Held brake button; separate from the stick's brake-while-rolling arc. */
   private touchBraking = false;
+  /** Camera-relative basis for the stick, rebuilt each step, allocation-free. */
+  private readonly stickForward = new THREE.Vector3();
+  private readonly stickRight = new THREE.Vector3();
+  private readonly stickHeading = new THREE.Vector3();
+  private readonly stickQuaternion = new THREE.Quaternion();
   /** Phone HUD layout: minimizable panels, thumb-clear anchoring. Inert on desktop. */
   private readonly mobileHud: SurvivalMobileHud;
   private readonly buffBar: BuffBar;
@@ -2047,6 +2052,38 @@ export class SurvivalMode {
   }
 
   /**
+   * World yaw the stick is pointing at, in the `atan2(x, z)` convention the
+   * rest of the game uses.
+   *
+   * Derived from the live camera basis rather than a constant, so it stays
+   * correct if the follow rig's offset is ever retuned: the ground-plane
+   * projections of the camera's forward and right axes are what "up" and
+   * "right" mean to the player looking at the screen.
+   */
+  private stickYawWorld(x: number, y: number): number {
+    this.camera.getWorldDirection(this.stickForward);
+    this.stickForward.y = 0;
+    if (this.stickForward.lengthSq() < 1e-6) this.stickForward.set(0, 0, 1);
+    this.stickForward.normalize();
+    // Screen-right on the ground plane: forward x worldUp. Check it against the
+    // Three.js default of looking down -Z, which must give +X.
+    this.stickRight.set(-this.stickForward.z, 0, this.stickForward.x);
+    this.stickHeading
+      .copy(this.stickRight)
+      .multiplyScalar(x)
+      .addScaledVector(this.stickForward, y);
+    return Math.atan2(this.stickHeading.x, this.stickHeading.z);
+  }
+
+  /** The rig's heading. Vehicles face local +Z, so the axis is rotated and read. */
+  private vehicleYawWorld(): number {
+    const rotation = this.vehicle.body.rotation();
+    this.stickQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    this.stickHeading.set(0, 0, 1).applyQuaternion(this.stickQuaternion);
+    return Math.atan2(this.stickHeading.x, this.stickHeading.z);
+  }
+
+  /**
    * Build or tear down the on-screen controls to match the current device.
    *
    * Called at construction and again whenever the primary pointer changes — a
@@ -2477,12 +2514,19 @@ export class SurvivalMode {
     const forwardSpeed = this.vehicle.forwardSpeed();
     const stick = this.touch?.stick;
     if (stick?.active) {
-      // The stick already carries the keyboard's brake-versus-reverse rule, so
-      // the only thing left here is the handbrake button, which overrides it:
-      // a player holding brake meant brake even while pushing the stick.
-      const drive = driveFromJoystick(stick, forwardSpeed);
+      // Steer toward where the stick points rather than mapping stick-x onto
+      // the front wheels. The follow camera never rotates with the rig, so once
+      // the car has come about, screen-left and driver-left are opposites and
+      // every correction the player makes is backwards. The handbrake button
+      // still wins: holding brake meant brake, stick or no stick.
+      const drive = driveTowardHeading(
+        stick,
+        this.stickYawWorld(stick.x, stick.y),
+        this.vehicleYawWorld(),
+        forwardSpeed,
+      );
       this.controls.throttle = drive.throttle;
-      this.controls.reverse = drive.reverse;
+      this.controls.reverse = this.touchBraking ? 0 : drive.reverse;
       this.controls.brake = this.touchBraking ? 1 : drive.brake;
       this.controls.steer = drive.steer;
       this.controls.brake = brakeInputWithAutoHold(this.controls, forwardSpeed);

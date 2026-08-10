@@ -27,3 +27,4 @@ docs/generated/balance-lab.html
 # Local mobile verification harness output.
 .mobile-shots/
 mobile-shot.mjs
+steer-probe.mjs

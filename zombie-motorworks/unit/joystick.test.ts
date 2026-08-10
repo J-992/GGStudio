@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  driveTowardHeading,
+  wrapAngle,
   DEFAULT_JOYSTICK_CONFIG,
   NEUTRAL_JOYSTICK,
   clampStickOffset,
@@ -179,3 +181,55 @@ function stick(x: number, y: number): JoystickVector {
     active: magnitude > 0,
   };
 }
+
+describe('heading-based steering', () => {
+  const HALF_PI = Math.PI / 2;
+
+  it('wraps an angle into (-PI, PI]', () => {
+    expect(wrapAngle(0)).toBeCloseTo(0);
+    expect(wrapAngle(Math.PI * 3)).toBeCloseTo(Math.PI);
+    expect(wrapAngle(-Math.PI * 3)).toBeCloseTo(Math.PI);
+    expect(wrapAngle(Math.PI * 1.5)).toBeCloseTo(-HALF_PI);
+    expect(wrapAngle(Number.NaN)).toBe(0);
+  });
+
+  it('demands the opposite sign to the heading error', () => {
+    // Positive steer is a negative rotation about +Y, so a target to the rig's
+    // left (a positive yaw error) has to come out as negative steer.
+    expect(driveTowardHeading(stick(1, 0), HALF_PI, 0, 0).steer).toBeLessThan(0);
+    expect(driveTowardHeading(stick(-1, 0), -HALF_PI, 0, 0).steer).toBeGreaterThan(0);
+  });
+
+  it('stops steering once the rig is already pointing there', () => {
+    const drive = driveTowardHeading(stick(0, 1), 1.2, 1.2, 6);
+    expect(drive.steer).toBeCloseTo(0);
+    expect(drive.throttle).toBeCloseTo(1);
+    expect(drive.reverse).toBe(0);
+  });
+
+  it('reverses instead of arcing when asked to go back while stopped', () => {
+    const drive = driveTowardHeading(stick(0, -1), Math.PI, 0, 0);
+    expect(drive.reverse).toBeGreaterThan(0);
+    expect(drive.throttle).toBe(0);
+  });
+
+  it('arcs forward for the same request once already rolling', () => {
+    const drive = driveTowardHeading(stick(0, -1), Math.PI, 0, 8);
+    expect(drive.throttle).toBeGreaterThan(0);
+    expect(drive.reverse).toBe(0);
+  });
+
+  it('keeps throttle on through a full reversal so the rig can rotate', () => {
+    // A hard turn eases off, but never to a standstill: at zero throttle a
+    // wheeled rig cannot come about at all.
+    const drive = driveTowardHeading(stick(0, 1), Math.PI, 0, 8);
+    expect(drive.throttle).toBeGreaterThan(0.3);
+    expect(drive.throttle).toBeLessThan(1);
+  });
+
+  it('reads neutral for an inactive stick or non-finite inputs', () => {
+    expect(driveTowardHeading(NEUTRAL_JOYSTICK, 0, 0, 0).steer).toBe(0);
+    expect(driveTowardHeading(stick(0, 1), Number.NaN, 0, 0).throttle).toBe(0);
+    expect(driveTowardHeading(stick(0, 1), 0, 0, Number.NaN).throttle).toBe(0);
+  });
+});
