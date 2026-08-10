@@ -13,13 +13,21 @@
   --collapsible-toggle-size: var(--ui-control-md);
 }
 
-/* Dynamic viewport units follow the visible Safari and Chrome viewport while
-   their URL bars expand and collapse; older browsers retain the 100% shell. */
-@supports (height: 100dvh) {
+/*
+ * `svh`, deliberately not `dvh`.
+ *
+ * `dvh` grows to the URL-bar-hidden height, which makes the canvas taller than
+ * what iOS Safari is actually showing. The renderer sizes itself from this
+ * element, so the rendered centre — and with it the followed vehicle — ends up
+ * below the visible area and the camera looks like it has stopped tracking.
+ * `svh` is the always-visible height, so what is rendered is what is on screen.
+ * JS re-fits on `visualViewport` changes for the rest.
+ */
+@supports (height: 100svh) {
   html,
   body,
   #app {
-    height: 100dvh;
+    height: 100svh;
   }
 }
 
@@ -51,6 +59,21 @@ canvas {
 
 .scroll-y {
   -webkit-overflow-scrolling: touch;
+}
+
+/*
+ * `hidden` must actually hide.
+ *
+ * The UA rule is only `[hidden] { display: none }`, which any author `display`
+ * outranks — and this codebase sets `display` on almost every component. That
+ * has already produced three separate live bugs: empty ability boxes drawn as
+ * black rectangles, a touch button that stayed tappable while hidden, and a
+ * pause overlay that never went away and shielded the whole canvas from input.
+ * `hidden` is a statement about whether an element exists for the player, so it
+ * wins outright rather than losing to a layout rule.
+ */
+[hidden] {
+  display: none !important;
 }
 
 /* Manipulation removes the legacy double-tap delay without allowing a button

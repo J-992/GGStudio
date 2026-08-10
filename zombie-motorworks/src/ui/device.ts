@@ -73,18 +73,16 @@ export function onTouchControlsChange(
 }
 
 /**
- * Renderer pixel-ratio ceiling. Portals cap mobile DPR because native iOS DPR
- * multiplies fragment work dramatically for little visible benefit in a fast
- * action game; other touch-first devices retain a modest sharpness allowance.
+ * Renderer pixel-ratio ceiling.
+ *
+ * Portal guidance says to pin mobile DPR to 1, and on a 3x phone that is
+ * plainly wrong for this game: the art is chunky voxel work with hard edges and
+ * thin HUD strokes, and at 1 the whole screen reads as a blurred, aliased mess
+ * rather than as pixel art. 2 is the ceiling everywhere — it is already well
+ * under a modern phone's native 3, so the worst case is capped, and above 2
+ * there is nothing left to see in a moving 3D scene.
  */
 export function maxPixelRatio(): number {
-  if (typeof navigator === 'undefined') return 2;
-
-  const isIOSDevice =
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  if (isIOSDevice) return 1;
-  if (isCoarsePointer()) return 1.5;
   return 2;
 }
 

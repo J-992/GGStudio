@@ -31,11 +31,7 @@ import {
   type EditorViewState,
 } from '../editor/EditorMode.ts';
 import { CommandHistory } from '../core/commands.ts';
-import {
-  isCoarsePointer,
-  maxPixelRatio,
-  shouldUseTouchControls,
-} from '../ui/device.ts';
+import { maxPixelRatio, shouldUseTouchControls } from '../ui/device.ts';
 import { ChamberMode, type ScenarioName } from '../chamber/ChamberMode.ts';
 import type { VehicleControls } from '../runtime/vehicle.ts';
 import { SurvivalMode } from '../survival/SurvivalMode.ts';
@@ -450,14 +446,11 @@ export class App {
 
   async start(): Promise<void> {
     await RAPIER.init();
-    // Antialiasing is the first thing to go on a phone: it is a full extra
-    // resolve every frame for an effect nobody reads at arm's length while the
-    // camera is moving.
-    this.renderer = new THREE.WebGLRenderer({ antialias: !isCoarsePointer() });
-    // Rendering a phone's native 3x device ratio quadruples fragment cost for
-    // detail that is invisible in motion, and it is the single biggest frame
-    // rate lever on mobile — so the ceiling comes from the device, not from a
-    // fixed 2 that only ever made sense on a desktop display.
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    // A phone's native 3x ratio is more fragments than the frame budget wants
+    // and more detail than a moving 3D scene shows, so it is capped — but only
+    // capped. Dropping to 1 on mobile, which is the usual portal advice, turns
+    // this game's hard-edged voxel art and thin HUD strokes to mush.
     this.renderer.setPixelRatio(
       Math.min(window.devicePixelRatio, maxPixelRatio()),
     );
@@ -465,6 +458,10 @@ export class App {
     this.renderer.domElement.className = 'viewport';
     this.root.appendChild(this.renderer.domElement);
     window.addEventListener('resize', this.onViewportChange);
+    // Mobile Safari resizes the *visual* viewport when the URL bar slides away
+    // without always firing a window resize. Without this the canvas keeps the
+    // old size and the followed vehicle drifts off the bottom of the screen.
+    window.visualViewport?.addEventListener('resize', this.onViewportChange);
     // A phone rotating is a resize, but mobile Safari fires `orientationchange`
     // before the new viewport metrics have settled and does not always follow
     // with a `resize` — so the same work is queued a frame later rather than
