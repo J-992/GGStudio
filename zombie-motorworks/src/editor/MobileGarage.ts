@@ -7,7 +7,15 @@ import { onTouchControlsChange, shouldUseTouchControls } from '../ui/device.ts';
 
 const PALETTE_STORAGE_KEY = 'zm.garage.palette';
 const BUILD_CARD_STORAGE_KEY = 'zm.garage.buildcard';
-const COMPACT_BREAKPOINT = 720;
+/**
+ * Width below which the garage folds by default.
+ *
+ * Infinite because this controller only ever runs on a coarse pointer, and
+ * every such screen is over-subscribed: a phone held in landscape is barely
+ * 390 px tall, so the build report expanded means it lands on top of the
+ * abilities panel and the hotbar. It stays one tap away instead.
+ */
+const COMPACT_BREAKPOINT = Number.POSITIVE_INFINITY;
 const SWIPE_THRESHOLD_PX = 24;
 
 let nextPaletteId = 1;
@@ -250,6 +258,10 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
       handle.addEventListener('pointercancel', finishHandlePointer);
       handle.addEventListener('click', onHandleClick);
       root.appendChild(handle);
+      // Choosing a part is the last thing the drawer is for. Leaving it open
+      // means the sheet is covering the very grid the player now has to tap,
+      // so the drawer gets out of the way the moment a tile is picked.
+      palette.addEventListener('click', onPaletteChoice);
     }
 
     if (buildCard) {
@@ -280,6 +292,17 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     window.addEventListener('orientationchange', scheduleRefresh);
   };
 
+  /** Close the drawer once a tile hands the player something to place. */
+  const onPaletteChoice = (event: MouseEvent): void => {
+    if (!(event.target instanceof Element)) return;
+    // Only the part tiles themselves. Category tabs, the search field and the
+    // panel header all live in here too and must leave the sheet open.
+    if (!event.target.closest('.part-btn')) return;
+    // Not persisted: the player asked for a part, not for the drawer to stay
+    // shut next time they open the garage.
+    setPalettePreference(false, false);
+  };
+
   const uninstall = (): void => {
     if (!installed) return;
     installed = false;
@@ -287,6 +310,7 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     window.removeEventListener('orientationchange', scheduleRefresh);
     if (refreshFrame !== null) cancelAnimationFrame(refreshFrame);
     refreshFrame = null;
+    palette?.removeEventListener('click', onPaletteChoice);
     if (suppressClickTimer !== null) window.clearTimeout(suppressClickTimer);
     suppressClickTimer = null;
 

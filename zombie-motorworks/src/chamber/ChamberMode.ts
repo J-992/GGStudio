@@ -162,6 +162,7 @@ export class ChamberMode {
     if (this.disposed) return;
     this.menuOpen = open;
     this.menuOverlay.hidden = !open;
+    this.menuOverlay.style.display = open ? 'grid' : 'none';
     this.keys.clear();
     this.controls.fire = false;
     // A menu opening under a held thumb never delivers the matching pointerup,
@@ -451,8 +452,15 @@ export class ChamberMode {
 
     this.menuOverlay = document.createElement('div');
     this.menuOverlay.hidden = true;
+    // `display` is deliberately absent from the base rule. An inline
+    // `display: grid` is author-level and outranks the UA sheet's
+    // `[hidden] { display: none }`, so the overlay stayed painted and, worse,
+    // stayed hit-testable at z-index 40 — an invisible full-screen shield over
+    // the canvas that swallowed every aim, shot and thumb in the chamber.
+    // `setMenuOpen` now owns the property.
     this.menuOverlay.style.cssText =
-      'position:absolute;inset:0;z-index:40;display:grid;place-items:center;background:rgb(4 5 4 / 0.72)';
+      'position:absolute;inset:0;z-index:40;place-items:center;background:rgb(4 5 4 / 0.72)';
+    this.menuOverlay.style.display = 'none';
     const menuPanel = document.createElement('div');
     menuPanel.className = 'panel';
     menuPanel.style.cssText =
