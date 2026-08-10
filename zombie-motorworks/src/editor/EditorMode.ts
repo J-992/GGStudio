@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { installMobileGarage, type MobileGarage } from './MobileGarage.ts';
 import type {
   PartConfig,
   PartDefinition,
@@ -34,6 +35,11 @@ import {
   type EditorCommand,
 } from '../core/commands.ts';
 import { serializeBlueprint } from '../core/serialize.ts';
+import {
+  DEBUG_LOOK_AT_DISTANCE_M,
+  type DebugCameraPose,
+  type DebugCameraPoseReadout,
+} from '../core/cameraPose.ts';
 import { createEmptyBlueprint } from '../core/blueprint.ts';
 import {
   composeOrientations,
@@ -299,6 +305,12 @@ export class EditorMode {
   private ortho: THREE.OrthographicCamera;
   private camera: THREE.Camera;
   private controls: OrbitControls;
+  /** Phone layout controller; inert on a pointer-precise device. */
+  private readonly mobileGarage: MobileGarage;
+  /** True while the debug seam owns the camera transform. */
+  private cameraManual = false;
+  private readonly boundsHelper: THREE.Box3Helper;
+  private readonly scratchDirection = new THREE.Vector3();
   private readonly partsGroup = new THREE.Group();
   private readonly overlays = new Overlays();
   private readonly raycaster = new THREE.Raycaster();
@@ -417,8 +429,8 @@ export class EditorMode {
         (GRID_MAX.z + 1) * CELL_SIZE,
       ),
     );
-    const boundsHelper = new THREE.Box3Helper(bounds, 0x2f3a48);
-    this.scene.add(boundsHelper);
+    this.boundsHelper = new THREE.Box3Helper(bounds, 0x2f3a48);
+    this.scene.add(this.boundsHelper);
 
     this.scene.add(this.partsGroup);
     this.scene.add(this.overlays.group);
@@ -437,6 +449,13 @@ export class EditorMode {
         onPurchasePart: (defId) => this.handleStorePart(defId),
         onBuyPart: (defId) => this.buyInventoryPart(defId),
         onArmPart: (defId) => this.armGhost(defId),
+        onPartDragStart: (defId, clientX, clientY) =>
+          this.startPartDrag(defId, clientX, clientY),
+        onPartDragMove: (clientX, clientY) =>
+          this.updateGhost(clientX, clientY),
+        onPartDragEnd: (clientX, clientY) =>
+          this.finishPartDrag(clientX, clientY),
+        onPartDragCancel: () => this.disarmGhost(),
         onHotbarChange: (defIds) => this.setHotbar(defIds),
         newGarageDisposalSummary: () =>
           newGarageDisposalSummary(this.bp.parts, getPartDef),
@@ -505,6 +524,9 @@ export class EditorMode {
       partIconUrls,
     );
     this.ui.root.addEventListener('click', this.onUiButtonClick, true);
+    // Folds the palette into a bottom drawer and the build report into a
+    // collapsible sheet on a phone; a no-op on a pointer-precise device.
+    this.mobileGarage = installMobileGarage(this.ui.root);
 
     renderer.domElement.addEventListener('pointermove', this.onPointerMove);
     renderer.domElement.addEventListener('pointerdown', this.onPointerDown);
@@ -552,9 +574,12 @@ export class EditorMode {
   // ---------- rendering loop ----------
 
   update(): void {
-    this.controls.update();
-    this.updateSelectionTip();
-    this.updateUpgradeTip();
+    // A hand-authored capture pose owns the camera; see `debugSetCameraPose`.
+    if (!this.cameraManual) {
+      this.controls.update();
+      this.updateSelectionTip();
+      this.updateUpgradeTip();
+    }
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -622,6 +647,7 @@ export class EditorMode {
   }
 
   resize(w: number, h: number): void {
+    this.mobileGarage.refresh();
     const aspect = w / h;
     this.persp.aspect = aspect;
     this.persp.updateProjectionMatrix();
@@ -648,6 +674,7 @@ export class EditorMode {
     );
     window.removeEventListener('keydown', this.keyHandler);
     this.ui.root.removeEventListener('click', this.onUiButtonClick, true);
+    this.mobileGarage.dispose();
     this.controls.dispose();
     this.tutorialOverlay?.dispose();
     disposeObjectResources(this.scene);
@@ -1412,6 +1439,38 @@ export class EditorMode {
     this.refreshSelectionUI();
   }
 
+  private startPartDrag(
+    defId: string,
+    clientX: number,
+    clientY: number,
+  ): boolean {
+    this.armGhost(defId);
+    if (this.ghost?.defId !== defId) return false;
+    this.updateGhost(clientX, clientY);
+    return true;
+  }
+
+  private finishPartDrag(clientX: number, clientY: number): void {
+    if (!this.ghost) return;
+    this.updateGhost(clientX, clientY);
+
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const insideViewport =
+      clientX >= rect.left &&
+      clientX <= rect.right &&
+      clientY >= rect.top &&
+      clientY <= rect.bottom;
+    const elementAtDrop = document.elementFromPoint(clientX, clientY);
+    const overGarageControl =
+      elementAtDrop !== null && this.ui.root.contains(elementAtDrop);
+    if (!insideViewport || overGarageControl || !this.ghostTarget?.valid) {
+      this.ui.setStatus('Drag the block onto a green spot, then let go');
+      return;
+    }
+
+    this.placeGhost();
+  }
+
   private isUnlocked(defId: string): boolean {
     return (
       unlockCost(defId) === 0 || this.profile.unlockedDefIds.includes(defId)
@@ -2042,6 +2101,11 @@ export class EditorMode {
 
   private onPointerDown = (e: PointerEvent): void => {
     this.pointerDown = { x: e.clientX, y: e.clientY };
+    // A finger that touches down and lifts without moving produces no
+    // pointermove, so the ghost would still be sitting wherever the last
+    // gesture left it and the block would land in the wrong cell. Sampling on
+    // the way down puts it under the thumb before the tap can commit.
+    if (e.pointerType !== 'mouse') this.updateGhost(e.clientX, e.clientY);
   };
 
   private onPointerUp = (e: PointerEvent): void => {
@@ -2051,12 +2115,18 @@ export class EditorMode {
       e.clientY - this.pointerDown.y,
     );
     this.pointerDown = null;
-    if (moved > 6) return; // drag = camera, not click
+    // A thumb wobbles on the way off the glass far more than a mouse does, and
+    // at the mouse threshold an ordinary tap kept being read as a camera orbit.
+    const dragThresholdPx = e.pointerType === 'mouse' ? 6 : 14;
+    if (moved > dragThresholdPx) return; // drag = camera, not click
     if (e.button === 2) {
       this.deleteAt(e.clientX, e.clientY);
       return;
     }
     if (e.button !== 0) return;
+    // Touch has no hover, so the release point is the only statement of intent
+    // the player has made; re-aim at it before committing.
+    if (e.pointerType !== 'mouse') this.updateGhost(e.clientX, e.clientY);
     if (this.ghost) this.placeGhost();
     else this.selectAt(e.clientX, e.clientY, e.shiftKey);
   };
@@ -2465,6 +2535,85 @@ export class EditorMode {
       this.toggles,
       this.selected,
     );
+  }
+
+  /**
+   * Impose a hand-authored camera pose on the garage, or release it with
+   * `null`.
+   *
+   * Trailer capture only. Two things have to be held off for the pose to
+   * survive a frame: `OrbitControls` is disabled so a stray drag cannot fight
+   * it, and `update()` stops calling `controls.update()` — that call ends in
+   * `object.lookAt(target)`, which would otherwise re-aim the camera at the
+   * orbit target on the very next frame no matter what was written here.
+   *
+   * The pose is always applied to the perspective camera, and selects it, so a
+   * shot authored from an orthographic view still renders through the lens the
+   * pose describes.
+   */
+  debugSetCameraPose(pose: DebugCameraPose | null): void {
+    if (pose === null) {
+      this.cameraManual = false;
+      this.controls.enabled = true;
+      // Re-anchor the orbit target ahead of the camera so handing control back
+      // does not swing the view to whatever the target was before the shot.
+      this.persp.getWorldDirection(this.scratchDirection);
+      this.controls.target
+        .copy(this.persp.position)
+        .addScaledVector(this.scratchDirection, DEBUG_LOOK_AT_DISTANCE_M);
+      return;
+    }
+    this.cameraManual = true;
+    this.controls.enabled = false;
+    this.camera = this.persp;
+    this.persp.position.set(pose.pos[0], pose.pos[1], pose.pos[2]);
+    this.persp.lookAt(pose.lookAt[0], pose.lookAt[1], pose.lookAt[2]);
+    if (pose.fov !== undefined && Number.isFinite(pose.fov)) {
+      this.persp.fov = pose.fov;
+      this.persp.updateProjectionMatrix();
+    }
+  }
+
+  /** The perspective camera's pose right now, for shot authoring. */
+  debugGetCameraPose(): DebugCameraPoseReadout {
+    this.persp.getWorldDirection(this.scratchDirection);
+    const look = this.scratchDirection
+      .clone()
+      .multiplyScalar(DEBUG_LOOK_AT_DISTANCE_M)
+      .add(this.persp.position);
+    return {
+      pos: [
+        this.persp.position.x,
+        this.persp.position.y,
+        this.persp.position.z,
+      ],
+      lookAt: [look.x, look.y, look.z],
+      fov: this.persp.fov,
+    };
+  }
+
+  /**
+   * Draw one frame on demand. The App loop already renders the garage every
+   * frame, so this exists for the capture harness, which pauses on a pose and
+   * needs the buffer to hold that exact pose when the screenshot is taken.
+   */
+  debugRender(): void {
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Show or hide the build guides — centre of mass, contact patches, support
+   * polygon, plumb line — and the wireframe box marking the buildable volume.
+   *
+   * The capture harness hides DOM chrome with a stylesheet, which cannot touch
+   * any of these: they are meshes in the scene, not elements. They are the right
+   * thing to see while building and the wrong thing to see in a trailer, so the
+   * seam gets a switch rather than the garage getting a setting. The floor grid
+   * deliberately stays — it is the only thing giving the rig a ground to sit on.
+   */
+  debugSetOverlaysVisible(visible: boolean): void {
+    this.overlays.group.visible = visible;
+    this.boundsHelper.visible = visible;
   }
 
   /** Debug seam helpers (used by Playwright). */

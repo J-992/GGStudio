@@ -1,0 +1,234 @@
+/* The touch garage is opt-in at runtime, so hybrid devices keep the desktop
+   composition whenever a precise primary pointer is present. */
+[data-mobile-garage='on'] {
+  --garage-drawer-height: min(55dvh, 520px);
+}
+
+/* Safe-area offsets keep the wrapped command bar clear of notches without
+   changing the desktop bar's compact square-pixel chrome. */
+[data-mobile-garage='on'] .topbar {
+  top: max(12px, var(--safe-top));
+  right: max(12px, var(--safe-right));
+  left: max(12px, var(--safe-left));
+}
+
+/* Parts become a full-width shelf within thumb reach. Visibility waits for the
+   slide to finish so a closed drawer cannot intercept placement gestures. */
+[data-mobile-garage='on'] :is(.palette, .garage-dock) {
+  position: absolute;
+  top: auto;
+  right: max(12px, var(--safe-right));
+  bottom: max(12px, var(--safe-bottom));
+  left: max(12px, var(--safe-left));
+  z-index: 17;
+  width: auto;
+  height: var(--garage-drawer-height);
+  max-height: 55dvh;
+  border-radius: var(--panel-radius);
+  transform: translateY(0);
+  visibility: visible;
+  transition:
+    transform 180ms steps(5, end),
+    visibility 0s linear 0s;
+}
+
+[data-mobile-garage='on'][data-palette-open='false']
+  :is(.palette, .garage-dock),
+[data-mobile-garage='on'] :is(.palette, .garage-dock).is-drawer-closed {
+  pointer-events: none;
+  transform: translateY(calc(100% + max(12px, var(--safe-bottom))));
+  visibility: hidden;
+  transition:
+    transform 180ms steps(5, end),
+    visibility 0s linear 180ms;
+}
+
+/* Two or three picture frames per row preserve the store's quick visual scan.
+   Momentum is contained here so reaching an edge never rubber-bands the page. */
+[data-mobile-garage='on'] :is(.palette-content, .store-list) {
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+[data-mobile-garage='on']
+  :is(.palette, .garage-dock)
+  :is(.part-btn, .store-item) {
+  min-height: 72px;
+}
+
+/* The handle stays outside the translated shelf, and moves to its lip only
+   while open. Eighteen sits above garage cards but below dialogs and help. */
+[data-mobile-garage='on'] .garage-drawer-handle {
+  position: absolute;
+  right: 50%;
+  bottom: max(12px, var(--safe-bottom));
+  z-index: 18;
+  min-width: 112px;
+  min-height: var(--touch-target);
+  padding: 8px 22px max(12px, var(--safe-bottom));
+  border: 1px solid var(--ui-edge);
+  border-bottom: 3px solid var(--ui-signal-dark);
+  border-radius: var(--panel-radius);
+  background: var(--panel-bg-strong);
+  box-shadow: 5px 6px 0 rgb(0 0 0 / 0.38);
+  color: var(--ui-text);
+  font: 400 var(--ui-text-12)/1 var(--ui-font-display);
+  letter-spacing: 0.12em;
+  touch-action: none;
+  transform: translateX(50%);
+}
+
+[data-mobile-garage='on'][data-palette-open='true'] .garage-drawer-handle {
+  bottom: calc(var(--garage-drawer-height) + max(12px, var(--safe-bottom)));
+}
+
+/* The report remains a small top-right sheet. Its alert survives collapse so a
+   blocking validation problem cannot disappear with the report body. */
+[data-mobile-garage='on'] :is(.build-card, .vehicle-stats) {
+  top: max(72px, calc(var(--safe-top) + 60px));
+  right: max(12px, var(--safe-right));
+  bottom: auto;
+  left: auto;
+  width: min(300px, calc(100vw - 24px));
+  max-height: 45dvh;
+  overflow-y: auto;
+  touch-action: pan-y;
+}
+
+[data-mobile-garage='on'] :is(.build-card, .vehicle-stats).is-collapsed {
+  width: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
+  max-width: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
+  height: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
+  max-height: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
+}
+
+/* vehicle-stats has a desktop-era fold button; the shared Collapsible owns the
+   mobile state and accessibility contract while touch layout is installed. */
+[data-mobile-garage='on'] .vehicle-stats__header > .dock-panel__toggle {
+  display: none;
+}
+
+[data-mobile-garage='on'] .collapsible-toggle[data-alert='true'] {
+  border-color: var(--ui-danger);
+  background: var(--ui-danger-dark);
+  box-shadow: inset 0 0 0 1px var(--ui-danger);
+  color: #e1c4bc;
+}
+
+/* Compact density keeps two predictable rows. New Garage and the tutorial/help
+   cluster are demoted to the second row because they are occasional setup aids;
+   driving, history, view, and build-height controls remain in the first scan. */
+[data-mobile-garage='on'] .topbar[data-density='compact'] {
+  column-gap: 3px;
+  row-gap: 4px;
+  flex-wrap: wrap;
+  overflow: visible;
+  padding: 4px;
+}
+
+[data-mobile-garage='on'] .topbar[data-density='compact'] > * {
+  flex: 0 0 auto;
+}
+
+[data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-layer__label {
+  display: none;
+}
+
+[data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-layer {
+  gap: 3px;
+  padding-inline: 4px;
+}
+
+[data-mobile-garage='on']
+  .topbar[data-density='compact']
+  .topbar-layer__slider {
+  width: 66px;
+}
+
+[data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-utilities {
+  order: 2;
+  gap: 3px;
+}
+
+[data-mobile-garage='on'] .topbar[data-density='compact'] .icon-btn {
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+}
+
+/* Bottom tools share the home-indicator edge with the drawer handle. Safe
+   insets keep each tappable strip above the system gesture region. */
+[data-mobile-garage='on'] .hotbar-panel {
+  bottom: max(12px, var(--safe-bottom));
+  width: calc(
+    100% - max(12px, var(--safe-left)) - max(12px, var(--safe-right))
+  );
+}
+
+[data-mobile-garage='on'] .garage-status {
+  bottom: calc(70px + max(12px, var(--safe-bottom)));
+}
+
+[data-mobile-garage='on'] .selected-toolbar {
+  max-width: calc(
+    100vw - max(12px, var(--safe-left)) - max(12px, var(--safe-right))
+  );
+}
+
+/* Dialog bodies pan independently inside the visible mobile viewport. Their
+   buttons retain the same reliable thumb target as the persistent HUD. */
+[data-mobile-garage='on']
+  :is(
+    .build-prompt,
+    .garage-confirm,
+    .share-overlay,
+    .share-dialog,
+    .import-overlay,
+    .import-dialog
+  ) {
+  width: min(420px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+[data-mobile-garage='on']
+  :is(
+    .build-prompt,
+    .garage-confirm,
+    .share-overlay,
+    .share-dialog,
+    .import-overlay,
+    .import-dialog
+  )
+  button {
+  min-height: var(--touch-target);
+}
+
+@media (hover: none) {
+  /* Touch pointerenter is synthetic and has no matching hover exit, so the
+     desktop detail card and lift effects must never become sticky overlays. */
+  [data-mobile-garage='on'] .store-details {
+    display: none;
+  }
+
+  [data-mobile-garage='on'] :is(.part-btn, .store-item):hover:not(:disabled) {
+    box-shadow: none;
+    transform: none;
+  }
+
+  [data-mobile-garage='on'] .store-item:hover:not(:disabled) .part-thumbnail {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* State still changes instantly, preserving the same visibility and hit-test
+     guarantees without a stepped slide. */
+  [data-mobile-garage='on'] :is(.palette, .garage-dock) {
+    transition: none;
+  }
+}

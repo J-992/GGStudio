@@ -29,6 +29,12 @@ import { getBiome } from '../survival/arena/recipes/index.ts';
 import { applyWeaponAim, buildPartMesh } from '../editor/meshes.ts';
 import { wheelVisualCentre } from '../runtime/wheels.ts';
 import { ScopeCursor } from '../ui/ScopeCursor.ts';
+import {
+  shouldUseTouchControls,
+  onTouchControlsChange,
+} from '../ui/device.ts';
+import { TouchControls } from '../ui/touch/TouchControls.ts';
+import { driveFromJoystick } from '../core/joystick.ts';
 import type { TracerShot } from '../runtime/weapons.ts';
 import { VfxSystem } from '../vfx/VfxSystem.ts';
 import {
@@ -109,6 +115,10 @@ export class ChamberMode {
     manualAim: true,
   };
   private keys = new Set<string>();
+  /** On-screen driving controls; null on a pointer-precise device. */
+  private touch: TouchControls | null = null;
+  private touchUnsubscribe: (() => void) | null = null;
+  private touchBraking = false;
   private accumulator = 0;
   private lastTime = performance.now();
   private debugPaused = false;
@@ -154,6 +164,11 @@ export class ChamberMode {
     this.menuOverlay.hidden = !open;
     this.keys.clear();
     this.controls.fire = false;
+    // A menu opening under a held thumb never delivers the matching pointerup,
+    // so the gesture is dropped here rather than left commanding the rig.
+    this.touchBraking = false;
+    this.touch?.reset();
+    this.touch?.setVisible(!open);
     this.lastTime = performance.now();
   }
 
@@ -466,18 +481,62 @@ export class ChamberMode {
     this.renderer.domElement.addEventListener('pointerup', this.onFireUp);
 
     this.scopeCursor = new ScopeCursor(this.ui, this.renderer.domElement);
+    this.syncTouchControls();
+    this.touchUnsubscribe = onTouchControlsChange(() =>
+      this.syncTouchControls(),
+    );
+  }
+
+  /**
+   * Give the test chamber the same thumbs the survival arena has.
+   *
+   * A player who can only drive on a phone must be able to test-drive there
+   * too, or the build they take into a wave is one they have never actually
+   * steered.
+   */
+  private syncTouchControls(): void {
+    const wanted = shouldUseTouchControls();
+    if (wanted === (this.touch !== null)) return;
+    if (!wanted) {
+      this.touch?.dispose();
+      this.touch = null;
+      this.touchBraking = false;
+      this.controls.fire = false;
+      return;
+    }
+    const touch = new TouchControls({
+      parent: this.ui,
+      buttons: [{ id: 'brake', glyph: '▤', label: 'Handbrake', mode: 'hold' }],
+      onButton: (id, pressed) => {
+        unlockAudio();
+        if (id === 'brake') this.touchBraking = pressed;
+      },
+      onAim: (sample) => this.aimAtClientX(sample.clientX),
+      onFireChange: (firing) => {
+        unlockAudio();
+        this.controls.fire = this.menuOpen ? false : firing;
+      },
+    });
+    this.ui.prepend(touch.element);
+    touch.setVisible(true);
+    this.touch = touch;
   }
 
   private onAim = (e: PointerEvent): void => {
+    this.aimAtClientX(e.clientX);
+  };
+
+  /** Horizontal screen position only; the chamber aims in yaw, never in pitch. */
+  private aimAtClientX(clientX: number): void {
     const rect = this.renderer.domElement.getBoundingClientRect();
-    const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const nx = ((clientX - rect.left) / rect.width) * 2 - 1;
     // Aim yaw relative to camera heading.
     const camYaw = Math.atan2(
       this.camera.getWorldDirection(new THREE.Vector3()).x,
       this.camera.getWorldDirection(new THREE.Vector3()).z,
     );
     this.controls.aimYawWorld = camYaw - nx * 1.2;
-  };
+  }
 
   private onFireDown = (): void => {
     if (this.menuOpen) return;
@@ -527,13 +586,27 @@ export class ChamberMode {
     // S brakes while rolling forward, reverses once (near-)stopped.
     const forwardSpeed = this.vehicle.forwardSpeed();
     const movingForward = forwardSpeed > 0.6;
-    this.controls.throttle = fwd;
-    this.controls.reverse = rev && !fwd && !movingForward ? 1 : 0;
-    this.controls.brake = k.has(' ') ? 1 : rev && movingForward ? 1 : 0;
-    this.controls.brake = brakeInputWithAutoHold(this.controls, forwardSpeed);
-    this.controls.steer =
-      (k.has('a') || k.has('arrowleft') ? -1 : 0) +
-      (k.has('d') || k.has('arrowright') ? 1 : 0);
+    const stick = this.touch?.stick;
+    if (this.touch) {
+      // The stick carries the same brake-versus-reverse rule the keys do, so
+      // the chamber behaves exactly like the arena under a thumb.
+      const drive = stick?.active
+        ? driveFromJoystick(stick, forwardSpeed)
+        : { throttle: 0, reverse: 0, brake: 0, steer: 0 };
+      this.controls.throttle = drive.throttle;
+      this.controls.reverse = drive.reverse;
+      this.controls.brake = this.touchBraking ? 1 : drive.brake;
+      this.controls.steer = drive.steer;
+      this.controls.brake = brakeInputWithAutoHold(this.controls, forwardSpeed);
+    } else {
+      this.controls.throttle = fwd;
+      this.controls.reverse = rev && !fwd && !movingForward ? 1 : 0;
+      this.controls.brake = k.has(' ') ? 1 : rev && movingForward ? 1 : 0;
+      this.controls.brake = brakeInputWithAutoHold(this.controls, forwardSpeed);
+      this.controls.steer =
+        (k.has('a') || k.has('arrowleft') ? -1 : 0) +
+        (k.has('d') || k.has('arrowright') ? 1 : 0);
+    }
 
     this.vehicle.preStep(
       FIXED_DT,
@@ -837,6 +910,10 @@ export class ChamberMode {
     );
     this.renderer.domElement.removeEventListener('pointerup', this.onFireUp);
     this.ui.removeEventListener('click', this.onUiButtonClick, true);
+    this.touchUnsubscribe?.();
+    this.touchUnsubscribe = null;
+    this.touch?.dispose();
+    this.touch = null;
     this.scopeCursor.dispose();
     this.vfx?.dispose();
     this.vehicle?.dispose();

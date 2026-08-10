@@ -108,6 +108,16 @@ import {
   type AudioVolumeControl,
 } from '../ui/audioVolumeControl.ts';
 import { ScopeCursor } from '../ui/ScopeCursor.ts';
+import {
+  shouldUseTouchControls,
+  onTouchControlsChange,
+} from '../ui/device.ts';
+import { TouchControls } from '../ui/touch/TouchControls.ts';
+import {
+  installSurvivalMobileHud,
+  type SurvivalMobileHud,
+} from './MobileHud.ts';
+import { driveFromJoystick } from '../core/joystick.ts';
 import { buildLeaderboardTable } from '../ui/leaderboardTable.ts';
 import { VfxSystem } from '../vfx/VfxSystem.ts';
 import { WarningHud } from './WarningHud.ts';
@@ -685,6 +695,20 @@ export class SurvivalMode {
   private lastHudFuel = -1;
   /** Centre-screen bar of special abilities, one box per special. */
   private readonly abilityBar: AbilityBar;
+  /**
+   * On-screen driving controls, built only on a touch device.
+   *
+   * The stick is polled inside {@link updateControls} rather than pushed from
+   * its own event, so a thumb held perfectly still keeps commanding throttle:
+   * touch move events stop arriving the moment the finger stops, and an
+   * event-driven path would read that as the player letting go.
+   */
+  private touch: TouchControls | null = null;
+  private touchUnsubscribe: (() => void) | null = null;
+  /** Held brake button; separate from the stick's brake-while-rolling arc. */
+  private touchBraking = false;
+  /** Phone HUD layout: minimizable panels, thumb-clear anchoring. Inert on desktop. */
+  private readonly mobileHud: SurvivalMobileHud;
   private readonly buffBar: BuffBar;
   /** Rebuilt in place each frame, so a running buff allocates nothing. */
   private readonly buffViews: BuffView[] = [];
@@ -958,6 +982,11 @@ export class SurvivalMode {
     this.pointerFiring = false;
     this.controls.fire = false;
     this.controls.manualAim = false;
+    // A phone that backgrounds mid-gesture never delivers the pointerup, so
+    // without this the rig drives itself into the horde while the player is
+    // reading a notification.
+    this.touchBraking = false;
+    this.touch?.reset();
   };
 
   constructor(
@@ -1150,6 +1179,14 @@ export class SurvivalMode {
     this.abilityBar = new AbilityBar(this.ui, MAX_ABILITY_SLOTS, (slot) =>
       this.requestAbility(slot),
     );
+    // The ability boxes are already buttons, so touch reaches the specials
+    // through the same bar the mouse uses; what the overlay has to add is the
+    // driving, the aim, and the two keybinds with no on-screen twin.
+    this.syncTouchControls();
+    this.touchUnsubscribe = onTouchControlsChange(() =>
+      this.syncTouchControls(),
+    );
+    this.mobileHud = installSurvivalMobileHud(this.ui);
 
     if (Number.isFinite(run.kills) && (run.kills ?? 0) >= 0) {
       this.kills = Math.floor(run.kills ?? 0);
@@ -1403,7 +1440,9 @@ export class SurvivalMode {
     const stuckTitle = document.createElement('strong');
     stuckTitle.textContent = 'Vehicle Stuck';
     const stuckAction = document.createElement('span');
-    stuckAction.textContent = 'Press J to Jump';
+    stuckAction.textContent = shouldUseTouchControls()
+      ? 'Tap ↻ to Jump'
+      : 'Press J to Jump';
     stuckCopy.append(stuckTitle, stuckAction);
     stuckPrompt.append(stuckIcon, stuckCopy);
     promptRow.appendChild(stuckPrompt);
@@ -1740,6 +1779,13 @@ export class SurvivalMode {
     this.pointerFiring = false;
     this.controls.fire = false;
     this.controls.manualAim = false;
+    // The dialog owns the screen while it is up: the driving overlay sits over
+    // it and would eat every tap aimed at a setting, and a thumb that was on
+    // the stick when it opened never delivers its pointerup.
+    this.touchBraking = false;
+    this.touch?.reset();
+    this.touch?.setVisible(!open);
+    this.mobileHud.setCompact(open);
     this.accumulator = 0;
     this.lastTime = performance.now();
     this.syncGameplayActivity();
@@ -1970,11 +2016,22 @@ export class SurvivalMode {
   }
 
   private readonly onAim = (event: PointerEvent): void => {
+    this.aimAtClientPoint(event.clientX, event.clientY);
+  };
+
+  /**
+   * Point the manual turrets at a viewport pixel.
+   *
+   * Shared by the mouse and the touch aim pad: both produce a client-space
+   * point, and everything downstream — the ground-plane raycast, the aim yaw,
+   * the shared aim point every turret fires at — is identical either way.
+   */
+  private aimAtClientPoint(clientX: number, clientY: number): void {
     if (this.phase !== 'active' || this.settingsOpen) return;
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointerNdc.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.aimRaycaster.setFromCamera(this.pointerNdc, this.camera);
     if (!this.aimRaycaster.ray.intersectPlane(this.aimPlane, this.aimPoint))
@@ -1987,7 +2044,66 @@ export class SurvivalMode {
     // Every turret fires at this point while the override is held, so the
     // barrel and the shot agree with the reticle.
     this.controls.aimPoint = this.aimPoint;
-  };
+  }
+
+  /**
+   * Build or tear down the on-screen controls to match the current device.
+   *
+   * Called at construction and again whenever the primary pointer changes — a
+   * tablet gaining a keyboard should get its screen back, and a desktop
+   * browser must never be handed an invisible input shield over the arena.
+   */
+  private syncTouchControls(): void {
+    const wanted = shouldUseTouchControls();
+    if (wanted === (this.touch !== null)) return;
+    if (!wanted) {
+      this.touch?.dispose();
+      this.touch = null;
+      this.touchBraking = false;
+      this.pointerFiring = false;
+      return;
+    }
+    const touch = new TouchControls({
+      parent: this.ui,
+      buttons: [
+        { id: 'brake', glyph: '▤', label: 'Handbrake', mode: 'hold' },
+        { id: 'recover', glyph: '↻', label: 'Right the vehicle', mode: 'tap' },
+      ],
+      onButton: (id, pressed) => this.onTouchButton(id, pressed),
+      onAim: (sample) => this.aimAtClientPoint(sample.clientX, sample.clientY),
+      onFireChange: (firing) => {
+        this.unlockAudioFromInput();
+        if (this.phase !== 'active' || this.settingsOpen) return;
+        this.pointerFiring = firing;
+        // A tap on the arena is also how a signature strike is called down on
+        // desktop, and the two inputs must not disagree about that.
+        if (firing) this.signatureRequested = true;
+      },
+    });
+    // First child, so the full-screen input zones stay underneath every HUD
+    // panel: an ability box or a prompt card must win the tap that lands on it.
+    this.ui.prepend(touch.element);
+    // Recovery is offered only while the rig is actually stuck; the stuck
+    // detector turns it back on every frame it applies.
+    touch.setButtonVisible('recover', false);
+    touch.setVisible(true);
+    this.touch = touch;
+  }
+
+  /** Route a touch button to the same request path its keybind uses. */
+  private onTouchButton(id: string, pressed: boolean): void {
+    this.unlockAudioFromInput();
+    if (id === 'brake') {
+      this.touchBraking = pressed;
+      return;
+    }
+    if (!pressed) return;
+    if (id === 'recover') {
+      // Same queue as `J`: honoured on the next fixed step, or dropped there if
+      // the rig is not actually stuck.
+      this.recoveryRequested = true;
+    }
+  }
 
   private readonly onFireDown = (event: PointerEvent): void => {
     this.unlockAudioFromInput();
@@ -2243,6 +2359,10 @@ export class SurvivalMode {
     const canRecover =
       this.stuckSeconds >= STUCK_PROMPT_SECONDS && this.recoveryCooldown <= 0;
     this.stuckPrompt.classList.toggle('is-visible', canRecover);
+    // The prompt is a status card, not a button, and there is no `J` key to
+    // press on a phone — so on touch the recovery button appears and vanishes
+    // with it rather than sitting in the cluster permanently greyed out.
+    this.touch?.setButtonVisible('recover', canRecover);
     if (this.recoverySettleSeconds > 0) this.applyRecoveryControlLock();
     if (!this.recoveryRequested) return;
     this.recoveryRequested = false;
@@ -2354,10 +2474,40 @@ export class SurvivalMode {
       return;
     }
 
+    const forwardSpeed = this.vehicle.forwardSpeed();
+    const stick = this.touch?.stick;
+    if (stick?.active) {
+      // The stick already carries the keyboard's brake-versus-reverse rule, so
+      // the only thing left here is the handbrake button, which overrides it:
+      // a player holding brake meant brake even while pushing the stick.
+      const drive = driveFromJoystick(stick, forwardSpeed);
+      this.controls.throttle = drive.throttle;
+      this.controls.reverse = drive.reverse;
+      this.controls.brake = this.touchBraking ? 1 : drive.brake;
+      this.controls.steer = drive.steer;
+      this.controls.brake = brakeInputWithAutoHold(this.controls, forwardSpeed);
+      this.controls.fire = this.pointerFiring;
+      this.controls.manualAim =
+        this.controls.fire && this.controls.aimPoint !== undefined;
+      return;
+    }
+    if (this.touch) {
+      // Touch device, thumb off the stick: coast rather than falling through to
+      // a keyboard read that can only ever return neutral anyway.
+      this.controls.throttle = 0;
+      this.controls.reverse = 0;
+      this.controls.steer = 0;
+      this.controls.brake = this.touchBraking ? 1 : 0;
+      this.controls.brake = brakeInputWithAutoHold(this.controls, forwardSpeed);
+      this.controls.fire = this.pointerFiring;
+      this.controls.manualAim =
+        this.controls.fire && this.controls.aimPoint !== undefined;
+      return;
+    }
+
     const forward = this.keys.has('w') || this.keys.has('arrowup') ? 1 : 0;
     const reverse = this.keys.has('s') || this.keys.has('arrowdown') ? 1 : 0;
     // S brakes while rolling forward, reverses once (near-)stopped.
-    const forwardSpeed = this.vehicle.forwardSpeed();
     const movingForward = forwardSpeed > 0.6;
     this.controls.throttle = forward;
     this.controls.reverse = reverse && !forward && !movingForward ? 1 : 0;
@@ -4948,6 +5098,11 @@ export class SurvivalMode {
     this.lastTime = performance.now();
   }
 
+  /** Trailer-capture only: pull the follow camera closer (1 = normal). */
+  debugSetCameraZoom(zoom: number): void {
+    this.followCamera.setCaptureZoom(zoom);
+  }
+
   debugStepSim(steps: number): void {
     if (this.disposed) return;
     const count = Math.max(0, Math.floor(Number.isFinite(steps) ? steps : 0));
@@ -5069,6 +5224,7 @@ export class SurvivalMode {
   resize(width: number, height: number): void {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.mobileHud.refresh();
   }
 
   debugTelemetry(): SurvivalTelemetry {
@@ -5179,6 +5335,11 @@ export class SurvivalMode {
     this.waveClearCard.dispose();
     this.abilityBar.dispose();
     this.buffBar.dispose();
+    this.touchUnsubscribe?.();
+    this.touchUnsubscribe = null;
+    this.touch?.dispose();
+    this.touch = null;
+    this.mobileHud.dispose();
     this.ui.remove();
     this.tracerRenderer.dispose();
     // Before the scene walk below: the ghosts share the vehicle's geometry, so

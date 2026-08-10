@@ -23,3 +23,7 @@ shot-timeline.mjs
 
 # Balance Lab output: regenerated on demand, timestamped, not a source of truth
 docs/generated/balance-lab.html
+
+# Local mobile verification harness output.
+.mobile-shots/
+mobile-shot.mjs

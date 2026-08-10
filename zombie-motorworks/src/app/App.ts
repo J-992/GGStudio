@@ -31,6 +31,7 @@ import {
   type EditorViewState,
 } from '../editor/EditorMode.ts';
 import { CommandHistory } from '../core/commands.ts';
+import { isCoarsePointer, maxPixelRatio } from '../ui/device.ts';
 import { ChamberMode, type ScenarioName } from '../chamber/ChamberMode.ts';
 import type { VehicleControls } from '../runtime/vehicle.ts';
 import { SurvivalMode } from '../survival/SurvivalMode.ts';
@@ -47,8 +48,10 @@ import {
   buildStarterRig,
   buildStarterUnlocks,
   buildWelcomeNotice,
+  isBuildId,
   type BuildId,
 } from '../core/builds.ts';
+import type { DebugCameraPose } from '../core/cameraPose.ts';
 import {
   defaultProfile,
   MINE_SWEEPER_UNLOCK_WAVE,
@@ -418,20 +421,51 @@ export class App {
     document.addEventListener('visibilitychange', this.onVisibilityChange);
   }
 
+  /**
+   * Re-fit the renderer and every live mode to the current viewport.
+   *
+   * The pixel-ratio ceiling is re-read here rather than only at boot because a
+   * tablet gaining a mouse changes what `maxPixelRatio` reports, and because
+   * mobile browsers can hand back a different `devicePixelRatio` after a
+   * rotation.
+   */
+  private readonly onViewportChange = (): void => {
+    this.renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio, maxPixelRatio()),
+    );
+    this.renderer.setSize(this.root.clientWidth, this.root.clientHeight);
+    this.editor?.resize(this.root.clientWidth, this.root.clientHeight);
+    this.chamber?.resize(this.root.clientWidth, this.root.clientHeight);
+    this.survival?.resize(this.root.clientWidth, this.root.clientHeight);
+    this.title?.resize(this.root.clientWidth, this.root.clientHeight);
+  };
+
+  private readonly onOrientationChange = (): void => {
+    requestAnimationFrame(this.onViewportChange);
+  };
+
   async start(): Promise<void> {
     await RAPIER.init();
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Antialiasing is the first thing to go on a phone: it is a full extra
+    // resolve every frame for an effect nobody reads at arm's length while the
+    // camera is moving.
+    this.renderer = new THREE.WebGLRenderer({ antialias: !isCoarsePointer() });
+    // Rendering a phone's native 3x device ratio quadruples fragment cost for
+    // detail that is invisible in motion, and it is the single biggest frame
+    // rate lever on mobile — so the ceiling comes from the device, not from a
+    // fixed 2 that only ever made sense on a desktop display.
+    this.renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio, maxPixelRatio()),
+    );
     this.renderer.setSize(this.root.clientWidth, this.root.clientHeight);
     this.renderer.domElement.className = 'viewport';
     this.root.appendChild(this.renderer.domElement);
-    window.addEventListener('resize', () => {
-      this.renderer.setSize(this.root.clientWidth, this.root.clientHeight);
-      this.editor?.resize(this.root.clientWidth, this.root.clientHeight);
-      this.chamber?.resize(this.root.clientWidth, this.root.clientHeight);
-      this.survival?.resize(this.root.clientWidth, this.root.clientHeight);
-      this.title?.resize(this.root.clientWidth, this.root.clientHeight);
-    });
+    window.addEventListener('resize', this.onViewportChange);
+    // A phone rotating is a resize, but mobile Safari fires `orientationchange`
+    // before the new viewport metrics have settled and does not always follow
+    // with a `resize` — so the same work is queued a frame later rather than
+    // read straight out of a stale layout.
+    window.addEventListener('orientationchange', this.onOrientationChange);
 
     const jumpTo = waveJumpTarget();
     if (jumpTo === null || !this.devWaveJump(jumpTo)) {
@@ -1557,6 +1591,19 @@ export class App {
         this.survival?.debugDamageVehicle(fraction),
       setScenario: (s: ScenarioName) => this.chamber?.debugSetScenario(s),
       resetVehicle: () => this.chamber?.reset(),
+      survivalCameraZoom: (zoom: number) =>
+        this.survival?.debugSetCameraZoom(zoom),
+      // Trailer-capture only: cinematic control over the garage/editor camera.
+      editorSetCameraPose: (pose: DebugCameraPose | null) =>
+        this.editor?.debugSetCameraPose(pose),
+      editorGetCameraPose: () => this.editor?.debugGetCameraPose() ?? null,
+      editorSetOverlays: (visible: boolean) =>
+        this.editor?.debugSetOverlaysVisible(visible),
+      editorRender: () => this.editor?.debugRender(),
+      loadStarterBuild: (id: string) =>
+        this.editor?.replaceBlueprint(
+          buildStarterBlueprint(isBuildId(id) ? id : DEFAULT_BUILD_ID),
+        ),
     };
   }
 }
