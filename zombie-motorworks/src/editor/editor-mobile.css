@@ -1,92 +1,130 @@
-/* The touch garage is opt-in at runtime, so hybrid devices keep the desktop
-   composition whenever a precise primary pointer is present. */
+/* Touch garage chrome lives at the edges so the vehicle owns the workspace. */
 [data-mobile-garage='on'] {
-  --garage-drawer-height: min(55dvh, 520px);
   --garage-edge-top: max(var(--ui-space-3), var(--safe-top));
   --garage-edge-right: max(var(--ui-space-3), var(--safe-right));
   --garage-edge-bottom: max(var(--ui-space-3), var(--safe-bottom));
   --garage-edge-left: max(var(--ui-space-3), var(--safe-left));
   --garage-stack-gap: var(--ui-space-2);
   --garage-hotbar-height: var(--touch-target);
-  --garage-handle-height: var(--touch-target);
-  --garage-ability-height: calc(
-    var(--touch-target) + var(--ui-text-11) + var(--ui-space-1) +
-      var(--ui-space-2) + var(--ui-space-2)
-  );
-  --garage-ability-width: calc(
-    var(--touch-target) + var(--touch-target) + var(--touch-target) +
-      var(--ui-space-2) + var(--ui-space-2) + var(--ui-space-2) +
-      var(--ui-space-2)
-  );
-  --garage-handle-bottom: calc(
+  --garage-action-height: var(--touch-target);
+  --garage-action-bottom: calc(
     var(--garage-edge-bottom) + var(--garage-hotbar-height) +
       var(--garage-stack-gap)
   );
-  --garage-ability-bottom: calc(
-    var(--garage-handle-bottom) + var(--garage-handle-height) +
-      var(--garage-stack-gap)
-  );
-  --garage-stack-clearance: calc(
-    var(--garage-ability-bottom) + var(--garage-ability-height) +
+  --garage-bottom-clearance: calc(
+    var(--garage-action-bottom) + var(--garage-action-height) +
       var(--garage-stack-gap)
   );
   --garage-topbar-height: calc(
     var(--touch-target) + var(--touch-target) + var(--ui-space-2) +
       var(--ui-space-1) + var(--ui-space-1)
   );
-  --garage-topbar-clearance: calc(
-    var(--garage-edge-top) + var(--garage-topbar-height) + var(--ui-space-2)
-  );
-  --garage-report-width: calc(
-    var(--touch-target) + var(--touch-target) + var(--touch-target) +
-      var(--touch-target) + var(--touch-target) + var(--touch-target) +
-      var(--ui-space-4)
-  );
 }
 
-/* Safe-area offsets keep the wrapped command bar clear of notches without
-   changing the desktop bar's compact square-pixel chrome. */
-[data-mobile-garage='on'] .topbar {
-  top: var(--garage-edge-top);
-  right: var(--garage-edge-right);
-  left: var(--garage-edge-left);
+/* Its panels move to the UI root, leaving no dock chrome over the vehicle. */
+[data-mobile-garage='on'] .garage-dock {
+  display: none;
 }
 
-/* Parts become a full-width shelf within thumb reach. Visibility waits for the
-   slide to finish so a closed drawer cannot intercept placement gestures. */
-[data-mobile-garage='on'] :is(.palette, .garage-dock) {
+/* A closed garage exposes none of the reference panels over the build. */
+[data-mobile-garage='on'] [data-garage-sheet-panel] {
+  display: none;
+}
+
+[data-mobile-garage='on'][data-garage-sheet='shop']
+  [data-garage-sheet-panel='shop'],
+[data-mobile-garage='on'][data-garage-sheet='inventory']
+  [data-garage-sheet-panel='inventory'],
+[data-mobile-garage='on'][data-garage-sheet='stats']
+  [data-garage-sheet-panel='stats'],
+[data-mobile-garage='on'][data-garage-sheet='share']
+  [data-garage-sheet-panel='share'] {
   position: absolute;
-  top: auto;
-  right: max(12px, var(--safe-right));
-  bottom: max(12px, var(--safe-bottom));
-  left: max(12px, var(--safe-left));
-  z-index: 17;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  box-sizing: border-box;
   width: auto;
-  height: var(--garage-drawer-height);
-  max-height: 55dvh;
-  border-radius: var(--panel-radius);
-  transform: translateY(0);
+  height: auto;
+  max-width: none;
+  max-height: none;
+  min-height: 0;
+  flex: none;
+  flex-direction: column;
+  gap: 0;
+  padding:
+    max(var(--ui-space-3), var(--safe-top))
+    max(var(--ui-space-3), var(--safe-right))
+    max(var(--ui-space-3), var(--safe-bottom))
+    max(var(--ui-space-3), var(--safe-left));
+  overflow: hidden;
+  border-radius: 0;
+  /* Fully opaque, not the panel token: at 0.97 the build screen behind still
+     ghosts through, and a sheet that shows the thing it is covering reads as a
+     rendering fault rather than as a screen you have navigated to. */
+  background: var(--ui-ink);
+  box-shadow: none;
+  transform: none;
   visibility: visible;
-  transition:
-    transform 180ms steps(5, end),
-    visibility 0s linear 0s;
 }
 
-[data-mobile-garage='on'][data-palette-open='false']
-  :is(.palette, .garage-dock),
-[data-mobile-garage='on'] :is(.palette, .garage-dock).is-drawer-closed {
-  pointer-events: none;
-  transform: translateY(calc(100% + max(12px, var(--safe-bottom))));
-  visibility: hidden;
-  transition:
-    transform 180ms steps(5, end),
-    visibility 0s linear 180ms;
+/* The header never scrolls away, leaving the only exit large and obvious. */
+[data-mobile-garage='on'] .garage-sheet__header {
+  display: flex;
+  min-height: var(--touch-target);
+  flex: 0 0 var(--touch-target);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  padding-left: var(--ui-space-3);
+  border-bottom: 1px solid var(--ui-edge);
+  background: var(--ui-surface-1);
+  box-shadow: inset 3px 0 0 var(--ui-signal-dark);
 }
 
-/* Two or three picture frames per row preserve the store's quick visual scan.
-   Momentum is contained here so reaching an edge never rubber-bands the page. */
-[data-mobile-garage='on'] :is(.palette-content, .store-list) {
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+[data-mobile-garage='on'] .garage-sheet__header h2 {
+  margin: 0;
+  color: var(--ui-text);
+  font: 400 var(--ui-text-16)/1 var(--ui-font-display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+[data-mobile-garage='on'] .garage-sheet__close {
+  display: grid;
+  width: var(--touch-target);
+  min-width: var(--touch-target);
+  height: var(--touch-target);
+  min-height: var(--touch-target);
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--ui-danger);
+  background: var(--ui-danger-dark);
+  box-shadow: inset 0 0 0 1px var(--ui-edge);
+  color: var(--ui-text);
+  font: 400 var(--ui-text-28)/1 var(--ui-font-display);
+}
+
+[data-mobile-garage='on']
+  [data-garage-sheet-panel]
+  > .dock-panel__header
+  > .dock-panel__toggle,
+[data-mobile-garage='on']
+  .garage-stats-sheet
+  .vehicle-stats__header
+  > .dock-panel__toggle {
+  display: none;
+}
+
+/* Sheet bodies own vertical gestures instead of handing them to the canvas. */
+[data-mobile-garage='on'][data-garage-sheet]
+  [data-garage-sheet-panel]
+  > :is(.dock-panel__body, .garage-sheet__body) {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--ui-space-2);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -94,84 +132,205 @@
 }
 
 [data-mobile-garage='on']
-  :is(.palette, .garage-dock)
-  :is(.part-btn, .store-item) {
-  min-height: 72px;
+  [data-garage-sheet-panel]
+  > .dock-panel__body {
+  padding: var(--ui-space-2);
 }
 
-/* The handle stays outside the translated shelf, and moves to its lip only
-   while open. Eighteen sits above garage cards but below dialogs and help. */
-[data-mobile-garage='on'] .garage-drawer-handle {
+[data-mobile-garage='on']
+  [data-garage-sheet-panel='inventory']
+  > .garage-sheet__body,
+[data-mobile-garage='on']
+  [data-garage-sheet-panel='stats']
+  > .garage-sheet__body {
+  padding: var(--ui-space-3);
+}
+
+/* Three broad columns remain quickly scannable in either phone orientation. */
+[data-mobile-garage='on']
+  [data-garage-sheet-panel='shop']
+  .store-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: 132px;
+  min-height: 0;
+  flex: none;
+  gap: var(--ui-space-2);
+  overflow: visible;
+  padding-right: 0;
+}
+
+[data-mobile-garage='on']
+  [data-garage-sheet-panel='shop']
+  :is(.part-btn, .store-item) {
+  min-height: 96px;
+}
+
+[data-mobile-garage='on']
+  [data-garage-sheet-panel='shop']
+  .part-price {
+  font-size: var(--ui-text-12);
+}
+
+[data-mobile-garage='on']
+  [data-garage-sheet-panel='inventory']
+  .inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-height: 0;
+  flex: none;
+  gap: var(--ui-space-2);
+  overflow: visible;
+  padding-right: 0;
+}
+
+/* Stats and abilities are one reference page, never separate floating cards. */
+[data-mobile-garage='on'] .garage-stats-sheet__body {
+  align-items: stretch;
+}
+
+[data-mobile-garage='on']
+  .garage-stats-sheet
+  :is(.vehicle-stats, .ability-loadout) {
+  position: static;
+  inset: auto;
+  display: flex;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  transform: none;
+}
+
+[data-mobile-garage='on'] .garage-stats-sheet .vehicle-stats {
+  overflow: visible;
+}
+
+[data-mobile-garage='on']
+  .garage-stats-sheet
+  .vehicle-stats.is-collapsed
+  .vehicle-stats__content {
+  display: grid;
+}
+
+[data-mobile-garage='on']
+  .garage-stats-sheet
+  .vehicle-stats__content {
+  overflow: visible;
+}
+
+[data-mobile-garage='on'] .garage-stats-sheet .ability-loadout {
+  flex-direction: column;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-3);
+}
+
+[data-mobile-garage='on'] .garage-stats-sheet .ability-loadout__boxes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-space-2);
+}
+
+[data-mobile-garage='on'] .garage-stats-sheet .ability-loadout__slot {
+  width: auto;
+  min-width: 0;
+  min-height: calc(var(--touch-target) + var(--ui-space-5));
+}
+
+/* The build screen keeps four destinations in one predictable thumb row. */
+[data-mobile-garage='on'] .garage-action-bar {
   position: absolute;
-  right: 50%;
-  bottom: max(12px, var(--safe-bottom));
+  right: var(--garage-edge-right);
+  bottom: var(--garage-action-bottom);
+  left: var(--garage-edge-left);
   z-index: 18;
-  min-width: 112px;
+  display: grid;
+  height: var(--garage-action-height);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ui-space-2);
+}
+
+[data-mobile-garage='on'] .garage-action-bar__button {
+  position: relative;
+  min-width: 0;
   min-height: var(--touch-target);
-  padding: 8px 22px max(12px, var(--safe-bottom));
+  padding: 0 var(--ui-space-2);
   border: 1px solid var(--ui-edge);
   border-bottom: 3px solid var(--ui-signal-dark);
-  border-radius: var(--panel-radius);
   background: var(--panel-bg-strong);
-  box-shadow: 5px 6px 0 rgb(0 0 0 / 0.38);
+  box-shadow: 3px 4px 0 rgb(0 0 0 / 0.38);
   color: var(--ui-text);
   font: 400 var(--ui-text-12)/1 var(--ui-font-display);
-  letter-spacing: 0.12em;
-  touch-action: none;
-  transform: translateX(50%);
+  letter-spacing: 0.06em;
 }
 
-[data-mobile-garage='on'][data-palette-open='true'] .garage-drawer-handle {
-  bottom: calc(var(--garage-drawer-height) + max(12px, var(--safe-bottom)));
+[data-mobile-garage='on'] .garage-action-bar__button[data-alert='true'] {
+  border-color: var(--ui-danger);
+  background: var(--ui-danger-dark);
+  box-shadow:
+    3px 4px 0 rgb(0 0 0 / 0.38),
+    inset 0 0 0 1px var(--ui-danger);
 }
 
-/* The report remains a small top-right sheet. Its alert survives collapse so a
-   blocking validation problem cannot disappear with the report body. */
-[data-mobile-garage='on'] :is(.build-card, .vehicle-stats) {
-  top: var(--garage-topbar-clearance);
+[data-mobile-garage='on']
+  .garage-action-bar__button[data-alert='true']::after {
+  position: absolute;
+  top: var(--ui-space-1);
+  right: var(--ui-space-1);
+  width: var(--ui-space-2);
+  height: var(--ui-space-2);
+  content: '';
+  background: var(--ui-danger);
+}
+
+/* The build bar is only its five armed slots; inventory moved to the row above. */
+[data-mobile-garage='on'] .hotbar-panel {
   right: var(--garage-edge-right);
-  bottom: auto;
-  left: auto;
-  width: min(
-    var(--garage-report-width),
-    calc(100vw - var(--garage-edge-left) - var(--garage-edge-right))
-  );
-  max-height: min(
-    60dvh,
-    calc(
-      100dvh - var(--garage-topbar-clearance) - var(--garage-stack-clearance)
-    )
-  );
-  overflow-y: auto;
-  touch-action: pan-y;
+  bottom: var(--garage-edge-bottom);
+  left: var(--garage-edge-left);
+  width: auto;
+  height: var(--garage-hotbar-height);
+  gap: var(--ui-space-2);
+  transform: none;
 }
 
-[data-mobile-garage='on'] :is(.build-card, .vehicle-stats).is-collapsed {
-  width: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
-  max-width: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
-  height: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
-  max-height: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
+[data-mobile-garage='on'] .hotbar-list {
+  grid-template-rows: var(--garage-hotbar-height);
+  gap: var(--ui-space-2);
 }
 
-/* vehicle-stats has a desktop-era fold button; the shared Collapsible owns the
-   mobile state and accessibility contract while touch layout is installed. */
-[data-mobile-garage='on'] .vehicle-stats__header > .dock-panel__toggle {
+[data-mobile-garage='on'] .hotbar-list .hotbar-slot {
+  height: var(--garage-hotbar-height);
+  min-height: var(--touch-target);
+}
+
+[data-mobile-garage='on'] .hotbar-panel > .inventory-toggle {
   display: none;
 }
 
-[data-mobile-garage='on'] .collapsible-toggle[data-alert='true'] {
-  border-color: var(--ui-danger);
-  background: var(--ui-danger-dark);
-  box-shadow: inset 0 0 0 1px var(--ui-danger);
-  color: #e1c4bc;
+[data-mobile-garage='on'] .garage-status {
+  right: var(--garage-edge-right);
+  bottom: var(--garage-bottom-clearance);
+  left: var(--garage-edge-left);
+  width: auto;
+  max-width: none;
+  transform: none;
 }
 
-/* Compact controls use their accessible names while their visible chrome sheds
-   labels. This leaves enough room for the phone-specific row layouts below. */
+/* Safe-area offsets keep command chrome clear of camera cut-outs. */
+[data-mobile-garage='on'] .topbar {
+  top: var(--garage-edge-top);
+  right: var(--garage-edge-right);
+  left: var(--garage-edge-left);
+}
+
 [data-mobile-garage='on'] .topbar[data-density='compact'] {
   gap: var(--ui-space-2);
   flex-wrap: wrap;
   overflow: visible;
+  row-gap: var(--ui-space-1);
   padding: var(--ui-space-1);
 }
 
@@ -179,29 +338,10 @@
   flex: 0 0 auto;
 }
 
-/* The bar has to wrap, not scroll sideways. A horizontal scroller hides the
-   view picker and the height slider behind a gesture nobody would guess at,
-   and on a 390 px screen those were simply unreachable. */
-[data-mobile-garage='on'] .topbar[data-density='compact'] {
-  overflow: visible;
-  row-gap: var(--ui-space-1);
-}
-
-/* The rig-name field is the one control that can give up width: it is the
-   widest, and a shorter box still shows the name being typed. */
 [data-mobile-garage='on'] .topbar[data-density='compact'] .garage-name {
+  width: auto;
+  min-width: 0;
   flex: 1 1 96px;
-  min-width: 96px;
-}
-
-/* Pinned below the bar rather than at a guessed offset — the bar is one row on
-   a phone in landscape and two in portrait. */
-[data-mobile-garage='on'] .editor-notice {
-  top: calc(
-    var(--garage-topbar-h, 64px) + max(12px, var(--safe-top)) + var(--ui-space-2)
-  );
-  width: min(340px, calc(100vw - 24px));
-  max-width: min(340px, calc(100vw - 24px));
 }
 
 [data-mobile-garage='on']
@@ -223,16 +363,18 @@
 [data-mobile-garage='on']
   .topbar[data-density='compact']
   button[data-mobile-glyph]::before {
+  display: inline-block;
   color: var(--ui-text);
   content: attr(data-mobile-glyph);
-  display: inline-block;
   font: var(--ui-text-20)/1 var(--ui-font-display);
   transform: scale(var(--hud-scale));
 }
 
-[data-mobile-garage='on'] .topbar[data-density='compact'] .garage-name {
-  width: auto;
-  min-width: 0;
+/* Share has one mobile home in the action row, avoiding duplicate controls. */
+[data-mobile-garage='on']
+  .topbar[data-density='compact']
+  button[aria-controls='garage-share-panel'] {
+  display: none;
 }
 
 [data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-layer__label {
@@ -279,92 +421,13 @@
   display: none;
 }
 
-/* Bottom tools have one measured vertical order: hotbar, drawer handle,
-   abilities, then transient status. No panel guesses another panel's pixels. */
-[data-mobile-garage='on'] .hotbar-panel {
-  right: var(--garage-edge-right);
-  bottom: var(--garage-edge-bottom);
-  left: var(--garage-edge-left);
-  width: auto;
-  height: var(--garage-hotbar-height);
-  gap: var(--ui-space-2);
-  transform: none;
-}
-
-[data-mobile-garage='on'] .hotbar-list {
-  grid-template-rows: var(--garage-hotbar-height);
-  gap: var(--ui-space-2);
-}
-
-[data-mobile-garage='on'] .hotbar-list .hotbar-slot,
-[data-mobile-garage='on'] .inventory-toggle {
-  height: var(--garage-hotbar-height);
-  min-height: var(--touch-target);
-}
-
-[data-mobile-garage='on'] .inventory-toggle {
-  width: var(--garage-hotbar-height);
-  flex-basis: var(--garage-hotbar-height);
-}
-
-[data-mobile-garage='on'] .garage-status {
-  right: var(--garage-edge-right);
-  bottom: var(--garage-stack-clearance);
-  left: var(--garage-edge-left);
-  width: auto;
-  max-width: none;
-  transform: none;
-}
-
-[data-mobile-garage='on'] .garage-drawer-handle {
-  bottom: var(--garage-handle-bottom);
-  height: var(--garage-handle-height);
-  min-height: var(--touch-target);
-  padding: 0 var(--ui-space-4);
-}
-
-[data-mobile-garage='on'] .ability-loadout {
-  right: var(--garage-edge-right);
-  bottom: var(--garage-ability-bottom);
-  left: var(--garage-edge-left);
-  width: auto;
-  height: var(--garage-ability-height);
-  gap: var(--ui-space-1);
-  padding: var(--ui-space-2);
-}
-
-[data-mobile-garage='on'] .ability-loadout > header {
-  min-width: 0;
-}
-
-[data-mobile-garage='on'] .ability-loadout__boxes {
-  min-width: 0;
-  gap: var(--ui-space-2);
-}
-
-[data-mobile-garage='on'] .ability-loadout__slot {
-  width: auto;
-  min-width: var(--touch-target);
-  height: var(--touch-target);
-  min-height: var(--touch-target);
-  flex: 1 1 var(--touch-target);
-  gap: 0;
-  padding: var(--ui-space-1);
-  overflow: hidden;
-}
-
-[data-mobile-garage='on'] .ability-loadout__part {
-  display: none;
-}
-
-/* The orange onboarding notice starts below the command bar and leaves the
-   collapsed build-report affordance exposed at the right edge. */
+/* Transient guidance follows the measured command bar, not a guessed row count. */
 [data-mobile-garage='on'] .editor-notice {
-  top: var(--garage-topbar-clearance);
-  right: calc(
-    var(--garage-edge-right) + var(--collapsible-toggle-size) +
-      var(--ui-space-2) + var(--ui-space-2)
+  top: calc(
+    var(--garage-topbar-h, var(--garage-topbar-height)) +
+      var(--garage-edge-top) + var(--ui-space-2)
   );
+  right: var(--garage-edge-right);
   left: var(--garage-edge-left);
   width: auto;
   max-width: none;
@@ -377,13 +440,13 @@
 
 [data-mobile-garage='on'] .selected-toolbar {
   max-width: calc(
-    100vw - max(12px, var(--safe-left)) - max(12px, var(--safe-right))
+    100vw - max(var(--ui-space-3), var(--safe-left)) -
+      max(var(--ui-space-3), var(--safe-right))
   );
 }
 
 @media (orientation: portrait) and (max-width: 560px) {
-  /* Seven equal cells form exactly two rows on a phone. Utility and history
-     wrappers dissolve into the grid so every control remains a full target. */
+  /* Seven equal cells keep the command bar to two reliable touch rows. */
   [data-mobile-garage='on'] .topbar[data-density='compact'] {
     display: grid;
     height: var(--garage-topbar-height);
@@ -431,14 +494,10 @@
 }
 
 @media (orientation: landscape) and (max-height: 560px) {
-  /* Short landscape screens spend one touch-target row on commands. Text-only
-     actions use the glyphs whose accessible names MobileGarage supplies. */
+  /* Landscape spends one row on commands and keeps both build rows below. */
   [data-mobile-garage='on'] {
     --garage-topbar-height: calc(
       var(--touch-target) + var(--ui-space-1) + var(--ui-space-1)
-    );
-    --garage-topbar-clearance: calc(
-      var(--garage-edge-top) + var(--garage-topbar-height) + var(--ui-space-2)
     );
   }
 
@@ -475,8 +534,7 @@
 
   [data-mobile-garage='on']
     .topbar[data-density='compact']
-    .topbar-layer__value,
-  [data-mobile-garage='on'] .ability-loadout > header span {
+    .topbar-layer__value {
     display: none;
   }
 
@@ -484,42 +542,9 @@
     min-width: var(--touch-target);
     padding-inline: var(--ui-space-1);
   }
-
-  /* Report, notice, and ability planner occupy separate horizontal lanes. An
-     expanded report can use 60dvh without folding or covering the abilities. */
-  [data-mobile-garage='on'] :is(.build-card, .vehicle-stats) {
-    right: auto;
-    left: var(--garage-edge-left);
-    width: min(
-      var(--garage-report-width),
-      calc(
-        100vw - var(--garage-edge-left) - var(--garage-edge-right) -
-          var(--garage-ability-width) - var(--garage-stack-gap)
-      )
-    );
-    max-height: 60dvh;
-  }
-
-  [data-mobile-garage='on'] .ability-loadout {
-    right: var(--garage-edge-right);
-    left: auto;
-    width: var(--garage-ability-width);
-  }
-
-  [data-mobile-garage='on'] .editor-notice {
-    right: calc(
-      var(--garage-edge-right) + var(--garage-ability-width) +
-        var(--garage-stack-gap)
-    );
-    left: calc(
-      var(--garage-edge-left) + var(--garage-report-width) +
-        var(--garage-stack-gap)
-    );
-  }
 }
 
-/* Dialog bodies pan independently inside the visible mobile viewport. Their
-   buttons retain the same reliable thumb target as the persistent HUD. */
+/* Dialogs retain an independent pan region inside the visible phone viewport. */
 [data-mobile-garage='on']
   :is(
     .build-prompt,
@@ -529,8 +554,8 @@
     .import-overlay,
     .import-dialog
   ) {
-  width: min(420px, calc(100vw - 24px));
-  max-height: calc(100dvh - 24px);
+  width: min(420px, calc(100vw - var(--ui-space-5)));
+  max-height: calc(100dvh - var(--ui-space-5));
   overflow-y: auto;
   overscroll-behavior: contain;
   touch-action: pan-y;
@@ -550,8 +575,7 @@
 }
 
 @media (hover: none) {
-  /* Touch pointerenter is synthetic and has no matching hover exit, so the
-     desktop detail card and lift effects must never become sticky overlays. */
+  /* Touch hover is sticky, so its desktop-only detail lift stays absent. */
   [data-mobile-garage='on'] .store-details {
     display: none;
   }
@@ -566,10 +590,14 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  /* State still changes instantly, preserving the same visibility and hit-test
-     guarantees without a stepped slide. */
-  [data-mobile-garage='on'] :is(.palette, .garage-dock) {
-    transition: none;
+@media (max-width: 380px) {
+  /* Very narrow phones trade one column for readable prices and tap targets. */
+  [data-mobile-garage='on']
+    [data-garage-sheet-panel='shop']
+    .store-list,
+  [data-mobile-garage='on']
+    [data-garage-sheet-panel='inventory']
+    .inventory-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

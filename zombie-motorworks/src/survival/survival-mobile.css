@@ -1,172 +1,311 @@
-/* Touch layouts opt in through the Survival adapter, so none of these repairs
-   can change the pointer-precise desktop HUD. */
+/* Touch layouts opt in through the Survival adapter, so pointer-precise HUDs
+   cannot match any repair in this file. */
 [data-mobile-hud='on'] {
-  --survival-mobile-hud-scale: var(--hud-scale);
+  --survival-mobile-edge-gap: 8px;
+  --survival-mobile-strip-height: var(--touch-target);
 }
 
-/* The wave rail remains centred, but shrinks toward its own anchor so Settings
-   and cash retain safe, tappable corners beside it. */
-[data-mobile-hud='on'] .survival-wave-hud {
-  top: max(12px, var(--safe-top));
-  transform: translateX(-50%) scale(var(--survival-mobile-hud-scale));
-  transform-origin: top center;
+/* Telemetry and the existing corner readouts share one top information band.
+   The timeline sits immediately below it, keeping both rows above the road. */
+[data-mobile-hud='on'] .survival-driver-hud {
+  position: absolute;
+  top: var(--safe-top);
+  right: var(--safe-right);
+  bottom: auto;
+  left: var(--safe-left);
+  z-index: 15;
+  display: grid;
+  width: auto;
+  min-width: 0;
+  height: var(--survival-mobile-strip-height);
+  min-height: var(--survival-mobile-strip-height);
+  max-height: var(--survival-mobile-strip-height);
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1.15fr);
+  align-items: center;
+  gap: 6px;
+  padding: 5px 84px 5px 52px;
+  overflow: hidden;
+  border-right: 0;
+  border-left: 0;
+  background: var(--panel-bg-strong);
+  box-shadow: inset 0 -2px 0 var(--ui-edge);
+  pointer-events: none;
+  transform: none;
 }
 
+[data-mobile-hud='on'] .survival-speed,
+[data-mobile-hud='on'] .survival-health,
+[data-mobile-hud='on'] .survival-fuel {
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+}
+
+[data-mobile-hud='on'] .survival-speed {
+  display: grid;
+  grid-template-columns: auto minmax(28px, 1fr);
+}
+
+[data-mobile-hud='on'] .survival-speed__header {
+  display: block;
+  min-width: 0;
+}
+
+[data-mobile-hud='on'] .survival-speed__header > span:first-child,
+[data-mobile-hud='on'] .survival-health > div:first-child > span:first-child,
+[data-mobile-hud='on'] .survival-fuel > div:first-child > span:first-child,
+[data-mobile-hud='on'] .survival-speed__legend {
+  display: none;
+}
+
+[data-mobile-hud='on'] .survival-speed__readout {
+  gap: 2px;
+  white-space: nowrap;
+}
+
+[data-mobile-hud='on'] .survival-speed__readout span {
+  font-size: var(--ui-text-20);
+  line-height: 1;
+}
+
+[data-mobile-hud='on'] .survival-speed small {
+  font-size: var(--ui-text-10);
+}
+
+[data-mobile-hud='on'] .survival-speed__gauge {
+  display: block;
+  min-width: 0;
+}
+
+[data-mobile-hud='on'] .survival-speed__track,
+[data-mobile-hud='on'] .survival-health__track,
+[data-mobile-hud='on'] .survival-fuel__track {
+  width: 100%;
+  min-width: 0;
+  height: 8px;
+  padding: 1px;
+}
+
+[data-mobile-hud='on'] .survival-health,
+[data-mobile-hud='on'] .survival-fuel {
+  display: grid;
+  grid-template-columns: minmax(24px, 1fr) auto;
+}
+
+[data-mobile-hud='on'] .survival-health > div:first-child,
+[data-mobile-hud='on'] .survival-fuel > div:first-child {
+  grid-row: 1;
+  grid-column: 2;
+  font: var(--ui-text-10) / 1 var(--ui-font-display);
+  white-space: nowrap;
+}
+
+[data-mobile-hud='on'] .survival-health__track,
+[data-mobile-hud='on'] .survival-fuel__track {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+/* Settings and money occupy the padding reserved inside the strip, rather
+   than competing with speed or either resource bar. */
 [data-mobile-hud='on'] .survival-settings-button {
-  top: max(12px, var(--safe-top));
+  top: var(--safe-top);
   right: auto;
-  left: max(12px, var(--safe-left));
+  left: calc(var(--safe-left) + 4px);
   width: var(--touch-target);
   min-width: var(--touch-target);
+  height: var(--touch-target);
+  min-height: var(--touch-target);
   padding: 0;
   overflow: hidden;
   font-size: 0;
+  box-shadow: none;
 }
 
-/* A compact menu glyph leaves the full accessible button label intact while
-   avoiding a wide text button across the wave timeline. */
 [data-mobile-hud='on'] .survival-settings-button::after {
   content: '\2630';
   font-size: var(--ui-text-20);
 }
 
-/* Money and timed buffs share one notch-safe reading rail. It is inset from
-   the edge in landscape because the vertical ability rail owns that strip. */
 [data-mobile-hud='on'] .survival-cash {
-  top: max(12px, var(--safe-top));
-  right: max(12px, var(--safe-right));
+  top: calc(var(--safe-top) + 7px);
+  right: calc(var(--safe-right) + 8px);
   left: auto;
-  transform: scale(var(--survival-mobile-hud-scale));
-  transform-origin: top right;
+  max-width: 70px;
+  overflow: visible;
+  transform: none;
 }
 
-[data-mobile-hud='on'] .survival-buffs {
-  top: max(58px, calc(var(--safe-top) + 58px));
-  right: max(12px, var(--safe-right));
-  bottom: auto;
-  left: auto;
-  width: 172px;
+[data-mobile-hud='on'] .survival-cash__value {
+  overflow: hidden;
+  font-size: var(--ui-text-20);
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The timeline is the second row of the same top band. Its route icons and
+   captions are planning detail, so combat keeps only wave, score, and progress. */
+[data-mobile-hud='on'] .wave-timeline {
+  top: max(50px, calc(var(--safe-top) + 50px));
+  width: min(
+    300px,
+    calc(100vw - var(--safe-left) - var(--safe-right) - 120px)
+  );
   gap: 4px;
-  transform: scale(var(--survival-mobile-hud-scale));
-  transform-origin: top right;
+  transform: translateX(-50%);
 }
 
-[data-mobile-hud='on'] .survival-pickup {
-  top: max(112px, calc(var(--safe-top) + 112px));
-  right: max(12px, var(--safe-right));
-  left: auto;
-  align-items: flex-end;
-  transform: scale(var(--survival-mobile-hud-scale));
-  transform-origin: top right;
+[data-mobile-hud='on'] .wave-timeline__cleared,
+[data-mobile-hud='on'] .wave-timeline__caption,
+[data-mobile-hud='on'] .wave-timeline__rail {
+  display: none;
 }
 
-/* Driver telemetry moves away from the floating joystick. Only its collapse
-   control accepts input, so the panel never steals a driving gesture. */
-[data-mobile-hud='on'] .survival-driver-hud {
-  top: max(64px, calc(var(--safe-top) + 64px));
+[data-mobile-hud='on'] .wave-timeline__bar {
+  height: 8px;
+  padding: 1px;
+}
+
+/* A boss replaces the ordinary timeline in its edge row, so two mandatory
+   progress displays never obscure one another. */
+[data-mobile-hud='on']:has(.survival-boss-hud:not([hidden])) .wave-timeline {
+  display: none;
+}
+
+[data-mobile-hud='on'] .survival-boss-hud {
+  top: max(50px, calc(var(--safe-top) + 50px));
+  width: min(
+    300px,
+    calc(100vw - var(--safe-left) - var(--safe-right) - 120px)
+  );
+  height: 32px;
+  grid-template-columns: auto minmax(60px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  transform: translateX(-50%);
+}
+
+[data-mobile-hud='on'] .survival-boss-hud__track {
+  height: 10px;
+  padding: 1px;
+}
+
+/* Folded, the map is one corner icon below the wallet. Open, it becomes a
+   deliberate stop-and-look overlay instead of growing into the playfield. */
+[data-mobile-hud='on'] .minimap {
+  position: fixed;
+  top: 50%;
   right: auto;
   bottom: auto;
-  left: max(12px, var(--safe-left));
-  padding-right: 72px;
-  pointer-events: none;
-  transform: scale(var(--survival-mobile-hud-scale));
-  transform-origin: top left;
-}
-
-[data-mobile-hud='on'] .survival-driver-hud > .collapsible-toggle,
-[data-mobile-hud='on'] .minimap > .collapsible-toggle {
-  width: 66px;
-  min-width: 66px;
-  height: 66px;
-  min-height: 66px;
-  pointer-events: auto;
-}
-
-/* The collapsed driver card remains a labelled chip instead of becoming an
-   unexplained arrow floating over the arena. */
-[data-mobile-hud='on'] .survival-driver-hud.is-collapsed {
-  width: 150px;
-  min-width: 150px;
-  max-width: 150px;
-  height: 74px;
-  min-height: 74px;
-  max-height: 74px;
-  padding: 4px;
-}
-
-[data-mobile-hud='on']
-  .survival-driver-hud.is-collapsed
-  > .collapsible-toggle,
-[data-mobile-hud='on'] .minimap.is-collapsed > .collapsible-toggle {
-  inset: 4px;
-  display: flex;
-  width: calc(100% - 8px);
+  left: 50%;
+  z-index: 35;
+  width: min(70vw, 70vh);
   min-width: 0;
-  height: calc(100% - 8px);
+  max-width: min(70vw, 70vh);
+  height: min(70vw, 70vh);
   min-height: 0;
-  justify-content: center;
-  gap: 10px;
-}
-
-[data-mobile-hud='on']
-  .survival-driver-hud.is-collapsed
-  > .collapsible-toggle::after,
-[data-mobile-hud='on']
-  .minimap.is-collapsed
-  > .collapsible-toggle::after {
-  content: attr(aria-label);
-  font: 400 var(--ui-text-11) / 1 var(--ui-font-display);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-/* The map lives in the upper information band rather than under either thumb.
-   Its canvas ignores input while the restore toggle remains reachable. */
-[data-mobile-hud='on'] .minimap {
-  top: max(84px, calc(var(--safe-top) + 84px));
-  /* Clears the ability rail on the same edge: one 56 px box plus its gutter.
-     Derived from the rail's own width so the two cannot drift apart. */
-  right: calc(max(12px, calc(var(--safe-right) + 12px)) + 72px);
-  bottom: auto;
-  left: auto;
-  width: 132px;
-  height: 132px;
+  max-height: min(70vw, 70vh);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--ui-edge);
+  background: var(--ui-surface-1);
+  box-shadow: var(--ui-shadow-panel);
   pointer-events: auto;
+  transform: translate(-50%, -50%);
+}
+
+[data-mobile-hud='on'] .minimap.is-collapsed {
+  top: max(50px, calc(var(--safe-top) + 50px));
+  right: var(--safe-right);
+  left: auto;
+  width: var(--touch-target);
+  min-width: var(--touch-target);
+  max-width: var(--touch-target);
+  height: var(--touch-target);
+  min-height: var(--touch-target);
+  max-height: var(--touch-target);
+  padding: 0;
+  box-shadow: none;
+  transform: none;
 }
 
 [data-mobile-hud='on'] .minimap__canvas {
   pointer-events: none;
 }
 
-[data-mobile-hud='on'] .minimap.is-collapsed {
-  width: 126px;
-  min-width: 126px;
-  max-width: 126px;
-  height: 64px;
-  min-height: 64px;
-  max-height: 64px;
-  padding: 4px;
+[data-mobile-hud='on'] .minimap > .collapsible-toggle {
+  inset: 8px 8px auto auto;
+  width: var(--touch-target);
+  min-width: var(--touch-target);
+  height: var(--touch-target);
+  min-height: var(--touch-target);
+  pointer-events: auto;
 }
 
-/* Ability boxes sit immediately above the touch button cluster. A vertical
-   rail follows the right thumb without covering the right aim surface. */
+[data-mobile-hud='on'] .minimap.is-collapsed > .collapsible-toggle {
+  inset: 0;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+}
+
+/* A map pin reads as the closed-map action; an x remains inside the open map. */
+[data-mobile-hud='on'] .minimap > .collapsible-toggle::before {
+  width: auto;
+  height: auto;
+  border: 0;
+  content: '\00d7';
+  font: 400 var(--ui-text-28) / 1 var(--ui-font-display);
+  transform: none;
+}
+
+[data-mobile-hud='on']
+  .minimap.is-collapsed
+  > .collapsible-toggle::before {
+  content: '\2316';
+  font-size: var(--ui-text-20);
+}
+
+[data-mobile-hud='on'] .survival-minimap-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 34;
+  background: rgb(4 5 4 / 0.7);
+  pointer-events: auto;
+}
+
+[data-mobile-hud='on'] .survival-minimap-backdrop[hidden] {
+  display: none !important;
+}
+
+/* Filled abilities form a touch-target rail between the map and the button
+   cluster. At 430 px tall, three slots retain 8 px clearance at both ends. */
 [data-mobile-hud='on'] .survival-ability-bar {
-  right: max(12px, var(--safe-right));
-  /* Directly above the button cluster, which sits 88 px up and is 56 px tall. */
-  bottom: max(152px, calc(var(--safe-bottom) + 152px));
+  right: var(--safe-right);
+  bottom: max(168px, calc(var(--safe-bottom) + 168px));
   left: auto;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--survival-mobile-edge-gap);
   transform: none;
 }
 
 [data-mobile-hud='on'] .survival-ability-slot {
-  width: 56px;
-  min-width: 56px;
-  height: 56px;
-  min-height: 56px;
+  width: var(--touch-target);
+  min-width: var(--touch-target);
+  height: var(--touch-target);
+  min-height: var(--touch-target);
   gap: 0;
-  padding: 5px;
+  padding: 4px;
+  box-shadow: inset 0 -2px 0 var(--ui-signal-dark);
+}
+
+[data-mobile-hud='on'] .survival-ability-slot[hidden] {
+  display: none !important;
 }
 
 [data-mobile-hud='on'] .survival-ability-slot__glyph {
@@ -179,55 +318,132 @@
   display: none;
 }
 
-/* Emergency actions sit in the upper centre-left playfield. Their compact
-   cards leave the lower corners completely available for steering and aim. */
-[data-mobile-hud='on'] .survival-prompts {
-  top: max(116px, calc(var(--safe-top) + 116px));
-  right: max(84px, calc(var(--safe-right) + 84px));
+/* Short-lived effect timers use the slim column beside the right-edge rail. */
+[data-mobile-hud='on'] .survival-buffs {
+  top: max(50px, calc(var(--safe-top) + 50px));
+  right: calc(var(--safe-right) + var(--touch-target) + 8px);
   bottom: auto;
-  left: max(180px, calc(var(--safe-left) + 180px));
-  justify-content: center;
-  gap: 8px;
+  left: auto;
+  width: 116px;
+  max-height: 44px;
+  gap: 3px;
+  overflow: hidden;
+  transform: none;
+}
+
+[data-mobile-hud='on'] .survival-buff__header {
+  font-size: var(--ui-text-10);
+}
+
+[data-mobile-hud='on'] .survival-buff__track {
+  height: 7px;
+}
+
+[data-mobile-hud='on'] .survival-pickup {
+  top: max(102px, calc(var(--safe-top) + 102px));
+  right: calc(var(--safe-right) + var(--touch-target) + 8px);
+  left: auto;
+  width: 116px;
+  max-height: 44px;
+  align-items: flex-end;
+  overflow: hidden;
+  transform: none;
+}
+
+[data-mobile-hud='on'] .survival-pickup__chit {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--ui-text-14);
+  text-overflow: ellipsis;
+}
+
+/* Emergency actions become icon-only edge buttons. Their full copy remains in
+   the accessible DOM while the road and both thumb zones stay unobstructed. */
+[data-mobile-hud='on'] .survival-prompts {
+  top: max(50px, calc(var(--safe-top) + 50px));
+  right: auto;
+  bottom: auto;
+  left: var(--safe-left);
+  flex-direction: column;
+  gap: var(--survival-mobile-edge-gap);
   transform: none;
 }
 
 [data-mobile-hud='on'] .survival-prompt {
-  grid-template-columns: 36px minmax(0, 1fr);
-  gap: 8px;
-  min-width: 0;
-  max-width: 230px;
-  padding: 8px 10px 8px 8px;
+  width: var(--touch-target);
+  min-width: var(--touch-target);
+  max-width: var(--touch-target);
+  height: var(--touch-target);
+  min-height: var(--touch-target);
+  grid-template-columns: 1fr;
+  gap: 0;
+  padding: 4px;
+  overflow: hidden;
+  box-shadow: none;
 }
 
 [data-mobile-hud='on'] .survival-prompt__icon {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
+}
+
+[data-mobile-hud='on'] .survival-prompt__copy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
 }
 
 [data-mobile-hud='on'] .survival-scuttle {
-  min-height: 56px;
+  min-height: var(--touch-target);
 }
 
-/* Damage warnings join the upper band and scale toward their left anchor so
-   they cannot drift into the joystick zone on short screens. */
+/* Warnings reduce to a non-interactive icon row above the landscape midpoint;
+   their live-region copy remains available to assistive technology. */
 [data-mobile-hud='on'] .survival-warnings {
-  top: max(226px, calc(var(--safe-top) + 226px));
-  left: max(12px, var(--safe-left));
-  width: min(220px, calc(100vw - 108px));
-  transform: scale(var(--survival-mobile-hud-scale));
-  transform-origin: top left;
+  top: max(154px, calc(var(--safe-top) + 154px));
+  left: var(--safe-left);
+  display: flex;
+  width: auto;
+  max-width: calc(100vw - var(--safe-left) - var(--safe-right));
+  gap: 4px;
+  transform: none;
 }
 
-/* Boss health is mandatory information. It scales in place but never gains a
-   collapse affordance that could hide an encounter's win condition. */
-[data-mobile-hud='on'] .survival-boss-hud {
-  top: max(62px, calc(var(--safe-top) + 62px));
-  transform: translateX(-50%) scale(var(--survival-mobile-hud-scale));
-  transform-origin: top center;
+[data-mobile-hud='on'] .survival-warning {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  grid-template-columns: 28px;
+  gap: 0;
+  padding: 1px;
+  overflow: hidden;
+  box-shadow: none;
 }
 
-/* Modal cards use the visible dynamic viewport and own their scrolling, so a
-   360 x 640 phone never loses the close or restart action below the fold. */
+[data-mobile-hud='on'] .survival-warning__icon {
+  width: 28px;
+  height: 28px;
+  transform: scale(0.82);
+  transform-origin: center;
+}
+
+[data-mobile-hud='on'] .survival-warning__copy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* Modal cards use the visible viewport and own their scrolling, so phone
+   actions do not fall below the browser chrome. */
 [data-mobile-hud='on'] .survival-settings-overlay {
   padding:
     max(12px, var(--safe-top)) max(12px, var(--safe-right))
@@ -237,9 +453,7 @@
 [data-mobile-hud='on'] .survival-settings,
 [data-mobile-hud='on'] .survival-gameover {
   width: min(420px, calc(100vw - 24px));
-  max-height: calc(
-    100dvh - max(12px, var(--safe-top)) - max(12px, var(--safe-top))
-  );
+  max-height: calc(100dvh - 24px);
   overflow-y: auto;
   overscroll-behavior: contain;
   touch-action: pan-y;
@@ -262,134 +476,23 @@
   min-height: var(--touch-target);
 }
 
-/* Landscape has very little vertical runway. Read-only status moves one box
-   left so the full three-ability rail can use the right edge from top to bottom. */
-@media (orientation: landscape) {
-  [data-mobile-hud='on'] .survival-cash,
-  [data-mobile-hud='on'] .survival-buffs,
-  [data-mobile-hud='on'] .survival-pickup {
-    right: max(84px, calc(var(--safe-right) + 84px));
-  }
-}
-
-/* Portrait keeps telemetry wide and shallow above the two thumb zones. The
-   speed, integrity, and fuel gauges form one horizontal reading strip. */
-@media (orientation: portrait) {
-  [data-mobile-hud='on'] {
-    --survival-mobile-hud-scale: 0.68;
-  }
-
+@media (orientation: portrait) and (max-width: 480px) {
+  /* Narrow strips spend pixels on values first; their tracks absorb the rest. */
   [data-mobile-hud='on'] .survival-driver-hud {
-    top: auto;
-    right: max(12px, var(--safe-right));
-    bottom: max(214px, calc(var(--safe-bottom) + 214px));
-    left: max(12px, var(--safe-left));
-    width: auto;
-    grid-template-columns: 1.3fr 1fr 1fr;
-    gap: 7px;
-    padding: 8px 58px 8px 8px;
-    transform: none;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.9fr) minmax(0, 1.05fr);
+    gap: 4px;
   }
 
-  [data-mobile-hud='on'] .survival-driver-hud.is-collapsed {
-    right: auto;
-    width: 132px;
-    min-width: 132px;
-    max-width: 132px;
-    height: 60px;
-    min-height: 60px;
-    max-height: 60px;
-    padding: 4px;
-  }
-
-  [data-mobile-hud='on'] .survival-driver-hud > .collapsible-toggle {
-    width: var(--touch-target);
-    min-width: var(--touch-target);
-    height: var(--touch-target);
-    min-height: var(--touch-target);
-  }
-
-  [data-mobile-hud='on'] .survival-speed {
-    grid-column: auto;
-    gap: 5px;
-    padding: 0 7px 0 0;
-    border-right: 1px solid var(--ui-edge);
-    border-bottom: 0;
-  }
-
-  [data-mobile-hud='on'] .survival-speed__header {
-    gap: 5px;
+  [data-mobile-hud='on'] .survival-speed,
+  [data-mobile-hud='on'] .survival-health,
+  [data-mobile-hud='on'] .survival-fuel {
+    gap: 2px;
   }
 
   [data-mobile-hud='on'] .survival-speed__readout span {
-    font-size: calc(var(--ui-text-28) * var(--hud-scale));
+    font-size: var(--ui-text-16);
   }
 
-  [data-mobile-hud='on'] .survival-speed__legend {
-    display: none;
-  }
-
-  [data-mobile-hud='on'] .survival-speed__track,
-  [data-mobile-hud='on'] .survival-health__track,
-  [data-mobile-hud='on'] .survival-fuel__track {
-    height: calc(12px * var(--hud-scale));
-  }
-
-  [data-mobile-hud='on'] .survival-health,
-  [data-mobile-hud='on'] .survival-fuel {
-    align-content: center;
-    gap: 5px;
-  }
-
-  /* Portrait is narrow enough that the wave banner and the settings button
-     were sharing the same top-left pixels; the banner steps aside because the
-     button is the one that has to be hit accurately. */
-  [data-mobile-hud='on'] .wave-timeline {
-    padding-left: calc(var(--touch-target) + 16px);
-  }
-
-  [data-mobile-hud='on'] .minimap {
-    top: max(70px, calc(var(--safe-top) + 70px));
-    left: max(12px, var(--safe-left));
-    width: 112px;
-    height: 112px;
-  }
-
-  [data-mobile-hud='on'] .minimap.is-collapsed {
-    width: 112px;
-    min-width: 112px;
-    max-width: 112px;
-    height: 56px;
-    min-height: 56px;
-    max-height: 56px;
-  }
-
-  /* Portrait stacks the telemetry strip across the bottom, so the ability rail
-     has to start above it rather than crossing it at the right edge. */
-  [data-mobile-hud='on'] .survival-ability-bar {
-    bottom: max(300px, calc(var(--safe-bottom) + 300px));
-  }
-
-  [data-mobile-hud='on'] .survival-prompts {
-    top: max(142px, calc(var(--safe-top) + 142px));
-    right: max(76px, calc(var(--safe-right) + 76px));
-    left: max(12px, var(--safe-left));
-    flex-direction: column;
-    align-items: center;
-  }
-
-  [data-mobile-hud='on'] .survival-prompt {
-    width: min(230px, 100%);
-  }
-
-  [data-mobile-hud='on'] .survival-warnings {
-    top: max(204px, calc(var(--safe-top) + 204px));
-  }
-}
-
-/* The narrowest portrait screens need one more pass after the shared HUD scale
-   drops: trim modal padding and let action rows consume the available width. */
-@media (orientation: portrait) and (max-width: 480px) {
   [data-mobile-hud='on'] .survival-settings,
   [data-mobile-hud='on'] .survival-gameover {
     padding: 14px !important;
@@ -404,14 +507,10 @@
   [data-mobile-hud='on'] .survival-gameover__actions button {
     width: 100%;
   }
-
-  [data-mobile-hud='on'] .survival-gameover__stats {
-    margin-top: 14px;
-  }
 }
 
-/* Taps must release their colour immediately; retained hover on iOS otherwise
-   makes a ready ability or destructive action look permanently selected. */
+/* Taps release their colour immediately; retained hover on iOS makes a ready
+   ability or destructive action look permanently selected. */
 @media (hover: none) {
   [data-mobile-hud='on'] button:hover:not(:disabled),
   [data-mobile-hud='on'] .ui-button:hover:not(:disabled) {
@@ -437,12 +536,14 @@
   }
 }
 
-/* Existing mobile movement is functional feedback, not decoration. Reduced
-   motion keeps every state readable while removing entrances and pulsing. */
+/* Mobile feedback remains readable without entrances, pulses, or stepped
+   interpolation when the player requests reduced motion. */
 @media (prefers-reduced-motion: reduce) {
   [data-mobile-hud='on'] .survival-prompt.is-visible,
   [data-mobile-hud='on'] .survival-scuttle .survival-prompt__icon::after,
-  [data-mobile-hud='on'] .survival-scuttle-banner {
+  [data-mobile-hud='on'] .survival-scuttle-banner,
+  [data-mobile-hud='on'] .survival-warning.is-new,
+  [data-mobile-hud='on'] .survival-warning--critical .survival-warning__icon {
     animation: none;
   }
 

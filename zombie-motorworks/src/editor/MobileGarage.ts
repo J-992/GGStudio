@@ -2,21 +2,7 @@
 
 import './editor-mobile.css';
 
-import { Collapsible } from '../ui/Collapsible.ts';
 import { onTouchControlsChange, shouldUseTouchControls } from '../ui/device.ts';
-
-const PALETTE_STORAGE_KEY = 'zm.garage.palette';
-const BUILD_CARD_STORAGE_KEY = 'zm.garage.buildcard';
-/**
- * Width below which the garage folds by default.
- *
- * Infinite because this controller only ever runs on a coarse pointer, and
- * every such screen is over-subscribed: a phone held in landscape is barely
- * 390 px tall, so the build report expanded means it lands on top of the
- * abilities panel and the hotbar. It stays one tap away instead.
- */
-const COMPACT_BREAKPOINT = Number.POSITIVE_INFINITY;
-const SWIPE_THRESHOLD_PX = 24;
 
 const COMPACT_BUTTON_GLYPHS: Readonly<Record<string, string>> = {
   'New Garage': '+',
@@ -28,58 +14,76 @@ const COMPACT_BUTTON_GLYPHS: Readonly<Record<string, string>> = {
   'Test Drive': '▶',
 };
 
+type GarageSheet = 'none' | 'shop' | 'inventory' | 'stats' | 'share';
+type OpenGarageSheet = Exclude<GarageSheet, 'none'>;
+
 interface RestoredAttribute {
   element: HTMLElement;
   name: string;
   value: string | null;
 }
 
-let nextPaletteId = 1;
+interface RestoredClass {
+  element: HTMLElement;
+  name: string;
+  present: boolean;
+}
+
+interface NodePlacement {
+  node: Node;
+  parent: Node;
+  nextSibling: Node | null;
+}
+
+let nextSheetId = 1;
 
 /** Controls the touch-only presentation layered over the ordinary garage DOM. */
 export interface MobileGarage {
   /** Re-applies viewport defaults after the usable width changes. */
   refresh(): void;
-  /** Opens or closes the parts drawer without synthesising pointer input. */
+  /** Opens or closes the Shop sheet without synthesising pointer input. */
   setPaletteOpen(open: boolean): void;
-  /** Temporarily folds nonessential panels while a modal owns the screen. */
+  /** Closes reference sheets while another modal owns the screen. */
   setCompact(compact: boolean): void;
   /** Detaches the controller and restores the desktop DOM it inherited. */
   dispose(): void;
 }
 
 /**
- * Folds the garage into something a thumb can drive.
+ * Leaves the vehicle as the garage's default mobile screen.
  *
- * Hybrid tablets can change their primary pointer while the editor is alive,
- * so the returned controller remains subscribed even when its first install is
- * a no-op. The desktop DOM is restored between transitions rather than rebuilt;
- * editor state and the part tiles' pointer-capture listeners stay untouched.
+ * The ordinary editor panels stay alive, with their event listeners and live
+ * content intact. Mobile only promotes one of them over the canvas at a time.
  */
 export function installMobileGarage(root: HTMLElement): MobileGarage {
   let installed = false;
   let disposed = false;
   let compact = false;
-  let paletteOpenPreference = false;
-  let buildCardCollapsedPreference = false;
-  let buildCardHasPreference = false;
-  let applyingBuildCardState = false;
+  let currentSheet: GarageSheet = 'none';
   let refreshFrame: number | null = null;
-  let palette: HTMLElement | null = null;
-  let buildCard: HTMLElement | null = null;
+  let listenerController: AbortController | null = null;
+  let statsObserver: MutationObserver | null = null;
+  let inventoryHiddenBeforeSheet: boolean | null = null;
+  let originalTopbarHeight = '';
+  let originalTopbarHeightPriority = '';
   let topbar: HTMLElement | null = null;
-  let handle: HTMLButtonElement | null = null;
-  let buildCardCollapsible: Collapsible | null = null;
-  let generatedPaletteId: string | null = null;
-  let originalBuildCardCollapsed = false;
-  let originalBuildCardDataCollapsed: string | null = null;
-  let activePointerId: number | null = null;
-  let pointerStartY = 0;
-  let pointerLastY = 0;
-  let pointerSwiped = false;
-  let suppressNextClick = false;
-  let suppressClickTimer: number | null = null;
+  let storePanel: HTMLElement | null = null;
+  let inventoryPopover: HTMLElement | null = null;
+  let vehicleStats: HTMLElement | null = null;
+  let abilityLoadout: HTMLElement | null = null;
+  let sharePanel: HTMLElement | null = null;
+  let actionBar: HTMLElement | null = null;
+  let statsSheet: HTMLElement | null = null;
+  let inventoryHeader: HTMLElement | null = null;
+  let inventoryBody: HTMLElement | null = null;
+  let originalStoreTitle = '';
+  let inventoryChildren: Node[] = [];
+  const actionButtons = new Map<OpenGarageSheet, HTMLButtonElement>();
+  const closeButtons = new Map<OpenGarageSheet, HTMLButtonElement>();
   const restoredAttributes: RestoredAttribute[] = [];
+  const restoredClasses: RestoredClass[] = [];
+  const nodePlacements: NodePlacement[] = [];
+  const generatedElements: HTMLElement[] = [];
 
   const setTemporaryAttribute = (
     element: HTMLElement,
@@ -94,9 +98,59 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     element.setAttribute(name, value);
   };
 
+  const addTemporaryClass = (element: HTMLElement, name: string): void => {
+    restoredClasses.push({
+      element,
+      name,
+      present: element.classList.contains(name),
+    });
+    element.classList.add(name);
+  };
+
+  const restoreDecorations = (): void => {
+    for (const { element, name, present } of restoredClasses.reverse()) {
+      element.classList.toggle(name, present);
+    }
+    restoredClasses.length = 0;
+
+    for (const { element, name, value } of restoredAttributes.reverse()) {
+      if (value === null) element.removeAttribute(name);
+      else element.setAttribute(name, value);
+    }
+    restoredAttributes.length = 0;
+  };
+
+  const moveNode = (node: Node, destination: Node): void => {
+    const parent = node.parentNode;
+    if (!parent) return;
+    nodePlacements.push({ node, parent, nextSibling: node.nextSibling });
+    destination.appendChild(node);
+  };
+
+  const restoreMovedNodes = (): void => {
+    for (const { node, parent, nextSibling } of nodePlacements.reverse()) {
+      const reference = nextSibling?.parentNode === parent ? nextSibling : null;
+      parent.insertBefore(node, reference);
+    }
+    nodePlacements.length = 0;
+  };
+
+  const ensureId = (element: HTMLElement, stem: string): string => {
+    if (element.id) return element.id;
+
+    let candidate: string;
+    do {
+      candidate = `${stem}-${nextSheetId}`;
+      nextSheetId += 1;
+    } while (document.getElementById(candidate));
+    setTemporaryAttribute(element, 'id', candidate);
+    return candidate;
+  };
+
   const decorateCompactTopbar = (): void => {
     if (!topbar) return;
 
+    setTemporaryAttribute(topbar, 'data-density', 'compact');
     const nameInput = topbar.querySelector<HTMLElement>('.garage-name');
     if (nameInput && !nameInput.hasAttribute('aria-label')) {
       setTemporaryAttribute(nameInput, 'aria-label', 'Vehicle name');
@@ -118,117 +172,169 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     }
   };
 
-  const restoreTemporaryAttributes = (): void => {
-    for (const { element, name, value } of restoredAttributes.reverse()) {
-      if (value === null) element.removeAttribute(name);
-      else element.setAttribute(name, value);
-    }
-    restoredAttributes.length = 0;
-  };
-
-  const readStoredBoolean = (key: string): boolean | null => {
-    try {
-      const value = localStorage.getItem(key);
-      if (value === 'true') return true;
-      if (value === 'false') return false;
-    } catch {
-      // Sandboxed frames and Safari private mode may reject storage outright.
-    }
-    return null;
-  };
-
-  const readStoredValue = (key: string): string | null => {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
+  const updateStatsAlert = (): void => {
+    const statsButton = actionButtons.get('stats');
+    if (!statsButton) return;
+    if (vehicleStats?.querySelector('.issue-error')) {
+      statsButton.setAttribute('data-alert', 'true');
+    } else {
+      statsButton.removeAttribute('data-alert');
     }
   };
 
-  const writeStoredBoolean = (key: string, value: boolean): void => {
-    try {
-      localStorage.setItem(key, String(value));
-    } catch {
-      // Persistence is optional; the in-memory drawer must remain usable.
+  const restoreInventoryHidden = (): void => {
+    if (inventoryHiddenBeforeSheet === null || !inventoryPopover) return;
+    inventoryPopover.hidden = inventoryHiddenBeforeSheet;
+    inventoryHiddenBeforeSheet = null;
+  };
+
+  const setSheet = (
+    sheet: GarageSheet,
+    restoreActionFocus = false,
+  ): void => {
+    if (!installed) return;
+
+    if (currentSheet === 'inventory' && sheet !== 'inventory') {
+      restoreInventoryHidden();
+    }
+    if (sheet === 'inventory' && currentSheet !== 'inventory') {
+      inventoryHiddenBeforeSheet = inventoryPopover?.hidden ?? true;
+      if (inventoryPopover) inventoryPopover.hidden = false;
+    }
+
+    const previousSheet = currentSheet;
+    currentSheet = sheet;
+    root.setAttribute('data-garage-sheet', sheet);
+    for (const [name, button] of actionButtons) {
+      button.setAttribute('aria-expanded', String(name === sheet));
+    }
+
+    if (sheet !== 'none') {
+      closeButtons.get(sheet)?.focus({ preventScroll: true });
+    } else if (restoreActionFocus && previousSheet !== 'none') {
+      actionButtons.get(previousSheet)?.focus({ preventScroll: true });
     }
   };
 
-  const restoreStoredValue = (key: string, value: string | null): void => {
-    try {
-      if (value === null) localStorage.removeItem(key);
-      else localStorage.setItem(key, value);
-    } catch {
-      // Restoring a preference is best-effort for the same storage constraints.
+  const makeCloseButton = (sheet: OpenGarageSheet): HTMLButtonElement => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'garage-sheet__close';
+    button.textContent = '×';
+    button.setAttribute('data-touch-passthrough', '');
+    button.setAttribute('aria-label', `Close ${sheet} sheet`);
+    button.addEventListener('click', () => setSheet('none', true), {
+      signal: listenerController?.signal,
+    });
+    closeButtons.set(sheet, button);
+    generatedElements.push(button);
+    return button;
+  };
+
+  const decorateDockSheet = (
+    panel: HTMLElement,
+    sheet: 'shop' | 'share',
+  ): string => {
+    setTemporaryAttribute(panel, 'data-garage-sheet-panel', sheet);
+    setTemporaryAttribute(panel, 'role', 'dialog');
+    setTemporaryAttribute(panel, 'aria-modal', 'true');
+    const header = panel.querySelector<HTMLElement>('.dock-panel__header');
+    if (header) {
+      addTemporaryClass(header, 'garage-sheet__header');
+      header.appendChild(makeCloseButton(sheet));
     }
+    return ensureId(panel, `garage-${sheet}-sheet`);
   };
 
-  const applyPaletteState = (): void => {
-    const open = !compact && paletteOpenPreference;
-    root.setAttribute('data-palette-open', open ? 'true' : 'false');
-    palette?.classList.toggle('is-drawer-closed', !open);
-    handle?.setAttribute('aria-expanded', String(open));
-    handle?.setAttribute(
-      'aria-label',
-      `${open ? 'Close' : 'Open'} parts drawer`,
-    );
+  const buildInventorySheet = (panel: HTMLElement): string => {
+    const id = ensureId(panel, 'garage-inventory-sheet');
+    setTemporaryAttribute(panel, 'data-garage-sheet-panel', 'inventory');
+    setTemporaryAttribute(panel, 'role', 'dialog');
+    setTemporaryAttribute(panel, 'aria-modal', 'true');
+
+    inventoryChildren = Array.from(panel.childNodes);
+    inventoryHeader = document.createElement('header');
+    inventoryHeader.className = 'garage-sheet__header';
+    const title = document.createElement('h2');
+    title.textContent = 'Inventory';
+    inventoryHeader.append(title, makeCloseButton('inventory'));
+
+    inventoryBody = document.createElement('div');
+    inventoryBody.className = 'garage-sheet__body';
+    for (const child of inventoryChildren) inventoryBody.appendChild(child);
+    panel.append(inventoryHeader, inventoryBody);
+    generatedElements.push(inventoryHeader, inventoryBody);
+    return id;
   };
 
-  const setPalettePreference = (open: boolean, persist: boolean): void => {
-    paletteOpenPreference = open;
-    if (persist) writeStoredBoolean(PALETTE_STORAGE_KEY, open);
-    applyPaletteState();
+  const buildStatsSheet = (
+    stats: HTMLElement,
+    abilities: HTMLElement,
+  ): string => {
+    statsSheet = document.createElement('section');
+    statsSheet.className = 'garage-stats-sheet';
+    statsSheet.id = `garage-stats-sheet-${nextSheetId}`;
+    nextSheetId += 1;
+    statsSheet.setAttribute('data-garage-sheet-panel', 'stats');
+    statsSheet.setAttribute('role', 'dialog');
+    statsSheet.setAttribute('aria-modal', 'true');
+
+    const header = document.createElement('header');
+    header.className = 'garage-sheet__header';
+    const title = document.createElement('h2');
+    title.textContent = 'Stats';
+    header.append(title, makeCloseButton('stats'));
+
+    const body = document.createElement('div');
+    body.className = 'garage-sheet__body garage-stats-sheet__body';
+    statsSheet.append(header, body);
+    root.appendChild(statsSheet);
+    moveNode(stats, body);
+    moveNode(abilities, body);
+    generatedElements.push(statsSheet, header, body);
+    return statsSheet.id;
   };
 
-  // Collapsible persists ordinary user toggles. Layout-only folds preserve the
-  // prior raw value so opening a modal or rotating a phone is not a preference.
-  const applyBuildCardState = (collapsed: boolean): void => {
-    if (!buildCardCollapsible) return;
-    const storedValue = readStoredValue(BUILD_CARD_STORAGE_KEY);
-    applyingBuildCardState = true;
-    try {
-      buildCardCollapsible.setCollapsed(collapsed);
-    } finally {
-      applyingBuildCardState = false;
-      restoreStoredValue(BUILD_CARD_STORAGE_KEY, storedValue);
+  const createActionBar = (
+    ids: Readonly<Record<OpenGarageSheet, string>>,
+  ): void => {
+    actionBar = document.createElement('nav');
+    actionBar.className = 'garage-action-bar';
+    actionBar.setAttribute('aria-label', 'Garage screens');
+
+    const names: readonly OpenGarageSheet[] = [
+      'shop',
+      'inventory',
+      'stats',
+      'share',
+    ];
+    for (const name of names) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'garage-action-bar__button';
+      button.textContent = name.toUpperCase();
+      button.setAttribute('data-touch-passthrough', '');
+      button.setAttribute('aria-controls', ids[name]);
+      button.setAttribute('aria-expanded', 'false');
+      button.addEventListener('click', () => setSheet(name), {
+        signal: listenerController?.signal,
+      });
+      actionButtons.set(name, button);
+      actionBar.appendChild(button);
     }
-  };
-
-  const updateBuildCardState = (): void => {
-    applyBuildCardState(compact ? true : buildCardCollapsedPreference);
+    root.appendChild(actionBar);
+    generatedElements.push(actionBar);
   };
 
   const refresh = (): void => {
     if (!installed) return;
-
-    const narrow = root.getBoundingClientRect().width < COMPACT_BREAKPOINT;
-    // `toggleAttribute` writes an empty value, and every compact rule selects
-    // on `[data-density='compact']` — so the whole compact layer silently never
-    // applied. The value has to be set explicitly.
-    if (narrow) topbar?.setAttribute('data-density', 'compact');
-    else topbar?.removeAttribute('data-density');
-
-    // The notice card and anything else pinned below the bar cannot use a fixed
-    // offset: the bar wraps to two rows on a narrow screen and to one on a wide
-    // one. Publishing its measured height lets the stylesheet follow it.
     if (topbar) {
       root.style.setProperty(
         '--garage-topbar-h',
         `${Math.round(topbar.getBoundingClientRect().height)}px`,
       );
     }
-
-    if (!buildCardHasPreference) {
-      buildCardCollapsedPreference = narrow;
-      updateBuildCardState();
-    }
-
-    // The report only renders one blocking issue, marked by ui.ts structurally.
-    // Mirroring that class avoids brittle copies of user-facing validation text.
-    const hasBlockingIssue = buildCard?.querySelector('.issue-error') !== null;
-    const buildToggle = buildCard?.querySelector<HTMLElement>(
-      '.collapsible-toggle',
-    );
-    buildToggle?.toggleAttribute('data-alert', hasBlockingIssue);
+    updateStatsAlert();
   };
 
   const scheduleRefresh = (): void => {
@@ -239,199 +345,140 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     });
   };
 
-  const finishHandlePointer = (event: PointerEvent): void => {
-    if (event.pointerId !== activePointerId || !handle) return;
-    pointerLastY = event.clientY;
-    const deltaY = pointerLastY - pointerStartY;
-    if (!pointerSwiped && Math.abs(deltaY) > SWIPE_THRESHOLD_PX) {
-      pointerSwiped = true;
-      setPalettePreference(deltaY < 0, true);
-    }
-
-    const releasedPointerId = activePointerId;
-    activePointerId = null;
-    if (handle.hasPointerCapture(releasedPointerId)) {
-      handle.releasePointerCapture(releasedPointerId);
-    }
-
-    if (!pointerSwiped) return;
-    suppressNextClick = true;
-    if (suppressClickTimer !== null) window.clearTimeout(suppressClickTimer);
-    suppressClickTimer = window.setTimeout(() => {
-      suppressNextClick = false;
-      suppressClickTimer = null;
-    }, 0);
-  };
-
-  const onHandlePointerDown = (event: PointerEvent): void => {
-    if (
-      !event.isPrimary ||
-      event.button !== 0 ||
-      activePointerId !== null ||
-      !handle
-    ) {
-      return;
-    }
-    activePointerId = event.pointerId;
-    pointerStartY = event.clientY;
-    pointerLastY = event.clientY;
-    pointerSwiped = false;
-    handle.setPointerCapture(event.pointerId);
-  };
-
-  const onHandlePointerMove = (event: PointerEvent): void => {
-    if (event.pointerId !== activePointerId) return;
-    pointerLastY = event.clientY;
-    const deltaY = pointerLastY - pointerStartY;
-    if (pointerSwiped || Math.abs(deltaY) <= SWIPE_THRESHOLD_PX) return;
-    pointerSwiped = true;
-    setPalettePreference(deltaY < 0, true);
-  };
-
-  const onHandleClick = (event: MouseEvent): void => {
-    if (suppressNextClick) {
-      suppressNextClick = false;
-      event.preventDefault();
-      return;
-    }
-    setPalettePreference(!paletteOpenPreference, true);
+  const onStoreChoice = (event: MouseEvent): void => {
+    if (!(event.target instanceof Element)) return;
+    if (!event.target.closest('.part-btn')) return;
+    setSheet('none');
   };
 
   const install = (): void => {
     if (installed || disposed) return;
-    installed = true;
-    root.setAttribute('data-mobile-garage', 'on');
 
-    // ui.ts currently calls these panels garage-dock and vehicle-stats. The
-    // legacy names remain supported so the controller survives their rename.
-    palette = root.querySelector<HTMLElement>('.palette, .garage-dock');
-    buildCard = root.querySelector<HTMLElement>('.build-card, .vehicle-stats');
+    const nextStorePanel = root.querySelector<HTMLElement>('.store-panel');
+    const nextInventoryPopover =
+      root.querySelector<HTMLElement>('.inventory-popover');
+    const nextVehicleStats = root.querySelector<HTMLElement>('.vehicle-stats');
+    const nextAbilityLoadout =
+      root.querySelector<HTMLElement>('.ability-loadout');
+    const nextSharePanel = root.querySelector<HTMLElement>('.share-panel');
+    if (
+      !nextStorePanel ||
+      !nextInventoryPopover ||
+      !nextVehicleStats ||
+      !nextAbilityLoadout ||
+      !nextSharePanel
+    ) {
+      return;
+    }
+
+    installed = true;
+    listenerController = new AbortController();
+    storePanel = nextStorePanel;
+    inventoryPopover = nextInventoryPopover;
+    vehicleStats = nextVehicleStats;
+    abilityLoadout = nextAbilityLoadout;
+    sharePanel = nextSharePanel;
     topbar = root.querySelector<HTMLElement>('.topbar');
+    originalTopbarHeight = root.style.getPropertyValue('--garage-topbar-h');
+    originalTopbarHeightPriority = root.style.getPropertyPriority(
+      '--garage-topbar-h',
+    );
+
+    setTemporaryAttribute(root, 'data-mobile-garage', 'on');
+    setTemporaryAttribute(root, 'data-garage-sheet', 'none');
     decorateCompactTopbar();
 
-    paletteOpenPreference = readStoredBoolean(PALETTE_STORAGE_KEY) ?? false;
-
-    if (palette) {
-      if (!palette.id) {
-        let candidate: string;
-        do {
-          candidate = `garage-parts-drawer-${nextPaletteId}`;
-          nextPaletteId += 1;
-        } while (document.getElementById(candidate));
-        palette.id = candidate;
-        generatedPaletteId = candidate;
-      }
-
-      handle = document.createElement('button');
-      handle.type = 'button';
-      handle.className = 'garage-drawer-handle';
-      handle.textContent = 'PARTS';
-      handle.setAttribute('data-touch-passthrough', '');
-      handle.setAttribute('aria-controls', palette.id);
-      handle.setAttribute('aria-label', 'Open parts drawer');
-      handle.addEventListener('pointerdown', onHandlePointerDown);
-      handle.addEventListener('pointermove', onHandlePointerMove);
-      handle.addEventListener('pointerup', finishHandlePointer);
-      handle.addEventListener('pointercancel', finishHandlePointer);
-      handle.addEventListener('click', onHandleClick);
-      root.appendChild(handle);
-      // Choosing a part is the last thing the drawer is for. Leaving it open
-      // means the sheet is covering the very grid the player now has to tap,
-      // so the drawer gets out of the way the moment a tile is picked.
-      palette.addEventListener('click', onPaletteChoice);
+    const storeTitle = storePanel.querySelector<HTMLElement>(
+      '.dock-panel__header h2',
+    );
+    if (storeTitle) {
+      originalStoreTitle = storeTitle.textContent ?? '';
+      storeTitle.textContent = 'Shop';
     }
 
-    if (buildCard) {
-      originalBuildCardCollapsed = buildCard.classList.contains('is-collapsed');
-      originalBuildCardDataCollapsed = buildCard.getAttribute('data-collapsed');
-      const storedBuildCardState = readStoredBoolean(BUILD_CARD_STORAGE_KEY);
-      buildCardHasPreference = storedBuildCardState !== null;
-      buildCardCollapsedPreference =
-        storedBuildCardState ??
-        root.getBoundingClientRect().width < COMPACT_BREAKPOINT;
-      buildCardCollapsible = new Collapsible({
-        panel: buildCard,
-        label: 'Build report',
-        startCollapsed: buildCardCollapsedPreference,
-        storageKey: BUILD_CARD_STORAGE_KEY,
-        onToggle: (collapsed) => {
-          if (applyingBuildCardState) return;
-          buildCardHasPreference = true;
-          buildCardCollapsedPreference = collapsed;
-        },
-      });
-    }
+    const shopId = decorateDockSheet(storePanel, 'shop');
+    const shareId = decorateDockSheet(sharePanel, 'share');
+    // The dock is itself positioned on desktop. Sheets must instead resolve
+    // their inset against the whole UI layer in every browser.
+    moveNode(storePanel, root);
+    moveNode(sharePanel, root);
+    const inventoryId = buildInventorySheet(inventoryPopover);
+    moveNode(inventoryPopover, root);
+    const statsId = buildStatsSheet(vehicleStats, abilityLoadout);
+    createActionBar({
+      shop: shopId,
+      inventory: inventoryId,
+      stats: statsId,
+      share: shareId,
+    });
 
-    applyPaletteState();
-    updateBuildCardState();
+    storePanel.addEventListener('click', onStoreChoice, {
+      signal: listenerController.signal,
+    });
+    window.addEventListener('resize', scheduleRefresh, {
+      signal: listenerController.signal,
+    });
+    window.addEventListener('orientationchange', scheduleRefresh, {
+      signal: listenerController.signal,
+    });
+    statsObserver = new MutationObserver(updateStatsAlert);
+    statsObserver.observe(vehicleStats, { childList: true, subtree: true });
     refresh();
-    window.addEventListener('resize', scheduleRefresh);
-    window.addEventListener('orientationchange', scheduleRefresh);
-  };
-
-  /** Close the drawer once a tile hands the player something to place. */
-  const onPaletteChoice = (event: MouseEvent): void => {
-    if (!(event.target instanceof Element)) return;
-    // Only the part tiles themselves. Category tabs, the search field and the
-    // panel header all live in here too and must leave the sheet open.
-    if (!event.target.closest('.part-btn')) return;
-    // Not persisted: the player asked for a part, not for the drawer to stay
-    // shut next time they open the garage.
-    setPalettePreference(false, false);
   };
 
   const uninstall = (): void => {
     if (!installed) return;
+    setSheet('none');
     installed = false;
-    window.removeEventListener('resize', scheduleRefresh);
-    window.removeEventListener('orientationchange', scheduleRefresh);
+    listenerController?.abort();
+    listenerController = null;
+    statsObserver?.disconnect();
+    statsObserver = null;
     if (refreshFrame !== null) cancelAnimationFrame(refreshFrame);
     refreshFrame = null;
-    palette?.removeEventListener('click', onPaletteChoice);
-    if (suppressClickTimer !== null) window.clearTimeout(suppressClickTimer);
-    suppressClickTimer = null;
 
-    if (handle) {
-      handle.removeEventListener('pointerdown', onHandlePointerDown);
-      handle.removeEventListener('pointermove', onHandlePointerMove);
-      handle.removeEventListener('pointerup', finishHandlePointer);
-      handle.removeEventListener('pointercancel', finishHandlePointer);
-      handle.removeEventListener('click', onHandleClick);
-      handle.remove();
-    }
-    handle = null;
-    activePointerId = null;
+    const storeTitle = storePanel?.querySelector<HTMLElement>(
+      '.dock-panel__header h2',
+    );
+    if (storeTitle) storeTitle.textContent = originalStoreTitle;
 
-    buildCardCollapsible?.dispose();
-    buildCardCollapsible = null;
-    if (buildCard) {
-      buildCard.classList.toggle('is-collapsed', originalBuildCardCollapsed);
-      if (originalBuildCardDataCollapsed === null) {
-        buildCard.removeAttribute('data-collapsed');
-      } else {
-        buildCard.setAttribute(
-          'data-collapsed',
-          originalBuildCardDataCollapsed,
-        );
+    if (inventoryPopover) {
+      for (const child of inventoryChildren) {
+        inventoryPopover.appendChild(child);
       }
     }
+    inventoryChildren = [];
+    restoreMovedNodes();
 
-    if (palette) {
-      palette.classList.remove('is-drawer-closed');
-      if (generatedPaletteId && palette.id === generatedPaletteId) {
-        palette.removeAttribute('id');
-      }
+    for (const element of generatedElements.reverse()) element.remove();
+    generatedElements.length = 0;
+    actionButtons.clear();
+    closeButtons.clear();
+    actionBar = null;
+    statsSheet = null;
+    inventoryHeader = null;
+    inventoryBody = null;
+    inventoryHiddenBeforeSheet = null;
+    currentSheet = 'none';
+
+    restoreDecorations();
+    if (originalTopbarHeight) {
+      root.style.setProperty(
+        '--garage-topbar-h',
+        originalTopbarHeight,
+        originalTopbarHeightPriority,
+      );
+    } else {
+      root.style.removeProperty('--garage-topbar-h');
     }
-    topbar?.removeAttribute('data-density');
-    root.style.removeProperty('--garage-topbar-h');
-    restoreTemporaryAttributes();
-    root.removeAttribute('data-palette-open');
-    root.removeAttribute('data-mobile-garage');
 
-    palette = null;
-    buildCard = null;
     topbar = null;
-    generatedPaletteId = null;
+    storePanel = null;
+    inventoryPopover = null;
+    vehicleStats = null;
+    abilityLoadout = null;
+    sharePanel = null;
+    originalStoreTitle = '';
   };
 
   const unsubscribe = onTouchControlsChange((enabled) => {
@@ -444,14 +491,15 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     refresh,
     setPaletteOpen: (open) => {
       if (!installed) return;
-      setPalettePreference(open, true);
+      if (open) {
+        if (!compact) setSheet('shop');
+      } else if (currentSheet === 'shop') {
+        setSheet('none');
+      }
     },
     setCompact: (nextCompact) => {
-      if (compact === nextCompact) return;
       compact = nextCompact;
-      if (!installed) return;
-      applyPaletteState();
-      updateBuildCardState();
+      if (installed && compact) setSheet('none');
     },
     dispose: () => {
       if (disposed) return;
