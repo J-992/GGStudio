@@ -1,5 +1,6 @@
 import '../ui/ui-system.css';
 import '../style.css';
+import '../mobile.css';
 
 async function boot(): Promise<void> {
   const el = document.getElementById('app');

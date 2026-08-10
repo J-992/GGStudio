@@ -1,0 +1,158 @@
+:root {
+  /* One vocabulary for notches and the home indicator keeps each HUD from
+     growing its own slightly different device inset calculation. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  /* Apple's 44 point guidance is also a comfortable floor on coarse Android
+     pointers, where a visually small control is otherwise easy to miss. */
+  --touch-target: 44px;
+  --hud-scale: 1;
+  --collapsible-toggle-size: var(--ui-control-md);
+}
+
+/* Dynamic viewport units follow the visible Safari and Chrome viewport while
+   their URL bars expand and collapse; older browsers retain the 100% shell. */
+@supports (height: 100dvh) {
+  html,
+  body,
+  #app {
+    height: 100dvh;
+  }
+}
+
+/* Full-screen canvas gestures must not escape into pull-to-refresh or rubber
+   band scrolling, both of which interrupt an active pointer sequence. */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-overflow-scrolling: auto;
+}
+
+canvas {
+  touch-action: none;
+}
+
+/* Real scroll regions opt back into vertical panning and contain momentum at
+   their edges so the browser never hands the gesture to the page shell. */
+.scroll-y,
+.palette-content,
+[data-scrollable] {
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+.scroll-y {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Manipulation removes the legacy double-tap delay without allowing a button
+   press to turn into a canvas-blocking page zoom. */
+button,
+[role='button'] {
+  touch-action: manipulation;
+}
+
+/* The toggle remains in the panel so a hidden HUD section always has a clear
+   restore affordance instead of becoming an untappable zero-sized box. */
+.collapsible-toggle {
+  position: absolute;
+  top: var(--ui-space-1);
+  right: var(--ui-space-1);
+  z-index: 2;
+  display: grid;
+  width: var(--collapsible-toggle-size);
+  height: var(--collapsible-toggle-size);
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--ui-edge);
+  background: var(--panel-bg-strong);
+  color: var(--ui-text-muted);
+}
+
+.collapsible-toggle::before {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentcolor;
+  border-bottom: 2px solid currentcolor;
+  content: '';
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.collapsible-toggle[aria-expanded='true']::before {
+  transform: translateY(2px) rotate(225deg);
+}
+
+.collapsible-toggle:focus-visible {
+  color: var(--ui-signal);
+}
+
+.is-collapsed {
+  width: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
+  min-width: 0;
+  max-width: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
+  height: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
+  min-height: 0;
+  max-height: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
+  padding: var(--ui-space-1);
+  overflow: hidden;
+}
+
+.is-collapsed > :not(.collapsible-toggle) {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --collapsible-toggle-size: var(--touch-target);
+  }
+
+  /* Long presses belong to the game, not iOS callout menus. */
+  * {
+    -webkit-touch-callout: none;
+  }
+
+  /* Minimum dimensions preserve each component's display mode, so grid-based
+     icon glyphs remain centred while their hit area grows. */
+  button,
+  .icon-btn,
+  [role='button'] {
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+  }
+}
+
+@media (hover: none) {
+  /* A tapped icon otherwise keeps its hover colour until another element is
+     touched. Components with richer hover art need screen-specific resets in
+     their later mobile layout work. */
+  .icon-btn:hover:not(:disabled) {
+    color: var(--ui-text-muted);
+  }
+
+  .collapsible-toggle:hover:not(:disabled) {
+    background: var(--panel-bg-strong);
+    color: var(--ui-text-muted);
+  }
+}
+
+/* Narrow coarse-pointer layouts can scale their HUD without each screen
+   guessing independently at phone and small-tablet breakpoints. */
+@media (pointer: coarse) and (max-width: 900px) {
+  :root {
+    --hud-scale: 0.85;
+  }
+}
+
+@media (pointer: coarse) and (max-width: 560px) {
+  :root {
+    --hud-scale: 0.75;
+  }
+}
