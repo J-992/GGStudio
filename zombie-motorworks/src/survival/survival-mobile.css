@@ -1,34 +1,62 @@
 /* Touch layouts opt in through the Survival adapter, so pointer-precise HUDs
    cannot match any repair in this file. */
 [data-mobile-hud='on'] {
-  --survival-mobile-edge-gap: 8px;
-  --survival-mobile-strip-height: var(--touch-target);
+  --survival-mobile-edge-gap: var(--ui-space-2);
+  --survival-mobile-strip-height: calc(var(--touch-target) + var(--ui-space-3));
 }
 
-/* Telemetry and the existing corner readouts share one top information band.
-   The timeline sits immediately below it, keeping both rows above the road. */
-[data-mobile-hud='on'] .survival-driver-hud {
+/* One real container keeps every persistent readout inside a 56 px edge band
+   instead of leaving several dark panels over the road. */
+[data-mobile-hud='on'] .survival-mobile-top-band {
   position: absolute;
-  top: var(--safe-top);
-  right: var(--safe-right);
-  bottom: auto;
-  left: var(--safe-left);
-  z-index: 15;
+  top: max(12px, var(--safe-top));
+  right: max(12px, var(--safe-right));
+  left: max(12px, var(--safe-left));
+  z-index: 19;
+  display: grid;
+  height: var(--survival-mobile-strip-height);
+  min-width: 0;
+  grid-template-areas: 'settings driver timeline cash';
+  grid-template-columns:
+    var(--touch-target) minmax(220px, 1fr) max-content
+    minmax(52px, auto);
+  align-items: center;
+  gap: var(--survival-mobile-edge-gap);
+  padding: var(--ui-space-1) var(--ui-space-2);
+  overflow: hidden;
+  border: 1px solid var(--ui-edge);
+  background: var(--panel-bg-strong);
+  box-shadow: inset 0 -2px 0 var(--ui-edge);
+  pointer-events: none;
+}
+
+/* Boss health is mandatory combat state, so it joins the same row only while
+   present instead of opening a second band over the arena. */
+[data-mobile-hud='on']
+  .survival-mobile-top-band:has(> .survival-boss-hud:not([hidden])) {
+  grid-template-areas: 'settings driver boss timeline cash';
+  grid-template-columns:
+    var(--touch-target) minmax(220px, 1fr) minmax(112px, 160px)
+    max-content minmax(52px, auto);
+}
+
+[data-mobile-hud='on'] .survival-mobile-top-band > .survival-driver-hud {
+  position: static;
+  grid-area: driver;
   display: grid;
   width: auto;
   min-width: 0;
-  height: var(--survival-mobile-strip-height);
-  min-height: var(--survival-mobile-strip-height);
-  max-height: var(--survival-mobile-strip-height);
+  height: var(--touch-target);
+  min-height: 0;
+  max-height: var(--touch-target);
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1.15fr);
   align-items: center;
-  gap: 6px;
-  padding: 5px 84px 5px 52px;
+  gap: var(--ui-space-2);
+  padding: 0;
   overflow: hidden;
-  border-right: 0;
-  border-left: 0;
-  background: var(--panel-bg-strong);
-  box-shadow: inset 0 -2px 0 var(--ui-edge);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   pointer-events: none;
   transform: none;
 }
@@ -38,7 +66,7 @@
 [data-mobile-hud='on'] .survival-fuel {
   min-width: 0;
   align-items: center;
-  gap: 4px;
+  gap: var(--ui-space-1);
   padding: 0;
   border: 0;
 }
@@ -108,12 +136,9 @@
   grid-column: 1;
 }
 
-/* Settings and money occupy the padding reserved inside the strip, rather
-   than competing with speed or either resource bar. */
-[data-mobile-hud='on'] .survival-settings-button {
-  top: var(--safe-top);
-  right: auto;
-  left: calc(var(--safe-left) + 4px);
+[data-mobile-hud='on'] .survival-mobile-top-band > .survival-settings-button {
+  position: static;
+  grid-area: settings;
   width: var(--touch-target);
   min-width: var(--touch-target);
   height: var(--touch-target);
@@ -122,6 +147,7 @@
   overflow: hidden;
   font-size: 0;
   box-shadow: none;
+  pointer-events: auto;
 }
 
 [data-mobile-hud='on'] .survival-settings-button::after {
@@ -129,12 +155,61 @@
   font-size: var(--ui-text-20);
 }
 
-[data-mobile-hud='on'] .survival-cash {
-  top: calc(var(--safe-top) + 7px);
-  right: calc(var(--safe-right) + 8px);
-  left: auto;
-  max-width: 70px;
-  overflow: visible;
+/* The phone rail and its 12 px icons add noise without readable information.
+   Wave, cleared count, and score stay inline; the wide track and rail vanish. */
+[data-mobile-hud='on'] .survival-mobile-top-band > .wave-timeline {
+  position: static;
+  grid-area: timeline;
+  display: block;
+  width: auto;
+  min-width: 0;
+  overflow: hidden;
+  transform: none;
+}
+
+[data-mobile-hud='on'] .wave-timeline__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ui-space-2);
+  overflow: hidden;
+}
+
+[data-mobile-hud='on'] .wave-timeline__group {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--ui-space-1);
+}
+
+[data-mobile-hud='on'] .wave-timeline__group--end {
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+[data-mobile-hud='on'] .wave-timeline__wave,
+[data-mobile-hud='on'] .wave-timeline__score {
+  font-size: var(--ui-text-16);
+}
+
+[data-mobile-hud='on'] .wave-timeline__cleared,
+[data-mobile-hud='on'] .wave-timeline__caption {
+  font-size: var(--ui-text-10);
+}
+
+[data-mobile-hud='on'] .wave-timeline__bar,
+[data-mobile-hud='on'] .wave-timeline__rail {
+  display: none;
+}
+
+[data-mobile-hud='on'] .survival-mobile-top-band > .survival-cash {
+  position: relative;
+  grid-area: cash;
+  max-width: 76px;
+  min-width: 0;
+  overflow: hidden;
   transform: none;
 }
 
@@ -146,55 +221,62 @@
   white-space: nowrap;
 }
 
-/* The timeline is the second row of the same top band. Its route icons and
-   captions are planning detail, so combat keeps only wave, score, and progress. */
-[data-mobile-hud='on'] .wave-timeline {
-  top: max(50px, calc(var(--safe-top) + 50px));
-  width: min(
-    300px,
-    calc(100vw - var(--safe-left) - var(--safe-right) - 120px)
-  );
-  gap: 4px;
-  transform: translateX(-50%);
-}
-
-[data-mobile-hud='on'] .wave-timeline__cleared,
-[data-mobile-hud='on'] .wave-timeline__caption,
-[data-mobile-hud='on'] .wave-timeline__rail {
+/* The wallet itself updates in place; floating gain chits would escape the
+   strip and recreate the obstruction this layout removes. */
+[data-mobile-hud='on'] .survival-cash__gains {
   display: none;
 }
 
-[data-mobile-hud='on'] .wave-timeline__bar {
+[data-mobile-hud='on'] .survival-mobile-top-band > .survival-boss-hud {
+  position: static;
+  grid-area: boss;
+  display: grid;
+  width: auto;
+  min-width: 0;
+  height: 32px;
+  grid-template-columns: auto minmax(48px, 1fr) auto;
+  align-items: center;
+  gap: var(--ui-space-1);
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+[data-mobile-hud='on'] .survival-boss-hud__name,
+[data-mobile-hud='on'] .survival-boss-hud__value {
+  overflow: hidden;
+  font-size: var(--ui-text-10);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-mobile-hud='on'] .survival-boss-hud__track {
   height: 8px;
   padding: 1px;
 }
 
-/* A boss replaces the ordinary timeline in its edge row, so two mandatory
-   progress displays never obscure one another. */
-[data-mobile-hud='on']:has(.survival-boss-hud:not([hidden])) .wave-timeline {
-  display: none;
+/* The scuttle verdict replaces the band briefly; a run outcome should be loud
+   without adding a card to the arena. */
+[data-mobile-hud='on'] .survival-mobile-top-band > .survival-scuttle-banner {
+  position: absolute;
+  inset: 0 0 0 calc(var(--touch-target) + var(--survival-mobile-edge-gap));
+  z-index: 2;
+  display: grid;
+  max-width: none;
+  padding: var(--ui-space-1) var(--ui-space-2);
+  place-items: center;
+  border: 0;
+  background: var(--panel-bg-strong);
+  box-shadow: none;
+  font-size: var(--ui-text-14);
+  transform: none;
 }
 
-[data-mobile-hud='on'] .survival-boss-hud {
-  top: max(50px, calc(var(--safe-top) + 50px));
-  width: min(
-    300px,
-    calc(100vw - var(--safe-left) - var(--safe-right) - 120px)
-  );
-  height: 32px;
-  grid-template-columns: auto minmax(60px, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-  transform: translateX(-50%);
-}
-
-[data-mobile-hud='on'] .survival-boss-hud__track {
-  height: 10px;
-  padding: 1px;
-}
-
-/* Folded, the map is one corner icon below the wallet. Open, it becomes a
-   deliberate stop-and-look overlay instead of growing into the playfield. */
+/* Folded, the map is one right-edge icon. Open, it is the one deliberate
+   centred overlay and every point outside it remains a close target. */
 [data-mobile-hud='on'] .minimap {
   position: fixed;
   top: 50%;
@@ -218,8 +300,11 @@
 }
 
 [data-mobile-hud='on'] .minimap.is-collapsed {
-  top: max(50px, calc(var(--safe-top) + 50px));
-  right: var(--safe-right);
+  top: calc(
+    max(12px, var(--safe-top)) + var(--survival-mobile-strip-height) +
+      var(--ui-space-2)
+  );
+  right: max(12px, var(--safe-right));
   left: auto;
   width: var(--touch-target);
   min-width: var(--touch-target);
@@ -237,7 +322,7 @@
 }
 
 [data-mobile-hud='on'] .minimap > .collapsible-toggle {
-  inset: 8px 8px auto auto;
+  inset: var(--ui-space-2) var(--ui-space-2) auto auto;
   width: var(--touch-target);
   min-width: var(--touch-target);
   height: var(--touch-target);
@@ -264,9 +349,7 @@
   transform: none;
 }
 
-[data-mobile-hud='on']
-  .minimap.is-collapsed
-  > .collapsible-toggle::before {
+[data-mobile-hud='on'] .minimap.is-collapsed > .collapsible-toggle::before {
   content: '\2316';
   font-size: var(--ui-text-20);
 }
@@ -275,7 +358,7 @@
   position: fixed;
   inset: 0;
   z-index: 34;
-  background: rgb(4 5 4 / 0.7);
+  background: color-mix(in srgb, var(--ui-black) 70%, transparent);
   pointer-events: auto;
 }
 
@@ -283,14 +366,14 @@
   display: none !important;
 }
 
-/* Filled abilities form a touch-target rail between the map and the button
-   cluster. At 430 px tall, three slots retain 8 px clearance at both ends. */
+/* Three 44 px slots total 140 px with these gaps. At 430 px tall that leaves
+   two pixels below the map and clears the 56 px touch cluster by eight. */
 [data-mobile-hud='on'] .survival-ability-bar {
-  right: var(--safe-right);
-  bottom: max(168px, calc(var(--safe-bottom) + 168px));
+  right: max(12px, var(--safe-right));
+  bottom: calc(max(12px, var(--safe-bottom)) + 156px);
   left: auto;
   flex-direction: column;
-  gap: var(--survival-mobile-edge-gap);
+  gap: var(--ui-space-1);
   transform: none;
 }
 
@@ -300,7 +383,7 @@
   height: var(--touch-target);
   min-height: var(--touch-target);
   gap: 0;
-  padding: 4px;
+  padding: var(--ui-space-1);
   box-shadow: inset 0 -2px 0 var(--ui-signal-dark);
 }
 
@@ -318,14 +401,15 @@
   display: none;
 }
 
-/* Short-lived effect timers use the slim column beside the right-edge rail. */
-[data-mobile-hud='on'] .survival-buffs {
-  top: max(50px, calc(var(--safe-top) + 50px));
-  right: calc(var(--safe-right) + var(--touch-target) + 8px);
+/* Short-lived state borrows band space instead of opening another arena row. */
+[data-mobile-hud='on'] .survival-mobile-top-band > .survival-buffs {
+  top: var(--ui-space-1);
+  right: calc(76px + var(--ui-space-2));
   bottom: auto;
   left: auto;
+  z-index: 1;
   width: 116px;
-  max-height: 44px;
+  max-height: var(--touch-target);
   gap: 3px;
   overflow: hidden;
   transform: none;
@@ -339,13 +423,15 @@
   height: 7px;
 }
 
-[data-mobile-hud='on'] .survival-pickup {
-  top: max(102px, calc(var(--safe-top) + 102px));
-  right: calc(var(--safe-right) + var(--touch-target) + 8px);
-  left: auto;
+/* Pickup receipts borrow the other end of the band and remain transient. */
+[data-mobile-hud='on'] .survival-mobile-top-band > .survival-pickup {
+  top: var(--ui-space-1);
+  right: auto;
+  left: calc(var(--touch-target) + var(--ui-space-3));
+  z-index: 1;
   width: 116px;
-  max-height: 44px;
-  align-items: flex-end;
+  max-height: var(--touch-target);
+  align-items: flex-start;
   overflow: hidden;
   transform: none;
 }
@@ -357,13 +443,16 @@
   text-overflow: ellipsis;
 }
 
-/* Emergency actions become icon-only edge buttons. Their full copy remains in
-   the accessible DOM while the road and both thumb zones stay unobstructed. */
+/* Emergency actions are upper-left icon buttons. Their live copy remains in
+   the accessible DOM while the lower joystick quadrant stays empty. */
 [data-mobile-hud='on'] .survival-prompts {
-  top: max(50px, calc(var(--safe-top) + 50px));
+  top: calc(
+    max(12px, var(--safe-top)) + var(--survival-mobile-strip-height) +
+      var(--ui-space-2)
+  );
   right: auto;
   bottom: auto;
-  left: var(--safe-left);
+  left: max(12px, var(--safe-left));
   flex-direction: column;
   gap: var(--survival-mobile-edge-gap);
   transform: none;
@@ -377,7 +466,7 @@
   min-height: var(--touch-target);
   grid-template-columns: 1fr;
   gap: 0;
-  padding: 4px;
+  padding: var(--ui-space-1);
   overflow: hidden;
   box-shadow: none;
 }
@@ -401,16 +490,22 @@
   min-height: var(--touch-target);
 }
 
-/* Warnings reduce to a non-interactive icon row above the landscape midpoint;
-   their live-region copy remains available to assistive technology. */
-[data-mobile-hud='on'] .survival-warnings {
-  top: max(154px, calc(var(--safe-top) + 154px));
-  left: var(--safe-left);
+/* Damage warnings also borrow band space, so a three-chip stack can never grow
+   down into the floating joystick's lower-left quadrant. */
+[data-mobile-hud='on'] .survival-mobile-top-band > .survival-warnings {
+  top: 50%;
+  left: calc(
+    var(--touch-target) + var(--ui-space-3) + 116px + var(--ui-space-2)
+  );
+  z-index: 1;
   display: flex;
   width: auto;
-  max-width: calc(100vw - var(--safe-left) - var(--safe-right));
-  gap: 4px;
-  transform: none;
+  max-width: 98px;
+  max-height: 30px;
+  flex-direction: row;
+  gap: var(--ui-space-1);
+  overflow: hidden;
+  transform: translateY(-50%);
 }
 
 [data-mobile-hud='on'] .survival-warning {
@@ -442,11 +537,20 @@
   white-space: nowrap;
 }
 
+/* The reticle is a mouse cursor with nowhere to be on a touch screen, and the
+   full-screen damage tint is decoration that costs a composite every hit.
+   Damage numbers deliberately stay: they land on the zombie that was hit, they
+   are the only feedback that a shot connected, and a wave with them switched
+   off reads as if nothing the player does has any effect. */
+[data-mobile-hud='on'] .scope-cursor,
+[data-mobile-hud='on'] .survival-vignette {
+  display: none;
+}
+
 /* Modal cards use the visible viewport and own their scrolling, so phone
    actions do not fall below the browser chrome. */
 [data-mobile-hud='on'] .survival-settings-overlay {
-  padding:
-    max(12px, var(--safe-top)) max(12px, var(--safe-right))
+  padding: max(12px, var(--safe-top)) max(12px, var(--safe-right))
     max(12px, var(--safe-bottom)) max(12px, var(--safe-left));
 }
 
@@ -477,10 +581,38 @@
 }
 
 @media (orientation: portrait) and (max-width: 480px) {
-  /* Narrow strips spend pixels on values first; their tracks absorb the rest. */
-  [data-mobile-hud='on'] .survival-driver-hud {
-    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.9fr) minmax(0, 1.05fr);
-    gap: 4px;
+  /* Portrait wraps the same band once: 44 px telemetry over 40 px wave state,
+     plus token spacing, for a 96 px total edge bar. */
+  [data-mobile-hud='on'] {
+    --survival-mobile-strip-height: calc(
+      var(--touch-target) + var(--touch-target) + var(--ui-space-2)
+    );
+  }
+
+  [data-mobile-hud='on'] .survival-mobile-top-band {
+    grid-template-areas:
+      'settings driver driver cash'
+      'timeline timeline timeline timeline';
+    grid-template-columns:
+      var(--touch-target) minmax(0, 1fr) minmax(0, 1fr)
+      minmax(52px, auto);
+    grid-template-rows: var(--touch-target) minmax(0, 1fr);
+    gap: var(--ui-space-1) var(--ui-space-2);
+    padding: var(--ui-space-1);
+  }
+
+  [data-mobile-hud='on']
+    .survival-mobile-top-band:has(> .survival-boss-hud:not([hidden])) {
+    grid-template-areas:
+      'settings driver driver cash'
+      'timeline timeline timeline boss';
+    grid-template-columns:
+      var(--touch-target) minmax(0, 1fr) minmax(0, 1fr)
+      112px;
+  }
+
+  [data-mobile-hud='on'] .survival-mobile-top-band > .survival-driver-hud {
+    gap: var(--ui-space-1);
   }
 
   [data-mobile-hud='on'] .survival-speed,
@@ -493,9 +625,23 @@
     font-size: var(--ui-text-16);
   }
 
+  [data-mobile-hud='on'] .wave-timeline__head {
+    justify-content: center;
+  }
+
+  [data-mobile-hud='on'] .survival-mobile-top-band > .survival-warnings {
+    top: calc(var(--touch-target) + var(--ui-space-2));
+    left: var(--ui-space-1);
+    transform: none;
+  }
+
+  [data-mobile-hud='on'] .survival-boss-hud__name {
+    display: none;
+  }
+
   [data-mobile-hud='on'] .survival-settings,
   [data-mobile-hud='on'] .survival-gameover {
-    padding: 14px !important;
+    padding: var(--ui-text-14) !important;
   }
 
   [data-mobile-hud='on'] .survival-settings__cheats,
@@ -522,12 +668,12 @@
   [data-mobile-hud='on'] button.primary:hover:not(:disabled),
   [data-mobile-hud='on'] .ui-button--primary:hover:not(:disabled) {
     background: var(--ui-signal-dark);
-    color: #e3e8cf;
+    color: var(--ui-text);
   }
 
   [data-mobile-hud='on'] .ui-button--danger:hover:not(:disabled) {
     background: var(--ui-danger-dark);
-    color: #e1c4bc;
+    color: var(--ui-text);
   }
 
   [data-mobile-hud='on'] .survival-ability-slot.is-ready:hover,

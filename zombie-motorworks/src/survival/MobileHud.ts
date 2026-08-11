@@ -1,8 +1,5 @@
 import { Collapsible } from '../ui/Collapsible.ts';
-import {
-  onTouchControlsChange,
-  shouldUseTouchControls,
-} from '../ui/device.ts';
+import { onTouchControlsChange, shouldUseTouchControls } from '../ui/device.ts';
 import './survival-mobile.css';
 
 /** Controls the touch-first presentation layered over the survival HUD. */
@@ -22,9 +19,14 @@ export interface SurvivalMobileHud {
  */
 class SurvivalMobileHudController implements SurvivalMobileHud {
   private readonly inheritedMobileHudValue: string | null;
+  private readonly topBandMoves: Array<{
+    element: HTMLElement;
+    placeholder: Comment;
+  }> = [];
   private minimapPanel: Collapsible | null = null;
   private minimapBackdrop: HTMLDivElement | null = null;
   private minimapToggle: HTMLButtonElement | null = null;
+  private topBand: HTMLDivElement | null = null;
   private compactRestore: boolean | null = null;
   private unsubscribeTouchControls: (() => void) | null = null;
   private active = false;
@@ -98,6 +100,7 @@ class SurvivalMobileHudController implements SurvivalMobileHud {
 
   private activate(): void {
     this.root.setAttribute('data-mobile-hud', 'on');
+    this.installTopBand();
 
     const minimap = this.root.querySelector<HTMLElement>('.minimap');
     if (minimap !== null) {
@@ -145,16 +148,58 @@ class SurvivalMobileHudController implements SurvivalMobileHud {
     this.minimapBackdrop?.remove();
     this.minimapBackdrop = null;
     this.compactRestore = null;
+    this.restoreTopBand();
 
     if (this.inheritedMobileHudValue === null) {
       this.root.removeAttribute('data-mobile-hud');
     } else {
-      this.root.setAttribute(
-        'data-mobile-hud',
-        this.inheritedMobileHudValue,
-      );
+      this.root.setAttribute('data-mobile-hud', this.inheritedMobileHudValue);
     }
     this.active = false;
+  }
+
+  private installTopBand(): void {
+    const band = this.root.ownerDocument.createElement('div');
+    band.className = 'survival-mobile-top-band';
+    band.setAttribute('aria-label', 'Driving and wave status');
+    band.setAttribute('role', 'group');
+    this.root.prepend(band);
+    this.topBand = band;
+
+    // Moving the existing readouts makes one real band instead of several
+    // independently positioned panels. Placeholders make the move reversible.
+    for (const selector of [
+      '.survival-settings-button',
+      '.survival-driver-hud',
+      '.survival-boss-hud',
+      '.wave-timeline',
+      '.survival-cash',
+      '.survival-buffs',
+      '.survival-pickup',
+      '.survival-warnings',
+      '.survival-scuttle-banner',
+    ]) {
+      const element = this.root.querySelector<HTMLElement>(
+        `:scope > ${selector}`,
+      );
+      if (element === null) continue;
+
+      const placeholder = this.root.ownerDocument.createComment(
+        'survival-mobile-top-band',
+      );
+      element.before(placeholder);
+      band.appendChild(element);
+      this.topBandMoves.push({ element, placeholder });
+    }
+  }
+
+  private restoreTopBand(): void {
+    for (const move of this.topBandMoves) {
+      move.placeholder.replaceWith(move.element);
+    }
+    this.topBandMoves.length = 0;
+    this.topBand?.remove();
+    this.topBand = null;
   }
 
   private syncMinimapPresentation(collapsed: boolean): void {
@@ -176,8 +221,6 @@ class SurvivalMobileHudController implements SurvivalMobileHud {
  * still watches the primary input because a tablet can gain or lose a mouse
  * without SurvivalMode being reconstructed.
  */
-export function installSurvivalMobileHud(
-  root: HTMLElement,
-): SurvivalMobileHud {
+export function installSurvivalMobileHud(root: HTMLElement): SurvivalMobileHud {
   return new SurvivalMobileHudController(root);
 }

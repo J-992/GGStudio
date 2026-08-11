@@ -73,6 +73,8 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
   let abilityLoadout: HTMLElement | null = null;
   let sharePanel: HTMLElement | null = null;
   let actionBar: HTMLElement | null = null;
+  let actionToggle: HTMLButtonElement | null = null;
+  let actionGroup: HTMLElement | null = null;
   let statsSheet: HTMLElement | null = null;
   let inventoryHeader: HTMLElement | null = null;
   let inventoryBody: HTMLElement | null = null;
@@ -172,13 +174,21 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     }
   };
 
+  const setActionMenuExpanded = (expanded: boolean): void => {
+    if (!actionToggle || !actionGroup) return;
+    actionToggle.setAttribute('aria-expanded', String(expanded));
+    actionGroup.hidden = !expanded;
+  };
+
   const updateStatsAlert = (): void => {
     const statsButton = actionButtons.get('stats');
     if (!statsButton) return;
     if (vehicleStats?.querySelector('.issue-error')) {
       statsButton.setAttribute('data-alert', 'true');
+      actionToggle?.setAttribute('data-alert', 'true');
     } else {
       statsButton.removeAttribute('data-alert');
+      actionToggle?.removeAttribute('data-alert');
     }
   };
 
@@ -188,10 +198,7 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     inventoryHiddenBeforeSheet = null;
   };
 
-  const setSheet = (
-    sheet: GarageSheet,
-    restoreActionFocus = false,
-  ): void => {
+  const setSheet = (sheet: GarageSheet, restoreActionFocus = false): void => {
     if (!installed) return;
 
     if (currentSheet === 'inventory' && sheet !== 'inventory') {
@@ -204,6 +211,7 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
 
     const previousSheet = currentSheet;
     currentSheet = sheet;
+    setActionMenuExpanded(false);
     root.setAttribute('data-garage-sheet', sheet);
     for (const [name, button] of actionButtons) {
       button.setAttribute('aria-expanded', String(name === sheet));
@@ -212,7 +220,7 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     if (sheet !== 'none') {
       closeButtons.get(sheet)?.focus({ preventScroll: true });
     } else if (restoreActionFocus && previousSheet !== 'none') {
-      actionButtons.get(previousSheet)?.focus({ preventScroll: true });
+      actionToggle?.focus({ preventScroll: true });
     }
   };
 
@@ -302,6 +310,32 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     actionBar.className = 'garage-action-bar';
     actionBar.setAttribute('aria-label', 'Garage screens');
 
+    actionGroup = document.createElement('div');
+    actionGroup.className = 'garage-action-bar__group';
+    actionGroup.id = `garage-action-menu-${nextSheetId}`;
+    nextSheetId += 1;
+    actionGroup.setAttribute('role', 'group');
+    actionGroup.setAttribute('aria-label', 'Garage screens');
+    actionGroup.hidden = true;
+
+    actionToggle = document.createElement('button');
+    actionToggle.type = 'button';
+    actionToggle.className = 'garage-action-bar__toggle';
+    actionToggle.textContent = '☰ MENU';
+    actionToggle.setAttribute('data-touch-passthrough', '');
+    actionToggle.setAttribute('aria-label', 'Garage menu');
+    actionToggle.setAttribute('aria-controls', actionGroup.id);
+    actionToggle.setAttribute('aria-expanded', 'false');
+    actionToggle.addEventListener(
+      'click',
+      () => {
+        setActionMenuExpanded(
+          actionToggle?.getAttribute('aria-expanded') !== 'true',
+        );
+      },
+      { signal: listenerController?.signal },
+    );
+
     const names: readonly OpenGarageSheet[] = [
       'shop',
       'inventory',
@@ -316,12 +350,14 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
       button.setAttribute('data-touch-passthrough', '');
       button.setAttribute('aria-controls', ids[name]);
       button.setAttribute('aria-expanded', 'false');
+      button.setAttribute('aria-haspopup', 'dialog');
       button.addEventListener('click', () => setSheet(name), {
         signal: listenerController?.signal,
       });
       actionButtons.set(name, button);
-      actionBar.appendChild(button);
+      actionGroup.appendChild(button);
     }
+    actionBar.append(actionGroup, actionToggle);
     root.appendChild(actionBar);
     generatedElements.push(actionBar);
   };
@@ -334,6 +370,16 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
         `${Math.round(topbar.getBoundingClientRect().height)}px`,
       );
     }
+
+    // The notice sits under the between-waves repair banner when there is one,
+    // and directly under the top bar when there is not. Reserving the banner's
+    // height unconditionally pushed the notice down onto the vehicle during an
+    // ordinary garage visit, so it is measured rather than assumed.
+    const runBanner = root.querySelector<HTMLElement>('.run-banner.run-active');
+    root.style.setProperty(
+      '--garage-run-banner-h',
+      runBanner ? `${Math.round(runBanner.getBoundingClientRect().height)}px` : '0px',
+    );
     updateStatsAlert();
   };
 
@@ -380,9 +426,8 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     sharePanel = nextSharePanel;
     topbar = root.querySelector<HTMLElement>('.topbar');
     originalTopbarHeight = root.style.getPropertyValue('--garage-topbar-h');
-    originalTopbarHeightPriority = root.style.getPropertyPriority(
-      '--garage-topbar-h',
-    );
+    originalTopbarHeightPriority =
+      root.style.getPropertyPriority('--garage-topbar-h');
 
     setTemporaryAttribute(root, 'data-mobile-garage', 'on');
     setTemporaryAttribute(root, 'data-garage-sheet', 'none');
@@ -455,6 +500,8 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     actionButtons.clear();
     closeButtons.clear();
     actionBar = null;
+    actionToggle = null;
+    actionGroup = null;
     statsSheet = null;
     inventoryHeader = null;
     inventoryBody = null;
@@ -470,6 +517,7 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
       );
     } else {
       root.style.removeProperty('--garage-topbar-h');
+    root.style.removeProperty('--garage-run-banner-h');
     }
 
     topbar = null;

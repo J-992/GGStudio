@@ -19,6 +19,9 @@
     var(--touch-target) + var(--touch-target) + var(--ui-space-2) +
       var(--ui-space-1) + var(--ui-space-1)
   );
+  --garage-run-banner-height: calc(
+    var(--touch-target) + var(--ui-space-2) + 2px
+  );
 }
 
 /* Its panels move to the UI root, leaving no dock chrome over the vehicle. */
@@ -52,8 +55,7 @@
   flex: none;
   flex-direction: column;
   gap: 0;
-  padding:
-    max(var(--ui-space-3), var(--safe-top))
+  padding: max(var(--ui-space-3), var(--safe-top))
     max(var(--ui-space-3), var(--safe-right))
     max(var(--ui-space-3), var(--safe-bottom))
     max(var(--ui-space-3), var(--safe-left));
@@ -131,9 +133,7 @@
   touch-action: pan-y;
 }
 
-[data-mobile-garage='on']
-  [data-garage-sheet-panel]
-  > .dock-panel__body {
+[data-mobile-garage='on'] [data-garage-sheet-panel] > .dock-panel__body {
   padding: var(--ui-space-2);
 }
 
@@ -147,9 +147,7 @@
 }
 
 /* Three broad columns remain quickly scannable in either phone orientation. */
-[data-mobile-garage='on']
-  [data-garage-sheet-panel='shop']
-  .store-list {
+[data-mobile-garage='on'] [data-garage-sheet-panel='shop'] .store-list {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-auto-rows: 132px;
@@ -166,9 +164,7 @@
   min-height: 96px;
 }
 
-[data-mobile-garage='on']
-  [data-garage-sheet-panel='shop']
-  .part-price {
+[data-mobile-garage='on'] [data-garage-sheet-panel='shop'] .part-price {
   font-size: var(--ui-text-12);
 }
 
@@ -215,9 +211,7 @@
   display: grid;
 }
 
-[data-mobile-garage='on']
-  .garage-stats-sheet
-  .vehicle-stats__content {
+[data-mobile-garage='on'] .garage-stats-sheet .vehicle-stats__content {
   overflow: visible;
 }
 
@@ -239,21 +233,41 @@
   min-height: calc(var(--touch-target) + var(--ui-space-5));
 }
 
-/* The build screen keeps four destinations in one predictable thumb row. */
+/* One corner toggle leaves the build visible until its destinations are needed. */
+/* Above the notice and the status line: those are read, this is pressed. */
+[data-mobile-garage='on'] .garage-action-bar,
+[data-mobile-garage='on'] .garage-action-bar__group {
+  z-index: 19;
+}
+
 [data-mobile-garage='on'] .garage-action-bar {
   position: absolute;
-  right: var(--garage-edge-right);
   bottom: var(--garage-action-bottom);
   left: var(--garage-edge-left);
   z-index: 18;
-  display: grid;
-  height: var(--garage-action-height);
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
+  width: calc(var(--touch-target) + var(--touch-target));
+  max-width: calc(100vw - var(--garage-edge-left) - var(--garage-edge-right));
+  flex-direction: column;
   gap: var(--ui-space-2);
 }
 
-[data-mobile-garage='on'] .garage-action-bar__button {
+[data-mobile-garage='on'] .garage-action-bar__group {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ui-space-2);
+  transform-origin: bottom left;
+}
+
+[data-mobile-garage='on'] .garage-action-bar__group:not([hidden]) {
+  animation: garage-action-menu-enter 140ms ease-out;
+}
+
+[data-mobile-garage='on']
+  :is(.garage-action-bar__button, .garage-action-bar__toggle) {
   position: relative;
+  width: 100%;
   min-width: 0;
   min-height: var(--touch-target);
   padding: 0 var(--ui-space-2);
@@ -266,7 +280,17 @@
   letter-spacing: 0.06em;
 }
 
-[data-mobile-garage='on'] .garage-action-bar__button[data-alert='true'] {
+[data-mobile-garage='on'] .garage-action-bar__toggle {
+  height: var(--garage-action-height);
+  border-color: var(--ui-signal-dark);
+  background: var(--ui-surface-2);
+}
+
+[data-mobile-garage='on']
+  :is(
+    .garage-action-bar__button,
+    .garage-action-bar__toggle
+  )[data-alert='true'] {
   border-color: var(--ui-danger);
   background: var(--ui-danger-dark);
   box-shadow:
@@ -275,7 +299,10 @@
 }
 
 [data-mobile-garage='on']
-  .garage-action-bar__button[data-alert='true']::after {
+  :is(
+    .garage-action-bar__button,
+    .garage-action-bar__toggle
+  )[data-alert='true']::after {
   position: absolute;
   top: var(--ui-space-1);
   right: var(--ui-space-1);
@@ -283,6 +310,18 @@
   height: var(--ui-space-2);
   content: '';
   background: var(--ui-danger);
+}
+
+@keyframes garage-action-menu-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--ui-space-2)) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* The build bar is only its five armed slots; inventory moved to the row above. */
@@ -382,17 +421,22 @@
 }
 
 [data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-layer {
+  box-sizing: border-box;
   min-width: 0;
+  max-width: 100%;
+  flex: 1 1 0;
   gap: var(--ui-space-1);
+  overflow: hidden;
   padding-inline: var(--ui-space-1);
 }
 
 [data-mobile-garage='on']
   .topbar[data-density='compact']
   .topbar-layer__slider {
-  width: auto;
-  min-width: var(--touch-target);
-  flex: 1 1 var(--touch-target);
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 0;
 }
 
 [data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-utilities {
@@ -421,16 +465,94 @@
   display: none;
 }
 
-/* Transient guidance follows the measured command bar, not a guessed row count. */
-[data-mobile-garage='on'] .editor-notice {
+/* Repairs own the first strip because their controls persist through build phase;
+   transient notices follow below instead of obscuring them. */
+[data-mobile-garage='on'] .run-banner.run-active {
   top: calc(
     var(--garage-topbar-h, var(--garage-topbar-height)) +
       var(--garage-edge-top) + var(--ui-space-2)
   );
   right: var(--garage-edge-right);
   left: var(--garage-edge-left);
+  display: flex !important;
+  box-sizing: border-box;
   width: auto;
+  min-width: 0;
   max-width: none;
+  height: var(--garage-run-banner-height);
+  max-height: var(--garage-run-banner-height);
+  align-items: center;
+  gap: var(--ui-space-2);
+  padding: var(--ui-space-1);
+  overflow: hidden;
+  transform: none;
+  white-space: normal;
+}
+
+[data-mobile-garage='on'] .run-banner__text,
+[data-mobile-garage='on'] .run-banner__warning {
+  min-width: 0;
+  overflow: hidden;
+  font: 700 var(--ui-text-11)/1.05 var(--ui-font-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-mobile-garage='on'] .run-banner__text {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+[data-mobile-garage='on'] .run-banner__warning {
+  flex: 0 1 auto;
+}
+
+[data-mobile-garage='on'] .run-banner__actions {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  grid-row: auto;
+  grid-column: auto;
+  gap: var(--ui-space-2);
+}
+
+[data-mobile-garage='on']
+  .run-banner__actions
+  :is(.run-banner__repair, .run-banner__rebuild) {
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  flex: 0 1 auto;
+  padding-inline: var(--ui-space-1);
+  font-size: var(--ui-text-10);
+  white-space: nowrap;
+}
+
+/* Transient guidance follows both measured command chrome rows. */
+/* The notice and the status line are things to read, never things to press,
+   and on a phone they sit directly over the build grid. Left hit-testable they
+   silently swallow the tap that was meant to place a block — the ghost lands
+   nowhere and the player just sees nothing happen. */
+[data-mobile-garage='on'] .editor-notice,
+[data-mobile-garage='on'] .garage-status {
+  pointer-events: none;
+}
+
+[data-mobile-garage='on'] .editor-notice {
+  top: calc(
+    var(--garage-topbar-h, var(--garage-topbar-height)) +
+      var(--garage-edge-top) + var(--ui-space-2) +
+      var(--garage-run-banner-h, var(--garage-run-banner-height)) +
+      var(--ui-space-2)
+  );
+  /* Right-aligned and capped rather than edge-to-edge: the action menu expands
+     upward from the bottom-left corner, and a full-width notice is the one
+     thing tall enough to meet it coming the other way. */
+  right: var(--garage-edge-right);
+  left: auto;
+  z-index: 14;
+  width: min(420px, calc(100% - var(--garage-edge-left) - var(--garage-edge-right)));
+  max-width: min(420px, calc(100% - var(--garage-edge-left) - var(--garage-edge-right)));
   max-height: 25dvh;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -496,9 +618,16 @@
 @media (orientation: landscape) and (max-height: 560px) {
   /* Landscape spends one row on commands and keeps both build rows below. */
   [data-mobile-garage='on'] {
+    --garage-stack-gap: var(--ui-space-1);
     --garage-topbar-height: calc(
       var(--touch-target) + var(--ui-space-1) + var(--ui-space-1)
     );
+  }
+
+  /* Removing only this inter-control gap keeps the four 44px options below the
+     repair strip at 430px high; their own 8px stack rhythm remains intact. */
+  [data-mobile-garage='on'] .garage-action-bar {
+    gap: 0;
   }
 
   [data-mobile-garage='on'] .topbar[data-density='compact'] {
@@ -541,6 +670,12 @@
   [data-mobile-garage='on'] .topbar[data-density='compact'] .money-readout {
     min-width: var(--touch-target);
     padding-inline: var(--ui-space-1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-mobile-garage='on'] .garage-action-bar__group:not([hidden]) {
+    animation: none;
   }
 }
 
@@ -592,9 +727,7 @@
 
 @media (max-width: 380px) {
   /* Very narrow phones trade one column for readable prices and tap targets. */
-  [data-mobile-garage='on']
-    [data-garage-sheet-panel='shop']
-    .store-list,
+  [data-mobile-garage='on'] [data-garage-sheet-panel='shop'] .store-list,
   [data-mobile-garage='on']
     [data-garage-sheet-panel='inventory']
     .inventory-grid {
