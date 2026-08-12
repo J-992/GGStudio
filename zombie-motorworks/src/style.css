@@ -32,6 +32,9 @@ body,
   color: var(--ui-text);
   font-family: var(--ui-font-display);
   font-size: 14px;
+  /* Safari and iOS still need the prefix, and CrazyGames asks for it by name:
+     without it a drag on the canvas selects UI text instead of steering. */
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -69,6 +72,18 @@ body,
     12px 14px 0 rgb(0 0 0 / 0.48),
     inset 0 3px 0 var(--ui-signal-dark);
   text-align: center;
+}
+
+/*
+ * The flanking zombies are appended after the panel's content, so by paint
+ * order they sit on top of it. On the map screen that put an arm across the
+ * "D" of DESERT and the tail of its handling text. Lifting the content above
+ * them keeps every row legible while the zombies still bleed past the panel
+ * edges, which is the whole point of them.
+ */
+.title-panel > :not(.title-zombie) {
+  position: relative;
+  z-index: 1;
 }
 
 .title-zombie {
@@ -2022,6 +2037,12 @@ button:disabled {
   border: 1px solid #2b3128;
   background: rgb(12 15 12 / 0.88);
   box-shadow: inset 0 0 0 1px var(--ui-black);
+  touch-action: none;
+}
+
+.hotbar-list
+  .hotbar-slot:not(.hotbar-slot--empty):not(.is-out-of-stock) {
+  cursor: grab;
 }
 
 /* Hovering lifts the slot so its name chip clears the neighbouring tiles. */
@@ -2380,6 +2401,13 @@ button:disabled {
 .inventory-tile {
   position: relative;
   padding: 18px 4px 20px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.part-btn.is-part-dragging {
+  cursor: grabbing;
+  filter: brightness(1.25);
 }
 
 .inventory-tile[hidden] {

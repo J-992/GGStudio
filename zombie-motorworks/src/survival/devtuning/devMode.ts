@@ -1,8 +1,12 @@
 /**
- * The dev tuner is a build-time/runtime opt-in that never ships enabled in the
- * public CrazyGames build. It mounts only when the URL carries `?dev=1` (or in a
- * Vite dev build, which is already developer-only). Kept in its own module so
- * both `main.ts` and `SurvivalMode` can ask the same question cheaply.
+ * The dev tuner is a developer-build-only opt-in. It mounts when a Vite dev
+ * build carries `?dev=1`; a production bundle ignores the parameter entirely.
+ * Kept in its own module so both `main.ts` and `SurvivalMode` can ask the same
+ * question cheaply.
+ *
+ * The build check is what makes the URL safe to ship. `?dev=1&wave=20` in the
+ * public build would otherwise hand every player a leaderboard exploit, and a
+ * comment promising the parameter is inert is not a gate — this is.
  */
 let cachedDevMode: boolean | null = null;
 
@@ -11,7 +15,7 @@ export function isDevMode(): boolean {
   let enabled = false;
   try {
     const params = new URLSearchParams(globalThis.location?.search ?? '');
-    enabled = params.get('dev') === '1';
+    enabled = import.meta.env.DEV && params.get('dev') === '1';
   } catch {
     enabled = false;
   }

@@ -7,10 +7,12 @@
 // character: the Necromancer casts, the Gunslinger shoots.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { castPose, walkPose } from './necromancerPose';
 import { shootPose, walkPose as gunWalkPose } from './gunslingerPose';
+import { walkPose as alchWalkPose } from './alchemistPose';
 import { BONE_NAMES, type BoneName, type CharacterPose } from './rigPose';
 
 /**
@@ -35,6 +37,10 @@ const MODELS = {
   'necromancer-old': {
     file: 'necromancer-voxel.rigged.glb',
     clips: { walk: { pose: walkPose }, cast: { pose: castPose, period: 2.4 } },
+  },
+  alchemist: {
+    file: 'green-alchemist.rigged.glb',
+    clips: { walk: { pose: alchWalkPose } },
   },
   gunslinger: {
     file: 'gunslinger.rigged.glb',
@@ -205,9 +211,11 @@ async function loadModel(key: ModelKey): Promise<void> {
   status.textContent = `loading ${key}…`;
   unload();
 
-  const gltf = await new GLTFLoader().loadAsync(
-    `${import.meta.env.BASE_URL}assets/zombies/${MODELS[key].file}`,
-  );
+  // Every shipped rig is meshopt-compressed, so the preview needs the same
+  // decoder the game's loader installs.
+  const gltf = await new GLTFLoader()
+    .setMeshoptDecoder(MeshoptDecoder)
+    .loadAsync(`${import.meta.env.BASE_URL}assets/zombies/${MODELS[key].file}`);
   const scene = gltf.scene;
   rigRoot.add(scene);
 

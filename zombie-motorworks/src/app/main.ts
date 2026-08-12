@@ -40,7 +40,14 @@ async function boot(): Promise<void> {
   // share code cannot take the debug seam down with it.
   const params = new URLSearchParams(location.search);
   const build = params.get('build');
-  if (params.get('debug') === '1') {
+  // Developer builds only. The seam drives the whole game from the console —
+  // place parts, jump waves, set controls — so the public build must not expose
+  // it however the URL is dressed up. The Playwright suite drives a production
+  // preview through this seam, so it builds with `VITE_E2E=1` to opt back in;
+  // that flag is set by `playwright.config.ts` and by nothing that ships.
+  const debugSeamAllowed =
+    import.meta.env.DEV || import.meta.env.VITE_E2E === '1';
+  if (debugSeamAllowed && params.get('debug') === '1') {
     (window as unknown as { __scrapRig: unknown }).__scrapRig = app.debugSeam();
   }
   if (build) {

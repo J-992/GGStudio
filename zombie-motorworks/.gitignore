@@ -28,3 +28,6 @@ docs/generated/balance-lab.html
 .mobile-shots/
 mobile-shot.mjs
 steer-probe.mjs
+
+# Trailer capture workspace: hundreds of MB of rendered frames and video.
+trailer/
