@@ -39,6 +39,8 @@ export class FollowCamera {
   /** Remaining shake strength; decays every frame once kicked. */
   private shake = 0;
   private shakePhase = 0;
+  /** Trailer-capture only: <1 pulls the camera closer to the vehicle. */
+  private captureZoom = 1;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -77,6 +79,12 @@ export class FollowCamera {
   addShake(strength: number): void {
     if (strength <= 0) return;
     this.shake = Math.min(MAX_SHAKE, this.shake + strength);
+  }
+
+  /** Trailer-capture only: scale the follow distance (1 = normal, 0.6 = closer). */
+  setCaptureZoom(zoom: number): void {
+    this.captureZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+    this.snap();
   }
 
   snap(): void {
@@ -131,7 +139,7 @@ export class FollowCamera {
       this.bounds.maxZ - BOUNDS_MARGIN,
     );
     this.targetLookAt.set(targetX, position.y, targetZ);
-    this.scratchOffset.copy(BASE_OFFSET).multiplyScalar(zoomScale);
+    this.scratchOffset.copy(BASE_OFFSET).multiplyScalar(zoomScale * this.captureZoom);
     this.targetPosition.copy(this.targetLookAt).add(this.scratchOffset);
   }
 }

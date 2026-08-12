@@ -39,6 +39,11 @@ export interface EditorUIHandlers {
   onPurchasePart?(defId: string): void;
   onBuyPart(defId: string): void;
   onArmPart(defId: string): void;
+  /** Drag an owned block from Inventory/build bar directly onto the rig. */
+  onPartDragStart(defId: string, clientX: number, clientY: number): boolean;
+  onPartDragMove(clientX: number, clientY: number): void;
+  onPartDragEnd(clientX: number, clientY: number): void;
+  onPartDragCancel(): void;
   /** The player re-curated the build bar; older harnesses may omit this. */
   onHotbarChange?(defIds: readonly string[]): void;
   onCancelTool(): void;
@@ -1542,6 +1547,103 @@ export function buildEditorUI(
     positionStoreDetails(tile);
   };
 
+  /**
+   * Turns a normal button into a mouse/touch placement source without taking
+   * away its existing click action. Pointer capture keeps the drag alive after
+   * the finger leaves the small tile; the movement threshold preserves taps.
+   */
+  const bindPartDrag = (
+    button: HTMLButtonElement,
+    defIdForButton: () => string | null,
+  ): (() => boolean) => {
+    const thresholdPx = 7;
+    let pointerId: number | null = null;
+    let startX = 0;
+    let startY = 0;
+    let dragging = false;
+    let suppressNextClick = false;
+
+    const releasePointer = (): void => {
+      const capturedId = pointerId;
+      pointerId = null;
+      dragging = false;
+      button.classList.remove('is-part-dragging');
+      if (capturedId !== null && button.hasPointerCapture(capturedId)) {
+        button.releasePointerCapture(capturedId);
+      }
+    };
+
+    button.addEventListener('pointerdown', (event) => {
+      const defId = defIdForButton();
+      if (
+        !event.isPrimary ||
+        event.button !== 0 ||
+        !defId ||
+        (stock[defId] ?? 0) <= 0
+      ) {
+        return;
+      }
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      dragging = false;
+      suppressNextClick = false;
+      button.setPointerCapture(event.pointerId);
+    });
+
+    button.addEventListener('pointermove', (event) => {
+      if (event.pointerId !== pointerId) return;
+      if (!dragging) {
+        const moved = Math.hypot(
+          event.clientX - startX,
+          event.clientY - startY,
+        );
+        if (moved < thresholdPx) return;
+        const defId = defIdForButton();
+        if (
+          !defId ||
+          !handlers.onPartDragStart(defId, event.clientX, event.clientY)
+        ) {
+          releasePointer();
+          return;
+        }
+        dragging = true;
+        button.classList.add('is-part-dragging');
+      }
+      event.preventDefault();
+      handlers.onPartDragMove(event.clientX, event.clientY);
+    });
+
+    button.addEventListener('pointerup', (event) => {
+      if (event.pointerId !== pointerId) return;
+      if (dragging) {
+        event.preventDefault();
+        suppressNextClick = true;
+        handlers.onPartDragEnd(event.clientX, event.clientY);
+        // A pointer-generated click follows pointerup synchronously. Clear the
+        // guard afterward so the next keyboard/tap click still works.
+        window.setTimeout(() => {
+          suppressNextClick = false;
+        }, 0);
+      }
+      releasePointer();
+    });
+
+    const cancelDrag = (event: PointerEvent): void => {
+      if (event.pointerId !== pointerId) return;
+      if (dragging) handlers.onPartDragCancel();
+      releasePointer();
+    };
+    button.addEventListener('pointercancel', cancelDrag);
+    button.addEventListener('lostpointercapture', cancelDrag);
+
+    return () => {
+      if (!suppressNextClick) return false;
+      suppressNextClick = false;
+      return true;
+    };
+  };
+
   for (const id of SIMPLE_PART_IDS) {
     const def = catalog[id];
     if (!def) continue;
@@ -1648,7 +1750,14 @@ export function buildEditorUI(
       count,
       slotBadge,
     );
-    inventoryButton.addEventListener('click', () => toggleHotbarEntry(id));
+    const consumeDragClick = bindPartDrag(inventoryButton, () => id);
+    inventoryButton.addEventListener('click', (event) => {
+      if (consumeDragClick()) {
+        event.preventDefault();
+        return;
+      }
+      toggleHotbarEntry(id);
+    });
     inventoryContent.appendChild(inventoryButton);
     inventoryButtons.set(id, inventoryButton);
     inventoryCountLabels.set(id, count);
@@ -1764,7 +1873,12 @@ export function buildEditorUI(
       count.className = 'inventory-count';
       button.append(key, name, art, count);
       const slot: HotbarSlotView = { defId: null, button, name, art, count };
-      button.addEventListener('click', () => {
+      const consumeDragClick = bindPartDrag(button, () => slot.defId);
+      button.addEventListener('click', (event) => {
+        if (consumeDragClick()) {
+          event.preventDefault();
+          return;
+        }
         if (!slot.defId) {
           setStatus(
             'Empty slot - open the Inventory button on the bar to fill it',
@@ -1823,7 +1937,7 @@ export function buildEditorUI(
       );
       slot.button.title =
         count > 0
-          ? `Arm ${displayName} (right-click to clear the slot)`
+          ? `Drag ${displayName} onto the car, or click to arm it (right-click to clear)`
           : `${displayName} - none left, click to find it in the Store`;
     });
     applyToolStates();
@@ -1882,16 +1996,16 @@ export function buildEditorUI(
       tile.setAttribute(
         'aria-label',
         slotIndex >= 0
-          ? `${displayName}, ${count} in inventory, in slot ${slotIndex + 1} — click to remove`
-          : `${displayName}, ${count} in inventory — click to add to the bar`,
+          ? `${displayName}, ${count} in inventory, in slot ${slotIndex + 1} — drag onto the car, or click to remove`
+          : `${displayName}, ${count} in inventory — drag onto the car, or click to add to the bar`,
       );
       tile.title =
         slotIndex >= 0
-          ? `Remove ${displayName} from slot ${slotIndex + 1}`
-          : `Put ${displayName} on the build bar`;
+          ? `Drag ${displayName} onto the car, or remove it from slot ${slotIndex + 1}`
+          : `Drag ${displayName} onto the car, or put it on the build bar`;
     }
     inventoryEmpty.hidden = ownedTypes > 0;
-    inventoryHint.textContent = `Build bar ${hotbar.length}/${HOTBAR_CAPACITY} - click a block to slot it`;
+    inventoryHint.textContent = `Build bar ${hotbar.length}/${HOTBAR_CAPACITY} - click to slot, or drag a block onto the car`;
     inventoryToggleBadge.textContent = String(ownedTypes);
     renderHotbar();
   };
