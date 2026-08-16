@@ -313,6 +313,21 @@ export interface EditorUI {
   deny(text: string): void;
   /** Open the first-run rig picker. Modal, and only closable by choosing. */
   showBuildPrompt(): void;
+  /**
+   * Swap in a freshly rendered icon for every tile showing `defId`.
+   *
+   * Icons are rendered a few per frame rather than all at once, so tiles are
+   * built against the SVG fallback and upgraded here as the real ones land.
+   */
+  setPartIcon(defId: string, url: string): void;
+  /**
+   * Offer the guided tour, if this browser has never been offered it. Idempotent.
+   *
+   * Called by EditorMode once the garage is the only thing on screen — either
+   * straight away, or after the rig picker closes — so the welcome never lands
+   * on top of another dialog.
+   */
+  presentWelcome(): void;
   /** Nudge shown at the start of every new game to buy a starting weapon. */
   ghostTip: HTMLDivElement;
   /**
@@ -588,6 +603,10 @@ function partThumbnail(
   image.className = 'part-thumbnail';
   image.alt = '';
   image.draggable = false;
+  // Tagged so `setPartIcon` can find every tile showing this part once its
+  // rendered icon arrives — icons are drawn a few per frame now, so a tile is
+  // routinely built before its icon exists.
+  image.dataset.partIcon = def.id;
   if (iconUrl) {
     image.src = iconUrl;
     return image;
@@ -1072,6 +1091,9 @@ export function buildEditorUI(
   const closeBuildPrompt = (): void => {
     buildPromptOverlay.hidden = true;
     stopBuildPromptPreviews();
+    // The picker was holding the welcome back; now that the screen is clear it
+    // can have its turn.
+    presentWelcome();
   };
 
   for (const buildId of BUILD_IDS) {
@@ -2383,12 +2405,27 @@ export function buildEditorUI(
   const debugMode = new URLSearchParams(location.search).get('debug') === '1';
   const WELCOME_SEEN_KEY = 'scraprig.welcome-seen';
   const TUTORIAL_DONE_KEY = 'scraprig.tutorial-done';
-  if (
-    !debugMode &&
-    !localStorage.getItem(TUTORIAL_DONE_KEY) &&
-    !localStorage.getItem(HELP_SEEN_KEY) &&
-    !localStorage.getItem(WELCOME_SEEN_KEY)
-  ) {
+  let welcomePresented = false;
+  /**
+   * Offer the tour, once, when the garage has the player's whole attention.
+   *
+   * Deliberately not raised during construction. A first-time player reaches
+   * this garage straight off their first wave, and the rig picker is already
+   * waiting for them — two modals stacked on a screen they have never seen is
+   * exactly the wall this ordering exists to remove. EditorMode calls this
+   * either instead of the picker or after the picker resolves.
+   */
+  const presentWelcome = (): void => {
+    if (welcomePresented) return;
+    welcomePresented = true;
+    if (
+      debugMode ||
+      localStorage.getItem(TUTORIAL_DONE_KEY) ||
+      localStorage.getItem(HELP_SEEN_KEY) ||
+      localStorage.getItem(WELCOME_SEEN_KEY)
+    ) {
+      return;
+    }
     const welcome = buildWelcomeDialog(
       () => {
         localStorage.setItem(WELCOME_SEEN_KEY, '1');
@@ -2401,7 +2438,7 @@ export function buildEditorUI(
       },
     );
     root.appendChild(welcome);
-  }
+  };
 
   const showNoSelection = (): void => {
     root.classList.remove('has-selection');
@@ -2886,6 +2923,15 @@ export function buildEditorUI(
         importOverlay.hidden = false;
         importAsNewSlot.focus();
       }),
+    presentWelcome,
+    setPartIcon: (defId, url) => {
+      const selector = `img.part-thumbnail[data-part-icon="${CSS.escape(defId)}"]`;
+      for (const image of root.querySelectorAll<HTMLImageElement>(selector)) {
+        // The SVG fallback is drawn inline, so swapping `src` is the whole
+        // upgrade: same element, same layout, no reflow of the panel.
+        image.src = url;
+      }
+    },
     showBuildPrompt: () => {
       buildPromptOverlay.hidden = false;
       firstBuildOption?.focus();

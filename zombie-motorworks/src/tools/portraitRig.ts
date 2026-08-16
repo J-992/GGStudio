@@ -1,5 +1,5 @@
 // Headless render rig for character portrait PNGs. Loaded via portrait.html
-// with ?asset=/assets/zombies/<name> and driven by scripts/render-portraits.mjs.
+// with ?asset=/art-src/zombies/<name> and driven by scripts/render-portraits.mjs.
 import * as THREE from 'three';
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';

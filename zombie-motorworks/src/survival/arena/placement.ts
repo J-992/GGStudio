@@ -32,7 +32,7 @@ function isBatchableAsset(
   const basename = asset.slice(asset.lastIndexOf('/') + 1);
   return (
     scatteredAssets.has(asset) ||
-    basename === 'SM-7-Fence' ||
+    basename === 'SM-7-Fence.glb' ||
     basename.startsWith('Road-Street') ||
     basename.startsWith('Road-Crossing')
   );
@@ -291,6 +291,7 @@ export class VoxelPlacer {
   >();
   private readonly pendingPlacements: Promise<void>[] = [];
   private readonly failedAssets = new Set<string>();
+  private settledPlacements = 0;
 
   constructor(
     private readonly root: THREE.Group,
@@ -345,7 +346,7 @@ export class VoxelPlacer {
         this.placeFallback(placement);
         this.reportAssetFailure(placement.asset, error);
       });
-    this.pendingPlacements.push(pendingPlacement);
+    this.track(pendingPlacement);
   }
 
   flushVoxelBatches(): void {
@@ -353,7 +354,7 @@ export class VoxelPlacer {
       const pendingPlacement = loadVoxelInstanceSource(
         `${this.assetRoot}/${asset}`,
       )
-        .then(({ geometry, material, pivot }) => {
+        .then(({ geometry, material, localMatrix }) => {
           if (this.isDisposed()) return;
           const batchMaterial: THREE.Material | THREE.Material[] =
             Array.isArray(material)
@@ -370,12 +371,7 @@ export class VoxelPlacer {
           mesh.name = `${this.arenaName}-batch:${asset}`;
           mesh.castShadow = style.castShadow ?? true;
           mesh.receiveShadow = true;
-          const pivotMatrix = new THREE.Matrix4().makeTranslation(
-            pivot.x,
-            pivot.y,
-            pivot.z,
-          );
-          const matrix = new THREE.Matrix4();
+                    const matrix = new THREE.Matrix4();
           const quaternion = new THREE.Quaternion();
           const up = new THREE.Vector3(0, 1, 0);
           const position = new THREE.Vector3();
@@ -388,7 +384,7 @@ export class VoxelPlacer {
             scaleVector.set(scale, placement.scaleY ?? scale, scale);
             matrix
               .compose(position, quaternion, scaleVector)
-              .multiply(pivotMatrix);
+              .multiply(localMatrix);
             mesh.setMatrixAt(i, matrix);
           }
           mesh.instanceMatrix.needsUpdate = true;
@@ -399,7 +395,7 @@ export class VoxelPlacer {
           for (const placement of placements) this.placeFallback(placement);
           this.reportAssetFailure(asset, error);
         });
-      this.pendingPlacements.push(pendingPlacement);
+      this.track(pendingPlacement);
     }
     this.voxelBatches.clear();
   }
@@ -407,6 +403,25 @@ export class VoxelPlacer {
   whenReady(): Promise<void> {
     if (this.pendingPlacements.length === 0) return Promise.resolve();
     return Promise.allSettled(this.pendingPlacements).then(() => undefined);
+  }
+
+  /**
+   * How much of this placer's work has settled, for the arena loading bar.
+   *
+   * `total` is final once the owning builder's constructor has returned, since
+   * every `placeVoxel` and the single `flushVoxelBatches` happen there.
+   */
+  progress(): { loaded: number; total: number } {
+    return { loaded: this.settledPlacements, total: this.pendingPlacements.length };
+  }
+
+  /** Push a placement and count it toward `progress` when it settles. */
+  private track(pending: Promise<void>): void {
+    this.pendingPlacements.push(
+      pending.finally(() => {
+        this.settledPlacements += 1;
+      }),
+    );
   }
 
   private placeFallback(placement: FixturePlacement): void {
@@ -419,7 +434,7 @@ export class VoxelPlacer {
     );
     const material = basename.startsWith('Road-')
       ? this.resources.fallbackRoadMaterial
-      : basename === 'SM-2-Ghost'
+      : basename === 'SM-2-Ghost.glb'
         ? this.resources.fallbackSpectralMaterial
         : this.resources.fallbackMaterial;
     const mesh = new THREE.Mesh(this.resources.fallbackGeometry, material);
@@ -444,12 +459,12 @@ export class VoxelPlacer {
     ) {
       return FALLBACK_ROAD;
     }
-    if (basename === 'RoadSign-66') return FALLBACK_SIGN;
-    if (basename === 'SM-7-Fence') return FALLBACK_FENCE;
-    if (basename === 'SM-8-Pillar') return FALLBACK_PILLAR;
-    if (basename === 'SM-1-Tree') return FALLBACK_TREE;
+    if (basename === 'RoadSign-66.glb') return FALLBACK_SIGN;
+    if (basename === 'SM-7-Fence.glb') return FALLBACK_FENCE;
+    if (basename === 'SM-8-Pillar.glb') return FALLBACK_PILLAR;
+    if (basename === 'SM-1-Tree.glb') return FALLBACK_TREE;
     if (basename.includes('Tomb')) return FALLBACK_TOMB;
-    if (basename === 'SM-2-Ghost' || basename === 'SM-11-Igor_wSpade') {
+    if (basename === 'SM-2-Ghost.glb' || basename === 'SM-11-Igor_wSpade.glb') {
       return FALLBACK_PERSON;
     }
     if (basename.includes('Barricade') || basename.includes('BarbedWires')) {

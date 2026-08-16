@@ -62,7 +62,7 @@ export function combineEnvironments(
 }
 
 export interface PropEntry {
-  /** Path relative to the recipe's assetRoot, e.g. 'SM-3-Tomb1' or 'props/Trash.fbx'. */
+  /** Path relative to the recipe's assetRoot, e.g. 'SM-3-Tomb1.glb'. */
   asset: string;
   weight: number;
   scale?: readonly [number, number];

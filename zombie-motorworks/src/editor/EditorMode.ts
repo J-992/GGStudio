@@ -110,7 +110,10 @@ import {
   extractShareCode,
   sharedSlotName,
 } from './shareHelpers.ts';
-import { renderPartIconUrls } from './PartIconRenderer.ts';
+import {
+  partIconUrls as partIconUrlMap,
+  renderPartIcons,
+} from './PartIconRenderer.ts';
 
 export const BLUEPRINT_STORAGE_KEY = 'scraprig.blueprints.v1';
 const TUTORIAL_DONE_KEY = 'scraprig.tutorial-done';
@@ -352,6 +355,8 @@ export class EditorMode {
   private ui: EditorUI;
   private tutorialOverlay: TutorialOverlay | null = null;
   private tutorialActive = false;
+  /** Stops the incremental part-icon render when this garage goes away. */
+  private readonly stopIconRender: () => void;
   private pointerDown: { x: number; y: number } | null = null;
   private lastPointer: { x: number; y: number } | null = null;
   private disposed = false;
@@ -444,13 +449,14 @@ export class EditorMode {
     this.scene.add(this.partsGroup);
     this.scene.add(this.overlays.group);
 
-    const partIconUrls = renderPartIconUrls(
-      renderer,
-      SIMPLE_PART_IDS.flatMap((id) => {
-        const definition = PART_CATALOG[id];
-        return definition ? [definition] : [];
-      }),
-    );
+    // The live map, not a snapshot: `renderPartIcons` fills it a few icons per
+    // frame below, and every panel rebuilt after that reads the real icons
+    // straight out of it. Until one lands the tile shows its SVG fallback.
+    const iconDefinitions = SIMPLE_PART_IDS.flatMap((id) => {
+      const definition = PART_CATALOG[id];
+      return definition ? [definition] : [];
+    });
+    const partIconUrls = partIconUrlMap(renderer);
     this.ui = buildEditorUI(
       container,
       PART_CATALOG,
@@ -533,6 +539,12 @@ export class EditorMode {
       partIconUrls,
     );
     this.ui.root.addEventListener('click', this.onUiButtonClick, true);
+    // Kicked once the UI exists so each icon has somewhere to land the moment
+    // it is drawn. Cancelled on dispose so a garage the player has already left
+    // is not still rendering thumbnails for it.
+    this.stopIconRender = renderPartIcons(renderer, iconDefinitions, (defId, url) =>
+      this.ui.setPartIcon(defId, url),
+    );
     // Folds the palette into a bottom drawer and the build report into a
     // collapsible sheet on a phone; a no-op on a pointer-precise device.
     this.mobileGarage = installMobileGarage(this.ui.root);
@@ -560,8 +572,14 @@ export class EditorMode {
     if (context.notice) this.ui.setNotice(context.notice);
     // A new game opens onto the rig picker rather than the old "buy a weapon"
     // prompt: the three builds each arrive with a weapon already bolted on, so
-    // the first decision is which rig, not which gun.
+    // the first decision is which rig, not which gun. By the time it appears
+    // the player has already driven a wave in the default rig, so the pick is
+    // an informed one rather than a coin toss on a screen they cannot read.
+    //
+    // The welcome/tour offer waits its turn behind the picker rather than
+    // stacking on it; when there is no picker it goes up immediately.
     if (context.isNewGame) this.ui.showBuildPrompt();
+    else this.ui.presentWelcome();
   }
 
   viewState(): EditorViewState {
@@ -668,6 +686,7 @@ export class EditorMode {
 
   dispose(): void {
     this.disposed = true;
+    this.stopIconRender();
     this.renderer.domElement.removeEventListener(
       'pointermove',
       this.onPointerMove,

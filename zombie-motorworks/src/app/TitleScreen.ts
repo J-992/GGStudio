@@ -41,6 +41,7 @@ import {
 // into App.ts is safe because it is only invoked at call time, well after
 // both modules have finished linking.
 import { buildStarterBlueprint } from './App.ts';
+import { assetUrl } from '../core/assetVersion.ts';
 
 export interface TitleScreenHandlers {
   onNewGame(): void;
@@ -150,7 +151,7 @@ function buildZombies(): HTMLImageElement[] {
   ).map(([side, portrait]) => {
     const zombie = document.createElement('img');
     zombie.className = `title-zombie title-zombie-${side}`;
-    zombie.src = `${PORTRAIT_ROOT}/${portrait}.png`;
+    zombie.src = assetUrl(`${PORTRAIT_ROOT}/${portrait}.png`);
     zombie.alt = '';
     zombie.setAttribute('aria-hidden', 'true');
     return zombie;

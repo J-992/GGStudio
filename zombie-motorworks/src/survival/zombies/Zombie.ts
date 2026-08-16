@@ -253,12 +253,13 @@ interface KindModel {
 }
 
 const KIND_MODELS: Partial<Record<ZombieKind, KindModel>> = {
-  thrower: { file: () => 'zombie_city', height: THROWER_VISUAL_HEIGHT },
+  thrower: { file: () => 'zombie_city.glb', height: THROWER_VISUAL_HEIGHT },
   'phone-addict': {
-    file: (index) => `PhoneAddict-${index % 2 === 0 ? '0-Woman' : '1-Man'}`,
+    file: (index) =>
+      `PhoneAddict-${index % 2 === 0 ? '0-Woman' : '1-Man'}.glb`,
     height: PHONE_ADDICT_VISUAL_HEIGHT,
   },
-  worker: { file: () => 'zombie_worker', height: WORKER_VISUAL_HEIGHT },
+  worker: { file: () => 'zombie_worker.glb', height: WORKER_VISUAL_HEIGHT },
   gunslinger: {
     file: () => 'gunslinger.rigged.glb',
     height: GUNSLINGER_VISUAL_HEIGHT,
@@ -302,7 +303,7 @@ export function modelFileFor(
 ): string {
   if (kind === 'boss') return bossDef?.assetName ?? DEFAULT_BOSS_ASSET;
   const kindModel = KIND_MODELS[kind];
-  return kindModel ? kindModel.file(index) : `Zed_${(index % 6) + 1}`;
+  return kindModel ? kindModel.file(index) : `Zed_${(index % 6) + 1}.glb`;
 }
 
 /**

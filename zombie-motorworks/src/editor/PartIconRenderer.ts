@@ -7,10 +7,36 @@ import { buildPartMesh } from './meshes.ts';
 const ICON_SIZE = 256;
 const ICON_PADDING = 1.18;
 const CAMERA_DIRECTION = new THREE.Vector3(4, 3.1, 5).normalize();
-const iconCache = new WeakMap<
-  THREE.WebGLRenderer,
-  ReadonlyMap<string, string>
->();
+
+/**
+ * Icons rendered so far, per renderer, and live rather than snapshotted.
+ *
+ * Callers hold this map and read from it as tiles are built, so an icon that
+ * lands after the garage has drawn is still picked up by the next refresh
+ * without anybody having to re-request the set.
+ */
+const iconCache = new WeakMap<THREE.WebGLRenderer, Map<string, string>>();
+/** One in-flight incremental render per renderer; a second call joins it. */
+const activeRuns = new WeakMap<THREE.WebGLRenderer, IconRun>();
+
+/**
+ * How many icons are rendered per animation frame.
+ *
+ * Each one is a mesh build, a draw, a GPU readback and a PNG encode, so the
+ * whole catalogue in one go is a visible freeze on a phone — and it used to sit
+ * in the EditorMode constructor, which is the first screen of the game. Four
+ * keeps a frame comfortably inside budget while still finishing the catalogue
+ * in well under a second.
+ */
+const ICONS_PER_FRAME = 4;
+
+interface IconRun {
+  /** Ids still to draw, in order. */
+  readonly queue: string[];
+  /** Everyone waiting to hear about newly drawn icons. */
+  readonly listeners: Set<(defId: string, url: string) => void>;
+  cancelled: boolean;
+}
 
 function disposeObject(root: THREE.Object3D): void {
   const geometries = new Set<THREE.BufferGeometry>();
@@ -114,27 +140,47 @@ export function isCompleteDistinctIconSet(
 }
 
 /**
- * Render catalog icons with one short-lived, isolated WebGL canvas. Capturing
- * that canvas directly avoids multisampled render-target readback, which is
- * not portable across all browser/GPU combinations. Any unavailable rendering
- * API yields an empty map so the garage can retain its lightweight fallback.
+ * The live icon map for a renderer. Empty until `renderPartIcons` fills it.
+ *
+ * Handed straight to the garage and to the threat alert, which read it as they
+ * build tiles — so an icon that finishes rendering after a panel was drawn is
+ * still there for the next refresh.
  */
-export function renderPartIconUrls(
+export function partIconUrls(
   renderer: THREE.WebGLRenderer,
-  definitions: readonly PartDefinition[],
 ): ReadonlyMap<string, string> {
-  if (typeof document === 'undefined') return new Map();
-  const cached = iconCache.get(renderer);
-  if (cached && definitions.every((definition) => cached.has(definition.id))) {
-    return cached;
+  return liveIconMap(renderer);
+}
+
+function liveIconMap(renderer: THREE.WebGLRenderer): Map<string, string> {
+  let cached = iconCache.get(renderer);
+  if (!cached) {
+    cached = new Map<string, string>();
+    iconCache.set(renderer, cached);
   }
+  return cached;
+}
 
-  const result = new Map<string, string>();
-  let thumbnailRenderer: THREE.WebGLRenderer | null = null;
+/** One isolated thumbnail canvas plus the scene it draws parts into. */
+interface IconStage {
+  readonly renderer: THREE.WebGLRenderer;
+  readonly canvas: HTMLCanvasElement;
+  readonly scene: THREE.Scene;
+  readonly camera: THREE.OrthographicCamera;
+  dispose(): void;
+}
 
+/**
+ * Build the offscreen stage. Capturing its canvas directly avoids multisampled
+ * render-target readback, which is not portable across all browser/GPU
+ * combinations. Returns null when the rendering API is unavailable, and the
+ * garage keeps its lightweight SVG fallbacks.
+ */
+function createIconStage(): IconStage | null {
+  if (typeof document === 'undefined') return null;
   try {
     const canvas = document.createElement('canvas');
-    thumbnailRenderer = new THREE.WebGLRenderer({
+    const thumbnailRenderer = new THREE.WebGLRenderer({
       canvas,
       alpha: true,
       antialias: true,
@@ -157,29 +203,111 @@ export function renderPartIconUrls(
     coolRim.position.set(-5, 2.5, -4);
     scene.add(hemisphere, warmKey, coolRim);
 
-    for (const definition of definitions) {
-      const part = buildPartMesh(definition, iconPart(definition));
-      scene.add(part);
-      try {
-        if (!framePart(camera, part))
-          throw new Error('Part has no render bounds');
-        thumbnailRenderer.clear(true, true, true);
-        thumbnailRenderer.render(scene, camera);
-        result.set(definition.id, canvas.toDataURL('image/png'));
-      } finally {
-        scene.remove(part);
-        disposeObject(part);
-      }
-    }
-
-    const ids = definitions.map(({ id }) => id);
-    if (!isCompleteDistinctIconSet(ids, result)) return new Map();
-    iconCache.set(renderer, result);
-    return result;
+    return {
+      renderer: thumbnailRenderer,
+      canvas,
+      scene,
+      camera,
+      dispose: () => {
+        thumbnailRenderer.dispose();
+        thumbnailRenderer.forceContextLoss();
+      },
+    };
   } catch {
-    return new Map();
-  } finally {
-    thumbnailRenderer?.dispose();
-    thumbnailRenderer?.forceContextLoss();
+    return null;
   }
+}
+
+/** Draw one part onto the stage. Returns its data URL, or null if it failed. */
+function drawIcon(stage: IconStage, definition: PartDefinition): string | null {
+  const part = buildPartMesh(definition, iconPart(definition));
+  stage.scene.add(part);
+  try {
+    if (!framePart(stage.camera, part)) return null;
+    stage.renderer.clear(true, true, true);
+    stage.renderer.render(stage.scene, stage.camera);
+    return stage.canvas.toDataURL('image/png');
+  } catch {
+    return null;
+  } finally {
+    stage.scene.remove(part);
+    disposeObject(part);
+  }
+}
+
+/**
+ * Fill in any missing catalogue icons, a few per frame, into the renderer's
+ * live map.
+ *
+ * This used to be one synchronous pass over the whole catalogue inside the
+ * EditorMode constructor: twenty-eight mesh builds, draws, GPU readbacks and
+ * PNG encodes, blocking the first screen a player ever sees. Spreading it over
+ * frames costs nothing visible — every tile has an SVG fallback until its icon
+ * lands, and `onIcon` swaps them in as they do.
+ *
+ * Returns a cancel function; calling it stops the run and releases the canvas.
+ * A second call for the same renderer joins the run already in flight.
+ */
+export function renderPartIcons(
+  renderer: THREE.WebGLRenderer,
+  definitions: readonly PartDefinition[],
+  onIcon?: (defId: string, url: string) => void,
+): () => void {
+  const icons = liveIconMap(renderer);
+  const byId = new Map(definitions.map((definition) => [definition.id, definition]));
+
+  const existing = activeRuns.get(renderer);
+  if (existing) {
+    if (onIcon) existing.listeners.add(onIcon);
+    for (const id of byId.keys()) {
+      if (!icons.has(id) && !existing.queue.includes(id)) existing.queue.push(id);
+    }
+    return () => {
+      if (onIcon) existing.listeners.delete(onIcon);
+    };
+  }
+
+  const queue = [...byId.keys()].filter((id) => !icons.has(id));
+  const listeners = new Set<(defId: string, url: string) => void>();
+  if (onIcon) listeners.add(onIcon);
+  // Everything asked for is already drawn, so there is nothing to schedule and
+  // nothing to cancel.
+  if (queue.length === 0) return () => undefined;
+
+  const run: IconRun = { queue, listeners, cancelled: false };
+  activeRuns.set(renderer, run);
+
+  const stage = createIconStage();
+  if (stage === null) {
+    activeRuns.delete(renderer);
+    return () => undefined;
+  }
+
+  const finish = (): void => {
+    if (activeRuns.get(renderer) === run) activeRuns.delete(renderer);
+    stage.dispose();
+  };
+
+  const step = (): void => {
+    if (run.cancelled) return finish();
+    for (let drawn = 0; drawn < ICONS_PER_FRAME; drawn++) {
+      const id = run.queue.shift();
+      if (id === undefined) return finish();
+      const definition = byId.get(id);
+      if (definition === undefined) continue;
+      const url = drawIcon(stage, definition);
+      // A part that cannot be framed keeps its SVG fallback forever rather
+      // than being retried every frame.
+      if (url === null) continue;
+      icons.set(id, url);
+      for (const listener of run.listeners) listener(id, url);
+    }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+
+  return () => {
+    if (onIcon) run.listeners.delete(onIcon);
+    run.cancelled = true;
+  };
 }

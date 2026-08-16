@@ -97,14 +97,39 @@ describe('biome recipes', () => {
       const assetRoot = biome.layout.assetRoot.replace(/^\/+/, '');
       for (const asset of new Set(referencedAssets(biome))) {
         const basePath = join(PUBLIC_DIR, assetRoot, asset);
-        if (asset.endsWith('.fbx')) {
+        // Almost everything is a compressed GLB built by
+        // `scripts/convert-voxel-assets.mjs` from the sources in `art-src/`.
+        if (asset.endsWith('.glb')) {
           expect(existsSync(basePath), basePath).toBe(true);
           continue;
         }
+        // The exceptions are the five two-material scatter props, which stay
+        // OBJ because instanced batching needs one mesh per asset. They are
+        // named without an extension and still ship their MTL.
         expect(existsSync(`${basePath}.obj`), `${basePath}.obj`).toBe(true);
         expect(existsSync(`${basePath}.mtl`), `${basePath}.mtl`).toBe(true);
       }
     }
+  });
+
+  it('only leaves the two-material scatter props as OBJ', () => {
+    // A converted asset carries its extension; an extension-less name means the
+    // runtime will reach for the OBJ loader. That loader exists solely for the
+    // palms and pines, so anything else arriving here is a conversion that was
+    // missed — and would ship as a grey placeholder box.
+    const objAssets = new Set<string>();
+    for (const biome of Object.values(BIOMES)) {
+      for (const asset of referencedAssets(biome)) {
+        if (!asset.endsWith('.glb')) objAssets.add(asset);
+      }
+    }
+    expect([...objAssets].sort()).toEqual([
+      'nature/PalmTree_2',
+      'nature/PalmTree_3',
+      'nature/PalmTree_5',
+      'nature/PineTree_3',
+      'nature/PineTree_5',
+    ]);
   });
 
   it('keeps wave one hazard-free in every biome', () => {

@@ -189,7 +189,7 @@ export const BOSS_WAVE_INTERVAL = 5;
  * never what is seen. An elite boss (see `EliteBossSpec`) is a real zombie kind
  * with its own model instead, so it never touches this.
  */
-export const DEFAULT_BOSS_ASSET = 'Zed_5';
+export const DEFAULT_BOSS_ASSET = 'Zed_5.glb';
 
 /** Ground-ring telegraph shown while a boss winds up its slam. */
 export const BOSS_RING_OPACITY = 0.9;

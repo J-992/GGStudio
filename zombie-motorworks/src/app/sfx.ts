@@ -2,6 +2,7 @@ import type {
   ZombieSfxReport,
   ZombieSfxEvent,
 } from '../survival/zombies/ZombieSystem.ts';
+import { assetUrl } from '../core/assetVersion.ts';
 
 export type SfxName =
   | 'coinTick'
@@ -69,7 +70,7 @@ type AudioContextGlobal = typeof globalThis & {
 };
 
 const audioUrl = (file: string): string =>
-  `${import.meta.env.BASE_URL}assets/audio/${file}`;
+  assetUrl(`${import.meta.env.BASE_URL}assets/audio/${file}`);
 
 const SAMPLE_URLS = {
   uiClick: [audioUrl('ui-click-real.ogg')],
@@ -125,12 +126,72 @@ const LOOP_URLS = {
   garageMusic: audioUrl('garage-theme.ogg'),
 } as const;
 
+/**
+ * Cues a player can hear inside the first half-minute, on any route into the
+ * game.
+ *
+ * Everything in the bank used to be fetched and decoded the instant audio
+ * unlocked — around fifty files and two megabytes, kicked off by the first tap,
+ * which is exactly when the arena is fetching its own models. The two were
+ * fighting over the same connection at the worst possible moment. This tier is
+ * what a first wave actually needs: the sounds of driving, of shooting the
+ * weapon every starting rig carries, of hitting a zombie, and of the UI.
+ *
+ * Nothing here is load-bearing. A cue that has not arrived is fetched on demand
+ * the first time it is played, which is what `playUrl` already did for anything
+ * missing — the tiers only change what is fetched *eagerly*.
+ */
+const ESSENTIAL_CUES: readonly SampleCue[] = [
+  'uiClick',
+  'uiDeny',
+  'mechanical',
+  'pickup',
+  'cashRegister',
+  'waveChime',
+  'turret',
+  'cannon',
+  'pistol',
+  'metalImpact',
+  'heavyImpact',
+  'zombieGrowl',
+  'zombieAttack',
+  'zombieDeath',
+  'gore',
+];
+
+/** Loops needed as soon as the rig moves, plus the garage theme. */
+const ESSENTIAL_LOOPS: readonly (keyof typeof LOOP_URLS)[] = [
+  'engineIdle',
+  'engineRev',
+  'tireSkid',
+  'garageMusic',
+];
+
+const ESSENTIAL_URLS = [
+  ...new Set([
+    ...ESSENTIAL_CUES.flatMap((cue) => [...SAMPLE_URLS[cue]]),
+    ...ESSENTIAL_LOOPS.map((loop) => LOOP_URLS[loop]),
+  ]),
+];
+
 const ALL_URLS = [
   ...new Set([
     ...Object.values(SAMPLE_URLS).flat(),
     ...Object.values(LOOP_URLS),
   ]),
 ];
+
+/** Everything the first tier left out, fetched once the game has settled. */
+const DEFERRED_URLS = ALL_URLS.filter((url) => !ESSENTIAL_URLS.includes(url));
+
+/**
+ * How long the deferred tier waits before it starts.
+ *
+ * Long enough for the arena the player is dropping into to have claimed the
+ * bandwidth it needs, short enough that the first flamethrower or ice cannon
+ * bought in the garage is already loaded by the time it fires.
+ */
+const DEFERRED_PRELOAD_DELAY_MS = 8000;
 
 interface DriveSfxInput {
   speedKmh: number;
@@ -373,8 +434,25 @@ function loadUrl(context: AudioContext, url: string): Promise<void> {
   return load;
 }
 
+let deferredPreloadTimer: number | undefined;
+
+/**
+ * Fetch the first-minute cues now and the rest of the bank shortly after.
+ *
+ * Idempotent and cheap to call repeatedly: `loadUrl` already dedupes both
+ * in-flight fetches and decoded buffers, and the deferred pass is armed once.
+ */
 function preload(context: AudioContext): void {
-  for (const url of ALL_URLS) void loadUrl(context, url);
+  for (const url of ESSENTIAL_URLS) void loadUrl(context, url);
+  if (deferredPreloadTimer !== undefined || DEFERRED_URLS.length === 0) return;
+  deferredPreloadTimer = window.setTimeout(() => {
+    // Re-read the context rather than closing over the one that armed the
+    // timer: a suspended context can be replaced between the two, and decoding
+    // into a dead context throws the buffers away.
+    const current = audioContext;
+    if (current === null) return;
+    for (const url of DEFERRED_URLS) void loadUrl(current, url);
+  }, DEFERRED_PRELOAD_DELAY_MS);
 }
 
 function cueUrl(cue: SampleCue): string {

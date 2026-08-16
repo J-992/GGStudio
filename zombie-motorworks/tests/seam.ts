@@ -124,12 +124,17 @@ export async function boot(page: Page): Promise<void> {
 }
 
 /**
- * Advance to the garage from whatever boot produced. A first-time player skips
- * the title entirely and lands in the garage already, so the title's buttons
- * are only driven when a title is actually on screen.
+ * Advance to the garage from whatever boot produced.
+ *
+ * Three starting points are possible. A returning player gets the title and its
+ * buttons. A first-time player is dropped straight into wave one — the garage
+ * is introduced afterwards, at the build phase — so the run has to be abandoned
+ * to reach it early. And a boot that already landed in the garage needs
+ * nothing.
  */
 export async function advanceToEditor(page: Page): Promise<void> {
-  if ((await page.evaluate(() => window.__scrapRig.mode())) === 'title') {
+  const mode = await page.evaluate(() => window.__scrapRig.mode());
+  if (mode === 'title') {
     const continued = await page.evaluate(() =>
       window.__scrapRig.continueGame(),
     );
@@ -139,6 +144,8 @@ export async function advanceToEditor(page: Page): Promise<void> {
         throw new Error('New Game unexpectedly requires confirmation');
       }
     }
+  } else if (mode === 'survival') {
+    await page.evaluate(() => window.__scrapRig.backToEditor());
   }
   await page.waitForFunction(() => window.__scrapRig.mode() === 'editor');
 }

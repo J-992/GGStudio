@@ -27,14 +27,23 @@ interface RawSave {
 }
 
 /**
- * A first-time player never sees the title: boot drops them into the garage
- * with the rig picker open, which is where every fresh-save test starts.
+ * A first-time player never sees the title, and no longer starts in the garage
+ * either: boot drops them straight into wave one on the default rig, and the
+ * garage introduces itself at the build phase afterwards. Fresh-save tests that
+ * want the garage abandon that first run to get there.
  */
 async function bootFreshToGarage(page: Page): Promise<void> {
   await page.goto('/?debug=1');
   await page.waitForFunction(
     () =>
-      window.__scrapRig !== undefined && window.__scrapRig.mode() === 'editor',
+      window.__scrapRig !== undefined &&
+      window.__scrapRig.mode() === 'survival',
+    null,
+    { timeout: 20_000 },
+  );
+  await page.evaluate(() => window.__scrapRig.backToEditor());
+  await page.waitForFunction(
+    () => window.__scrapRig.mode() === 'editor',
     null,
     { timeout: 20_000 },
   );
@@ -105,7 +114,26 @@ async function createDistinctSave(page: Page): Promise<{
   return snapshot;
 }
 
-test('fresh boot skips the title and opens the garage on the rig picker', async ({
+test('fresh boot skips the title and drops straight into the first wave', async ({
+  page,
+}) => {
+  await page.goto('/?debug=1');
+  await page.waitForFunction(
+    () =>
+      window.__scrapRig !== undefined &&
+      window.__scrapRig.mode() === 'survival',
+    null,
+    { timeout: 20_000 },
+  );
+  // No title, and no garage in front of the first zombie: the whole point of
+  // the ordering is that a new player is driving before they are building.
+  await expect(
+    page.getByText('ZOMBIE MOTORWORKS', { exact: true }),
+  ).toHaveCount(0);
+  await expect(page.locator('.garage-dock')).toHaveCount(0);
+});
+
+test('the garage reached from that first run opens on the rig picker', async ({
   page,
 }) => {
   await bootFreshToGarage(page);
