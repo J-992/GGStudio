@@ -4,9 +4,10 @@
  * at the part's current level, and a cooldown sweep that drains as it recharges.
  *
  * Boxes are buttons, so an ability can be fired with the mouse as well as its
- * key — handy on a trackpad where the left hand is busy steering. A slot only
- * exists while the part backing it is bolted on and alive, so the bar shrinks
- * the moment a zombie tears the emitter off.
+ * key — handy on a trackpad where the left hand is busy steering. An unbound
+ * slot carries `is-empty`: the pointer layout drops it, so the bar shrinks the
+ * moment a zombie tears the emitter off, while the touch layout keeps it as a
+ * placeholder so the row never resizes under a thumb mid-wave.
  *
  * The renderer diffs against what is already on screen, so a bar full of ready
  * abilities costs no DOM writes per frame.
@@ -101,13 +102,35 @@ export class AbilityBar {
     if (!box.filled) return;
     box.filled = false;
     box.partId = '';
-    box.root.hidden = true;
+    box.lastName = '';
+    box.lastDetail = '';
+    box.name.textContent = '';
+    box.detail.textContent = '';
+    box.glyph.textContent = '';
+    box.timer.textContent = '';
+    box.root.removeAttribute('title');
+    box.root.setAttribute('aria-hidden', 'true');
+    box.root.tabIndex = -1;
+    // Back to the neutral box a fresh slot starts as, so the next ability
+    // bound here cannot inherit a cooldown sweep it never ran.
+    box.lastRemaining = 0;
+    box.lastFraction = 0;
+    box.sweep.style.transform = 'scaleY(0)';
+    box.root.classList.remove('is-cooling');
+    box.root.classList.add('is-ready');
+    box.root.setAttribute('aria-disabled', 'true');
+    // An empty slot is a shape, not a control: it holds the row's width on
+    // touch and is skipped entirely by the desktop layout.
+    box.root.classList.add('is-empty');
   }
 
   private fillBox(box: AbilitySlotBox, view: AbilitySlotView): void {
     if (!box.filled) {
       box.filled = true;
-      box.root.hidden = false;
+      box.root.classList.remove('is-empty');
+      box.root.removeAttribute('aria-hidden');
+      box.root.setAttribute('aria-disabled', 'false');
+      box.root.tabIndex = 0;
     }
     if (box.partId !== view.partId || box.lastName !== view.name) {
       box.partId = view.partId;
@@ -116,10 +139,7 @@ export class AbilityBar {
       box.glyph.textContent = view.glyph;
       box.key.textContent = view.keyLabel;
       box.root.title = view.tooltip;
-      box.root.setAttribute(
-        'aria-label',
-        `${view.name}, key ${view.keyLabel}`,
-      );
+      box.root.setAttribute('aria-label', `${view.name}, key ${view.keyLabel}`);
     }
     if (box.lastDetail !== view.detail) {
       box.lastDetail = view.detail;
@@ -154,9 +174,11 @@ export class AbilityBar {
   private createBox(slot: number): AbilitySlotBox {
     const root = document.createElement('button');
     root.type = 'button';
-    root.className = 'survival-ability-slot is-ready';
+    root.className = 'survival-ability-slot is-ready is-empty';
     root.dataset.slot = `${slot}`;
-    root.hidden = true;
+    root.tabIndex = -1;
+    root.setAttribute('aria-hidden', 'true');
+    root.setAttribute('aria-disabled', 'true');
 
     const glyph = document.createElement('span');
     glyph.className = 'survival-ability-slot__glyph';
@@ -180,6 +202,9 @@ export class AbilityBar {
       event.preventDefault();
       event.stopPropagation();
       if (event.button !== 0) return;
+      // Empty slots stay on screen on touch so the rail keeps its shape; they
+      // must still swallow the tap rather than fire whatever was last bound.
+      if (!this.boxes[slot]?.filled) return;
       this.onActivate(slot);
     });
     this.root.appendChild(root);

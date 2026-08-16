@@ -1,6 +1,6 @@
 import type { JoystickConfig, JoystickVector } from '../../core/joystick.ts';
 import { AimPad, type AimPadSample } from './AimPad.ts';
-import { FloatingJoystick } from './Joystick.ts';
+import { TouchJoystick } from './Joystick.ts';
 import './touch.css';
 
 export interface TouchButtonSpec {
@@ -36,7 +36,7 @@ const NON_PASSIVE: AddEventListenerOptions = { passive: false };
 
 export class TouchControls {
   readonly #root: HTMLDivElement;
-  readonly #joystick: FloatingJoystick;
+  readonly #joystick: TouchJoystick;
   readonly #aimPad: AimPad;
   readonly #onButton?: (id: string, pressed: boolean) => void;
   readonly #buttons = new Map<string, ButtonEntry>();
@@ -72,7 +72,7 @@ export class TouchControls {
 
     for (const spec of options.buttons) this.#addButton(spec);
 
-    this.#joystick = new FloatingJoystick({
+    this.#joystick = new TouchJoystick({
       parent: this.#root,
       zone: joystickZone,
       config: options.joystickConfig,

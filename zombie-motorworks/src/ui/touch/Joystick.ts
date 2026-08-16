@@ -10,7 +10,7 @@ import {
 export interface JoystickOptions {
   /** Element the stick is drawn into; must be positioned. */
   readonly parent: HTMLElement;
-  /** Hit region that spawns the stick. Pointers starting outside it are ignored. */
+  /** Hit region the stick answers to. Pointers starting outside it are ignored. */
   readonly zone: HTMLElement;
   readonly config?: Partial<JoystickConfig>;
   readonly onChange?: (vector: JoystickVector) => void;
@@ -22,7 +22,6 @@ interface JoystickGesture {
 }
 
 const EMIT_EPSILON = 0.0001;
-const EDGE_GUTTER_PX = 12;
 const NON_PASSIVE: AddEventListenerOptions = { passive: false };
 
 function nearlyEqual(a: number, b: number): boolean {
@@ -39,12 +38,19 @@ function sameVector(a: JoystickVector, b: JoystickVector): boolean {
   );
 }
 
-function clampedCentre(value: number, min: number, max: number): number {
-  if (min > max) return (min + max) / 2;
-  return Math.min(max, Math.max(min, value));
-}
-
-export class FloatingJoystick {
+/**
+ * A stick that stays where it is drawn.
+ *
+ * It used to spawn under the thumb wherever the left half was touched, which
+ * reads well in a demo and badly in a wave: the control the player is steering
+ * with was in a different place every time they looked down, and a stick that
+ * moves is one more thing to find while something is chewing the front axle.
+ * Now CSS parks it in the bottom-left corner and it never leaves, and the zone
+ * it answers to is a pad barely wider than the ring itself: a stick that never
+ * moves does not need half the screen to be found on, and the screen it gives
+ * back is screen the player can shoot at.
+ */
+export class TouchJoystick {
   readonly #parent: HTMLElement;
   readonly #zone: HTMLElement;
   readonly #config: Partial<JoystickConfig>;
@@ -72,9 +78,11 @@ export class FloatingJoystick {
 
     this.#root = document.createElement('div');
     this.#root.className = 'touch-joystick';
-    this.#root.hidden = true;
     this.#root.setAttribute('aria-hidden', 'true');
-    this.#root.style.setProperty('--joystick-radius', `${this.#radiusPx}px`);
+    // Published on the parent, not on the stick: the hit zone is a *sibling*
+    // of the stick, and it has to be sized from the same radius or the pad and
+    // the ring it represents drift apart.
+    this.#parent.style.setProperty('--joystick-radius', `${this.#radiusPx}px`);
 
     const base = document.createElement('div');
     base.className = 'touch-joystick__base';
@@ -132,6 +140,7 @@ export class FloatingJoystick {
   setVisible(visible: boolean): void {
     if (this.#visible === visible) return;
     this.#visible = visible;
+    this.#root.hidden = !visible;
     if (!visible) this.reset();
   }
 
@@ -153,26 +162,15 @@ export class FloatingJoystick {
   readonly #handlePointerDown = (event: PointerEvent): void => {
     if (!this.#visible || this.#disposed || this.engaged) return;
 
-    const gesture = { originX: event.clientX, originY: event.clientY };
-    this.#gestures.set(event.pointerId, gesture);
-
-    const zoneRect = this.#zone.getBoundingClientRect();
-    const parentRect = this.#parent.getBoundingClientRect();
-    const edgeMargin = this.#radiusPx + EDGE_GUTTER_PX;
-    const centreX = clampedCentre(
-      event.clientX,
-      zoneRect.left + edgeMargin,
-      zoneRect.right - edgeMargin,
-    );
-    const centreY = clampedCentre(
-      event.clientY,
-      zoneRect.top + edgeMargin,
-      zoneRect.bottom - edgeMargin,
-    );
-    this.#root.style.left = `${centreX - parentRect.left}px`;
-    this.#root.style.top = `${centreY - parentRect.top}px`;
-    this.#knob.style.transform = 'translate3d(0px, 0px, 0)';
-    this.#root.hidden = false;
+    // The origin is the base's own centre, not where the thumb landed: the
+    // stick does not move to meet the touch, the knob comes to the touch.
+    const centre = this.#centre();
+    this.#gestures.set(event.pointerId, {
+      originX: centre.x,
+      originY: centre.y,
+    });
+    this.#applyGesture(centre, event.clientX, event.clientY);
+    this.#root.classList.add('is-engaged');
 
     try {
       this.#zone.setPointerCapture(event.pointerId);
@@ -186,22 +184,11 @@ export class FloatingJoystick {
     const gesture = this.#gestures.get(event.pointerId);
     if (!gesture) return;
 
-    const vector = readJoystick(
-      gesture.originX,
-      gesture.originY,
+    this.#applyGesture(
+      { x: gesture.originX, y: gesture.originY },
       event.clientX,
       event.clientY,
-      this.#config,
     );
-    const offset = clampStickOffset(
-      gesture.originX,
-      gesture.originY,
-      event.clientX,
-      event.clientY,
-      this.#radiusPx,
-    );
-    this.#knob.style.transform = `translate3d(${offset.x}px, ${offset.y}px, 0)`;
-    this.#emit(vector);
     event.preventDefault();
   };
 
@@ -228,8 +215,38 @@ export class FloatingJoystick {
     }
   }
 
+  /** Centre of the base in client coordinates; the root is a zero-sized point. */
+  #centre(): { x: number; y: number } {
+    const rect = this.#root.getBoundingClientRect();
+    return { x: rect.left, y: rect.top };
+  }
+
+  /** Read the stick for one pointer sample and move the knob to match. */
+  #applyGesture(
+    origin: { x: number; y: number },
+    clientX: number,
+    clientY: number,
+  ): void {
+    const vector = readJoystick(
+      origin.x,
+      origin.y,
+      clientX,
+      clientY,
+      this.#config,
+    );
+    const offset = clampStickOffset(
+      origin.x,
+      origin.y,
+      clientX,
+      clientY,
+      this.#radiusPx,
+    );
+    this.#knob.style.transform = `translate3d(${offset.x}px, ${offset.y}px, 0)`;
+    this.#emit(vector);
+  }
+
   #hideAndNeutralise(): void {
-    this.#root.hidden = true;
+    this.#root.classList.remove('is-engaged');
     this.#knob.style.transform = 'translate3d(0px, 0px, 0)';
     this.#vector = NEUTRAL_JOYSTICK;
     this.#lastEmitted = NEUTRAL_JOYSTICK;

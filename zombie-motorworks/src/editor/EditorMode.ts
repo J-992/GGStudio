@@ -10,6 +10,7 @@ import type {
   PartConfig,
   PartDefinition,
   PlacedPart,
+  PlacementResult,
   Vec3i,
   VehicleBlueprint,
 } from '../core/types.ts';
@@ -47,6 +48,7 @@ import {
   orientationFromSteps,
   rotateVec,
 } from '../core/grid.ts';
+import { wheelOrientationCandidates } from '../core/wheelMount.ts';
 import { buildPartMesh } from './meshes.ts';
 import { ARMOUR_FACE_AXIS } from './parts/armourPlate.ts';
 import { Overlays, defaultToggles, type OverlayToggles } from './overlays.ts';
@@ -258,6 +260,13 @@ export function previewUpgradeMetrics(
 interface GhostState {
   defId: string;
   orient: number;
+  /**
+   * The player has taken the wheel over with R or F. Wheels orient themselves
+   * from the face they are dropped against (see `core/wheelMount.ts`), which
+   * would otherwise overwrite the turn they just asked for on the next pointer
+   * move. One press hands the wheel back to them for as long as it is held.
+   */
+  manualOrient?: boolean;
 }
 
 /** Camera/layer state preserved across editor <-> runtime-mode round trips. */
@@ -1645,6 +1654,9 @@ export class EditorMode {
 
     let target: Vec3i | null = null;
     let orient = this.ghost.orient;
+    // Direction from the ghost's own cell back to the block it was dropped
+    // against, for the wheel auto-mount below. Null when it is out in the open.
+    let hostDir: Vec3i | null = null;
 
     const hits = this.raycaster.intersectObjects(
       this.partsGroup.children,
@@ -1664,6 +1676,7 @@ export class EditorMode {
       } else {
         const adj = p.clone().addScaledVector(n, FACE_STEP_M);
         target = this.toCell(adj);
+        hostDir = { x: -n.x, y: -n.y, z: -n.z };
         // Point the plate's outward face away from the block it covers.
         if (isFlatArmour) {
           orient = this.orientFacing(
@@ -1692,14 +1705,14 @@ export class EditorMode {
       return;
     }
 
-    const result = canPlacePart(
-      this.bp,
-      getPartDef,
-      this.ghost.defId,
-      target,
-      orient,
-      {},
-    );
+    const auto =
+      def.wheel !== undefined && !this.ghost.manualOrient
+        ? this.autoOrientWheel(def, target, hostDir)
+        : null;
+    const result =
+      auto?.result ??
+      canPlacePart(this.bp, getPartDef, this.ghost.defId, target, orient, {});
+    if (auto) orient = auto.orient;
     this.ghost.orient = orient;
     this.ghostTarget = {
       pos: target,
@@ -1753,6 +1766,42 @@ export class EditorMode {
     } else {
       tip.style.display = 'none';
     }
+  }
+
+  /**
+   * Mount a wheel without the player rotating it.
+   *
+   * `core/wheelMount.ts` ranks the orientations worth trying — the face it was
+   * dropped against first, then whatever the rig's other wheels do — and this
+   * takes the first that actually places. If none does the wheel is unmountable
+   * here whichever way it faces, so the best candidate is kept and its own
+   * failure is the message the player gets.
+   */
+  private autoOrientWheel(
+    def: PartDefinition,
+    target: Vec3i,
+    hostDir: Vec3i | null,
+  ): { orient: number; result: PlacementResult } {
+    const candidates = wheelOrientationCandidates(
+      this.bp,
+      getPartDef,
+      def,
+      target,
+      hostDir,
+    );
+    const place = (orient: number): { orient: number; result: PlacementResult } => ({
+      orient,
+      result: canPlacePart(this.bp, getPartDef, def.id, target, orient, {}),
+    });
+    // The candidate list always ends in the four level turns, so there is
+    // always a first one to fall back to.
+    const best = place(candidates[0]);
+    if (best.result.ok) return best;
+    for (const orient of candidates.slice(1)) {
+      const attempt = place(orient);
+      if (attempt.result.ok) return attempt;
+    }
+    return best;
   }
 
   private orientFacing(
@@ -2172,6 +2221,7 @@ export class EditorMode {
         break;
       case 'r':
         if (this.ghost) {
+          this.ghost.manualOrient = true;
           this.ghost.orient = this.nextAllowedOrient(
             this.ghost.defId,
             this.ghost.orient,
@@ -2182,6 +2232,7 @@ export class EditorMode {
         break;
       case 'f':
         if (this.ghost) {
+          this.ghost.manualOrient = true;
           this.ghost.orient = this.nextAllowedOrient(
             this.ghost.defId,
             this.ghost.orient,

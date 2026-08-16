@@ -31,7 +31,7 @@ import {
   type EditorViewState,
 } from '../editor/EditorMode.ts';
 import { CommandHistory } from '../core/commands.ts';
-import { maxPixelRatio, shouldUseTouchControls } from '../ui/device.ts';
+import { maxPixelRatio } from '../ui/device.ts';
 import { ChamberMode, type ScenarioName } from '../chamber/ChamberMode.ts';
 import type { VehicleControls } from '../runtime/vehicle.ts';
 import { SurvivalMode } from '../survival/SurvivalMode.ts';
@@ -47,7 +47,6 @@ import {
   DEFAULT_BUILD_ID,
   buildStarterRig,
   buildStarterUnlocks,
-  buildWelcomeNotice,
   isBuildId,
   type BuildId,
 } from '../core/builds.ts';
@@ -74,8 +73,12 @@ import {
   playSfx,
   startGarageMusic,
   stopGarageMusic,
+  unlockAudio,
   type SfxName,
 } from './sfx.ts';
+
+/** Gestures a browser accepts as "the user is here" for unlocking audio. */
+const FIRST_GESTURE_EVENTS = ['pointerdown', 'keydown', 'touchstart'] as const;
 
 const EDITOR_SFX: Record<EditorSfxCue, SfxName> = {
   click: 'uiClick',
@@ -375,6 +378,21 @@ export function resetProfileForNewGame(profile: PlayerProfile): void {
   delete profile.phoneAddictsKilled;
 }
 
+/**
+ * Whether boot should hand the player a new game rather than the title screen.
+ *
+ * Only a player with nothing at all — no garage, no profile, no run in
+ * progress — skips it. Both saves have to be checked: a run save alone means
+ * someone who quit mid-run, and dropping them into a brand-new game would
+ * erase the run they came back for.
+ */
+export function shouldSkipTitleAtBoot(
+  hasStoredSave: boolean,
+  hasStoredRun: boolean,
+): boolean {
+  return !hasStoredSave && !hasStoredRun;
+}
+
 export class App {
   private renderer!: THREE.WebGLRenderer;
   private editor: EditorMode | null = null;
@@ -444,6 +462,20 @@ export class App {
     requestAnimationFrame(this.onViewportChange);
   };
 
+  /**
+   * Web Audio stays suspended until a gesture, and the title screen used to be
+   * the guaranteed one: every route out of it went through a button. A
+   * first-time player now boots straight into the Garage, so the unlock is
+   * hung off the first gesture anywhere instead of off any one screen's
+   * buttons. One shot — it removes itself.
+   */
+  private readonly onFirstGesture = (): void => {
+    for (const type of FIRST_GESTURE_EVENTS) {
+      window.removeEventListener(type, this.onFirstGesture, true);
+    }
+    unlockAudio();
+  };
+
   async start(): Promise<void> {
     await RAPIER.init();
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -467,10 +499,19 @@ export class App {
     // with a `resize` — so the same work is queued a frame later rather than
     // read straight out of a stale layout.
     window.addEventListener('orientationchange', this.onOrientationChange);
+    for (const type of FIRST_GESTURE_EVENTS) {
+      window.addEventListener(type, this.onFirstGesture, true);
+    }
 
     const jumpTo = waveJumpTarget();
     if (jumpTo === null || !this.devWaveJump(jumpTo)) {
-      this.showTitle(this.saveExistedAtBoot);
+      // A first-time player has nothing to resume and no garage to protect, so
+      // the title screen is a menu whose only real answer is "New Game". Boot
+      // them straight into the Garage on the rig picker instead. Everything the
+      // title offers — maps, leaderboard, badges — is one Menu press away, and
+      // the map they skip past is the one a new run defaults to anyway.
+      if (this.isFirstBoot()) this.beginNewGame();
+      else this.showTitle(this.saveExistedAtBoot);
     }
 
     const loop = (): void => {
@@ -481,6 +522,15 @@ export class App {
       this.survival?.update();
     };
     loop();
+  }
+
+  /**
+   * True when this browser has never played. Read through `saveExistedAtBoot`
+   * so a profile this session writes cannot retroactively change what boot
+   * decided.
+   */
+  private isFirstBoot(): boolean {
+    return shouldSkipTitleAtBoot(this.saveExistedAtBoot, runSaveStore.has());
   }
 
   /** True when a resumable run save exists. */
@@ -686,10 +736,11 @@ export class App {
     // Reopened rather than refreshed: the editor caches meshes, selection and
     // overlays off the blueprint it was constructed with, and every one of
     // those is stale the moment the rig underneath changes.
-    this.pendingEditorNotice = buildWelcomeNotice(
-      buildId,
-      shouldUseTouchControls() ? 'touch' : 'pointer',
-    );
+    //
+    // No welcome banner: the rig the player just picked arrives with its weapon
+    // already fitted and its ability already bound, and a paragraph explaining
+    // that lands over the build grid on the one screen where they want to
+    // start building.
     this.openEditor();
   }
 

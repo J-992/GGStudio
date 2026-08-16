@@ -84,7 +84,7 @@ export class WaveTimelineHud {
   readonly root: HTMLElement;
 
   private readonly waveLabel: HTMLSpanElement;
-  private readonly clearedLabel: HTMLSpanElement;
+  private readonly clearedCount: HTMLSpanElement;
   private readonly scoreValue: HTMLSpanElement;
   private readonly bar: HTMLDivElement;
   private readonly fill: HTMLSpanElement;
@@ -102,9 +102,15 @@ export class WaveTimelineHud {
     this.root.setAttribute('aria-label', 'Wave progress');
 
     this.waveLabel = element('span', 'wave-timeline__wave');
-    this.clearedLabel = element('span', 'wave-timeline__cleared');
+    // The count and the word it is counting are separate spans so the touch
+    // strip can keep "0 / 36" and drop the prose without rebuilding the label.
+    this.clearedCount = element('span', 'wave-timeline__cleared-count');
+    const clearedCaption = element('span', 'wave-timeline__cleared-caption');
+    clearedCaption.textContent = ' cleared';
+    const clearedLabel = element('span', 'wave-timeline__cleared');
+    clearedLabel.append(this.clearedCount, clearedCaption);
     const waveGroup = element('div', 'wave-timeline__group');
-    waveGroup.append(this.waveLabel, this.clearedLabel);
+    waveGroup.append(this.waveLabel, clearedLabel);
 
     this.scoreValue = element('span', 'wave-timeline__score');
     this.scoreValue.textContent = '0';
@@ -226,7 +232,7 @@ export class WaveTimelineHud {
 
     this.lastKilled = killed;
     this.lastTotal = total;
-    this.clearedLabel.textContent = `${killed} / ${total} cleared`;
+    this.clearedCount.textContent = `${killed} / ${total}`;
     this.bar.setAttribute('aria-valuemax', String(total));
     this.bar.setAttribute('aria-valuenow', String(killed));
     const progress = total > 0 ? killed / total : 0;

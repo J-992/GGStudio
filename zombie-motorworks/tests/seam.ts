@@ -123,13 +123,21 @@ export async function boot(page: Page): Promise<void> {
   await page.waitForTimeout(400);
 }
 
-/** Advance an already-loaded debug title screen using the available save. */
+/**
+ * Advance to the garage from whatever boot produced. A first-time player skips
+ * the title entirely and lands in the garage already, so the title's buttons
+ * are only driven when a title is actually on screen.
+ */
 export async function advanceToEditor(page: Page): Promise<void> {
-  const continued = await page.evaluate(() => window.__scrapRig.continueGame());
-  if (!continued) {
-    const started = await page.evaluate(() => window.__scrapRig.newGame());
-    if (!started) {
-      throw new Error('New Game unexpectedly requires confirmation');
+  if ((await page.evaluate(() => window.__scrapRig.mode())) === 'title') {
+    const continued = await page.evaluate(() =>
+      window.__scrapRig.continueGame(),
+    );
+    if (!continued) {
+      const started = await page.evaluate(() => window.__scrapRig.newGame());
+      if (!started) {
+        throw new Error('New Game unexpectedly requires confirmation');
+      }
     }
   }
   await page.waitForFunction(() => window.__scrapRig.mode() === 'editor');

@@ -108,10 +108,7 @@ import {
   type AudioVolumeControl,
 } from '../ui/audioVolumeControl.ts';
 import { ScopeCursor } from '../ui/ScopeCursor.ts';
-import {
-  shouldUseTouchControls,
-  onTouchControlsChange,
-} from '../ui/device.ts';
+import { shouldUseTouchControls, onTouchControlsChange } from '../ui/device.ts';
 import { TouchControls } from '../ui/touch/TouchControls.ts';
 import {
   installSurvivalMobileHud,
@@ -121,6 +118,7 @@ import { driveTowardHeading } from '../core/joystick.ts';
 import { buildLeaderboardTable } from '../ui/leaderboardTable.ts';
 import { VfxSystem } from '../vfx/VfxSystem.ts';
 import { WarningHud } from './WarningHud.ts';
+import { StrikeGauge } from './StrikeGauge.ts';
 import { DamageNumbersOverlay } from './DamageNumbers.ts';
 import { TracerRenderer, tracerStyleForWeapon } from './Tracers.ts';
 import {
@@ -166,14 +164,8 @@ import {
   zombieCompositionForWave,
   zombieCountForWave,
 } from './WaveManager.ts';
-import {
-  formatWaveComposition,
-  newThreatsForWave,
-} from './waveBalance.ts';
-import {
-  bossEncounterWarning,
-  bossForWave,
-} from './zombies/bossConfig.ts';
+import { formatWaveComposition, newThreatsForWave } from './waveBalance.ts';
+import { bossEncounterWarning, bossForWave } from './zombies/bossConfig.ts';
 import { threatPreviewForWave } from './threatPreview.ts';
 import { ThreatAlert, type ThreatAlertView } from './ThreatAlert.ts';
 import { renderPartIconUrls } from '../editor/PartIconRenderer.ts';
@@ -696,6 +688,14 @@ export class SurvivalMode {
   /** Centre-screen bar of special abilities, one box per special. */
   private readonly abilityBar: AbilityBar;
   /**
+   * The signature strike's recharge, for the touch HUD.
+   *
+   * Desktop reads it off the reticle, which a phone does not have; the gauge
+   * is the same number over the ability row instead. It draws nothing on a
+   * pointer-precise session — see `survival-mobile.css`.
+   */
+  private readonly strikeGauge: StrikeGauge;
+  /**
    * On-screen driving controls, built only on a touch device.
    *
    * The stick is polled inside {@link updateControls} rather than pushed from
@@ -1184,6 +1184,8 @@ export class SurvivalMode {
     this.abilityBar = new AbilityBar(this.ui, MAX_ABILITY_SLOTS, (slot) =>
       this.requestAbility(slot),
     );
+    // After the bar, so it stacks above it in DOM order as well as in CSS.
+    this.strikeGauge = new StrikeGauge(this.ui);
     // The ability boxes are already buttons, so touch reaches the specials
     // through the same bar the mouse uses; what the overlay has to add is the
     // driving, the aim, and the two keybinds with no on-screen twin.
@@ -1500,7 +1502,10 @@ export class SurvivalMode {
 
     const gameOverOverlay = overlayPanel();
     gameOverOverlay.classList.add('survival-gameover');
-    gameOverOverlay.style.display = 'none';
+    // Visibility is the `hidden` attribute, never an inline `display`: the
+    // touch layout re-lays the card out in landscape, and a layout rule strong
+    // enough to beat an inline `display: block` also beats `display: none`.
+    gameOverOverlay.hidden = true;
     gameOverOverlay.setAttribute('role', 'dialog');
     gameOverOverlay.setAttribute('aria-modal', 'true');
     gameOverOverlay.setAttribute('aria-labelledby', 'survival-gameover-title');
@@ -1548,11 +1553,19 @@ export class SurvivalMode {
     gameOverButton.textContent = 'Restart Run';
     gameOverButton.addEventListener('click', this.onGameOverContinue);
     gameOverActions.append(gameOverMenuButton, gameOverButton);
-    gameOverOverlay.append(
+    // The verdict is one block — title, badge, and the score it is about — so a
+    // short landscape phone can set it beside the run's numbers instead of
+    // above them and make the card scroll.
+    const gameOverHeadline = document.createElement('div');
+    gameOverHeadline.className = 'survival-gameover__headline';
+    gameOverHeadline.append(
       gameOverTitle,
       gameOverBest,
       gameOverScoreLabel,
       gameOverScore,
+    );
+    gameOverOverlay.append(
+      gameOverHeadline,
       gameOverStats,
       gameOverBoard,
       gameOverReset,
@@ -1966,7 +1979,7 @@ export class SurvivalMode {
       // parts into the checkpoint, and redeploys onto the whole rig.
       const payload = this.clearedWavePayload();
       this.threatAlert.hide();
-    this.waveClearCard.hide();
+      this.waveClearCard.hide();
       this.callbacks.onFullRepairRebuild(
         quote.cost,
         payload.clearedRun,
@@ -3073,18 +3086,18 @@ export class SurvivalMode {
         { emptyMessage: 'No runs recorded yet.' },
       ),
     );
-    this.gameOverOverlay.style.display = 'block';
+    this.gameOverOverlay.hidden = false;
   }
 
   private readonly onGameOverContinue = (): void => {
     if (this.disposed) return;
-    this.gameOverOverlay.style.display = 'none';
+    this.gameOverOverlay.hidden = true;
     this.callbacks.onGameOverContinue();
   };
 
   private readonly onGameOverMenu = (): void => {
     if (this.disposed) return;
-    this.gameOverOverlay.style.display = 'none';
+    this.gameOverOverlay.hidden = true;
     this.callbacks.onGameOverMenu();
   };
 
@@ -3369,7 +3382,8 @@ export class SurvivalMode {
           this.popPickupToast('RIG INTACT', PICKUP_KINDS.repair.minimapColor);
           return true;
         }
-        if (repaired.action === 'rebuild') this.showRepairedPart(repaired.partId);
+        if (repaired.action === 'rebuild')
+          this.showRepairedPart(repaired.partId);
         this.popPickupToast(
           repaired.action === 'rebuild'
             ? `REBUILT ${repaired.name}`
@@ -3609,7 +3623,7 @@ export class SurvivalMode {
 
     this.strikes.step(FIXED_DT, (impact) => this.detonateStrike(impact));
     this.drawStrikeVisuals();
-    this.syncSignatureCursor(live !== null);
+    this.syncSignatureReadouts(live !== null);
   }
 
   /**
@@ -3630,6 +3644,7 @@ export class SurvivalMode {
       // asked to shoot early, so flashing at a stray click would be noise.
       if (!live.stats.autoFire) {
         this.scopeCursor.flashDenied();
+        this.strikeGauge.flashDenied();
         playSfx('uiDeny');
       }
       return;
@@ -3681,7 +3696,10 @@ export class SurvivalMode {
    * ground would leave the weapon silently unavailable the instant a zombie
    * finally walked into reach.
    */
-  private fireChain(stats: SignatureStats, target: { x: number; z: number }): void {
+  private fireChain(
+    stats: SignatureStats,
+    target: { x: number; z: number },
+  ): void {
     const path = this.zombies.chainFrom(
       target,
       stats.radiusM,
@@ -3778,20 +3796,23 @@ export class SurvivalMode {
   }
 
   /**
-   * Push the signature's recharge into the reticle. A rig with no signature
-   * block clears the gauge entirely rather than showing a permanently full
-   * one, so the brackets go back to being decoration.
+   * Push the signature's recharge into both readouts: the reticle on desktop,
+   * the strike gauge on touch. A rig with no signature block clears them
+   * rather than showing a permanently full one, so the brackets go back to
+   * being decoration and the gauge stops claiming a weapon that is not fitted.
    */
-  private syncSignatureCursor(hasSignature: boolean): void {
+  private syncSignatureReadouts(hasSignature: boolean): void {
     if (!hasSignature) {
       this.scopeCursor.clearCooldown();
+      this.strikeGauge.clearCooldown();
       return;
     }
-    this.scopeCursor.setCooldown(
+    const charge =
       this.signatureCooldownTotal <= 0
         ? 1
-        : 1 - this.signatureCooldown / this.signatureCooldownTotal,
-    );
+        : 1 - this.signatureCooldown / this.signatureCooldownTotal;
+    this.scopeCursor.setCooldown(charge);
+    this.strikeGauge.setCooldown(charge);
   }
 
   /** Queue an ability slot, from either its keybind or a click on its box. */
@@ -4395,10 +4416,16 @@ export class SurvivalMode {
     // While a wave is running the fixed step already refreshes the loadout
     // every step; outside one nothing else does, so the HUD keeps it current.
     if (this.phase !== 'active') this.refreshAbilityLoadout();
+    // Touch keeps the empty boxes: the row is the floor of a fixed centre
+    // stack, and a bar that appears when the first ability is fitted would
+    // shove the strike gauge sat on top of it.
+    const combatHud = this.phase === 'countdown' || this.phase === 'active';
     this.abilityBar.setVisible(
-      (this.phase === 'countdown' || this.phase === 'active') &&
-        this.abilityLoadout.length > 0,
+      combatHud && (this.abilityLoadout.length > 0 || shouldUseTouchControls()),
     );
+    // The gauge answers to the phase alone; whether the rig even has a
+    // signature block is the readout's own business.
+    this.strikeGauge.setVisible(combatHud);
     // The loadout only changes when a part is fitted, lost, or repaired, and
     // the labels only change with it — so the views (and the strings in them)
     // are rebuilt on that signature, not every frame. Cooldowns are the one
@@ -4657,7 +4684,9 @@ export class SurvivalMode {
         if (!this.isAttachedAlivePart(part)) continue;
         this.droneEscortLevels.push(part.placed.config.level ?? 1);
       }
-      this.droneEscort.setDroneCount(DroneEscort.droneCount(this.droneEscortLevels));
+      this.droneEscort.setDroneCount(
+        DroneEscort.droneCount(this.droneEscortLevels),
+      );
     }
     this.droneEscort.update(frameDt, position);
   }
@@ -5378,6 +5407,7 @@ export class SurvivalMode {
     this.threatAlert.dispose();
     this.waveClearCard.dispose();
     this.abilityBar.dispose();
+    this.strikeGauge.dispose();
     this.buffBar.dispose();
     this.touchUnsubscribe?.();
     this.touchUnsubscribe = null;

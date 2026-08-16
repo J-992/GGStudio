@@ -1,4 +1,3 @@
-import { Collapsible } from '../ui/Collapsible.ts';
 import { onTouchControlsChange, shouldUseTouchControls } from '../ui/device.ts';
 import './survival-mobile.css';
 
@@ -6,7 +5,7 @@ import './survival-mobile.css';
 export interface SurvivalMobileHud {
   /** Re-evaluate layout after a resize or orientation change. */
   refresh(): void;
-  /** Collapse everything collapsible — used when a modal opens. */
+  /** Clear what a blocking card should not be read through. */
   setCompact(compact: boolean): void;
   /** Remove mobile-only controls, attributes, and global listeners. */
   dispose(): void;
@@ -23,11 +22,7 @@ class SurvivalMobileHudController implements SurvivalMobileHud {
     element: HTMLElement;
     placeholder: Comment;
   }> = [];
-  private minimapPanel: Collapsible | null = null;
-  private minimapBackdrop: HTMLDivElement | null = null;
-  private minimapToggle: HTMLButtonElement | null = null;
   private topBand: HTMLDivElement | null = null;
-  private compactRestore: boolean | null = null;
   private unsubscribeTouchControls: (() => void) | null = null;
   private active = false;
   private compact = false;
@@ -44,28 +39,16 @@ class SurvivalMobileHudController implements SurvivalMobileHud {
     );
   }
 
-  /** Keep generated controls in sync after SurvivalMode's viewport refresh. */
-  refresh(): void {
-    if (!this.active) return;
-    this.syncMinimapPresentation(this.minimapPanel?.collapsed ?? true);
-  }
+  /** Nothing generated here is measured, so a resize needs no repair. */
+  refresh(): void {}
 
-  /** Temporarily clear the map while a blocking card owns the view. */
+  /** Drop the map while a blocking card owns the view. */
   setCompact(compact: boolean): void {
     if (this.disposed || compact === this.compact) return;
 
     this.compact = compact;
     if (!this.active) return;
-
-    if (compact) {
-      this.compactRestore = this.minimapPanel?.collapsed ?? true;
-      this.minimapPanel?.setCollapsed(true);
-      return;
-    }
-
-    const restore = this.compactRestore;
-    this.compactRestore = null;
-    if (restore !== null) this.minimapPanel?.setCollapsed(restore);
+    this.syncCompact();
   }
 
   /** Release every listener and DOM mutation owned by this adapter. */
@@ -82,12 +65,6 @@ class SurvivalMobileHudController implements SurvivalMobileHud {
     this.setTouchLayoutEnabled(enabled);
   };
 
-  private readonly handleMinimapBackdropClick = (event: MouseEvent): void => {
-    event.preventDefault();
-    event.stopPropagation();
-    this.minimapPanel?.setCollapsed(true);
-  };
-
   private setTouchLayoutEnabled(enabled: boolean): void {
     if (this.disposed || enabled === this.active) return;
 
@@ -101,54 +78,15 @@ class SurvivalMobileHudController implements SurvivalMobileHud {
   private activate(): void {
     this.root.setAttribute('data-mobile-hud', 'on');
     this.installTopBand();
-
-    const minimap = this.root.querySelector<HTMLElement>('.minimap');
-    if (minimap !== null) {
-      // The dimmer is a sibling so the map can stay above it and every point
-      // outside the map remains a one-tap close target.
-      const backdrop = this.root.ownerDocument.createElement('div');
-      backdrop.className = 'survival-minimap-backdrop';
-      backdrop.hidden = true;
-      backdrop.setAttribute('aria-hidden', 'true');
-      backdrop.addEventListener('click', this.handleMinimapBackdropClick);
-      minimap.before(backdrop);
-      this.minimapBackdrop = backdrop;
-
-      const panel = new Collapsible({
-        panel: minimap,
-        label: 'Open minimap',
-        startCollapsed: true,
-        onToggle: (collapsed) => this.syncMinimapPresentation(collapsed),
-      });
-      this.minimapPanel = panel;
-      this.minimapToggle = minimap.querySelector<HTMLButtonElement>(
-        ':scope > .collapsible-toggle',
-      );
-      this.syncMinimapPresentation(panel.collapsed);
-    }
-
     this.active = true;
-    if (this.compact) {
-      this.compactRestore = this.minimapPanel?.collapsed ?? true;
-      this.minimapPanel?.setCollapsed(true);
-    }
+    this.syncCompact();
   }
 
   private deactivate(): void {
     if (!this.active) return;
 
-    this.minimapPanel?.dispose();
-    this.minimapPanel = null;
-    this.minimapToggle = null;
-
-    this.minimapBackdrop?.removeEventListener(
-      'click',
-      this.handleMinimapBackdropClick,
-    );
-    this.minimapBackdrop?.remove();
-    this.minimapBackdrop = null;
-    this.compactRestore = null;
     this.restoreTopBand();
+    this.root.removeAttribute('data-mobile-compact');
 
     if (this.inheritedMobileHudValue === null) {
       this.root.removeAttribute('data-mobile-hud');
@@ -156,6 +94,14 @@ class SurvivalMobileHudController implements SurvivalMobileHud {
       this.root.setAttribute('data-mobile-hud', this.inheritedMobileHudValue);
     }
     this.active = false;
+  }
+
+  private syncCompact(): void {
+    if (this.compact) {
+      this.root.setAttribute('data-mobile-compact', 'on');
+      return;
+    }
+    this.root.removeAttribute('data-mobile-compact');
   }
 
   private installTopBand(): void {
@@ -168,15 +114,22 @@ class SurvivalMobileHudController implements SurvivalMobileHud {
 
     // Moving the existing readouts makes one real band instead of several
     // independently positioned panels. Placeholders make the move reversible.
+    //
+    // The map and the emergency prompts join it even though neither sits in
+    // the row: the map has to land in the top-right corner the band already
+    // owns, and the prompts hang off the band's bottom edge so a boss bar that
+    // grows the band pushes them down rather than landing on them.
     for (const selector of [
       '.survival-settings-button',
       '.survival-driver-hud',
       '.survival-boss-hud',
       '.wave-timeline',
       '.survival-cash',
+      '.minimap',
       '.survival-buffs',
       '.survival-pickup',
       '.survival-warnings',
+      '.survival-prompts',
       '.survival-scuttle-banner',
     ]) {
       const element = this.root.querySelector<HTMLElement>(
@@ -195,22 +148,18 @@ class SurvivalMobileHudController implements SurvivalMobileHud {
 
   private restoreTopBand(): void {
     for (const move of this.topBandMoves) {
-      move.placeholder.replaceWith(move.element);
+      // A moved readout can be torn down by its own owner first — the minimap
+      // disposes ahead of this adapter — and putting a removed element back
+      // would resurrect it. Only what is still in the band comes home.
+      if (move.element.parentNode === this.topBand) {
+        move.placeholder.replaceWith(move.element);
+      } else {
+        move.placeholder.remove();
+      }
     }
     this.topBandMoves.length = 0;
     this.topBand?.remove();
     this.topBand = null;
-  }
-
-  private syncMinimapPresentation(collapsed: boolean): void {
-    if (this.minimapBackdrop !== null) {
-      this.minimapBackdrop.hidden = collapsed;
-    }
-    if (this.minimapToggle !== null) {
-      const label = collapsed ? 'Open minimap' : 'Close minimap';
-      this.minimapToggle.setAttribute('aria-label', label);
-      this.minimapToggle.title = label;
-    }
   }
 }
 
