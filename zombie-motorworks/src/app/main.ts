@@ -36,8 +36,21 @@ async function boot(): Promise<void> {
   physicsReady.catch(() => undefined);
 
   const platform = await import('./platform.ts');
-  const sdkReadyAtBoot = await platform.initPlatformForBoot();
-  if (sdkReadyAtBoot) await platform.startPlatformLoading();
+  // Give the SDK a head start before the module graph is fetched. The result is
+  // deliberately discarded: it reports whether init won a short race, which is
+  // not the same question as whether the loading bracket below should run.
+  await platform.initPlatformForBoot();
+  // Both halves of the loading bracket hang off this one promise, so the pair
+  // can never invert or go half-reported. Gating them on the boot watchdog
+  // instead — which is what this used to do — meant an SDK that finished
+  // initializing a moment after the watchdog gave up never got a
+  // `gameLoadingStart`/`gameLoadingFinished` pair at all, and a portal's
+  // integration check reads that as a missing integration.
+  const loadingBracket = platform.startPlatformLoading();
+  // Only awaited in the `finally` below, which can be seconds away. Same reason
+  // as `physicsReady` above: a rejection landing before then would count as
+  // unhandled even though it is awaited eventually.
+  loadingBracket.catch(() => undefined);
   reportBootStage('platformReady');
 
   let app: import('./App.ts').App;
@@ -54,7 +67,11 @@ async function boot(): Promise<void> {
     // The splash comes down even when boot threw: a stuck splash would hide
     // whatever the failure put on screen.
     dismissBootSplash();
-    if (sdkReadyAtBoot) await platform.stopPlatformLoading();
+    // Never report the game as loaded before the report that it started
+    // loading. Both calls no-op on a platform that has no loading screen, and
+    // on one whose SDK never arrived.
+    await loadingBracket;
+    await platform.stopPlatformLoading();
   }
 
   // Read every parameter before rewriting the URL below, so stripping the

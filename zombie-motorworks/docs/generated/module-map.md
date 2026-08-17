@@ -5,8 +5,8 @@
 > it end to end as routine task setup.
 
 - Source Modules: 162
-- Source lines: 70,789
-- Test files scanned: 126
+- Source lines: 70,806
+- Test files scanned: 127
 
 ## Largest Modules
 
@@ -81,7 +81,7 @@
 - External packages: none
 - Direct tests: `unit/leaderboard-store.test.ts`
 
-### [`src/app/main.ts`](../../src/app/main.ts) (88 LOC)
+### [`src/app/main.ts`](../../src/app/main.ts) (105 LOC)
 
 - Exports: none
 - Imports: `src/app/bootSplash.ts`, `src/mobile.css`, `src/style.css`, `src/ui/ui-system.css`
