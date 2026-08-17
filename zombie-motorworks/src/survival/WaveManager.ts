@@ -343,11 +343,61 @@ function kamikazeWaveOrder(composition: WaveComposition): ZombieKind[] {
   return order;
 }
 
+/** Bodies in a composition, whatever kinds they are. */
+export function compositionTotal(composition: WaveComposition): number {
+  return Object.values(composition).reduce((total, count) => total + count, 0);
+}
+
+/**
+ * The roster the First Play tutorial wave fields, written down rather than read
+ * off the curve.
+ *
+ * Wave one normally opens on 24 walkers and nothing else, sized for a player
+ * driving a starter rig with one gun on it. The tutorial hands them six
+ * engines, a Heavy Cannon, two blasters and a blade instead, so that crowd
+ * would be gone before the coach finished teaching the ability — and a wall of
+ * bodies is the whole point of the first thing a new player sees. Half again
+ * as many walkers, and a squad of throwers that ordinarily waits until wave 3,
+ * so there is something on the field that shoots back and gives the Shield
+ * Bubble a reason to exist the moment it is taught.
+ *
+ * Applied through `WaveManager.setCompositionOverride`, which means it never
+ * touches `zombieCompositionForWave` — the curve, the wave lab, the threat
+ * preview and every balance test go on describing the ordinary wave one.
+ */
+export const FIRST_PLAY_WAVE_COMPOSITION: WaveComposition = {
+  walker: 30,
+  gunslinger: 0,
+  necromancer: 0,
+  thrower: 5,
+  worker: 0,
+  'phone-addict': 0,
+  kamikaze: 0,
+  behemoth: 0,
+  zamboni: 0,
+  boss: 0,
+};
+
 export function spawnOrderForWave(wave: number): ZombieKind[] {
   const composition = zombieCompositionForWave(wave);
   if (isKamikazeWave(safeWaveNumber(wave))) {
     return kamikazeWaveOrder(composition);
   }
+  return spawnOrderForComposition(composition, wave);
+}
+
+/**
+ * The interleaved spawn queue for an explicit roster.
+ *
+ * Split out of `spawnOrderForWave` so an authored wave — the First Play
+ * tutorial's, which is written down rather than read off the curve — gets the
+ * same walkers-between-specialists pacing as every other wave instead of its
+ * own ordering rule.
+ */
+export function spawnOrderForComposition(
+  composition: WaveComposition,
+  wave: number,
+): ZombieKind[] {
   // Bosses head the queue rather than joining the specialist interleave, so the
   // health bar is up from the start of the wave whatever else is scheduled. An
   // elite boss is an ordinary kind under the hood, so the queue asks the pool
@@ -400,6 +450,8 @@ export class WaveManager {
   private bossRefillTimer = 0;
   /** Endless and Creative runs never stop between waves; see `setEndless`. */
   private endless = false;
+  /** Authored roster for the next `startWave`; see `setCompositionOverride`. */
+  private compositionOverride: WaveComposition | null = null;
 
   constructor(
     private readonly zombies: ZombieSystem,
@@ -422,11 +474,33 @@ export class WaveManager {
     return !this.waveDone;
   }
 
+  /**
+   * Play the next wave on an authored roster instead of the curve's.
+   *
+   * Only the First Play tutorial uses this (see `firstPlayWaveComposition`):
+   * its wave is a scripted set piece, so its roster is written down rather than
+   * derived. It applies to `startWave` only — an endless run rolling into its
+   * next wave, and a boss wave topping itself up, both go back to the curve,
+   * which is right for both since neither can happen during the tutorial.
+   *
+   * Pass null to go back to the curve.
+   */
+  setCompositionOverride(composition: WaveComposition | null): void {
+    this.compositionOverride = composition;
+  }
+
   startWave(wave: number): void {
     this.waveNumber = Math.max(1, Math.floor(wave));
-    this.assignedCount = zombieCountForWave(this.waveNumber);
+    const authored = this.compositionOverride;
+    this.assignedCount =
+      authored === null
+        ? zombieCountForWave(this.waveNumber)
+        : compositionTotal(authored);
     this.spawnQueueIndex = 0;
-    this.spawnOrder = spawnOrderForWave(this.waveNumber);
+    this.spawnOrder =
+      authored === null
+        ? spawnOrderForWave(this.waveNumber)
+        : spawnOrderForComposition(authored, this.waveNumber);
     this.killedCount = 0;
     this.spawnTimer = 0;
     this.waveDone = false;
@@ -621,11 +695,27 @@ export class WaveManager {
       : HORDE_RETRY_SECONDS;
   }
 
+  /**
+   * The concurrency ceiling for the wave in flight.
+   *
+   * An authored roster raises the curve's floor to its own size for the same
+   * reason `maxActiveZombiesForWave` does it for a burst wave: the tutorial
+   * wave is meant to arrive as one crowd, and a cap below its own count would
+   * turn that back into a trickle. Still bounded by the hard cap the curve
+   * carries, which the opening waves sit well under.
+   */
+  private maxActiveNow(): number {
+    const curve = maxActiveZombiesForWave(this.waveNumber);
+    return this.compositionOverride === null
+      ? curve
+      : Math.max(curve, compositionTotal(this.compositionOverride));
+  }
+
   /** One anchored release of up to `size` queued bodies. */
   private spawnOneHorde(size: number): { wanted: number; spawned: number } {
     const headroom = Math.max(
       0,
-      maxActiveZombiesForWave(this.waveNumber) - this.zombies.getActiveCount(),
+      this.maxActiveNow() - this.zombies.getActiveCount(),
     );
     const wanted = Math.min(
       size,

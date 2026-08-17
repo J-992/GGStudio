@@ -166,6 +166,9 @@ function createHarness(options: { destroyed?: boolean } = {}): {
       mode.phase = 'gameOver';
     },
     syncGameplayActivity: vi.fn(),
+    // Not the First Play tutorial wave, which clears straight to the Garage
+    // instead of through the payout card these tests measure.
+    firstPlay: null,
     ...cashHud.fields,
   });
   return {

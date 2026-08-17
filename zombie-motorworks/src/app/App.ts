@@ -70,6 +70,7 @@ import type { BiomeId } from '../core/biomes.ts';
 import {
   DEFAULT_BUILD_ID,
   buildBeginnerBlueprint,
+  buildFirstPlayBlueprint,
   buildStarterRig,
   buildStarterUnlocks,
   isBuildId,
@@ -469,6 +470,12 @@ export class App {
   private saveFailureNotified = false;
   private pendingEditorNotice: string | undefined;
   private pendingIsNewGame = false;
+  /**
+   * The wave about to be deployed is a brand-new player's very first, so
+   * Survival runs the First Play coach over it. Cleared by the deployment that
+   * consumes it, so it can never leak into a second wave or a resumed run.
+   */
+  private firstPlayWave = false;
 
   constructor(private readonly root: HTMLElement) {
     // Raw-key detection must happen before profile loading can synthesize an
@@ -809,6 +816,7 @@ export class App {
     this.markProfileDirty();
     this.bp = buildStarterBlueprint(buildId);
     this.history.clear();
+    this.rebaseCheckpointOnChosenBuild();
     // Reopened rather than refreshed: the editor caches meshes, selection and
     // overlays off the blueprint it was constructed with, and every one of
     // those is stale the moment the rig underneath changes.
@@ -818,6 +826,28 @@ export class App {
     // that lands over the build grid on the one screen where they want to
     // start building.
     this.openEditor();
+  }
+
+  /**
+   * Put the chosen Build under the run in flight, at full health.
+   *
+   * Only the First Play route ever reaches this with a live checkpoint: the
+   * picker opens in the Garage between the tutorial wave and wave two, and the
+   * checkpoint sitting behind it still describes the demo rig — its damage, and
+   * anything a zombie tore off it, priced as blocks the player owes for. None
+   * of that survives the swap. They are being handed a different vehicle, so it
+   * arrives whole and owing nothing, and `missingParts` is emptied rather than
+   * filtered because the ids on the new rig collide with the demo's.
+   */
+  private rebaseCheckpointOnChosenBuild(): void {
+    if (this.checkpoint === null) return;
+    this.checkpoint = {
+      ...this.checkpoint,
+      blueprint: this.bp,
+      partHp: fullPartHp(this.bp),
+      missingParts: [],
+    };
+    this.persistRunCheckpoint(this.inBuildPhase ? 'build' : 'wave');
   }
 
   /**
@@ -877,15 +907,28 @@ export class App {
    * reading in front of a game whose actual loop is "drive a truck at a crowd",
    * and it was the first thing every new player met.
    *
-   * So the order is inverted for them: the default rig is already assembled and
-   * already armed, and wave one starts immediately. The Garage arrives at the
-   * build phase afterwards, when "spend what you just earned on the truck you
-   * just drove" is a sentence the player can already parse, and
-   * `pendingIsNewGame` carries the rig picker across to it.
+   * So the order is inverted for them: wave one starts immediately, on a rig
+   * that is not one of the three Builds at all. `firstPlayRig` is a demo — six
+   * engines, a Heavy Cannon, two blasters, a blade and a shield — because a
+   * first impression made on a starter truck with one gun is a first impression
+   * of a slower, quieter game than this one. The First Play coach rides along
+   * and teaches the three inputs over it, a card at a time, with the world
+   * stopped for each.
+   *
+   * The rig is handed back at the end of that wave: the clear goes straight to
+   * the Garage with the picker up (`pendingIsNewGame`), and whichever Build
+   * they choose replaces it. So nothing about it has to be balanced, and none
+   * of what it carries is unlocked or granted — it is never theirs.
    */
   private beginFirstRun(): void {
     this.resetToStarterRig();
-    this.startRun(this.bp, this.preferredBiomeId);
+    this.startRun(
+      buildFirstPlayBlueprint(),
+      this.preferredBiomeId,
+      DEFAULT_GAME_MODE_ID,
+      undefined,
+      true,
+    );
   }
 
   /**
@@ -1155,10 +1198,12 @@ export class App {
     biomeId: BiomeId,
     modeId: GameModeId = DEFAULT_GAME_MODE_ID,
     seed?: number,
+    firstPlay = false,
   ): void {
     runSaveStore.clear();
     this.activeModeId = modeId;
     this.runMoneyEarned = 0;
+    this.firstPlayWave = firstPlay;
     // A fixed-seed mode takes its arena from the calendar however it got here —
     // including the Garage's Fight button, which knows nothing about dailies.
     const runSeed =
@@ -1200,7 +1245,16 @@ export class App {
     this.chamber?.dispose();
     this.chamber = null;
     this.survival?.dispose();
-    this.survival = new SurvivalMode(this.root, this.renderer, bp, run, {
+    // Consumed here rather than read: the tutorial belongs to one deployment,
+    // and a run that somehow reached a second wave must not open a second one.
+    const firstPlay = this.firstPlayWave;
+    this.firstPlayWave = false;
+    this.survival = new SurvivalMode(
+      this.root,
+      this.renderer,
+      bp,
+      firstPlay ? { ...run, firstPlay: true } : run,
+      {
       profileMoney: () => this.profile.money,
       runEarnings: () => this.runMoneyEarned,
       onRepairAll: (cost) => this.repairRunInPlace(cost),
@@ -1268,7 +1322,8 @@ export class App {
       },
       onSaveAndQuit: () => this.saveAndQuitRun(),
       onGameplayActiveChanged: (active) => setCrazyGamesGameplayActive(active),
-    });
+      },
+    );
     this.survival.resize(this.root.clientWidth, this.root.clientHeight);
   }
 

@@ -159,6 +159,7 @@ import { ArenaBuilder } from './arena/ArenaBuilder.ts';
 import { DEFAULT_BIOME_ID, getBiome } from './arena/recipes/index.ts';
 import { Minimap } from './Minimap.ts';
 import {
+  FIRST_PLAY_WAVE_COMPOSITION,
   WaveManager,
   attackDamageMultiplierForWave,
   healthMultiplierForWave,
@@ -182,6 +183,9 @@ import {
   type WaveClearRepairOffer,
 } from './WaveClearCard.ts';
 import { WaveTimelineHud } from './WaveTimelineHud.ts';
+import { FirstPlayCoach } from './FirstPlayCoach.ts';
+import { FirstPlayVictory } from './FirstPlayVictory.ts';
+import type { FirstPlayInput } from '../core/firstPlay.ts';
 import { ZombieSystem } from './zombies/ZombieSystem.ts';
 import { isDevMode } from './devtuning/devMode.ts';
 import { devTuning, subscribeTuning } from './devtuning/DevTuning.ts';
@@ -206,6 +210,23 @@ const COUNTDOWN_SECONDS = 3;
  * playable either way.
  */
 const ARENA_LOAD_TIMEOUT_SECONDS = 12;
+/**
+ * Keys `updateControls` reads as driving, for the First Play coach's benefit.
+ * Kept here rather than derived from the control block below because the coach
+ * only needs to know that the player *tried* to drive, not what it did.
+ */
+/** Firework shells thrown around the rig behind the first-wave celebration. */
+const CELEBRATION_SHELLS = 7;
+const DRIVE_KEYS = new Set([
+  'w',
+  'a',
+  's',
+  'd',
+  'arrowup',
+  'arrowdown',
+  'arrowleft',
+  'arrowright',
+]);
 // These are shared immutable options, not per-shot literals: the firing loop
 // runs at physics rate and the tracer pool must stay allocation-free.
 const TRACER_OPTIONS = [
@@ -566,6 +587,8 @@ interface SurvivalUi {
   speedKillLabel: HTMLSpanElement;
   integrityValue: HTMLSpanElement;
   integrityFill: HTMLSpanElement;
+  /** The whole health block, so the First Play coach can keep it covered. */
+  healthPanel: HTMLDivElement;
   fuelValue: HTMLSpanElement;
   fuelFill: HTMLSpanElement;
   waveTimeline: WaveTimelineHud;
@@ -620,7 +643,18 @@ type PendingTransition =
       pendingMoneyDiscarded: number;
     };
 
-type SurvivalRunState = RunState & { kills?: number; score?: number };
+type SurvivalRunState = RunState & {
+  kills?: number;
+  score?: number;
+  /**
+   * This is a brand-new player's very first wave, so run the First Play coach
+   * over it and hand them to the Garage the moment it clears. Not part of
+   * `RunState` because it is a property of one deployment rather than of the
+   * run: it is never persisted, and a resumed save is by definition not a
+   * first wave.
+   */
+  firstPlay?: boolean;
+};
 
 export class SurvivalMode {
   /** The rules this run is played under; fixed for the mode's whole life. */
@@ -717,6 +751,15 @@ export class SurvivalMode {
   private readonly speedKillLabel: HTMLSpanElement;
   private readonly integrityValue: HTMLSpanElement;
   private readonly integrityFill: HTMLSpanElement;
+  private readonly healthPanel: HTMLDivElement;
+  /**
+   * The first-wave coach, or null for every other deployment. Non-null is the
+   * one thing that makes this mode a tutorial: it hides HUD, freezes the step,
+   * and sends a clear straight to the Garage instead of the payout card.
+   */
+  private readonly firstPlay: FirstPlayCoach | null;
+  /** The tutorial wave's celebration, built alongside its coach. */
+  private readonly firstPlayVictory: FirstPlayVictory | null;
   private readonly fuelValue: HTMLSpanElement;
   private readonly fuelFill: HTMLSpanElement;
   private lastHudFuel = -1;
@@ -1024,6 +1067,11 @@ export class SurvivalMode {
       return;
     }
     this.keys.add(key);
+    // Auto-repeat is excluded: a key already held when a card opens must not
+    // dismiss it, and the coach is asking for a press rather than a hold.
+    if (!event.repeat) {
+      this.notifyFirstPlay(DRIVE_KEYS.has(key) ? 'drive' : 'other');
+    }
   };
 
   private readonly keyup = (event: KeyboardEvent): void => {
@@ -1183,6 +1231,7 @@ export class SurvivalMode {
     this.speedKillLabel = builtUi.speedKillLabel;
     this.integrityValue = builtUi.integrityValue;
     this.integrityFill = builtUi.integrityFill;
+    this.healthPanel = builtUi.healthPanel;
     this.fuelValue = builtUi.fuelValue;
     this.fuelFill = builtUi.fuelFill;
     this.waveTimelineHud = builtUi.waveTimeline;
@@ -1266,6 +1315,27 @@ export class SurvivalMode {
       this.syncTouchControls(),
     );
     this.mobileHud = installSurvivalMobileHud(this.ui);
+
+    // The tutorial is a property of this one deployment, so everything it
+    // changes is decided here, once, rather than re-tested all over the mode:
+    // the coach exists or it does not, and the wave's roster is authored or it
+    // is the curve's.
+    this.firstPlay =
+      run.firstPlay === true
+        ? new FirstPlayCoach(this.ui, {
+            onChanged: () => this.syncFirstPlayHud(),
+          })
+        : null;
+    this.firstPlayVictory =
+      this.firstPlay === null
+        ? null
+        : new FirstPlayVictory(this.ui, {
+            onStartRun: () => this.leaveFirstPlayWave(),
+          });
+    if (this.firstPlay !== null) {
+      this.waves.setCompositionOverride(FIRST_PLAY_WAVE_COMPOSITION);
+    }
+    this.syncFirstPlayHud();
 
     if (Number.isFinite(run.kills) && (run.kills ?? 0) >= 0) {
       this.kills = Math.floor(run.kills ?? 0);
@@ -1890,6 +1960,7 @@ export class SurvivalMode {
       speedKillLabel,
       integrityValue,
       integrityFill,
+      healthPanel: health,
       fuelValue,
       fuelFill,
       waveTimeline,
@@ -1969,10 +2040,66 @@ export class SurvivalMode {
   }
 
   private syncGameplayActivity(): void {
+    // A coach freeze is deliberately *not* a gameplay break. Each card lasts a
+    // second or two and there are five of them, so reporting every one would
+    // strobe the platform SDK through ten state changes in the opening minute
+    // for no benefit to the player.
     this.callbacks.onGameplayActiveChanged?.(
       !this.settingsOpen &&
         (this.phase === 'countdown' || this.phase === 'active'),
     );
+  }
+
+  /**
+   * Put the HUD where the First Play coach says it should be.
+   *
+   * Everything here is derived from the coach rather than tracked separately,
+   * so it is safe to call on any change and idempotent when nothing moved. A
+   * run without a coach reveals everything, which is the ordinary HUD.
+   */
+  private syncFirstPlayHud(): void {
+    const coach = this.firstPlay;
+    const healthUp = coach === null || coach.isRevealed('health');
+    const timelineUp = coach === null || coach.isRevealed('waveTimeline');
+    this.healthPanel.hidden = !healthUp;
+    this.waveTimelineHud.root.hidden = !timelineUp;
+    this.healthPanel.classList.toggle(
+      'is-first-play-spotlight',
+      coach?.isSpotlighting('health') === true,
+    );
+    this.waveTimelineHud.root.classList.toggle(
+      'is-first-play-spotlight',
+      coach?.isSpotlighting('waveTimeline') === true,
+    );
+  }
+
+  /**
+   * Feed an input to the coach. A no-op outside the tutorial, and it never
+   * consumes the press: the key that dismisses the driving card is the same
+   * key that drives on the very next step.
+   */
+  private notifyFirstPlay(input: FirstPlayInput): void {
+    this.firstPlay?.notifyInput(input);
+  }
+
+  /**
+   * Offer the coach whatever is *still* held while a card is up.
+   *
+   * The press handlers only see edges, and half of what the coach asks for is
+   * something the player was already doing when the card arrived: W held down
+   * from the previous lesson, the fire button held on a crowd, a thumb parked
+   * on the joystick. Without this the card waits for a release-and-repress the
+   * player has no reason to perform. The coach applies a longer grace to these
+   * so the line is still read.
+   */
+  private pollHeldFirstPlayInput(): void {
+    const coach = this.firstPlay;
+    if (coach === null) return;
+    if (this.touch?.stick.active === true) coach.notifyInput('drive', true);
+    if (this.pointerFiring) coach.notifyInput('fire', true);
+    for (const key of this.keys) {
+      coach.notifyInput(DRIVE_KEYS.has(key) ? 'drive' : 'other', true);
+    }
   }
 
   private readonly onSfxVolumeInput = (): void => {
@@ -2287,6 +2414,7 @@ export class SurvivalMode {
         // A tap on the arena is also how a signature strike is called down on
         // desktop, and the two inputs must not disagree about that.
         if (firing) this.signatureRequested = true;
+        if (firing) this.notifyFirstPlay('fire');
       },
     });
     // First child, so the full-screen input zones stay underneath every HUD
@@ -2323,6 +2451,7 @@ export class SurvivalMode {
     // signature strike down on it. Queued rather than fired here so the strike
     // resolves inside the fixed step with everything else.
     this.signatureRequested = true;
+    this.notifyFirstPlay('fire');
   };
 
   private readonly onFireUp = (): void => {
@@ -2341,6 +2470,16 @@ export class SurvivalMode {
       return;
     }
     if (this.debugPaused) {
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+    // Time stop. The coach's cards are read over a genuinely stopped arena —
+    // nothing steps, nothing animates, the crowd hangs mid-stride — so a new
+    // player is never asked to read while something is closing on them. Zero
+    // delta rather than an early return so the frame is still drawn.
+    if (this.firstPlay?.isFrozen() === true) {
+      this.pollHeldFirstPlayInput();
+      this.syncView(0);
       this.renderer.render(this.scene, this.camera);
       return;
     }
@@ -2403,6 +2542,9 @@ export class SurvivalMode {
     }
     this.waveElapsedSeconds += FIXED_DT;
     this.runElapsedSeconds += FIXED_DT;
+    // Arena time, not wall clock: the gap between two lessons is measured in
+    // the seconds the player actually spends driving.
+    this.firstPlay?.fixedUpdate(FIXED_DT);
     this.updateControls();
     this.updateRecoveryAssist(FIXED_DT);
     this.updateAbility();
@@ -2848,6 +2990,10 @@ export class SurvivalMode {
   }
 
   private beginCountdown(wave: number): void {
+    // Any lesson still open belongs to the wave being left. `active` is false
+    // for a coach that has not started yet, which is what the construction-time
+    // call into here relies on.
+    if (this.firstPlay?.active === true) this.firstPlay.finish();
     this.setCurrentWave(wave);
     this.phase = 'countdown';
     this.countdownRemaining = COUNTDOWN_SECONDS;
@@ -2911,6 +3057,9 @@ export class SurvivalMode {
     playSfx('waveStart');
     this.resetWaveStats();
     this.waves.startWave(this.currentWave);
+    // Only now: the coach freezes the world, and freezing the countdown would
+    // leave a player staring at a card over a "3" that never becomes a "1".
+    this.firstPlay?.begin();
     this.syncGameplayActivity();
   }
 
@@ -3149,8 +3298,89 @@ export class SurvivalMode {
         );
       }
       this.stopVehicleMotion();
+      if (this.firstPlay !== null) {
+        this.celebrateFirstPlayWave();
+        return;
+      }
       this.showVictory();
     }
+  }
+
+  /**
+   * End of the tutorial wave: a celebration, and one button out of it.
+   *
+   * Every other cleared wave earns a threat alert, a payout card and a
+   * "Continue Now" button, and all three are wrong here. The rig the player
+   * just drove is a demo they do not own and are about to give back, so there
+   * is nothing to bank a repair against and no next wave to warn them about —
+   * the only thing that happens next is picking the Build they will actually
+   * play, which is why the celebration has exactly one exit. Badges are skipped
+   * for the same reason: a wave fought on a rig with six engines and a Heavy
+   * Cannon on it has not earned a NO DAMAGE stamp.
+   *
+   * The money is banked by the caller before this runs, so `waveMoneyEarned` is
+   * the real, credited figure the card counts up to and the player walks into
+   * the Garage holding.
+   */
+  private celebrateFirstPlayWave(): void {
+    // Re-entry guard: the debug kill-all and the fixed step can both land on a
+    // clear, and replaying the entrance would restart the fireworks over a card
+    // the player is already reading.
+    if (this.firstPlayVictory?.visible === true) return;
+    this.firstPlay?.finish();
+    this.fireCelebrationVfx();
+    if (this.firstPlayVictory === null) {
+      this.leaveFirstPlayWave();
+      return;
+    }
+    // No `setCompact`: the celebration is a full-screen scrim over everything
+    // the mobile layout would have been hiding, exactly like the wave-clear
+    // card, and setting it here would fight the settings overlay for the flag.
+    this.firstPlayVictory.show({
+      kills: Math.max(0, this.kills - this.waveStartKills),
+      cashEarned: this.waveMoneyEarned,
+      elapsedSeconds: this.waveElapsedSeconds,
+    });
+  }
+
+  /**
+   * Fireworks over the rig, behind the celebration's scrim.
+   *
+   * The wave is over and `stepFixed` has stopped, but `syncView` keeps running
+   * the VFX layer every frame, so pooled bursts still animate — which makes
+   * this free in a way it would not be in the middle of a fight. Scattered in
+   * space and staggered in time so it reads as a display rather than as one
+   * explosion; the shells are cosmetic and touch nothing.
+   */
+  private fireCelebrationVfx(): void {
+    const origin = this.vehicle.body.translation();
+    for (let index = 0; index < CELEBRATION_SHELLS; index += 1) {
+      const angle = (index / CELEBRATION_SHELLS) * Math.PI * 2;
+      const reach = 5 + Math.random() * 5;
+      const x = origin.x + Math.cos(angle) * reach;
+      const z = origin.z + Math.sin(angle) * reach;
+      const y = origin.y + 3 + Math.random() * 4;
+      window.setTimeout(
+        () => {
+          if (this.disposed) return;
+          this.vfx.shellBurst(x, y, z, 2.4 + Math.random() * 1.4);
+        },
+        index * 140 + Math.random() * 90,
+      );
+    }
+  }
+
+  /** The celebration's single button: hand the player to the rig picker. */
+  private leaveFirstPlayWave(): void {
+    this.firstPlayVictory?.hide();
+    const payload = this.clearedWavePayload();
+    this.callbacks.onBuildPhase(
+      payload.clearedRun,
+      payload.survivingPartIds,
+      payload.partHp,
+      payload.kills,
+      payload.score,
+    );
   }
 
   private showVictory(): void {
@@ -3284,6 +3514,9 @@ export class SurvivalMode {
   private queueGameOver(pendingMoneyDiscarded = 0): void {
     if (this.pendingTransition !== null || this.phase === 'gameOver') return;
     fadeOutDriveSfx();
+    // A coach mid-lesson would otherwise hold the frame frozen behind the
+    // game-over card, since the freeze outranks the phase in `update`.
+    this.firstPlay?.finish();
     this.phase = 'gameOver';
     this.controls.throttle = 0;
     this.controls.brake = 1;
@@ -4076,6 +4309,7 @@ export class SurvivalMode {
   private requestAbility(slot: number): void {
     if (this.phase !== 'active' || this.settingsOpen) return;
     this.abilityRequests.add(slot);
+    this.notifyFirstPlay('ability');
   }
 
   /** Tick every ability's cooldown and discharge the ones pressed this step. */
@@ -4671,6 +4905,17 @@ export class SurvivalMode {
       view.remainingSeconds = this.abilityCooldowns.get(assignment.partId) ?? 0;
     }
     this.abilityBar.render(this.abilitySlotViews);
+    // The coach's ability card quotes a key, so it reads the bound one off the
+    // loadout rather than assuming the slot the rig asked for. The Shield
+    // Bubble is what it teaches; any ability at all is better than a card that
+    // names a box with nothing in it.
+    if (this.firstPlay !== null) {
+      const shield = this.abilityLoadout.find(
+        (assignment) => assignment.ability.kind === 'shield',
+      );
+      const taught = shield ?? this.abilityLoadout[0];
+      this.firstPlay.setAbilityKey(taught?.key.toUpperCase() ?? '');
+    }
     this.syncBuffHud();
   }
 
@@ -5646,6 +5891,8 @@ export class SurvivalMode {
       this.onMusicVolumeInput,
     );
     this.ui.removeEventListener('click', this.onUiButtonClick, true);
+    this.firstPlay?.dispose();
+    this.firstPlayVictory?.dispose();
     this.pickups.dispose();
     this.sentries.dispose();
     this.zombies.setDamageListener(null);

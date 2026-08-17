@@ -378,6 +378,9 @@ describe('run checkpoints', () => {
       stopVehicleMotion: () => undefined,
       showVictory: () => undefined,
       queueGameOver: () => undefined,
+      // Not the First Play tutorial wave, which clears straight to the Garage
+      // instead of through the payout card this test is measuring.
+      firstPlay: null,
     });
 
     mode.queueCompletedStepTransition();

@@ -1,0 +1,489 @@
+/* First-wave celebration. The one screen in the game that is allowed to show
+   off: a rotating ray fan, a spark shower thrown out of the card, a title that
+   lands hard, and three numbers counting themselves up. Everything below is a
+   CSS animation over generated elements, and all of it folds flat under
+   prefers-reduced-motion at the bottom of the file. */
+
+.first-play-victory {
+  --victory-glow: var(--ui-signal-strong);
+  --victory-gold: var(--ui-bone);
+
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  min-width: 0;
+  padding: 16px;
+  overflow: hidden;
+  place-items: center;
+  background:
+    radial-gradient(
+      ellipse 60% 55% at 50% 50%,
+      rgb(70 80 47 / 0.45),
+      transparent 70%
+    ),
+    color-mix(in srgb, var(--ui-black) 88%, transparent);
+  color: var(--ui-text);
+  font-family: var(--ui-font-body);
+}
+
+.first-play-victory[hidden] {
+  display: none;
+}
+
+.first-play-victory.is-in {
+  animation: victory-backdrop-in 260ms linear both;
+}
+
+/* ---- Ray fan ------------------------------------------------------------ */
+
+/* A hard-edged conic fan rather than a soft glow: it reads through the scrim
+   at phone size, where a gradient bloom just looks like a smudge. */
+.first-play-victory__rays {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 160vmax;
+  height: 160vmax;
+  background: repeating-conic-gradient(
+    from 0deg,
+    rgb(160 175 108 / 0.15) 0deg 7deg,
+    transparent 7deg 21deg
+  );
+  /* Prefixed as well: without a mask the fan is a hard-edged full-screen
+     starburst, which is a much worse failure than no rays at all. */
+  -webkit-mask-image: radial-gradient(closest-side, #000 20%, transparent 72%);
+  mask-image: radial-gradient(closest-side, #000 20%, transparent 72%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.first-play-victory.is-in .first-play-victory__rays {
+  animation:
+    victory-rays-in 520ms ease-out 60ms both,
+    victory-rays-spin 26s linear 60ms infinite;
+}
+
+/* ---- Card --------------------------------------------------------------- */
+
+.first-play-victory__card {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  min-width: 0;
+  gap: 14px;
+  padding: 26px 24px 22px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--ui-edge);
+  background: var(--ui-ink);
+  box-shadow:
+    9px 10px 0 rgb(0 0 0 / 0.5),
+    inset 3px 0 0 var(--victory-glow),
+    0 0 60px rgb(160 175 108 / 0.22);
+  text-align: center;
+}
+
+/* CRT scanlines, matching the wave-clear card so this still reads as the same
+   game rather than a different product's win screen. */
+.first-play-victory__card::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent 0 3px,
+    rgb(0 0 0 / 0.13) 3px 4px
+  );
+  content: '';
+  opacity: 0.34;
+  pointer-events: none;
+}
+
+.first-play-victory__card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.first-play-victory.is-in .first-play-victory__card {
+  animation: victory-card-in 420ms cubic-bezier(0.18, 0.9, 0.26, 1.2) both;
+}
+
+.first-play-victory__eyebrow {
+  color: var(--ui-text-muted);
+  font: 400 var(--ui-text-10) / 1 var(--ui-font-display);
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+}
+
+.first-play-victory__title {
+  margin: 0;
+  color: var(--victory-glow);
+  font: 400 clamp(34px, 10vw, 52px) / 0.95 var(--ui-font-display);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow:
+    4px 4px 0 var(--ui-signal-dark),
+    0 0 22px rgb(160 175 108 / 0.45);
+}
+
+.first-play-victory.is-in .first-play-victory__title {
+  animation: victory-title-slam 460ms cubic-bezier(0.2, 0.9, 0.24, 1.25) 120ms
+    both;
+}
+
+.first-play-victory__lede {
+  margin: -6px 0 0;
+  color: var(--ui-text);
+  font: 400 var(--ui-text-14) / 1.4 var(--ui-font-body);
+}
+
+/* ---- Stats -------------------------------------------------------------- */
+
+.first-play-victory__stats {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--ui-edge);
+  background: var(--ui-recess);
+}
+
+.first-play-victory__stat {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 12px 6px;
+  border-right: 1px solid var(--ui-edge-soft);
+}
+
+.first-play-victory__stat:last-child {
+  border-right: 0;
+}
+
+.first-play-victory.is-in .first-play-victory__stat {
+  animation: victory-stat-in 300ms ease-out both;
+}
+
+/* Staggered so the row assembles left to right instead of appearing at once. */
+.first-play-victory.is-in .first-play-victory__stat:nth-child(1) {
+  animation-delay: 300ms;
+}
+
+.first-play-victory.is-in .first-play-victory__stat:nth-child(2) {
+  animation-delay: 370ms;
+}
+
+.first-play-victory.is-in .first-play-victory__stat:nth-child(3) {
+  animation-delay: 440ms;
+}
+
+.first-play-victory__stat-value {
+  color: var(--victory-gold);
+  font: 400 clamp(19px, 5.5vw, 25px) / 1 var(--ui-font-display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* The kick as a counter reaches its final number. */
+.first-play-victory__stat.is-landed .first-play-victory__stat-value {
+  animation: victory-stat-land 260ms ease-out both;
+}
+
+.first-play-victory__stat-label {
+  color: var(--ui-text-muted);
+  font: 400 var(--ui-text-10) / 1 var(--ui-font-display);
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+  text-transform: uppercase;
+}
+
+.first-play-victory__note {
+  margin: 0;
+  color: var(--ui-text-muted);
+  font: 400 var(--ui-text-12) / 1.5 var(--ui-font-body);
+}
+
+/* ---- The one button ----------------------------------------------------- */
+
+.first-play-victory__cta {
+  min-height: 52px;
+  padding: 14px 18px;
+  border: 1px solid var(--ui-signal-dark);
+  background: linear-gradient(
+    180deg,
+    var(--ui-signal) 0%,
+    var(--ui-signal-dark) 100%
+  );
+  box-shadow:
+    4px 5px 0 rgb(0 0 0 / 0.5),
+    inset 0 1px 0 rgb(255 255 255 / 0.16);
+  color: var(--ui-black);
+  font: 400 clamp(17px, 4.6vw, 21px) / 1 var(--ui-font-display);
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.first-play-victory__cta.is-in {
+  animation:
+    victory-cta-in 320ms cubic-bezier(0.2, 0.85, 0.28, 1.15) both,
+    victory-cta-breathe 2.2s ease-in-out 320ms infinite;
+}
+
+.first-play-victory__cta:hover:not(:disabled),
+.first-play-victory__cta:focus-visible {
+  background: linear-gradient(
+    180deg,
+    var(--ui-signal-strong) 0%,
+    var(--ui-signal) 100%
+  );
+  outline: 2px solid var(--victory-gold);
+  outline-offset: 3px;
+}
+
+.first-play-victory__cta:active:not(:disabled) {
+  box-shadow:
+    1px 2px 0 rgb(0 0 0 / 0.5),
+    inset 0 1px 0 rgb(255 255 255 / 0.16);
+  transform: translate(3px, 3px);
+}
+
+.first-play-victory__cta:disabled {
+  cursor: default;
+}
+
+/* ---- Sparks ------------------------------------------------------------- */
+
+/* A zero-size origin in the middle of the screen; each spark is flung out of it
+   along its own angle. Above the card so the shower passes over the panel edge
+   rather than being clipped behind it. */
+.first-play-victory__sparks {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.first-play-victory__spark {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--spark-size, 6px);
+  height: var(--spark-size, 6px);
+  background: var(--victory-glow);
+  box-shadow: 0 0 8px rgb(160 175 108 / 0.7);
+  opacity: 0;
+  animation: victory-spark-fly 900ms cubic-bezier(0.16, 0.72, 0.3, 1)
+    var(--spark-delay, 0ms) both;
+}
+
+.first-play-victory__spark.is-gold {
+  background: var(--victory-gold);
+  box-shadow: 0 0 8px rgb(183 168 115 / 0.7);
+}
+
+/* A phone held sideways has about 380px of height to work with, most of which
+   this card would otherwise spend on padding and a 52px title. Everything
+   shrinks rather than the card scrolling, because the button has to be reachable
+   without a swipe — it is the only way off this screen. */
+@media (height <= 460px) {
+  .first-play-victory__card {
+    gap: 9px;
+    padding: 14px 18px 14px;
+  }
+
+  .first-play-victory__title {
+    font-size: clamp(24px, 7vh, 34px);
+  }
+
+  .first-play-victory__stat {
+    padding: 8px 5px;
+  }
+
+  .first-play-victory__note {
+    display: none;
+  }
+
+  .first-play-victory__cta {
+    min-height: 44px;
+    padding: 11px 16px;
+  }
+}
+
+/* ---- Keyframes ---------------------------------------------------------- */
+
+@keyframes victory-backdrop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes victory-rays-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.55);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes victory-rays-spin {
+  from {
+    rotate: 0deg;
+  }
+
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes victory-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(26px) scale(0.94);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Overshoots past its size and drops back, so the word reads as landing rather
+   than fading in. */
+@keyframes victory-title-slam {
+  0% {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+
+  55% {
+    opacity: 1;
+    transform: scale(0.94);
+  }
+
+  78% {
+    transform: scale(1.04);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes victory-stat-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes victory-stat-land {
+  0% {
+    transform: scale(1.28);
+    text-shadow: 0 0 18px rgb(183 168 115 / 0.8);
+  }
+
+  100% {
+    transform: scale(1);
+    text-shadow: none;
+  }
+}
+
+@keyframes victory-cta-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The pulse is thrown inward, not outward. The card scrolls (`overflow-y:
+   auto`), which computes the horizontal axis to `auto` as well and would clip
+   an outer bloom against the panel edge — worse at the short-viewport
+   breakpoint, where the padding around the button shrinks. */
+@keyframes victory-cta-breathe {
+  0%,
+  100% {
+    box-shadow:
+      4px 5px 0 rgb(0 0 0 / 0.5),
+      inset 0 1px 0 rgb(255 255 255 / 0.16),
+      inset 0 0 0 rgb(216 232 168 / 0);
+  }
+
+  50% {
+    box-shadow:
+      4px 5px 0 rgb(0 0 0 / 0.5),
+      inset 0 1px 0 rgb(255 255 255 / 0.16),
+      inset 0 0 26px rgb(216 232 168 / 0.6);
+  }
+}
+
+/* Thrown along its own angle, spinning, fading as it goes. The rotate/translate
+   order matters: rotating first turns the axis the translate then runs along. */
+@keyframes victory-spark-fly {
+  0% {
+    opacity: 0;
+    transform: rotate(var(--spark-angle, 0deg)) translateX(0) scale(0.4);
+  }
+
+  12% {
+    opacity: 1;
+    transform: rotate(var(--spark-angle, 0deg)) translateX(18px) scale(1.15);
+  }
+
+  100% {
+    opacity: 0;
+    transform: rotate(calc(var(--spark-angle, 0deg) + var(--spark-spin, 0deg)))
+      translateX(var(--spark-distance, 200px)) scale(0.3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .first-play-victory.is-in,
+  .first-play-victory.is-in .first-play-victory__rays,
+  .first-play-victory.is-in .first-play-victory__card,
+  .first-play-victory.is-in .first-play-victory__title,
+  .first-play-victory.is-in .first-play-victory__stat,
+  .first-play-victory__stat.is-landed .first-play-victory__stat-value,
+  .first-play-victory__cta.is-in {
+    animation: none;
+  }
+
+  /* The animations above were also what made these visible, so anything that
+     started at zero opacity has to be put back. */
+  .first-play-victory__rays,
+  .first-play-victory__cta {
+    opacity: 1;
+  }
+
+  .first-play-victory__spark {
+    display: none;
+  }
+}

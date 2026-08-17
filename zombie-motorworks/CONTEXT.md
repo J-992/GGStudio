@@ -81,6 +81,22 @@ They describe work at the time they were written and can be stale.
   outgoing damage, incoming damage, and drive torque plus speed ceiling.
 - **Build Phase**: the in-run Garage between cleared waves. It exposes repairs
   and preserves the checkpoint's damage; it is not an ordinary full-heal Garage.
+- **First Play**: the scripted first wave of a brand-new browser save. `App`
+  boots straight into it (`beginFirstRun`) on a rig that is not a Build at all —
+  `firstPlayRig` in `core/builds.ts`, a demo carrying six engines, a Heavy
+  Cannon, two blasters, a blade and a shield. Survival runs a **First Play
+  Coach** over it: five steps (`core/firstPlay.ts`) that stop the fixed step
+  dead, show one line, and start it again on the input they asked for. The
+  health bar and the wave timeline stay hidden until their own step reveals
+  them. The wave fields an authored roster rather than the curve's
+  (`FIRST_PLAY_WAVE_COMPOSITION`, applied through
+  `WaveManager.setCompositionOverride`). Clearing it shows the **First Play
+  Victory** card (`survival/FirstPlayVictory.ts`) — the celebration, not a
+  payout: three counted-up stats and one button, START RUN, which is the only
+  way off it. No threat alert, no wave-clear card, no Continue Now, no badges.
+  That button opens the Garage with the rig picker up; the picker's choice
+  replaces the demo rig and rebases the checkpoint onto it, so nothing the demo
+  carried is ever owned, unlocked, or owed for.
 - **Boss**: single enemy that replaces the whole horde every fifth wave. It is a
   pooled zombie of kind `boss` driven by a `BossDefinition` in
   `survival/zombies/bossConfig.ts`, which owns its stats, telegraphed attack,
@@ -264,12 +280,17 @@ Storage access failures must not make the in-memory game unusable.
 - `App.ts`, `EditorMode.ts`, and `SurvivalMode.ts` are large orchestration
   Modules. Changes that span them need one integration owner because callback
   ordering is part of their Interface.
-- The tutorial is a coach-mark **Garage Tour**: it narrates the Store, Vehicle
-  Stats, and Abilities panels, then walks the player through buy → attach →
-  fight on whatever rig is already in the bay. It never mutates the Blueprint,
-  Profile, or Inventory, so it is safe to start at any point in a run. Its
-  action steps compare a live snapshot against the one taken when the tour
-  opened, never against absolute counts.
+- There are two unrelated tutorials and they must not be confused. The **Garage
+  Tour** (`core/tutorial.ts`) is a coach-mark walk through the Store, Vehicle
+  Stats, and Abilities panels, then buy → attach → fight on whatever rig is
+  already in the bay. It never mutates the Blueprint, Profile, or Inventory, so
+  it is safe to start at any point in a run, and its action steps compare a live
+  snapshot against the one taken when the tour opened rather than against
+  absolute counts. **First Play** (`core/firstPlay.ts`) is the time-stop lesson
+  over the arena, on the first wave only. See the vocabulary entry above.
+- The First Play coach freezes by returning early from `SurvivalMode.update`,
+  which outranks the phase. Anything that ends a wave has to finish the coach or
+  the frame stays stopped behind the card that replaced it.
 
 ## Task Routing
 
@@ -305,6 +326,7 @@ the task crosses their Interface.
 | Biome recipes/arena generation     | `src/survival/arena/recipes/index.ts`        | `arena/ArenaBuilder.ts`, `core/biomes.ts`, `core/rng.ts`                | `unit/biome-recipes.test.ts`, `unit/arena.test.ts`, `unit/arena-perimeter.test.ts`                              |
 | Surface grip/biome handling        | `src/core/surfaces.ts`                       | `core/biomes.ts`, `runtime/wheels.ts`, `runtime/vehicle.ts`             | `unit/surfaces.test.ts`, `unit/biome-hazard.test.ts`, `unit/biome-selection.test.ts`                            |
 | Garage Tour (tutorial)             | `src/core/tutorial.ts`                       | `editor/TutorialOverlay.ts`, `EditorMode.ts`, `ui.ts`, `style.css`      | none — verified by playing the tour                                                                             |
+| First Play (first-wave tutorial)   | `src/core/firstPlay.ts`                      | `survival/FirstPlayCoach.ts`, `survival/FirstPlayVictory.ts`, `SurvivalMode.ts`, `core/builds.ts`, `WaveManager.ts`, `app/App.ts` | `unit/first-play.test.ts`                        |
 | Title/resume flow                  | `src/app/TitleScreen.ts`                     | `App.ts`, `runSaveStore.ts`                                             | `tests/title.spec.ts`, `unit/app.test.ts`                                                                       |
 | CrazyGames SDK/lifecycle           | `src/app/crazyGamesSdk.ts`                   | `main.ts`, `App.ts`, `SurvivalMode.ts`, `sfx.ts`                        | `unit/crazygames-sdk.test.ts`, `unit/audio-volume.test.ts`                                                      |
 | Debug/browser Seam                 | `src/app/App.ts` (`installDebugSeam`)        | `tests/seam.ts`                                                         | the affected Playwright spec                                                                                    |

@@ -343,6 +343,149 @@ const BUILD_RIGS: Record<BuildId, () => PlacedPart[]> = {
   heavy: heavyRig,
 };
 
+/** Levels the First Play rig ships its blocks at; see {@link firstPlayRig}. */
+const FIRST_PLAY_ENGINE_LEVEL = 5;
+const FIRST_PLAY_WHEEL_LEVEL = 5;
+const FIRST_PLAY_WEAPON_LEVEL = 4;
+const FIRST_PLAY_KIT_LEVEL = 3;
+
+function firstPlayEngine(): PartConfig {
+  return { level: FIRST_PLAY_ENGINE_LEVEL };
+}
+
+function firstPlayWheel(): PartConfig {
+  return {
+    ...driveWheel(),
+    suspensionPreset: 'off-road',
+    level: FIRST_PLAY_WHEEL_LEVEL,
+  };
+}
+
+/**
+ * The rig the very first wave of a brand-new save is played on — and only that
+ * wave.
+ *
+ * It is not a Build and it is never offered in the picker. A first-time player
+ * boots straight into the arena (see `App.beginFirstRun`) with no idea what any
+ * of this is yet, so the rig's job is to *show* them: every input the coach
+ * teaches has something loud bolted on to teach it with. The Pyre Core answers
+ * left-click with a fireball, the Shield Bubble and Fire Blast fill the ability
+ * bar, the Heavy Cannon and the pair of Zombie Blasters work the horde on their
+ * own so the arena is never quiet, and the sawblade rewards driving *through*
+ * a crowd rather than around it. Then the wave ends, the garage opens, and the
+ * player picks the Build they will actually play the run on — so nothing here
+ * has to be balanced against the economy. It is a demo reel with a steering
+ * wheel.
+ *
+ * Underneath it is the Emberframe's four-wheel deck widened by one cell, which
+ * is the smallest platform the two 2x2 pads — the Heavy Cannon's barbette and
+ * the blade — can both sit on the centreline of. Small on purpose: every extra
+ * frame block is mass, and mass is the one thing that makes this rig feel bad.
+ * `vehicleMassPerformanceFactor` taxes drive torque hard above 800 kg, and the
+ * guns alone are most of a tonne, so the deck is frame box rather than
+ * reinforced, the armour plate is left off (the Shield Bubble is the defence
+ * here), and nothing rides on it that is not being demonstrated.
+ *
+ * ```text
+ *  y = 1, the deck                    y = 2, everything it carries
+ *        x: -3 -2 -1  0  1  2               x: -2  -1   0   1
+ *   z=+3:         [SAW ]                z=+1:  [T][PYR][SHD][T]
+ *   z=+2:         [ SAW]                z= 0:  [E][ CANNON  ][E]
+ *   z=+1:      W [ ][ ][ ][ ] W         z=-1:  [E][ (cannon)][E]
+ *   z= 0:        [ ][C][ ][ ]           z=-2:  [E][ E ][ E ][E]
+ *   z=-1:        [ ][ ][ ][ ]
+ *   z=-2:      W [ ][ ][ ][ ] W
+ * ```
+ *
+ * Six engines is not a joke block count, and it is the reason the rig is worth
+ * driving. Torque sums across every engine on the rig while the redline is
+ * whichever single engine revs highest, so a stack of them at max level buys
+ * both halves of "fast": the launch out of a standing start, and a top end 56%
+ * past what a store engine reaches.
+ *
+ * Everything fits on one storey, which is the point of the four-deep deck
+ * rather than a three-deep one with a second floor over the tail. Stacking is
+ * cheaper in frame blocks and dearer in the two things that decide whether a
+ * heavy rig is drivable: it raises the centre of mass, and it does nothing for
+ * the wheelbase. Flat and long gives this one a three-cell wheelbase — half
+ * again the Emberframe's — under a deck low enough that the Heavy Cannon's
+ * recoil shoves it rather than pitching it.
+ *
+ * The blade hangs off the nose at deck level, ahead of the front axle, where it
+ * sweeps the ground the rig is about to drive over.
+ */
+export function firstPlayRig(): PlacedPart[] {
+  return rig([
+    // Deck: four wide (x -2..1) by four deep (z -2..1).
+    ['chassis-core', v(0, 1, 0)],
+    ['frame-box', v(-2, 1, 1)],
+    ['frame-box', v(-1, 1, 1)],
+    ['frame-box', v(0, 1, 1)],
+    ['frame-box', v(1, 1, 1)],
+    ['frame-box', v(-2, 1, 0)],
+    ['frame-box', v(-1, 1, 0)],
+    ['frame-box', v(1, 1, 0)],
+    ['frame-box', v(-2, 1, -1)],
+    ['frame-box', v(-1, 1, -1)],
+    ['frame-box', v(0, 1, -1)],
+    ['frame-box', v(1, 1, -1)],
+    ['frame-box', v(-2, 1, -2)],
+    ['frame-box', v(-1, 1, -2)],
+    ['frame-box', v(0, 1, -2)],
+    ['frame-box', v(1, 1, -2)],
+    // Monster wheels on the off-road preset: the biggest radius in the catalog
+    // (top speed is geared off it), the highest drive-torque limit, and enough
+    // travel and load rating to carry a two-tonne rig over rubble. Axles on the
+    // deck's two end rows, for the longest wheelbase the platform allows.
+    ['wheel-offroad', v(-3, 1, 1), 0, firstPlayWheel()],
+    ['wheel-offroad', v(2, 1, 1), YAW_180, firstPlayWheel()],
+    ['wheel-offroad', v(-3, 1, -2), 0, firstPlayWheel()],
+    ['wheel-offroad', v(2, 1, -2), YAW_180, firstPlayWheel()],
+    // Blade across the nose, mounted back onto the front edge of the deck.
+    ['sawblade', v(-1, 1, 2), 0, { level: FIRST_PLAY_WEAPON_LEVEL }],
+    // Four engines across the tail, two more up the flanks beside the gun.
+    ['engine-small', v(-2, 2, -2), 0, firstPlayEngine()],
+    ['engine-small', v(-1, 2, -2), 0, firstPlayEngine()],
+    ['engine-small', v(0, 2, -2), 0, firstPlayEngine()],
+    ['engine-small', v(1, 2, -2), 0, firstPlayEngine()],
+    ['engine-small', v(-2, 2, -1), 0, firstPlayEngine()],
+    ['engine-small', v(1, 2, -1), 0, firstPlayEngine()],
+    // Tanks amidships, walled in by an engine behind and a blaster in front.
+    ['fuel-tank', v(-2, 2, 0), 0, { level: FIRST_PLAY_KIT_LEVEL }],
+    ['fuel-tank', v(1, 2, 0), 0, { level: FIRST_PLAY_KIT_LEVEL }],
+    // The barbette sits over the core, where the deck is stiffest and the
+    // recoil shove lands on the rig's centre instead of twisting it.
+    ['cannon-heavy', v(-1, 2, -1), 0, { level: FIRST_PLAY_WEAPON_LEVEL }],
+    // Blasters on the shoulders, where their 360-degree arc clears the deck.
+    ['turret', v(-2, 2, 1), 0, { level: FIRST_PLAY_WEAPON_LEVEL }],
+    ['turret', v(1, 2, 1), 0, { level: FIRST_PLAY_WEAPON_LEVEL }],
+    // Both taught blocks ride the front rank, side by side: the one the coach
+    // asks the player to click, and the one it asks them to press a key for.
+    //
+    // The ability slots are pinned rather than left to `resolveAbilityLoadout`
+    // to fill, because the coach names a key out loud — "press Q" has to be
+    // true for the block the card is talking about, whatever order the loadout
+    // resolver would otherwise have walked the rig in.
+    [
+      'pyre-core',
+      v(-1, 2, 1),
+      0,
+      { level: FIRST_PLAY_KIT_LEVEL, abilitySlot: 1 },
+    ],
+    [
+      'shield-generator',
+      v(0, 2, 1),
+      0,
+      { level: FIRST_PLAY_KIT_LEVEL, abilitySlot: 0 },
+    ],
+  ]);
+}
+
+/** The First Play rig as a blueprint, fresh parts every call. */
+export function buildFirstPlayBlueprint(): VehicleBlueprint {
+  return { ...createEmptyBlueprint('first-play-rig'), parts: firstPlayRig() };
+}
+
 /**
  * The bare chassis every alternative mode starts on: a three-by-three deck,
  * four plain wheels, one engine, one fuel tank. Nothing else.
