@@ -17,3 +17,14 @@ zombie-motorworks/*.mjs
 !zombie-motorworks/scripts/*.mjs
 zombie-motorworks/necromancer.html
 zombie-motorworks/portrait.html
+
+# A .vercelignore replaces .gitignore rather than adding to them, so every
+# local-only working directory has to be named here too. Left out, the trailer
+# renders alone are 833 MB and the upload times out before the build starts.
+zombie-motorworks/trailer/
+zombie-motorworks/release/
+zombie-motorworks/art-src/
+zombie-motorworks/.mobile-shots/
+zombie-motorworks/.mob/
+zombie-motorworks/dist/
+zombie-motorworks/*.zip
