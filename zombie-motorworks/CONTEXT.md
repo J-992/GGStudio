@@ -146,21 +146,43 @@ helpers. `core` stays engine- and browser-independent.
 | `src/chamber/`  | Disposable test-drive world, scenarios, chamber HUD/camera                                                                                                                                         | Persistent blueprint mutation                             |
 | `src/survival/` | Biome arenas and recipes, waves, zombie pool/AI, specialists, mines, auto-aim, minimap, combat HUD, alert stack and damage vignette, victory/game-over presentation                                | Browser persistence and profile ownership                 |
 | `src/vfx/`      | Pooled voxel particle layers and every effect emitter (melee shred, gibs, muzzles, impacts, fire, explosions), plus the shot-to-effect mapping                                                     | Gameplay state, damage, or anything a mode must read back |
-| `src/app/`      | Boot, renderer, title/mode lifecycle, CrazyGames SDK boundary, active Blueprint, Profile, command history, Run Checkpoint, storage Adapters, debug Seam                                            | Duplicated physics or balance formulas                    |
+| `src/app/`      | Boot, renderer, title/mode lifecycle, portal SDK boundary, active Blueprint, Profile, command history, Run Checkpoint, storage Adapters, debug Seam                                                | Duplicated physics or balance formulas                    |
 | `src/ui/`       | Shared DOM primitives and the UI museum                                                                                                                                                            | Gameplay state                                            |
 
 ## Lifecycle Contracts
 
-### CrazyGames Platform
+### Portal Platform
 
-- Boot starts CrazyGames SDK v3 initialization before loading the main game
-  Modules. A short boot watchdog keeps a blocked CDN from preventing play, while
-  the live initialization remains retryable for later lifecycle and score calls.
-- `App` reports Garage, Test Chamber, Survival countdown, and active waves as
-  gameplay. Title, Survival settings, wave-clear cards, and game over are
-  gameplay breaks. Browser focus/visibility is left to the platform SDK.
-- CrazyGames' platform mute is a transient mix override. It never rewrites the
-  player's persistent SFX or music volume.
+- The game ships to more than one web-game portal. `src/app/platform.ts` is the
+  only Module that knows which; everything else calls its neutral verbs.
+  `VITE_PLATFORM` selects the target at build time (`crazygames` — the default —
+  `poki`, or `none`), because each portal hosts its own copy of the build and
+  two ad SDKs cannot share a page.
+- Boot starts portal SDK initialization before loading the main game Modules. A
+  short boot watchdog keeps a blocked CDN from preventing play, while the live
+  initialization remains retryable for later lifecycle, score, and ad calls.
+- Gameplay means an unpaused playable encounter and nothing else: Survival
+  countdown and active waves, plus the Test Chamber's drive. Title, **Garage**,
+  Survival settings, wave-clear cards, and game over are all gameplay breaks.
+  The Garage is a break despite being interactive — it is a store and a parts
+  grid between levels, and portals class that as a menu. Browser focus and
+  visibility are left to the portal SDK.
+- The same state is never reported twice in succession; the boundary Modules
+  dedupe, and no event at all is emitted while an ad is on screen.
+- Platform mute is a transient mix override — CrazyGames' persistent setting and
+  Poki's ad break both arrive on it. It never rewrites the player's persistent
+  SFX or music volume.
+- Ads run **into** gameplay, never out of it. `App.breakBeforeGameplay` has
+  exactly two callers, both transitions the player made to go and play: the
+  Garage's deploy button, and leaving the Survival pause menu. The screen being
+  left stays up for the length of the break, so the wave is never simulating
+  underneath an ad. Offering one on the way out — into the Garage, the title, or
+  a result card — is what a portal review rejects.
+- The game keeps no ad timer of its own. Frequency is the portal's to manage, so
+  every legal break is offered and the portal decides whether to fill it.
+- A portal that lacks a capability resolves false rather than throwing. Poki has
+  no score submission and CrazyGames has no ad break wired up, and both cases
+  take the same path a blocked SDK already takes.
 
 ### Garage and Test Chamber
 
@@ -328,7 +350,9 @@ the task crosses their Interface.
 | Garage Tour (tutorial)             | `src/core/tutorial.ts`                       | `editor/TutorialOverlay.ts`, `EditorMode.ts`, `ui.ts`, `style.css`      | none — verified by playing the tour                                                                             |
 | First Play (first-wave tutorial)   | `src/core/firstPlay.ts`                      | `survival/FirstPlayCoach.ts`, `survival/FirstPlayVictory.ts`, `SurvivalMode.ts`, `core/builds.ts`, `WaveManager.ts`, `app/App.ts` | `unit/first-play.test.ts`                        |
 | Title/resume flow                  | `src/app/TitleScreen.ts`                     | `App.ts`, `runSaveStore.ts`                                             | `tests/title.spec.ts`, `unit/app.test.ts`                                                                       |
-| CrazyGames SDK/lifecycle           | `src/app/crazyGamesSdk.ts`                   | `main.ts`, `App.ts`, `SurvivalMode.ts`, `sfx.ts`                        | `unit/crazygames-sdk.test.ts`, `unit/audio-volume.test.ts`                                                      |
+| Portal selection/lifecycle         | `src/app/platform.ts`                        | `main.ts`, `App.ts`, `SurvivalMode.ts`, `sfx.ts`                        | `unit/platform.test.ts`                                                                                         |
+| CrazyGames SDK                     | `src/app/crazyGamesSdk.ts`                   | `platform.ts`                                                           | `unit/crazygames-sdk.test.ts`, `unit/audio-volume.test.ts`                                                      |
+| Poki SDK (ads, happy time)         | `src/app/pokiSdk.ts`                         | `platform.ts`, `vite-plugins/platformSdk.ts`                            | `unit/poki-sdk.test.ts`                                                                                         |
 | Debug/browser Seam                 | `src/app/App.ts` (`installDebugSeam`)        | `tests/seam.ts`                                                         | the affected Playwright spec                                                                                    |
 
 ## Documentation Update Rule

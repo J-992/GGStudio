@@ -59,7 +59,8 @@ cross-mode ordering and browser persistence stay in `app`.
 | `src/survival/WaveManager.ts`  | Pure wave formulas plus spawn scheduling             | composition/multiplier helpers, `WaveManager`                                |
 | `src/survival/waveBalance.ts`  | Readable/reportable view of wave math                | reports, composition labels, threat warnings                                 |
 | `src/survival/zombies/`        | Pool, AI, specialist behavior, projectiles, mines    | `ZombieSystem` and specialist Modules                                        |
-| `src/app/App.ts`               | Composition root and lifecycle owner                 | mode transitions, Run Checkpoint, CrazyGames gameplay state, debug Seam      |
+| `src/app/App.ts`               | Composition root and lifecycle owner                 | mode transitions, Run Checkpoint, portal gameplay state, ad breaks, debug Seam |
+| `src/app/platform.ts`          | Portal boundary; picks the SDK from `VITE_PLATFORM`  | loading/gameplay/score/ad verbs, `activePlatformId`                          |
 | `src/app/profileStore.ts`      | Profile storage Adapter                              | `ProfileStore`                                                               |
 | `src/app/runSaveStore.ts`      | Run storage Adapter                                  | `RunSaveStore`                                                               |
 

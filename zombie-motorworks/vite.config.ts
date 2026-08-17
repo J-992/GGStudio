@@ -3,6 +3,7 @@ import path from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 
 import { assetManifest } from './vite-plugins/assetManifest.ts';
+import { platformSdk } from './vite-plugins/platformSdk.ts';
 import { rapierWasm, rapierWasmAssertion } from './vite-plugins/rapierWasm.ts';
 
 /**
@@ -40,6 +41,7 @@ export default defineConfig({
     rapierWasm(),
     rapierWasmAssertion(),
     assetManifest(),
+    platformSdk(),
     artSourceDir(),
   ],
   build: {

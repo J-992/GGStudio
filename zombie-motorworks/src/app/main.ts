@@ -35,9 +35,9 @@ async function boot(): Promise<void> {
   // no-op handler on it now. The real error still surfaces at the await.
   physicsReady.catch(() => undefined);
 
-  const sdk = await import('./crazyGamesSdk.ts');
-  const sdkReadyAtBoot = await sdk.initCrazyGamesForBoot();
-  if (sdkReadyAtBoot) await sdk.startCrazyGamesLoading();
+  const platform = await import('./platform.ts');
+  const sdkReadyAtBoot = await platform.initPlatformForBoot();
+  if (sdkReadyAtBoot) await platform.startPlatformLoading();
   reportBootStage('platformReady');
 
   let app: import('./App.ts').App;
@@ -47,14 +47,14 @@ async function boot(): Promise<void> {
       import('./sfx.ts'),
     ]);
     reportBootStage('modulesReady');
-    sdk.subscribeCrazyGamesAudioMute(setPlatformAudioMuted);
+    platform.subscribePlatformAudioMute(setPlatformAudioMuted);
     app = new App(el);
     await app.start(physicsReady);
   } finally {
     // The splash comes down even when boot threw: a stuck splash would hide
     // whatever the failure put on screen.
     dismissBootSplash();
-    if (sdkReadyAtBoot) await sdk.stopCrazyGamesLoading();
+    if (sdkReadyAtBoot) await platform.stopPlatformLoading();
   }
 
   // Read every parameter before rewriting the URL below, so stripping the

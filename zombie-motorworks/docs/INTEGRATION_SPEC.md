@@ -16,26 +16,51 @@ routing, `ARCHITECTURE.md` for design rationale, and
 | Saved-run compatibility    | `src/core/runSave.ts`, `src/app/runSaveStore.ts`                      | `unit/run-save.test.ts`                                                                |
 | Wave composition/tuning    | `src/survival/WaveManager.ts`, `src/survival/zombies/zombieConfig.ts` | `unit/waves.test.ts`, `unit/zombie-balance.test.ts`       |
 | Survival phase behavior    | `src/survival/SurvivalMode.ts`                                        | `tests/runloop.spec.ts`, `tests/failure.spec.ts`, `tests/combat.spec.ts`               |
-| CrazyGames platform state  | `src/app/crazyGamesSdk.ts`                                            | `unit/crazygames-sdk.test.ts`, `unit/audio-volume.test.ts`                             |
+| Portal platform state      | `src/app/platform.ts`                                                 | `unit/platform.test.ts`, `unit/crazygames-sdk.test.ts`, `unit/poki-sdk.test.ts`        |
 | Browser verification Seam  | `src/app/App.ts` (`debugSeam`), `tests/seam.ts`                       | affected Playwright specs                                                              |
 
-## CrazyGames Platform Contract
+## Portal Platform Contract
 
-`main.ts` begins SDK v3 initialization before importing the application. A
+`src/app/platform.ts` is the sole authority on which portal a build targets and
+the only platform Interface the rest of the game may call. `VITE_PLATFORM`
+selects the adapter at build time — `crazygames` (default), `poki`, or `none` —
+and `src/app/crazyGamesSdk.ts` and `src/app/pokiSdk.ts` are private to it.
+
+`main.ts` begins SDK initialization before importing the application. A
 three-second boot watchdog prevents a slow or unavailable CDN from blocking the
 game, but does not cancel the underlying attempt. Failed initialization is
-released after a cooldown so later gameplay or score calls can retry.
+released after a cooldown so later gameplay, score, or ad calls can retry.
 
 - Loading events bracket application Module loading only when the SDK became
   ready during boot.
 - App owns gameplay reporting for Title, Garage, and Test Chamber. Survival
   reports its phase/settings changes through `onGameplayActiveChanged`.
-- Gameplay starts for Garage, Test Chamber, countdown, and active waves. It
-  stops for Title, Survival settings, cleared-wave cards, and game over.
-- Focus, blur, and visibility changes are not forwarded; CrazyGames owns them.
-- `game.settings.muteAudio` overrides the live SFX/music mix without changing
-  stored player volumes.
-- The disabled environment and every SDK/network failure are non-fatal.
+- Gameplay covers only an unpaused playable encounter: Survival countdown and
+  active waves, and the Test Chamber drive. It stops for Title, Garage,
+  Survival settings, cleared-wave cards, and game over. The Garage counts as a
+  break: it is a between-levels store and parts grid, and a portal review reads
+  a run whose gameplay never stopped at a wave end as a broken integration.
+- The same state is never reported twice in succession, and no event of any
+  kind is emitted while an ad is on screen. A state change requested mid-ad is
+  held and flushed when the break resolves, then deduped as usual.
+- Focus, blur, and visibility changes are not forwarded; the portal owns them.
+- The platform mute channel overrides the live SFX/music mix without changing
+  stored player volumes. CrazyGames drives it from `game.settings.muteAudio`;
+  Poki drives it from the ad break, muting on the SDK's pre-ad callback and
+  clearing it when the break resolves — including when the break failed.
+- `App.breakBeforeGameplay` is the only caller of the ad Interface, and it runs
+  only on a transition **into** gameplay: the Garage's deploy button
+  (`startOrResumeRun`) and leaving the Survival pause (`onResumeFromPause`).
+  Offering a break on the way out of gameplay is a review failure, so no other
+  caller may be added. The departing screen stays up until the break resolves,
+  and the transition is abandoned if its owner was torn down meanwhile.
+  Concurrent offers collapse into the one break, and the game holds no ad timer
+  of its own — frequency belongs to the portal.
+- A capability a portal does not have resolves false and changes nothing:
+  Poki has no `submitScore`, CrazyGames has no `commercialBreak` or `happyTime`.
+- Every SDK/network failure is non-fatal, including CrazyGames' disabled
+  environment and a Poki `init()` rejected by an ad blocker — the latter leaves
+  the SDK marked available, because its methods stay callable and simply no-op.
 
 ## Blueprint Contract
 

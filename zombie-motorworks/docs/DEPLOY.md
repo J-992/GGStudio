@@ -34,6 +34,54 @@ Do **not** set `VITE_CRAZYGAMES_ENCRYPTION_KEY` on this project. Without it the
 game falls back to its local leaderboard, which is the right behaviour outside
 the CrazyGames frame; that key belongs only to the build submitted to them.
 
+Leaving `VITE_PLATFORM` unset here is fine but not ideal — see the next section.
+Setting it to `none` is better: the playtest link then loads no portal SDK at
+all, which is what a tester on a bare URL should get.
+
+## Portal builds
+
+The same source ships to more than one portal. `VITE_PLATFORM` decides which SDK
+a build talks to, and it is read in two places that must agree —
+`src/app/platform.ts` for the runtime calls and `vite-plugins/platformSdk.ts`
+for the tag in `index.html`. Both read the same variable, so there is one thing
+to set:
+
+| `VITE_PLATFORM` | SDK loaded    | Ads | Leaderboard submission |
+| --------------- | ------------- | --- | ---------------------- |
+| unset           | CrazyGames v3 | no  | yes, with the key set  |
+| `crazygames`    | CrazyGames v3 | no  | yes, with the key set  |
+| `poki`          | Poki v2       | yes | no — Poki has no API   |
+| `none`          | none          | no  | no                     |
+
+Unset behaves as `crazygames` so nothing about the existing build changed when
+Poki was added.
+
+### Building for Poki
+
+```sh
+VITE_PLATFORM=poki npm run build
+```
+
+Then upload `dist/` to Poki. Points worth knowing before their review:
+
+- The Poki loader is injected into the head of `dist/index.html` from their CDN,
+  which is where their checklist wants it. It is absent from every other build,
+  so a CrazyGames or Vercel build never contacts Poki.
+- `PokiSDK.setDebug(true)` is on **only** in a dev server (`import.meta.env.DEV`),
+  so their test ads appear while developing and never in an uploaded build. Run
+  `npm run dev` with `VITE_PLATFORM=poki` to see an ad break actually fire.
+- Ads play on the way **into** gameplay only — pressing deploy in the Garage,
+  and closing the Survival pause menu — which is the direction Poki's checklist
+  requires. The departing screen stays up for the ad, so nothing simulates
+  underneath it. Poki decides whether an ad actually runs, so a break often
+  returns having shown nothing; the game keeps no ad timer of its own.
+- An ad blocker makes `PokiSDK.init()` reject. That is expected and handled: the
+  game continues and lifecycle calls keep going to the SDK's no-op stubs.
+
+A Poki build still carries the local leaderboard, which is what players see on
+every platform. `VITE_CRAZYGAMES_ENCRYPTION_KEY` is meaningless here and should
+be left unset.
+
 ## What Vercel actually runs
 
 From the repo root: `npm run install:game`, then `npm run build`. Both delegate

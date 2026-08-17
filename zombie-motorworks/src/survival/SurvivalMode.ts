@@ -442,6 +442,15 @@ export interface SurvivalCallbacks {
   onSaveAndQuit(snapshot: { wave: number; kills: number; score: number }): void;
   /** True only while this mode is an unpaused playable encounter. */
   onGameplayActiveChanged?(active: boolean): void;
+  /**
+   * The player asked to leave the pause menu and go back to the wave.
+   *
+   * Resolve when the wave may actually resume. App uses the gap to let the
+   * portal run an interstitial — the one moment its rules allow — so the pause
+   * stays up until this settles. Absent, or resolved immediately, the pause
+   * simply closes.
+   */
+  onResumeFromPause?(): Promise<void>;
 }
 
 export interface WaveClearPayload {
@@ -1031,6 +1040,8 @@ export class SurvivalMode {
     survivingPartIds: string[];
     partHp: Record<string, number>;
   } | null = null;
+  /** An ad is holding the pause open on its way back into the wave. */
+  private resumeInFlight = false;
   /** HUD state the prompt was last built from, so a steady HUD costs nothing. */
   private selfDestructHudArmed = false;
   private selfDestructHudReachM = -1;
@@ -1038,7 +1049,8 @@ export class SurvivalMode {
   private readonly keydown = (event: KeyboardEvent): void => {
     this.unlockAudioFromInput();
     if (event.key === 'Escape' && this.phase !== 'gameOver') {
-      this.setSettingsOpen(!this.settingsOpen);
+      if (this.settingsOpen) this.requestResume();
+      else this.setSettingsOpen(true);
       event.preventDefault();
       return;
     }
@@ -1813,9 +1825,7 @@ export class SurvivalMode {
     closeSettingsButton.type = 'button';
     closeSettingsButton.className = 'ui-button ui-button--small';
     closeSettingsButton.textContent = 'Close';
-    closeSettingsButton.addEventListener('click', () =>
-      this.setSettingsOpen(false),
-    );
+    closeSettingsButton.addEventListener('click', () => this.requestResume());
     settingsHeader.append(settingsHeading, closeSettingsButton);
 
     const audioControls = document.createElement('div');
@@ -1947,7 +1957,7 @@ export class SurvivalMode {
     );
     settingsOverlay.appendChild(settingsPanel);
     settingsOverlay.addEventListener('pointerdown', (event) => {
-      if (event.target === settingsOverlay) this.setSettingsOpen(false);
+      if (event.target === settingsOverlay) this.requestResume();
     });
     root.appendChild(settingsOverlay);
 
@@ -1999,6 +2009,30 @@ export class SurvivalMode {
       skipWaveInput,
       settingsStatus,
     };
+  }
+
+  /**
+   * Leave the pause menu, giving the platform its one legal ad slot first.
+   *
+   * The pause stays on screen for the length of the break, so the wave is
+   * still frozen behind it and no input can reach the arena. Re-entrant calls
+   * — a second Escape, a click on the overlay — are dropped rather than
+   * queueing a second ad behind the first.
+   */
+  private requestResume(): void {
+    if (this.disposed || this.resumeInFlight) return;
+    const resumed = this.callbacks.onResumeFromPause?.();
+    if (resumed === undefined) {
+      this.setSettingsOpen(false);
+      return;
+    }
+    this.resumeInFlight = true;
+    void resumed.finally(() => {
+      this.resumeInFlight = false;
+      // The run can end or be torn down while an ad is up; only an encounter
+      // that is still live has a pause left to close.
+      if (!this.disposed) this.setSettingsOpen(false);
+    });
   }
 
   private setSettingsOpen(open: boolean): void {

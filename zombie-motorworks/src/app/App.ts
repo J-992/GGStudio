@@ -83,11 +83,14 @@ import type { SavedRun } from '../core/runSave.ts';
 import { randomSeed } from '../core/rng.ts';
 import { DEFAULT_BIOME_ID } from '../survival/arena/recipes/index.ts';
 import { isDevMode, waveJumpTarget } from '../survival/devtuning/devMode.ts';
-import {
-  setCrazyGamesGameplayActive,
-  submitCrazyGamesScore,
-} from './crazyGamesSdk.ts';
 import { leaderboardStore } from './leaderboardStore.ts';
+import {
+  platformHasAds,
+  reportPlatformHappyTime,
+  requestPlatformCommercialBreak,
+  setPlatformGameplayActive,
+  submitPlatformScore,
+} from './platform.ts';
 import { PROFILE_STORAGE_KEY, profileStore } from './profileStore.ts';
 import { runSaveStore } from './runSaveStore.ts';
 import { TitleScreen } from './TitleScreen.ts';
@@ -731,7 +734,7 @@ export class App {
       this.renderer,
       this.bp,
       (bp) => this.enterChamber(bp),
-      (bp) => this.startOrResumeRun(bp),
+      (bp) => void this.startOrResumeRun(bp),
       {
         history: this.history,
         view: this.savedView,
@@ -764,12 +767,17 @@ export class App {
     this.pendingIsNewGame = false;
     this.editor.resize(this.root.clientWidth, this.root.clientHeight);
     startGarageMusic();
-    setCrazyGamesGameplayActive(true);
+    // Not gameplay. The Garage is where a run is planned rather than played —
+    // a store, an inventory, and a parts grid — and portals class a menu
+    // between levels as a gameplay break however much time is spent in it.
+    // Reporting it as play would also mean gameplay never stopped at a wave
+    // end, which is the first thing a platform integration review checks.
+    setPlatformGameplayActive(false);
   }
 
   private showTitle(hasSave = this.hasStoredSave()): void {
     if (this.activeRun && this.inBuildPhase) return;
-    setCrazyGamesGameplayActive(false);
+    setPlatformGameplayActive(false);
     stopGarageMusic();
     this.disposeTitle();
     this.title = new TitleScreen(
@@ -1146,7 +1154,7 @@ export class App {
       this.openEditor(),
     );
     this.chamber.resize(this.root.clientWidth, this.root.clientHeight);
-    setCrazyGamesGameplayActive(true);
+    setPlatformGameplayActive(true);
   }
 
   /**
@@ -1185,7 +1193,18 @@ export class App {
     return true;
   }
 
-  private startOrResumeRun(bp: VehicleBlueprint): void {
+  /**
+   * The Garage's deploy button: the one transition from a menu into a live
+   * wave, and so the game's natural midroll slot. The ad runs with the Garage
+   * still on screen and the wave is not built until it is over — the player
+   * never watches an ad on top of a world that is already simulating.
+   */
+  private async startOrResumeRun(bp: VehicleBlueprint): Promise<void> {
+    await this.breakBeforeGameplay();
+    // The break is awaited, so the Garage may have been torn down underneath
+    // it — a save-and-quit or a return to the title during the ad. Deploying
+    // into a wave the player has already walked away from would be a bug.
+    if (this.editor === null) return;
     if (this.checkpoint !== null) {
       this.resumeRun(bp);
     } else {
@@ -1235,7 +1254,7 @@ export class App {
   }
 
   private enterSurvival(bp: VehicleBlueprint, run: RunState): void {
-    setCrazyGamesGameplayActive(true);
+    setPlatformGameplayActive(true);
     stopGarageMusic();
     this.editor?.persistGarage();
     this.bp = bp;
@@ -1321,7 +1340,8 @@ export class App {
         this.markProfileDirty();
       },
       onSaveAndQuit: () => this.saveAndQuitRun(),
-      onGameplayActiveChanged: (active) => setCrazyGamesGameplayActive(active),
+      onGameplayActiveChanged: (active) => setPlatformGameplayActive(active),
+      onResumeFromPause: () => this.breakBeforeGameplay(),
       },
     );
     this.survival.resize(this.root.clientWidth, this.root.clientHeight);
@@ -1379,6 +1399,26 @@ export class App {
   }
 
   /**
+   * Hold a transition open while the portal fills it with an interstitial.
+   *
+   * Direction is the whole rule Poki tests against: an ad belongs on the way
+   * **into** gameplay — leaving a pause, leaving the Garage for the next wave —
+   * and never on the way out of it into a menu. So every caller is a screen the
+   * player is deliberately leaving to go and play, and the ad runs with that
+   * screen still up; gameplay is not reported started until it resolves.
+   *
+   * Resolves immediately where there are no ads, which collapses the caller
+   * back into the plain synchronous transition it was before.
+   */
+  private async breakBeforeGameplay(): Promise<void> {
+    if (!platformHasAds()) return;
+    // Nothing here reports gameplay state. The caller is already on a menu, so
+    // the stop has long since fired, and firing anything during the ad itself
+    // is exactly what the portal forbids.
+    await requestPlatformCommercialBreak();
+  }
+
+  /**
    * Record a finished run and wipe the garage back to a fresh start. Survival
    * stays on screen showing the result until the player picks a way out of the
    * game-over card, so the reset is never a surprise.
@@ -1425,8 +1465,12 @@ export class App {
       biomeId: this.checkpoint?.biomeId ?? this.preferredBiomeId,
     });
     // Best effort. The local board is what the game actually displays, so a
-    // failed or absent CrazyGames submission must not change anything here.
-    void submitCrazyGamesScore(score);
+    // failed or absent portal submission must not change anything here.
+    void submitPlatformScore(score);
+    // A personal best is the clearest "the player is enjoying this" the game
+    // has. Portals that collect the signal use it to place the game; the rest
+    // no-op.
+    if (recorded.isPersonalBest) void reportPlatformHappyTime(1);
 
     this.resetProgressionForNewRun();
     return {
@@ -1936,7 +1980,7 @@ export class App {
         if (!bp) return false;
         const v = validateBlueprint(bp, getPartDef);
         if (v.errors.length > 0) return false;
-        this.startOrResumeRun(bp);
+        void this.startOrResumeRun(bp);
         return true;
       },
       backToEditor: () => {
