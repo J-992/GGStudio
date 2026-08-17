@@ -344,6 +344,53 @@ const BUILD_RIGS: Record<BuildId, () => PlacedPart[]> = {
 };
 
 /**
+ * The bare chassis every alternative mode starts on: a three-by-three deck,
+ * four plain wheels, one engine, one fuel tank. Nothing else.
+ *
+ * Deliberately unarmed and deliberately not one of the three Builds. Daily,
+ * Endless and Creative all hand the player a wallet or a crate and ask them to
+ * make something of it, and starting them on a rig that already has a weapon
+ * and a signature ability bolted on would answer half of that question before
+ * they touched anything. Everyone gets the same flat platform, so what they
+ * drive out with is entirely what they chose in the garage.
+ *
+ * ```text
+ *   W [ ][ ][ ] W    front axle, z = +1
+ *     [ ][C][ ]      chassis core on the centre cell
+ *   W [ ][ ][ ] W    rear axle, z = -1
+ * ```
+ *
+ * The layout is the medium Build's deck with its armour and signature block
+ * taken off, so it inherits a wheelbase and a weight balance that are already
+ * known to drive well.
+ */
+export function beginnerRig(): PlacedPart[] {
+  return rig([
+    ['chassis-core', v(0, 1, 0)],
+    // Three by three, core included.
+    ['frame-box', v(1, 1, 0)],
+    ['frame-box', v(-1, 1, 0)],
+    ['frame-box', v(0, 1, 1)],
+    ['frame-box', v(1, 1, 1)],
+    ['frame-box', v(-1, 1, 1)],
+    ['frame-box', v(0, 1, -1)],
+    ['frame-box', v(1, 1, -1)],
+    ['frame-box', v(-1, 1, -1)],
+    ['wheel-standard', v(2, 1, 1), YAW_180, driveWheel()],
+    ['wheel-standard', v(-2, 1, 1), 0, driveWheel()],
+    ['wheel-standard', v(2, 1, -1), YAW_180, driveWheel()],
+    ['wheel-standard', v(-2, 1, -1), 0, driveWheel()],
+    ['engine-small', v(0, 2, -1)],
+    ['fuel-tank', v(0, 2, 1)],
+  ]);
+}
+
+/** The beginner chassis as a blueprint, fresh parts every call. */
+export function buildBeginnerBlueprint(): VehicleBlueprint {
+  return { ...createEmptyBlueprint('beginner-rig'), parts: beginnerRig() };
+}
+
+/**
  * A small, valid, drivable rig for `buildId`, with its signature block already
  * bolted on. Every call returns a fresh blueprint with fresh part objects, so
  * a caller can mutate what it gets back without touching the next one.

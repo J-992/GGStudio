@@ -49,9 +49,9 @@ describe('two-stage store and upgrade preview helpers', () => {
       action: 'buy',
       price: 20,
     });
-    expect(storeOffer('mine-sweeper', [])).toEqual({
+    expect(storeOffer('thumper', [])).toEqual({
       action: 'unlock',
-      price: 98,
+      price: 130,
     });
   });
 

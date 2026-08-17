@@ -31,7 +31,6 @@ const EXPECTED_CATALOG_IDS = [
   'tread-tank',
   'engine-small',
   'fuel-tank',
-  'mine-sweeper',
   'turret',
   'armour-plate',
   'cannon-heavy',
@@ -180,14 +179,19 @@ describe('part catalog integrity', () => {
     );
   });
 
-  it('defines the unique Mine Sweeper outside the starter catalog', () => {
-    expect(PART_CATALOG['mine-sweeper']).toMatchObject({
-      cost: 150,
-      health: 90,
-      massKg: 35,
-      unique: true,
-    });
-    expect(STARTER_UNLOCKS).not.toContain('mine-sweeper');
+  it('gives the Thumper the Pulse Emitter\'s reach on a shorter cooldown', () => {
+    const thumper = PART_CATALOG.thumper.ability!;
+    const pulse = PART_CATALOG['pulse-emitter'].ability!;
+    // The two share the ability slot, so the trade has to be legible: the
+    // Thumper clears the same ground and comes back sooner, and the Pulse
+    // Emitter is the one that actually kills what it catches.
+    expect(thumper.rangeM).toBe(pulse.rangeM);
+    expect(thumper.cooldownSeconds).toBeLessThan(pulse.cooldownSeconds);
+    // Knockback only — a thump never deals damage, at any level.
+    expect(PART_CATALOG.thumper.weapon).toBeUndefined();
+    expect(PART_CATALOG.thumper.ability!.kind).toBe('thump');
+    // Bought off the shelf, never handed out by a wave clear.
+    expect(STARTER_UNLOCKS).not.toContain('thumper');
   });
 });
 

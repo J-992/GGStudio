@@ -15,6 +15,18 @@ import {
   getBiome,
 } from '../survival/arena/recipes/index.ts';
 import type { SavedRun } from '../core/runSave.ts';
+import { GAME_MODES, type GameModeId } from '../core/gameModes.ts';
+import {
+  canPlayDaily,
+  dailyLoadout,
+  dailyStreak,
+  describeDailyLoadout,
+  dayIdFor,
+  formatCountdown,
+  millisUntilRollover,
+  resultForDay,
+  type DailyResult,
+} from '../core/dailyChallenge.ts';
 import { leaderboardRows, type LeaderboardRow } from '../core/leaderboard.ts';
 import {
   createAudioVolumeControl,
@@ -49,6 +61,9 @@ export interface TitleScreenHandlers {
   onResumeRun(): void;
   /** The player picked the map their next run starts on. */
   onBiomeSelected(biomeId: BiomeId): void;
+  onDailyRun(): void;
+  onEndlessRun(): void;
+  onCreativeRun(): void;
 }
 
 const ORBIT_RADIUS_M = 12;
@@ -77,6 +92,115 @@ const SLIDERS_ICON_SVG =
   `<path d="M2 5h20v2H2zM2 11h20v2H2zM2 17h20v2H2z" fill="currentColor"/>` +
   `<path d="M6 3h3v6H6zM14 9h3v6h-3zM9 15h3v6H9z" fill="currentColor"/>` +
   `</svg>`;
+
+/**
+ * One mark per mode, drawn on the same 24-unit grid and chunky-fill convention
+ * as the rail icons above. Each one is the mode's own object rather than an
+ * abstract symbol — the truck you build, the calendar the daily comes from, the
+ * horde that never stops, the wrench that hands you everything — because a menu
+ * of four abstract glyphs is a menu nobody reads.
+ */
+const MODE_ICON_SVG: Record<GameModeId, string> = {
+  // A rig: cab, flatbed and two wheels.
+  campaign:
+    `<svg class="title-mode__glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+    `<path d="M2 9h9v6H2z" fill="currentColor"/>` +
+    `<path d="M13 6h5l4 5v4h-9z" fill="currentColor"/>` +
+    `<circle cx="6" cy="18" r="3" fill="currentColor"/>` +
+    `<circle cx="17" cy="18" r="3" fill="currentColor"/>` +
+    `</svg>`,
+  // A tear-off calendar with today's block punched out.
+  daily:
+    `<svg class="title-mode__glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+    `<path d="M3 5h18v16H3z" fill="none" stroke="currentColor" stroke-width="2"/>` +
+    `<path d="M3 5h18v4H3zM7 2h2v4H7zM15 2h2v4h-2z" fill="currentColor"/>` +
+    `<path d="M8 12h8v6H8z" fill="currentColor"/>` +
+    `</svg>`,
+  // Three shambling figures, the third half-drawn: they keep coming.
+  endless:
+    `<svg class="title-mode__glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+    `<path d="M3 8h4v13H3zM4 2h2v4H4z" fill="currentColor"/>` +
+    `<path d="M10 8h4v13h-4zM11 2h2v4h-2z" fill="currentColor"/>` +
+    `<path d="M17 8h4v13h-4zM18 2h2v4h-2z" fill="currentColor" opacity="0.45"/>` +
+    `</svg>`,
+  // A wrench crossed over a full parts crate.
+  creative:
+    `<svg class="title-mode__glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+    `<path d="M3 13h18v8H3z" fill="none" stroke="currentColor" stroke-width="2"/>` +
+    `<path d="M3 16h18v2H3z" fill="currentColor"/>` +
+    `<path d="M14 2a5 5 0 0 0-4 8l-6 0v3h3l7-7a5 5 0 0 0 0-4z" fill="currentColor"/>` +
+    `</svg>`,
+};
+
+/** Double chevron on the launch edge of every mode plate. */
+const CHEVRON_ICON_SVG =
+  `<svg class="title-mode__chevron-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+  `<path d="M4 4l8 8-8 8V4zM13 4l8 8-8 8V4z" fill="currentColor"/>` +
+  `</svg>`;
+
+/** Where a mode card's callout sits in the visual pecking order. */
+type ModeBadgeTone = 'signal' | 'bone' | 'danger';
+
+interface ModeCardView {
+  id: GameModeId;
+  /** Short callout chip: "START HERE", "6h LEFT", "3 DAY STREAK". */
+  badge: string | null;
+  badgeTone: ModeBadgeTone;
+  /** Replaces the mode's stock tagline when there is something truer to say. */
+  note: string | null;
+  disabled: boolean;
+}
+
+/**
+ * What each mode card says right now.
+ *
+ * Every line here is derived from the player's actual state rather than fixed
+ * copy, because the badge is the whole point of the row: a first-timer needs to
+ * be told where to press, a returning player needs to see their streak is
+ * alive,
+ * and someone who already ran today needs to know the door is shut until
+ * midnight. Pure, and clock-injected, so the countdown can be tested.
+ */
+export function modeCardViews(
+  dailyResults: readonly DailyResult[],
+  hasPlayedBefore: boolean,
+  now: number = Date.now(),
+): ModeCardView[] {
+  const dailyOpen = canPlayDaily(dailyResults, now);
+  const streak = dailyStreak(dailyResults, now);
+  const todaysResult = resultForDay(dailyResults, dayIdFor(now));
+
+  return [
+    {
+      id: 'campaign',
+      // The one instruction a brand-new player gets, and only they get it.
+      badge: hasPlayedBefore ? null : 'START HERE',
+      badgeTone: 'signal',
+      note: null,
+      disabled: false,
+    },
+    {
+      id: 'daily',
+      badge: dailyOpen
+        ? streak > 0
+          ? `${streak} DAY STREAK`
+          : `${formatCountdown(millisUntilRollover(now))} LEFT`
+        : 'PLAYED TODAY',
+      badgeTone: dailyOpen ? 'bone' : 'danger',
+      // Open days advertise the day's own rules, because that is the thing
+      // that changed since yesterday and the only reason to look at the card
+      // twice. A spent day reports the damage instead.
+      note: dailyOpen
+        ? describeDailyLoadout(dailyLoadout(dayIdFor(now)))
+        : `Reached wave ${todaysResult?.wave ?? 1}. Next run in ${formatCountdown(
+            millisUntilRollover(now),
+          )}.`,
+      disabled: !dailyOpen,
+    },
+    { id: 'endless', badge: null, badgeTone: 'signal', note: null, disabled: false },
+    { id: 'creative', badge: null, badgeTone: 'signal', note: null, disabled: false },
+  ];
+}
 
 /** Fixed so the backdrop of a given map looks the same on every boot. */
 const BACKDROP_SEED = 0x47524156;
@@ -290,6 +414,13 @@ export class TitleScreen {
   private readonly mapPanel = document.createElement('div');
   private readonly resumeButton = document.createElement('button');
   private readonly newGameButton = document.createElement('button');
+  private readonly modeList = document.createElement('div');
+  /** One card per mode, so the daily's countdown can be re-rendered in place. */
+  private readonly modeCards = new Map<GameModeId, HTMLButtonElement>();
+  /** Ticks the daily countdown while the title is up. */
+  private countdownTimer: number | undefined;
+  /** Whether this player has a run or garage to come back to. */
+  private hasResume = false;
   private readonly startRunButton = document.createElement('button');
   private readonly backButton = document.createElement('button');
   private readonly leaderboardButton = document.createElement('button');
@@ -495,6 +626,7 @@ export class TitleScreen {
     private readonly handlers: TitleScreenHandlers,
     private readonly savedRun: SavedRun | null = null,
     private selectedBiomeId: BiomeId = DEFAULT_BIOME_ID,
+    private readonly dailyResults: readonly DailyResult[] = [],
   ) {
     this.root.className = 'title-screen';
     this.root.setAttribute('aria-labelledby', 'game-title');
@@ -517,21 +649,24 @@ export class TitleScreen {
     actions.className = 'title-actions';
 
     // One resume button covers both saves: a run in flight resumes at its
-    // wave, and a garage-only save resumes at wave 1.
+    // wave, and a garage-only save resumes at wave 1. It sits above the mode
+    // list rather than in it: picking up where you left off is not a fifth
+    // choice between rule sets, it is the answer to "what was I doing?".
     const canResume = savedRun !== null || hasSave;
     this.resumeButton.type = 'button';
-    this.resumeButton.className = 'primary title-action';
-    this.resumeButton.textContent = `Resume Run — Wave ${savedRun?.wave ?? 1}`;
+    this.resumeButton.className = 'primary title-action title-resume';
+    this.resumeButton.innerHTML =
+      `<span class="title-resume__label">Resume Run</span>` +
+      `<span class="title-resume__wave">Wave ${savedRun?.wave ?? 1}</span>`;
     this.resumeButton.hidden = !canResume;
     this.resumeButton.disabled = !canResume;
+    actions.appendChild(this.resumeButton);
 
+    this.modeList.className = 'title-modes';
     this.newGameButton.type = 'button';
-    this.newGameButton.className = canResume
-      ? 'title-action'
-      : 'primary title-action';
-    this.newGameButton.textContent = 'New Game';
-
-    actions.append(this.resumeButton, this.newGameButton);
+    this.hasResume = canResume;
+    this.buildModeCards(canResume);
+    actions.appendChild(this.modeList);
 
     // Leaderboard, badges and settings are secondary: they live as icons in
     // the corner rail so the panel keeps a single column of run actions.
@@ -743,6 +878,97 @@ export class TitleScreen {
 
     this.orbitCenter = parkPosition.clone().add(new THREE.Vector3(0, 0.8, 0));
     this.updateCamera(0);
+
+    // Once a minute is enough for a countdown quoted in hours and minutes, and
+    // it means a title screen left open overnight rolls over to the new day's
+    // challenge on its own instead of showing a stale "PLAYED TODAY".
+    this.countdownTimer = window.setInterval(() => this.syncModeCards(), 30_000);
+  }
+
+  /**
+   * The four mode cards.
+   *
+   * Each is one button carrying its own icon, name, one-line pitch and callout
+   * chip, rather than a stack of identical text buttons. A player scanning this
+   * screen for two seconds should be able to tell the modes apart by shape
+   * alone, and be told in a chip which one to press first.
+   */
+  private buildModeCards(canResume: boolean): void {
+    for (const view of modeCardViews(this.dailyResults, canResume)) {
+      const mode = GAME_MODES[view.id];
+      const card =
+        view.id === 'campaign' ? this.newGameButton : document.createElement('button');
+      card.type = 'button';
+      card.className = `title-mode title-mode--${mode.id}`;
+
+      // Same anatomy as the garage's Fight button: a sheen sweeping the plate,
+      // an icon that moves, the label, and a chevron that says "this launches
+      // something". Everything except the name and the badge is aria-hidden, so
+      // the button still announces just its mode.
+      const sheen = document.createElement('span');
+      sheen.className = 'title-mode__sheen';
+      sheen.setAttribute('aria-hidden', 'true');
+
+      const icon = document.createElement('span');
+      icon.className = 'title-mode__icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.innerHTML = MODE_ICON_SVG[mode.id];
+
+      const copy = document.createElement('span');
+      copy.className = 'title-mode__copy';
+      const name = document.createElement('span');
+      name.className = 'title-mode__name';
+      name.textContent = mode.name;
+      const tagline = document.createElement('span');
+      tagline.className = 'title-mode__tagline';
+      copy.append(name, tagline);
+
+      const badge = document.createElement('span');
+      badge.className = 'title-mode__badge';
+
+      const chevron = document.createElement('span');
+      chevron.className = 'title-mode__chevron';
+      chevron.setAttribute('aria-hidden', 'true');
+      chevron.innerHTML = CHEVRON_ICON_SVG;
+
+      card.append(sheen, icon, copy, badge, chevron);
+      this.modeCards.set(mode.id, card);
+      this.modeList.appendChild(card);
+      this.listen(card, 'click', () => this.startMode(mode.id));
+    }
+    this.syncModeCards();
+  }
+
+  /** Re-render the parts of the cards that depend on the clock. */
+  private syncModeCards(): void {
+    if (this.disposed) return;
+    const views = modeCardViews(this.dailyResults, this.hasResume);
+    for (const view of views) {
+      const card = this.modeCards.get(view.id);
+      if (card === undefined) continue;
+      const mode = GAME_MODES[view.id];
+      const tagline = card.querySelector('.title-mode__tagline');
+      const badge = card.querySelector('.title-mode__badge');
+      if (tagline !== null) tagline.textContent = view.note ?? mode.tagline;
+      if (badge instanceof HTMLElement) {
+        badge.textContent = view.badge ?? '';
+        badge.hidden = view.badge === null;
+        badge.dataset.tone = view.badgeTone;
+      }
+      card.disabled = view.disabled;
+      card.classList.toggle('title-mode--spent', view.disabled);
+    }
+  }
+
+  private startMode(modeId: GameModeId): void {
+    if (this.disposed) return;
+    if (modeId === 'campaign') {
+      this.requestNewGame();
+      return;
+    }
+    if (modeId === 'daily') this.handlers.onDailyRun();
+    if (modeId === 'endless') this.handlers.onEndlessRun();
+    if (modeId === 'creative') this.handlers.onCreativeRun();
   }
 
   /** Registers a listener whose removal `dispose` takes care of. */
@@ -967,6 +1193,10 @@ export class TitleScreen {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.countdownTimer !== undefined) {
+      window.clearInterval(this.countdownTimer);
+      this.countdownTimer = undefined;
+    }
     for (const remove of this.listenerRemovers) remove();
     this.listenerRemovers.length = 0;
     this.root.remove();

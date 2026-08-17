@@ -406,22 +406,6 @@ export const PART_CATALOG: Record<string, PartDefinition> = {
     reinforcement: 1,
     fuelCapacity: 50,
   },
-  'mine-sweeper': {
-    id: 'mine-sweeper',
-    name: 'Mine Sweeper',
-    category: 'functional',
-    description: 'Reveals nearby buried mines.',
-    cells: oneCell,
-    clearanceCells: [],
-    sockets: frameSockets(oneCell),
-    massKg: 35,
-    health: 90,
-    cost: 150,
-    upgrade: upgrade(100),
-    unlockCost: unlock(150),
-    reinforcement: 1,
-    unique: true,
-  },
   turret: {
     id: 'turret',
     name: 'Turret',
@@ -968,17 +952,19 @@ export const PART_CATALOG: Record<string, PartDefinition> = {
     name: 'Thumper',
     category: 'weapon',
     description:
-      'Ground-pound slammer. Press Q to blast a shockwave outward that knocks ' +
-      'every zombie in a moderate circle away from you (12s cooldown); upgrades ' +
-      'crank up the knockback so they get flung harder and farther.',
+      'Opposed-ram slammer. Press Q to fire both pistons into the ground and ' +
+      'blast a shockwave outward that launches every zombie in a wide circle ' +
+      'clear off their feet (9s cooldown); upgrades widen the ring and fling ' +
+      'them harder and farther.',
     cells: oneCell,
     clearanceCells: [v(0, 1, 0)],
     sockets: [singleSocket('hardpoint-ny', 'frame', ORIGIN, 'ny')],
     massKg: 110,
     health: 140,
-    // Same reasoning as the Shield Generator: pure knockback with no damage
-    // behind it only earns its slot if it lands while the horde still fits in
-    // one blast, so it sits at the cheap end of the ability shelf.
+    // Pure knockback with no damage behind it, but the ram now reaches as far
+    // as the Pulse Emitter's ring and hits nearly twice as hard, so it is a
+    // real panic button rather than a nudge. Still the cheap end of the
+    // ability shelf: it buys space, never kills.
     cost: 180,
     upgrade: upgrade(180),
     unlockCost: 130,
@@ -988,10 +974,10 @@ export const PART_CATALOG: Record<string, PartDefinition> = {
     // carries the level-1 knockback speed (m/s); `rangeM` is the blast radius.
     ability: {
       kind: 'thump',
-      cooldownSeconds: 12,
+      cooldownSeconds: 9,
       baseDurationSeconds: 0,
-      rangeM: 5,
-      baseDamage: 14,
+      rangeM: 9,
+      baseDamage: 26,
     },
   },
   'pulse-emitter': {

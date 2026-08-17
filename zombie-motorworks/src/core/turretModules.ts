@@ -1,5 +1,5 @@
 /**
- * Zombie Blaster fire tuning, plus the Mine Sweeper's reveal radius.
+ * Zombie Blaster fire tuning, plus the Drone Swarm bay's intercept ladder.
  *
  * EMP and piercing used to be two side modules bought separately from the part
  * itself. They are now unlocks on the turret's ordinary upgrade chain (see
@@ -37,11 +37,6 @@ export function droneInterceptChance(level: number): number {
   return index < 0 ? 0 : DRONE_INTERCEPT_CHANCE_BY_LEVEL[index];
 }
 
-/** Mine reveal radius in metres by Mine Sweeper upgrade level; index 0 = no part. */
-export const MINE_SWEEPER_RADIUS_BY_LEVEL = [0, 14, 22, 30] as const;
-/** Level at which revealed mines also appear on the minimap. */
-export const MINE_SWEEPER_MINIMAP_LEVEL = 2;
-
 /**
  * EMP strength by turret upgrade level (index = level - 1). The EMP Coil unlock
  * lands at level 4 and the two levels above it tighten the coil, so a maxed
@@ -75,12 +70,6 @@ export function turretEmpLevel(placed: Pick<PlacedPart, 'config'>): number {
 /** Piercing strength this turret shoots with, from its upgrade level alone. */
 export function turretPiercingLevel(placed: Pick<PlacedPart, 'config'>): number {
   return PIERCING_LEVEL_BY_PART_LEVEL[Math.max(0, partLevelIndex(placed))];
-}
-
-export function mineSweeperRadius(level: number): number {
-  return MINE_SWEEPER_RADIUS_BY_LEVEL[
-    clampedLevel(level, MINE_SWEEPER_RADIUS_BY_LEVEL.length - 1)
-  ];
 }
 
 /**

@@ -118,6 +118,11 @@ import {
 export const BLUEPRINT_STORAGE_KEY = 'scraprig.blueprints.v1';
 const TUTORIAL_DONE_KEY = 'scraprig.tutorial-done';
 
+/** The top bar's own offset from the top edge — `.topbar { top: 8px }`. */
+const TOPBAR_INSET_PX = 8;
+/** Breathing room between the bar's underside and the panels hung from it. */
+const TOPBAR_PANEL_GAP_PX = 14;
+
 /**
  * How far a build-face hit is stepped along its normal to land in the
  * neighbouring cell. Generous enough to clear a curved placement surface — a
@@ -301,6 +306,20 @@ export interface EditorModeContext {
    * back the same build.
    */
   onChooseBuild?: (buildId: BuildId) => void;
+  /**
+   * How this mode's economy differs from Campaign's. Absent means the ordinary
+   * rules: parts cost money, stock is consumed on placement, the Store is open.
+   */
+  purchaseRules?: {
+    /** Stock never decrements, so placing a part costs nothing. */
+    infiniteInventory: boolean;
+    /**
+     * Build the garage without a Store panel at all — Creative, whose
+     * inventory is already unlimited, and a Daily draft day, whose fixed kit is
+     * the entire allowance.
+     */
+    hideStore: boolean;
+  };
   runContext?: RunState;
   runRepair?: {
     partHp(): Record<string, number>;
@@ -357,6 +376,14 @@ export class EditorMode {
   private tutorialActive = false;
   /** Stops the incremental part-icon render when this garage goes away. */
   private readonly stopIconRender: () => void;
+  /**
+   * Keeps `--garage-panel-top` in step with the top bar. The bar wraps to a
+   * second row once the window is too narrow to hold its controls in one — the
+   * CrazyGames compact desktop frame does exactly that — and the store, stats,
+   * and inspector all hang from its underside, so its height is measured
+   * rather than assumed.
+   */
+  private topbarResize: ResizeObserver | null = null;
   private pointerDown: { x: number; y: number } | null = null;
   private lastPointer: { x: number; y: number } | null = null;
   private disposed = false;
@@ -366,6 +393,7 @@ export class EditorMode {
   private readonly onSfx: (cue: EditorSfxCue) => void;
   private readonly runContext: RunState | undefined;
   private readonly runRepair: EditorModeContext['runRepair'];
+  private readonly purchaseRules: EditorModeContext['purchaseRules'];
   private readonly runPartMaxHpAtEntry: ReadonlyMap<string, number>;
   private readonly keyHandler = (e: KeyboardEvent) => this.onKey(e);
   private readonly onUiButtonClick = (event: MouseEvent): void => {
@@ -390,6 +418,7 @@ export class EditorMode {
     this.onSfx = context.onSfx ?? (() => undefined);
     this.runContext = context.runContext;
     this.runRepair = context.runRepair;
+    this.purchaseRules = context.purchaseRules;
     this.runPartMaxHpAtEntry = new Map(
       initial.parts.map((part) => [part.id, getEffectiveDef(part).health]),
     );
@@ -537,6 +566,7 @@ export class EditorMode {
         onImport: (input) => void this.importShareCode(input),
       },
       partIconUrls,
+      { hideStore: context.purchaseRules?.hideStore === true },
     );
     this.ui.root.addEventListener('click', this.onUiButtonClick, true);
     // Kicked once the UI exists so each icon has somewhere to land the moment
@@ -548,6 +578,22 @@ export class EditorMode {
     // Folds the palette into a bottom drawer and the build report into a
     // collapsible sheet on a phone; a no-op on a pointer-precise device.
     this.mobileGarage = installMobileGarage(this.ui.root);
+
+    const topbar = this.ui.root.querySelector<HTMLElement>('.topbar');
+    if (topbar) {
+      const syncPanelTop = (): void => {
+        const height = Math.round(topbar.getBoundingClientRect().height);
+        if (height > 0) {
+          this.ui.root.style.setProperty(
+            '--garage-panel-top',
+            `${TOPBAR_INSET_PX + height + TOPBAR_PANEL_GAP_PX}px`,
+          );
+        }
+      };
+      syncPanelTop();
+      this.topbarResize = new ResizeObserver(syncPanelTop);
+      this.topbarResize.observe(topbar);
+    }
 
     renderer.domElement.addEventListener('pointermove', this.onPointerMove);
     renderer.domElement.addEventListener('pointerdown', this.onPointerDown);
@@ -702,6 +748,8 @@ export class EditorMode {
     );
     window.removeEventListener('keydown', this.keyHandler);
     this.ui.root.removeEventListener('click', this.onUiButtonClick, true);
+    this.topbarResize?.disconnect();
+    this.topbarResize = null;
     this.mobileGarage.dispose();
     this.controls.dispose();
     this.tutorialOverlay?.dispose();
@@ -986,6 +1034,13 @@ export class EditorMode {
     }
     for (const part of after.parts) {
       afterCounts.set(part.defId, (afterCounts.get(part.defId) ?? 0) + 1);
+    }
+    // An unlimited inventory has nothing to reconcile: bolting a part on takes
+    // one from a pile that never runs down, and pulling it off puts nothing
+    // back. Leaving the counts alone is what makes the pile unlimited.
+    if (this.purchaseRules?.infiniteInventory === true) {
+      this.persistProfile();
+      return;
     }
     const stock = this.inventory();
     for (const defId of new Set([
@@ -1564,6 +1619,7 @@ export class EditorMode {
       return false;
     }
     if (!this.isUnlocked(defId)) return this.unlockPart(defId);
+
     if (!canAfford(this.profile.money, def.cost)) {
       this.deny(`Not enough money to buy ${def.name} - need $${def.cost}`);
       return false;

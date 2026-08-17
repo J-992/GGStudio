@@ -50,7 +50,7 @@ describe('legible consequence summaries', () => {
 
   it('formats exact wave composition while omitting zero-count kinds', () => {
     expect(formatWaveComposition(zombieCompositionForWave(1))).toBe(
-      '30 walkers',
+      '24 walkers',
     );
     expect(formatWaveComposition(zombieCompositionForWave(3))).toBe(
       '32 walkers / 4 throwers',

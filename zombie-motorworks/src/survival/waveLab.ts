@@ -30,6 +30,7 @@ import {
   healthMultiplierForWave,
   hordeIntervalForWave,
   maxActiveZombiesForWave,
+  spawnsAllAtOnce,
   speedMultiplierForWave,
   waveRewardForWave,
   zombieCompositionForWave,
@@ -201,11 +202,12 @@ export function waveLabRow(wave: number): WaveLabRow {
     // its own has no run to be a shortfall against.
     flatPayout: totalPayout,
     specialistShare: kindShare(countMap, SPECIALIST_KINDS),
-    spawnFloorSeconds: spawnBoundSeconds(
-      population,
-      meanHordeSize(),
-      hordeInterval,
-    ),
+    // An opening burst wave releases its whole roster on the first tick, so
+    // there is no schedule to charge it for — the horde-at-a-time model only
+    // describes the paced waves.
+    spawnFloorSeconds: spawnsAllAtOnce(wave)
+      ? 0
+      : spawnBoundSeconds(population, meanHordeSize(), hordeInterval),
     healthMultiplier,
     speedMultiplier: speedMultiplierForWave(wave),
     damageMultiplier: attackDamageMultiplierForWave(wave),

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_BUILD_ID } from '../src/core/builds.ts';
 import {
   DEFAULT_MONEY,
-  MINE_SWEEPER_UNLOCK_WAVE,
   decodeProfile,
   defaultProfile,
   encodeProfile,
@@ -78,7 +77,6 @@ describe('player profile codec', () => {
 
     expect(JSON.parse(encoded)).not.toHaveProperty('highestWaveCleared');
     expect(JSON.parse(encoded)).not.toHaveProperty('phoneAddictsKilled');
-    expect(MINE_SWEEPER_UNLOCK_WAVE).toBe(7);
   });
 
   it('filters unknown definitions while retaining every starter unlock', () => {

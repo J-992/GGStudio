@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
+import { getGameMode } from '../src/core/gameModes.ts';
 import {
   SurvivalMode,
   type SurvivalCallbacks,
@@ -117,6 +118,9 @@ function createHarness(options: { destroyed?: boolean } = {}): {
   ) as unknown as PendingRewardsHarness;
   Object.assign(mode, {
     disposed: false,
+    // The real constructor resolves this from the run's `modeId`; the harness
+    // is a Campaign run, which is the mode whose garage trip forfeits the wave.
+    mode: getGameMode('campaign'),
     phase: 'active' satisfies SurvivalPhase,
     kills: 0,
     phoneAddictKills: 0,

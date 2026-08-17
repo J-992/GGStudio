@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   empShieldLeak,
-  MINE_SWEEPER_MINIMAP_LEVEL,
-  mineSweeperRadius,
   piercingDamageFraction,
   turretEmpLevel,
   turretPiercingLevel,
@@ -45,13 +43,5 @@ describe('turret fire tuning', () => {
   it('gives a maxed turret the strongest leak and piercing on the ladder', () => {
     expect(empShieldLeak(turretEmpLevel(atLevel(6)))).toBe(0.65);
     expect(piercingDamageFraction(turretPiercingLevel(atLevel(6)))).toBe(0.6);
-  });
-
-  it('clamps Mine Sweeper levels to the configured reveal radii', () => {
-    expect([0, 1, 2, 3].map(mineSweeperRadius)).toEqual([0, 14, 22, 30]);
-    expect(mineSweeperRadius(Number.NaN)).toBe(0);
-    expect(mineSweeperRadius(-1)).toBe(0);
-    expect(mineSweeperRadius(99)).toBe(30);
-    expect(MINE_SWEEPER_MINIMAP_LEVEL).toBe(2);
   });
 });

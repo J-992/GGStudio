@@ -135,6 +135,9 @@ export type ZombieSfxEvent =
   | 'kamikaze'
   | 'behemoth'
   | 'vehicleImpact'
+  | 'meleeBlade'
+  | 'meleeSpikes'
+  | 'meleeDrum'
   | 'shield'
   | 'death';
 
@@ -198,6 +201,19 @@ function meleeVfxKindFor(visual: string | undefined): MeleeVfxKind {
   if (visual === 'plow') return 'ram';
   return 'drum';
 }
+
+/**
+ * Contact sound per weapon. Every melee weapon used to play the one
+ * `vehicleImpact` cue, so a sawblade, a pike and a grinder drum were
+ * indistinguishable by ear; a bare ram keeps that blunt cue because that is
+ * exactly what it is.
+ */
+const MELEE_SFX_EVENT: Record<MeleeVfxKind, ZombieSfxEvent> = {
+  blade: 'meleeBlade',
+  spikes: 'meleeSpikes',
+  drum: 'meleeDrum',
+  ram: 'vehicleImpact',
+};
 
 /** Rotate a vector by a Rapier body rotation (unit quaternion). */
 function rotateByQuaternion(
@@ -373,6 +389,14 @@ export class ZombieSystem {
   onVehicleStun:
     | ((seconds: number, x: number, y: number, z: number) => void)
     | null = null;
+  /**
+   * Set by the owning mode; a melee weapon just bit into a zombie. Carries the
+   * contact point and the same 0..1.5 force the spray is sized by, so the mode
+   * can answer with a camera kick and a reticle confirm the way it already does
+   * for a shell. Fires per landed contact, which the per-zombie impact cooldown
+   * paces — the mode is responsible for not acting on every one of them.
+   */
+  onMeleeHit: ((x: number, z: number, force: number) => void) | null = null;
   /** Presentation-only event sink owned by the active mode. */
   onSfx: ((report: ZombieSfxReport) => void) | null = null;
   private healthMultiplier = 1;
@@ -1130,11 +1154,16 @@ export class ZombieSystem {
    * radially outward at `speed` m/s. Returns how many zombies were knocked back.
    * Runs rarely (once per cooldown). Knockback does no damage, so `aliveTargets`
    * never changes and the array can be iterated directly with no rebuild.
+   *
+   * `liftFraction` is passed straight through to
+   * {@link Zombie.applyKnockback} — the share of the shove that goes upward, so
+   * the ring throws bodies rather than sliding them.
    */
   knockbackWithin(
     origin: { x: number; z: number },
     radiusM: number,
     speed: number,
+    liftFraction = 0,
   ): number {
     if (this.disposed || radiusM <= 0 || speed <= 0) return 0;
     const radiusSq = radiusM * radiusM;
@@ -1143,7 +1172,7 @@ export class ZombieSystem {
       const dx = zombie.position.x - origin.x;
       const dz = zombie.position.z - origin.z;
       if (dx * dx + dz * dz > radiusSq) continue;
-      zombie.applyKnockback(dx, dz, speed);
+      zombie.applyKnockback(dx, dz, speed, liftFraction);
       count += 1;
     }
     return count;
@@ -2203,7 +2232,7 @@ export class ZombieSystem {
       // paces the shred bursts: a drum touching a packed horde emits once per
       // zombie per cooldown, never once per fixed step.
       if (landed !== 'ignored') {
-        this.emitSfx('vehicleImpact', zombie);
+        this.emitSfx(MELEE_SFX_EVENT[meleeVfxKindFor(melee?.visual)], zombie);
         this.reportZombieDamage(zombie, damageForReport, landed === 'killed');
         this.emitShredVfx(zombie, melee, awayX, awayZ, vehicleSpeed);
       }
@@ -2233,6 +2262,11 @@ export class ZombieSystem {
    * Play the contact effect for a landed hit. The weapon that was touched
    * picks the effect — sawblade, spikes, and grinder drum each spray
    * differently — and a part with no melee weapon plays a blunt ram.
+   *
+   * Also announces the hit to the owning mode, which is what pays for the
+   * camera kick and the reticle confirm. That announcement is not conditional
+   * on a VFX layer being attached: a headless harness has no particles but the
+   * hit still happened.
    */
   private emitShredVfx(
     zombie: Zombie,
@@ -2241,7 +2275,6 @@ export class ZombieSystem {
     awayZ: number,
     vehicleSpeed: number,
   ): void {
-    if (this.vfx === null) return;
     const length = Math.hypot(awayX, awayZ) || 1;
     const target = zombie.vehicleTarget;
     // Halfway between the weapon and the zombie it bit into, never below the
@@ -2255,7 +2288,8 @@ export class ZombieSystem {
       melee === undefined
         ? Math.min(1.3, 0.5 + vehicleSpeed / LETHAL_IMPACT_SPEED)
         : Math.min(1.4, 0.55 + melee.damage / 60);
-    this.vfx.meleeShred(
+    this.onMeleeHit?.(contactX, contactZ, power);
+    this.vfx?.meleeShred(
       kind,
       contactX,
       contactY,

@@ -47,9 +47,6 @@ export const STARTER_UNLOCKS = [
 
 export const DEFAULT_MONEY = 200;
 
-/** Wave clear that unlocks the Mine Sweeper for purchase. */
-export const MINE_SWEEPER_UNLOCK_WAVE = 7;
-
 export function defaultProfile(): PlayerProfile {
   return {
     schemaVersion: 1,

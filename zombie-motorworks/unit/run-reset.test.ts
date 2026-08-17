@@ -17,7 +17,7 @@ function progressedProfile(): PlayerProfile {
       'engine-small',
       'fuel-tank',
       'turret',
-      'mine-sweeper',
+      'thumper',
       'heavy-cannon',
     ],
     inventory: { 'heavy-cannon': 2, 'armour-plate': 5 },
@@ -45,7 +45,7 @@ describe('reset after a finished run', () => {
     resetProfileForNewRun(profile);
 
     expect(profile.unlockedDefIds).toEqual(unlocksBefore);
-    expect(profile.unlockedDefIds).toContain('mine-sweeper');
+    expect(profile.unlockedDefIds).toContain('thumper');
     expect(profile.highestWaveCleared).toBe(12);
     expect(profile.phoneAddictsKilled).toBe(37);
   });
@@ -70,8 +70,8 @@ describe('reset after a finished run', () => {
     expect(afterNewGame.money).toBe(afterRun.money);
     expect(afterNewGame.inventory).toEqual(afterRun.inventory);
     // ...but only a new game forgets what the player unlocked.
-    expect(afterNewGame.unlockedDefIds).not.toContain('mine-sweeper');
-    expect(afterRun.unlockedDefIds).toContain('mine-sweeper');
+    expect(afterNewGame.unlockedDefIds).not.toContain('thumper');
+    expect(afterRun.unlockedDefIds).toContain('thumper');
     expect(afterNewGame.highestWaveCleared).toBeUndefined();
     expect(afterRun.highestWaveCleared).toBe(12);
   });

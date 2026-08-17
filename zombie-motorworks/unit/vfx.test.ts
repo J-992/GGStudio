@@ -157,6 +157,60 @@ describe('VfxSystem emitters', () => {
     far.vfx.dispose();
   });
 
+  it('keeps effects on the rig at full detail past the camera ring', () => {
+    // 30 m sits between LOD_FULL_DISTANCE_M and LOD_HALF_DISTANCE_M, which is
+    // where the follow camera puts the vehicle once it is moving.
+    const cameraOnly = system();
+    const focused = system();
+    focused.vfx.setFocus({ x: 0, y: 1, z: 30 });
+
+    cameraOnly.vfx.meleeShred('drum', 0, 1, 30, 1, 0, 1);
+    focused.vfx.meleeShred('drum', 0, 1, 30, 1, 0, 1);
+    expect(focused.vfx.particleCount).toBeGreaterThan(
+      cameraOnly.vfx.particleCount,
+    );
+
+    cameraOnly.vfx.dispose();
+    focused.vfx.dispose();
+  });
+
+  it('leaves the LOD purely camera-relative once the focus is cleared', () => {
+    const cleared = system();
+    cleared.vfx.setFocus({ x: 0, y: 1, z: 30 });
+    cleared.vfx.setFocus(null);
+
+    const focused = system();
+    focused.vfx.setFocus({ x: 0, y: 1, z: 30 });
+
+    cleared.vfx.meleeShred('drum', 0, 1, 30, 1, 0, 1);
+    focused.vfx.meleeShred('drum', 0, 1, 30, 1, 0, 1);
+    expect(cleared.vfx.particleCount).toBeLessThan(focused.vfx.particleCount);
+
+    cleared.vfx.dispose();
+    focused.vfx.dispose();
+  });
+
+  it('still thins an effect that is far from both the camera and the rig', () => {
+    const near = system();
+    const far = system();
+    near.vfx.setFocus({ x: 0, y: 1, z: 2 });
+    far.vfx.setFocus({ x: 0, y: 1, z: 2 });
+    near.vfx.meleeShred('drum', 0, 1, 2, 1, 0, 1);
+    far.vfx.meleeShred('drum', 0, 1, 40, 1, 0, 1);
+    expect(far.vfx.particleCount).toBeLessThan(near.vfx.particleCount);
+    near.vfx.dispose();
+    far.vfx.dispose();
+  });
+
+  it('never thins the hit confirm away, however weak or distant the contact', () => {
+    const { vfx } = system();
+    // Weakest possible contact at quarter detail: the weapon's own spray all
+    // but vanishes, and the confirmation still has to land.
+    vfx.meleeShred('drum', 0, 1, 60, 1, 0, 0);
+    expect(vfx.particleCount).toBeGreaterThanOrEqual(5);
+    vfx.dispose();
+  });
+
   it('honours the quality scale', () => {
     const { vfx } = system();
     vfx.setQuality(0);
@@ -253,6 +307,36 @@ describe('VfxSystem emitters', () => {
     const { vfx } = system();
     vfx.shellBurst(0, 0, 3, 4.5);
     expect(vfx.particleCount).toBeGreaterThan(0);
+    vfx.dispose();
+  });
+
+  it('lands a thumper slam heavier than the pulse ring it shares a slot with', () => {
+    const slam = system();
+    slam.vfx.thumperSlam(0, 0, 3, 9);
+    const slamCount = slam.vfx.particleCount;
+    slam.vfx.dispose();
+
+    const pulse = system();
+    pulse.vfx.pulseRing(0, 0, 3, 9);
+    const pulseCount = pulse.vfx.particleCount;
+    pulse.vfx.dispose();
+
+    // Two rings, thrown ground and a dust skirt against one ring and a puff of
+    // dirt: the slam has to be the louder of the two on screen.
+    expect(slamCount).toBeGreaterThan(pulseCount);
+  });
+
+  it('ignores a thumper slam with no radius to cover', () => {
+    const { vfx } = system();
+    vfx.thumperSlam(0, 0, 3, 0);
+    expect(vfx.particleCount).toBe(0);
+    vfx.dispose();
+  });
+
+  it('emits no thumper slam particles past the cull distance', () => {
+    const { vfx } = system();
+    vfx.thumperSlam(0, 0, 400, 9);
+    expect(vfx.particleCount).toBe(0);
     vfx.dispose();
   });
 

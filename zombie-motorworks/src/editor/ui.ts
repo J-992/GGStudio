@@ -928,6 +928,7 @@ export function buildEditorUI(
   catalog: Record<string, PartDefinition>,
   handlers: EditorUIHandlers,
   partIconUrls: ReadonlyMap<string, string> = new Map(),
+  options: { hideStore?: boolean } = {},
 ): EditorUI {
   const root = document.createElement('div');
   root.className = 'ui-layer garage-ui';
@@ -1529,7 +1530,10 @@ export function buildEditorUI(
   storeEmpty.style.order = '999999';
   store.body.append(storeSearch, storeFilters, storeContent);
 
-  garageDock.appendChild(store.panel);
+  // Creative never mounts the Store. The panel is still built — every store
+  // listener and lookup below expects it to exist — it just never reaches the
+  // dock, so an unlimited inventory is not sat behind a shop nobody pays.
+  if (options.hideStore !== true) garageDock.appendChild(store.panel);
 
   // Sharing lives in its own dock panel, collapsed by default: it is a thing
   // players go looking for, not something that should crowd the build tools.
@@ -1587,7 +1591,6 @@ export function buildEditorUI(
   const storeButtons = new Map<string, HTMLButtonElement>();
   const storePriceLabels = new Map<string, HTMLElement>();
   const storePriceBreakdowns = new Map<string, HTMLElement>();
-  const storeUnlockMilestones = new Map<string, HTMLElement>();
   const inventoryButtons = new Map<string, HTMLButtonElement>();
   const inventoryCountLabels = new Map<string, HTMLElement>();
   const inventorySlotBadges = new Map<string, HTMLElement>();
@@ -1708,13 +1711,9 @@ export function buildEditorUI(
     storeDetailsPriceMain.textContent =
       tile.dataset.offerLabel ?? storePriceLabels.get(defId)?.textContent ?? '';
     const breakdown = storePriceBreakdowns.get(defId);
-    const milestone = storeUnlockMilestones.get(defId);
-    const notes = [
-      breakdown?.hidden === false ? breakdown.textContent : null,
-      milestone?.hidden === false ? milestone.textContent : null,
-    ].filter((note): note is string => Boolean(note));
-    storeDetailsPriceNote.textContent = notes.join(' · ');
-    storeDetailsPriceNote.hidden = notes.length === 0;
+    const note = breakdown?.hidden === false ? breakdown.textContent : null;
+    storeDetailsPriceNote.textContent = note ?? '';
+    storeDetailsPriceNote.hidden = !note;
 
     storeDetails.hidden = false;
     positionStoreDetails(tile);
@@ -1867,17 +1866,7 @@ export function buildEditorUI(
     const priceBreakdown = document.createElement('small');
     priceBreakdown.className = 'part-price-breakdown';
     priceBreakdown.hidden = true;
-    const unlockMilestone = document.createElement('small');
-    unlockMilestone.className = 'part-unlock-milestone';
-    unlockMilestone.hidden = true;
-    storeButton.append(
-      storeName,
-      storeFrame,
-      storeBlurb,
-      price,
-      priceBreakdown,
-      unlockMilestone,
-    );
+    storeButton.append(storeName, storeFrame, storeBlurb, price, priceBreakdown);
     storeButton.addEventListener('click', () => {
       const bought = handlers.onPurchasePart
         ? handlers.onPurchasePart(id)
@@ -1908,7 +1897,6 @@ export function buildEditorUI(
     storeButtons.set(id, storeButton);
     storePriceLabels.set(id, price);
     storePriceBreakdowns.set(id, priceBreakdown);
-    storeUnlockMilestones.set(id, unlockMilestone);
 
     const inventoryButton = document.createElement('button');
     inventoryButton.className = 'part-btn inventory-item inventory-tile';
@@ -2806,10 +2794,6 @@ export function buildEditorUI(
           'is-affordable',
           !unaffordable && !atOwnershipLimit,
         );
-        storeButton?.classList.toggle(
-          'has-unlock-milestone',
-          locked && id === 'mine-sweeper',
-        );
         if (storeButton) {
           // Cheapest first. `order` reshuffles the grid without touching the
           // DOM, so a live search or a focused tile keeps its place.
@@ -2844,16 +2828,7 @@ export function buildEditorUI(
         const priceBreakdown = storePriceBreakdowns.get(id);
         if (priceBreakdown) {
           priceBreakdown.hidden = !locked || atOwnershipLimit;
-          priceBreakdown.textContent =
-            id === 'mine-sweeper'
-              ? `Unlock early · Buy later $${def.cost}`
-              : `Buy later $${def.cost}`;
-        }
-        const unlockMilestone = storeUnlockMilestones.get(id);
-        if (unlockMilestone) {
-          unlockMilestone.hidden =
-            !locked || atOwnershipLimit || id !== 'mine-sweeper';
-          unlockMilestone.textContent = 'Free after Wave 7';
+          priceBreakdown.textContent = `Buy later $${def.cost}`;
         }
       }
       renderInventory();

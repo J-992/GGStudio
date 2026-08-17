@@ -49,6 +49,14 @@ export const VFX_PALETTE = {
   /** Matches the Long Spikes pike. */
   steel: 0xb7bcc2,
   /**
+   * Thumper amber, matching the block's own paint (`parts/shared.ts`). Warm
+   * like fire but never saturated to red, and it always arrives as a flat ring
+   * with no embers in it, so a slam never reads as an explosion.
+   */
+  ram: 0xffcf80,
+  /** The white-hot core of a slam, at the instant both rams bottom out. */
+  ramHot: 0xfff0d2,
+  /**
    * Necromancer violet. The only purple in the game, so a purple glow anywhere
    * on screen means one thing — something is raising the dead — the way
    * turquoise means cold and orange means fire.
@@ -120,6 +128,21 @@ export const LOD_FULL_DISTANCE_M = 26;
 export const LOD_HALF_DISTANCE_M = 46;
 /** Nothing is emitted past this distance from the camera, m. */
 export const LOD_CULL_DISTANCE_M = 78;
+
+/**
+ * Radius around the focus point — the rig — that always emits at full detail,
+ * whatever the camera distance says, m.
+ *
+ * The follow camera sits about 23 m behind and above the vehicle and pulls back
+ * to roughly 29 m at speed, while contact points sit in front of the rig with
+ * the camera behind it. Measured from the camera alone, every effect bolted to
+ * the vehicle — muzzle flashes, melee shred — therefore spends most of the game
+ * on the far side of `LOD_FULL_DISTANCE_M` and emits at half its authored
+ * count, and does so precisely when the rig is moving and ramming things. The
+ * override says what the LOD was always trying to say: the thing the player is
+ * driving is never "far away".
+ */
+export const LOD_FOCUS_RADIUS_M = 9;
 
 /** Flat graveyard/chamber ground plane that particles bounce and settle on. */
 export const VFX_GROUND_Y = 0;

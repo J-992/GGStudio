@@ -125,7 +125,14 @@ button,
   color: var(--ui-signal);
 }
 
-.is-collapsed {
+/*
+ * Scoped to `data-collapsed`, which only `Collapsible` sets. `is-collapsed`
+ * alone is too broad a name to own globally: the garage's store dock and its
+ * vehicle-stats panel toggle that same class and collapse to a header bar of
+ * their own, and this rule was shrinking both to a bare toggle square and
+ * hiding the headers that are supposed to survive the collapse.
+ */
+[data-collapsed='true'].is-collapsed {
   width: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
   min-width: 0;
   max-width: calc(var(--collapsible-toggle-size) + var(--ui-space-2));
@@ -136,7 +143,7 @@ button,
   overflow: hidden;
 }
 
-.is-collapsed > :not(.collapsible-toggle) {
+[data-collapsed='true'].is-collapsed > :not(.collapsible-toggle) {
   display: none;
 }
 

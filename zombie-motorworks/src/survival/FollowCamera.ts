@@ -27,6 +27,16 @@ const SHAKE_AMPLITUDE_M = 0.85;
 const SHAKE_FREQUENCY_HZ = 26;
 /** Ceiling on stacked shakes, so a cannon volley never becomes unreadable. */
 const MAX_SHAKE = 1.4;
+/**
+ * Viewport height the follow distance is tuned against. The camera's vertical
+ * field of view is fixed, so a shorter frame draws the same slice of world into
+ * fewer pixels and the rig shrinks with it — CrazyGames' windowed player is
+ * 400px tall and the car reads as a speck there. Below this the camera comes in
+ * to hold the rig at a usable size.
+ */
+const REFERENCE_VIEWPORT_HEIGHT_PX = 640;
+/** Floor on that compensation, so a very short frame keeps some road ahead. */
+const MIN_VIEWPORT_ZOOM = 0.68;
 
 /** Allocation-free, world-aligned follow camera ported from zombie-car. */
 export class FollowCamera {
@@ -41,6 +51,8 @@ export class FollowCamera {
   private shakePhase = 0;
   /** Trailer-capture only: <1 pulls the camera closer to the vehicle. */
   private captureZoom = 1;
+  /** Short-viewport compensation; see `setViewportHeight`. */
+  private viewportZoom = 1;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -85,6 +97,20 @@ export class FollowCamera {
   setCaptureZoom(zoom: number): void {
     this.captureZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     this.snap();
+  }
+
+  /**
+   * Pulls the camera in on a short frame so the rig keeps roughly the on-screen
+   * size it has at the reference height. Called on every resize; a frame at or
+   * above the reference height leaves the follow distance alone.
+   */
+  setViewportHeight(heightPx: number): void {
+    const zoom =
+      Number.isFinite(heightPx) && heightPx > 0
+        ? clamp(heightPx / REFERENCE_VIEWPORT_HEIGHT_PX, MIN_VIEWPORT_ZOOM, 1)
+        : 1;
+    if (zoom === this.viewportZoom) return;
+    this.viewportZoom = zoom;
   }
 
   snap(): void {
@@ -139,7 +165,9 @@ export class FollowCamera {
       this.bounds.maxZ - BOUNDS_MARGIN,
     );
     this.targetLookAt.set(targetX, position.y, targetZ);
-    this.scratchOffset.copy(BASE_OFFSET).multiplyScalar(zoomScale * this.captureZoom);
+    this.scratchOffset
+      .copy(BASE_OFFSET)
+      .multiplyScalar(zoomScale * this.captureZoom * this.viewportZoom);
     this.targetPosition.copy(this.targetLookAt).add(this.scratchOffset);
   }
 }
