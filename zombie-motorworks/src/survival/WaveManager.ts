@@ -12,6 +12,13 @@ const DEFAULT_HORDE_INTERVAL = 1.45;
 export interface WaveManagerCallbacks {
   onRemainingChanged(remaining: number): void;
   onWaveComplete(wave: number, reward: number): void;
+  /**
+   * An endless run rolled straight into the next wave without stopping. The
+   * owning mode uses this to move its wave readout and pay the clear bonus;
+   * `onWaveComplete` deliberately does not fire, because nothing completed —
+   * the fight never paused.
+   */
+  onEndlessWaveAdvanced?(wave: number, reward: number): void;
 }
 
 export interface WaveComposition {
@@ -48,12 +55,55 @@ function countFromCurve(
  * the swarm gets bigger at the same time each body gets easier to drop, so
  * early waves read as "more zombies, more shootable" rather than a tougher
  * fight.
+ *
+ * Wave 1 is deliberately the lightest of the three, and lighter than it used to
+ * be. It is now released as one burst (see `isBurstWave`), so its whole count is
+ * on screen at once instead of arriving over half a minute — a count that read
+ * as a brisk opener while it trickled reads as a wall when it all turns up
+ * together, so the count came down as the pacing sped up.
  */
 function earlyWalkerBonus(safeWave: number): number {
-  if (safeWave === 1) return 17;
+  if (safeWave === 1) return 11;
   if (safeWave === 2) return 24;
   if (safeWave === 3) return 13;
   return 0;
+}
+
+/**
+ * The opening waves release their whole roster in one go instead of feeding it
+ * in over a horde interval at a time. Waves 1-2 are all walkers and the softest
+ * bodies in the game (see `earlyWaveHealthDiscount`), so trickling them meant a
+ * first minute of standing around waiting for the next handful — the wave was
+ * over as a fight long before it was over as a counter. Spawned together they
+ * are one short, loud fight the player finishes in well under a minute, which
+ * is what the first thing a new player does should feel like.
+ *
+ * From wave 3 the roster stops being uniform (throwers, then gunslingers), and
+ * the paced arrival is what makes a mixed wave readable, so the burst stops
+ * here.
+ */
+const LAST_BURST_WAVE = 2;
+
+/**
+ * How many bodies one burst chunk asks for. `ZombieSystem.trySpawnHorde` picks
+ * a single anchor per call and scatters the whole request around it, so asking
+ * for the entire wave in one call would stack it into one pile at one edge of
+ * the arena. Chunking spreads the same instant release across several anchors:
+ * the wave arrives from three or four directions on the same frame.
+ */
+const BURST_CHUNK = 8;
+
+function isBurstWave(safeWave: number): boolean {
+  return safeWave <= LAST_BURST_WAVE;
+}
+
+/**
+ * Whether a wave puts its whole roster on the field the moment it starts. The
+ * wave lab reads this so its spawn-time column does not charge a burst wave for
+ * a schedule it never runs.
+ */
+export function spawnsAllAtOnce(wave: number): boolean {
+  return isBurstWave(safeWaveNumber(wave));
 }
 
 /**
@@ -199,7 +249,12 @@ export function zombieCountForWave(wave: number): number {
 export function maxActiveZombiesForWave(wave: number): number {
   const safeWave = safeWaveNumber(wave);
   const { maxActiveBase, maxActivePerWave, maxActiveCap } = devTuning.wave;
-  return Math.min(maxActiveBase + safeWave * maxActivePerWave, maxActiveCap);
+  const curve = maxActiveBase + safeWave * maxActivePerWave;
+  // A burst wave has to be allowed to hold its whole roster at once, or the
+  // concurrency cap turns the burst straight back into a trickle. Still bounded
+  // by the same hard cap, which the opening waves sit under anyway.
+  const floor = isBurstWave(safeWave) ? zombieCountForWave(safeWave) : 0;
+  return Math.min(Math.max(curve, floor), maxActiveCap);
 }
 
 /**
@@ -244,6 +299,10 @@ export function hordeIntervalForWave(wave: number): number {
   const tuned = devTuning.wave.hordeInterval;
   // A dev-set interval overrides the tiering; the shipped default keeps it.
   if (Math.abs(tuned - DEFAULT_HORDE_INTERVAL) > 1e-6) return Math.max(0.1, tuned);
+  // Burst waves empty their queue on the first tick, so this only covers the
+  // remainder when the pool or the cap held something back — it should follow
+  // immediately rather than a second and a half later.
+  if (isBurstWave(safeWave)) return 0.2;
   // Later waves spawn more often so pressure comes from tempo instead of health.
   if (safeWave >= 13) return 1.05;
   if (safeWave >= 6) return 1.25;
@@ -339,6 +398,8 @@ export class WaveManager {
   private spawnPaused = false;
   /** Counts down to the next boss-wave top-up; see `refillBossWave`. */
   private bossRefillTimer = 0;
+  /** Endless and Creative runs never stop between waves; see `setEndless`. */
+  private endless = false;
 
   constructor(
     private readonly zombies: ZombieSystem,
@@ -386,6 +447,18 @@ export class WaveManager {
     this.spawnPaused = paused;
   }
 
+  /**
+   * Endless mode: the arena never empties and the run never returns to the
+   * garage. Instead of completing, a spent wave rolls its queue straight into
+   * the next wave's — the difficulty multipliers step up, the roster gets its
+   * next specialist, and the player never sees a loading pause.
+   *
+   * Set before `startWave`, and it stays set for the life of the run.
+   */
+  setEndless(endless: boolean): void {
+    this.endless = endless;
+  }
+
   fixedUpdate(dt: number): void {
     if (this.waveDone) return;
 
@@ -396,7 +469,50 @@ export class WaveManager {
       if (this.spawnTimer <= 0) this.trySpawnHorde();
     }
 
+    // After the refill, so a boss wave that is still topping itself up is not
+    // treated as spent: an endless run holds its escalation for as long as a
+    // boss is standing, then resumes the moment it falls.
+    if (!this.spawnPaused) this.advanceEndlessWave();
+
     this.checkWaveComplete();
+  }
+
+  /**
+   * Roll an endless run into its next wave the instant the current queue is
+   * spent, without waiting for the arena to empty.
+   *
+   * Waiting is what a campaign wave does, and it is why a campaign has a rhythm:
+   * kill the last one, breathe, go shopping. Endless has no shopping trip, so
+   * that pause would just be an empty arena. Queueing the next wave on top of
+   * the stragglers instead keeps one continuous pressure curve, with the
+   * difficulty multipliers and the roster stepping up underneath it.
+   *
+   * The queue is replaced rather than appended to: it is spent by definition at
+   * this point, so nothing is lost, and a run deep into the hundreds does not
+   * drag a thousand consumed entries behind it.
+   */
+  private advanceEndlessWave(): void {
+    if (!this.endless) return;
+    if (this.spawnQueueIndex < this.spawnOrder.length) return;
+
+    const cleared = this.waveNumber;
+    this.waveNumber = cleared + 1;
+    this.spawnOrder = spawnOrderForWave(this.waveNumber);
+    this.spawnQueueIndex = 0;
+    this.assignedCount += zombieCountForWave(this.waveNumber);
+    this.bossRefillTimer = BOSS_REFILL_SECONDS;
+
+    this.zombies.setWaveMultipliers(
+      healthMultiplierForWave(this.waveNumber),
+      speedMultiplierForWave(this.waveNumber),
+      attackDamageMultiplierForWave(this.waveNumber),
+    );
+    this.zombies.setBossEncounter(bossForWave(this.waveNumber));
+    this.emitRemaining();
+    this.callbacks.onEndlessWaveAdvanced?.(
+      cleared,
+      waveRewardForWave(cleared),
+    );
   }
 
   /**
@@ -485,15 +601,34 @@ export class WaveManager {
     this.waveDone = true;
     this.lastEmittedRemaining = -1;
     this.bossRefillTimer = 0;
+    // `endless` is deliberately not reset: it describes the run's mode, which
+    // the owning SurvivalMode sets once and which outlives any wave reset.
   }
 
   private trySpawnHorde(): void {
+    const burst = isBurstWave(this.waveNumber);
+    let full = true;
+    // A burst wave keeps asking until the queue is spent or something (the
+    // cap, the pool) refuses a chunk; every other wave releases exactly one
+    // horde and waits out its interval.
+    do {
+      const chunk = this.spawnOneHorde(burst ? BURST_CHUNK : hordeSizeForWave());
+      full = chunk.wanted > 0 && chunk.spawned === chunk.wanted;
+    } while (burst && full && this.spawnQueueIndex < this.spawnOrder.length);
+
+    this.spawnTimer = full
+      ? hordeIntervalForWave(this.waveNumber)
+      : HORDE_RETRY_SECONDS;
+  }
+
+  /** One anchored release of up to `size` queued bodies. */
+  private spawnOneHorde(size: number): { wanted: number; spawned: number } {
     const headroom = Math.max(
       0,
       maxActiveZombiesForWave(this.waveNumber) - this.zombies.getActiveCount(),
     );
     const wanted = Math.min(
-      hordeSizeForWave(),
+      size,
       this.spawnOrder.length - this.spawnQueueIndex,
       headroom,
     );
@@ -514,10 +649,7 @@ export class WaveManager {
         : 0;
 
     this.spawnQueueIndex += spawned;
-    this.spawnTimer =
-      wanted > 0 && spawned === wanted
-        ? hordeIntervalForWave(this.waveNumber)
-        : HORDE_RETRY_SECONDS;
+    return { wanted, spawned };
   }
 
   private emitRemaining(): void {
@@ -528,6 +660,9 @@ export class WaveManager {
   }
 
   private checkWaveComplete(): void {
+    // An endless run has no completion state: `advanceEndlessWave` has already
+    // refilled the queue, and the only thing that ends the run is the rig dying.
+    if (this.endless) return;
     if (this.waveDone || this.spawnQueueIndex < this.spawnOrder.length) return;
     if (this.zombies.getActiveCount() > 0) return;
 

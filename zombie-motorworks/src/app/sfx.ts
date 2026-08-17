@@ -21,6 +21,7 @@ export type SfxName =
   | 'abilityShield'
   | 'abilityFreeze'
   | 'abilityPulse'
+  | 'abilityThump'
   | 'abilityPhaseOut'
   | 'abilityPhaseIn'
   | 'abilityHellfire'
@@ -51,7 +52,6 @@ export type SfxName =
   | 'threatReveal'
   | 'bossAlarm'
   | 'gameOver'
-  | 'mineWarning'
   | 'vehicleRecover'
   | 'selfDestructArm'
   | 'selfDestructBlast';
@@ -793,6 +793,14 @@ export function playSfx(name: SfxName, options: { pitch?: number } = {}): void {
     case 'abilityPulse':
       playCue('electricPulse', { gain: 0.32, playbackRate: rate });
       break;
+    case 'abilityThump':
+      // Two opposed rams bottoming out: a pitched-down heavy impact for the
+      // mass landing, with the hydraulics slamming shut over the top of it. No
+      // electric layer at all — that belongs to the Pulse Emitter, and these
+      // two sit in the same ability slot.
+      playCue('heavyImpact', { gain: 0.46, playbackRate: 0.58 * rate });
+      playCue('mechanical', { gain: 0.3, playbackRate: 0.66 * rate });
+      break;
     case 'abilityPhaseOut':
       playCue('phase', { gain: 0.28, playbackRate: 0.92 * rate });
       break;
@@ -876,13 +884,6 @@ export function playSfx(name: SfxName, options: { pitch?: number } = {}): void {
     case 'gameOver':
       playCue('heavyImpact', { gain: 0.38, playbackRate: 0.72 * rate });
       playCue('phase', { gain: 0.14, playbackRate: 0.72 * rate });
-      break;
-    case 'mineWarning':
-      playCue('uiDeny', {
-        gain: 0.13,
-        playbackRate: 0.82 * rate,
-        cooldownSeconds: 0.18,
-      });
       break;
     // The wave-clear card's threat spotlight. Both are the lamp striking on
     // followed by whatever is standing under it noticing you.
@@ -1060,6 +1061,9 @@ const ZOMBIE_EVENT_COOLDOWN: Record<ZombieSfxEvent, number> = {
   kamikaze: 0.05,
   behemoth: 0.08,
   vehicleImpact: 0.06,
+  meleeBlade: 0.06,
+  meleeSpikes: 0.06,
+  meleeDrum: 0.06,
   shield: 0.04,
   death: 0.055,
 };
@@ -1129,6 +1133,20 @@ export function playZombieSfx(
     case 'vehicleImpact':
       playSpatial('gore', 0.3, pitch);
       playSpatial('heavyImpact', 0.13, 0.9);
+      break;
+    // The three melee weapons share the gore hit and separate on the metal.
+    // A disc shrieks, a pike punches through, a drum chews.
+    case 'meleeBlade':
+      playSpatial('metalImpact', 0.3, 1.62);
+      playSpatial('gore', 0.24, pitch * 1.12);
+      break;
+    case 'meleeSpikes':
+      playSpatial('gore', 0.3, pitch * 0.94);
+      playSpatial('metalImpact', 0.16, 0.82);
+      break;
+    case 'meleeDrum':
+      playSpatial('gore', 0.32, pitch * 0.88);
+      playSpatial('heavyImpact', 0.2, 0.7);
       break;
     case 'shield':
       playSpatial('shield', 0.26, 1);

@@ -7,6 +7,7 @@ import {
   effectiveHellfire,
   effectiveOverdrive,
   effectivePulse,
+  effectiveThump,
   MAX_ABILITY_SLOTS,
   resolveAbilityLoadout,
   type AbilityCandidate,
@@ -14,6 +15,7 @@ import {
 import { getPartDef, PART_CATALOG } from '../src/core/parts.ts';
 import { STARTER_UNLOCKS } from '../src/core/profile.ts';
 import type { AbilityDefinition } from '../src/core/types.ts';
+import { KNOCKBACK_SPEED } from '../src/survival/zombies/zombieConfig.ts';
 
 function candidate(
   partId: string,
@@ -272,5 +274,43 @@ describe('nitro injector catalog entry', () => {
     expect(effectiveOverdrive(ability, 0)).toEqual(
       effectiveOverdrive(ability, 1),
     );
+  });
+});
+
+describe('thumper catalog entry', () => {
+  const def = getPartDef('thumper');
+  const ability = def.ability as AbilityDefinition;
+
+  it('is a buyable, unlockable ability part with no normal fire', () => {
+    expect(PART_CATALOG.thumper).toBeDefined();
+    expect(def.unlockCost).toBeGreaterThan(0);
+    expect(STARTER_UNLOCKS).not.toContain('thumper');
+    expect(def.weapon).toBeUndefined();
+    expect(ability.kind).toBe('thump');
+  });
+
+  it('flings harder and reaches further with every upgrade level', () => {
+    const level1 = effectiveThump(ability, 1);
+    const level5 = effectiveThump(ability, 5);
+    expect(level1.knockbackSpeed).toBe(ability.baseDamage);
+    expect(level1.radiusM).toBe(ability.rangeM);
+    // Both axes grow: the ability deals no damage, so reach and shove are the
+    // only things an upgrade has left to buy.
+    expect(level5.knockbackSpeed).toBeGreaterThan(level1.knockbackSpeed);
+    expect(level5.radiusM).toBeGreaterThan(level1.radiusM);
+    // Cooldown is the one thing upgrades never touch.
+    expect(level5.cooldownSeconds).toBe(ability.cooldownSeconds);
+  });
+
+  it('shoves harder than a stock ram at every level', () => {
+    // The whole point of the part is that it beats simply driving into them.
+    expect(effectiveThump(ability, 1).knockbackSpeed).toBeGreaterThan(
+      KNOCKBACK_SPEED,
+    );
+  });
+
+  it('defaults to level 1 and never scales below it', () => {
+    expect(effectiveThump(ability)).toEqual(effectiveThump(ability, 1));
+    expect(effectiveThump(ability, 0)).toEqual(effectiveThump(ability, 1));
   });
 });

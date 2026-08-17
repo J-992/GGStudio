@@ -51,6 +51,11 @@ import {
 import { repairPlan } from '../core/economy.ts';
 import type { RunState } from '../core/economy.ts';
 import {
+  DEFAULT_GAME_MODE_ID,
+  getGameMode,
+  type GameModeDefinition,
+} from '../core/gameModes.ts';
+import {
   GAME_OVER_LEADERBOARD_ROWS,
   leaderboardRows,
   type RunOutcome,
@@ -58,11 +63,7 @@ import {
 import { getPartDef } from '../core/parts.ts';
 import { addScore, killScore, waveClearScore } from '../core/score.ts';
 import { deriveConnections } from '../core/structural.ts';
-import {
-  droneInterceptChance,
-  MINE_SWEEPER_MINIMAP_LEVEL,
-  mineSweeperRadius,
-} from '../core/turretModules.ts';
+import { droneInterceptChance } from '../core/turretModules.ts';
 import type {
   AbilityDefinition,
   PartDefinition,
@@ -249,6 +250,12 @@ const PHASE_MIN_TRAVEL_M = 0.75;
 const WARNING_REFRESH_INTERVAL_SECONDS = 0.25;
 /** Distance at which a blast stops shaking the camera at all, m. */
 const CAMERA_SHAKE_FALLOFF_M = 26;
+/**
+ * Camera kick for a melee contact, before the hit's own 0.25..1.5 force scales
+ * it. Far smaller than a shell's 0.9: a blade is a tick, not an event, and only
+ * the strongest contact of a step is ever spent (see `flushMeleeHit`).
+ */
+const MELEE_SHAKE_STRENGTH = 0.16;
 /** Stand-in for "nothing to point at", so idle frames allocate nothing. */
 const EMPTY_TARGETS: readonly ThreatTarget[] = [];
 /**
@@ -575,6 +582,7 @@ interface SurvivalUi {
   selfDestructButton: HTMLButtonElement;
   selfDestructHint: HTMLSpanElement;
   selfDestructBanner: HTMLDivElement;
+  endlessWaveBanner: HTMLDivElement;
   countdownOverlay: HTMLDivElement;
   countdownValue: HTMLDivElement;
   arenaLoadingOverlay: HTMLDivElement;
@@ -588,6 +596,7 @@ interface SurvivalUi {
   gameOverBoard: HTMLDivElement;
   settingsOverlay: HTMLDivElement;
   settingsButton: HTMLButtonElement;
+  hudGarageButton: HTMLButtonElement;
   settingsEyebrow: HTMLSpanElement;
   settingsSfxVolumeControl: AudioVolumeControl;
   settingsMusicVolumeControl: AudioVolumeControl;
@@ -614,6 +623,8 @@ type PendingTransition =
 type SurvivalRunState = RunState & { kills?: number; score?: number };
 
 export class SurvivalMode {
+  /** The rules this run is played under; fixed for the mode's whole life. */
+  private readonly mode: GameModeDefinition;
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
   private readonly world: RAPIER.World;
@@ -690,6 +701,13 @@ export class SurvivalMode {
    * source — zombie bites, thrown debris, mines, or a bad collision.
    */
   private lastLiveHealth = -1;
+  /**
+   * Strongest melee contact recorded during the current fixed step, and where
+   * it landed. Zero means no weapon touched anything this step.
+   */
+  private meleeHitForce = 0;
+  private meleeHitX = 0;
+  private meleeHitZ = 0;
   private warningRefreshSeconds = 0;
   private lastWarnings: VehicleWarning[] = [];
   private readonly speedValue: HTMLSpanElement;
@@ -771,8 +789,9 @@ export class SurvivalMode {
     radius: number;
   }[] = [];
   private explosionCursor = 0;
-  private thumpRing: THREE.Mesh | null = null;
-  private thumpRingMaterial: THREE.MeshBasicMaterial | null = null;
+  /** The Thumper's two ground rings, outer (fast) first. */
+  private thumpRings: THREE.Mesh[] = [];
+  private thumpRingMaterials: THREE.MeshBasicMaterial[] = [];
   private thumpRingTtl = 0;
   private thumpRingRange = 0;
   private readonly waveTimelineHud: WaveTimelineHud;
@@ -790,6 +809,9 @@ export class SurvivalMode {
   private readonly selfDestructButton: HTMLButtonElement;
   private readonly selfDestructHint: HTMLSpanElement;
   private readonly selfDestructBanner: HTMLDivElement;
+  private readonly endlessWaveBanner: HTMLDivElement;
+  /** Timer that hides the endless banner again; see `showWaveBanner`. */
+  private endlessBannerTimer = 0;
   private readonly countdownOverlay: HTMLDivElement;
   private readonly countdownValue: HTMLDivElement;
   private readonly arenaLoadingOverlay: HTMLDivElement;
@@ -809,6 +831,7 @@ export class SurvivalMode {
   private readonly gameOverBoard: HTMLDivElement;
   private readonly settingsOverlay: HTMLDivElement;
   private readonly settingsButton: HTMLButtonElement;
+  private readonly hudGarageButton: HTMLButtonElement;
   private readonly settingsEyebrow: HTMLSpanElement;
   private readonly settingsSfxVolumeControl: AudioVolumeControl;
   private readonly settingsMusicVolumeControl: AudioVolumeControl;
@@ -864,14 +887,12 @@ export class SurvivalMode {
   private cleanWaveStreak = 0;
   private pendingTransition: PendingTransition | null = null;
   private stuckSeconds = 0;
-  private currentMineSweeperLevel = 0;
   /**
    * Counts down to the next point-defence pass. One timer for the whole rig,
    * but every live bay rolls its own chance on each pass — two bays are two
    * rolls, which is what makes a second one worth bolting on.
    */
   private droneInterceptTimer = 0;
-  private mineWarningPulseSeconds = 0;
   private recoveryCooldown = 0;
   private recoverySettleSeconds = 0;
   private recoveryRequested = false;
@@ -942,8 +963,6 @@ export class SurvivalMode {
   private readonly recoveryForward = new THREE.Vector3();
   private readonly recoveryQuaternion = new THREE.Quaternion();
   private readonly recoveryTargetQuaternion = new THREE.Quaternion();
-  private mineWarningDistances = new WeakMap<object, number>();
-  private mineWarningPulsed = new WeakSet<object>();
   private readonly onUiButtonClick = (event: MouseEvent): void => {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -1030,6 +1049,7 @@ export class SurvivalMode {
     run: SurvivalRunState,
     private readonly callbacks: SurvivalCallbacks,
   ) {
+    this.mode = getGameMode(run.modeId ?? DEFAULT_GAME_MODE_ID);
     this.camera = new THREE.PerspectiveCamera(
       55,
       container.clientWidth / container.clientHeight,
@@ -1072,6 +1092,10 @@ export class SurvivalMode {
       this.vehicle,
       this.arena.bounds,
     );
+    // Before the first frame, so the run opens at the right distance rather
+    // than easing in from the reference one.
+    this.followCamera.setViewportHeight(container.clientHeight);
+    this.followCamera.snap();
     // Added before the zombie visuals are captured below, so the two VFX
     // layers stay parented to the scene rather than to the zombie root.
     this.vfx = new VfxSystem(this.scene);
@@ -1109,7 +1133,10 @@ export class SurvivalMode {
     this.waves = new WaveManager(this.zombies, {
       onRemainingChanged: () => undefined,
       onWaveComplete: (wave, reward) => this.onWaveComplete(wave, reward),
+      onEndlessWaveAdvanced: (wave, reward) =>
+        this.onEndlessWaveAdvanced(wave, reward),
     });
+    this.waves.setEndless(this.mode.endlessWaves);
     // Necromancer raises are bodies the director never assigned; hand them to
     // it so the wave's remaining count covers them.
     this.zombies.onZombiesRaised = (count) =>
@@ -1122,6 +1149,17 @@ export class SurvivalMode {
         forwardX: this.audioListenerForward.x,
         forwardZ: this.audioListenerForward.z,
       });
+    };
+    // A melee weapon biting a zombie was the one hit in the game that neither
+    // the camera nor the reticle acknowledged. Contacts are only recorded here;
+    // the step spends the strongest one, because a grinder drum sitting in a
+    // horde lands one of these per zombie and stacking them would rattle the
+    // screen flat.
+    this.zombies.onMeleeHit = (x, z, force) => {
+      if (force <= this.meleeHitForce) return;
+      this.meleeHitForce = force;
+      this.meleeHitX = x;
+      this.meleeHitZ = z;
     };
     // A behemoth's slam is the heaviest hit a zombie lands on the vehicle, so
     // it gets the same camera-kick treatment as a Heavy Cannon shell.
@@ -1161,6 +1199,7 @@ export class SurvivalMode {
     this.selfDestructButton = builtUi.selfDestructButton;
     this.selfDestructHint = builtUi.selfDestructHint;
     this.selfDestructBanner = builtUi.selfDestructBanner;
+    this.endlessWaveBanner = builtUi.endlessWaveBanner;
     this.countdownOverlay = builtUi.countdownOverlay;
     this.countdownValue = builtUi.countdownValue;
     this.arenaLoadingOverlay = builtUi.arenaLoadingOverlay;
@@ -1174,6 +1213,8 @@ export class SurvivalMode {
     this.gameOverBoard = builtUi.gameOverBoard;
     this.settingsOverlay = builtUi.settingsOverlay;
     this.settingsButton = builtUi.settingsButton;
+    this.hudGarageButton = builtUi.hudGarageButton;
+    this.hudGarageButton.hidden = !this.mode.midRunGarage;
     this.settingsEyebrow = builtUi.settingsEyebrow;
     this.settingsSfxVolumeControl = builtUi.settingsSfxVolumeControl;
     this.settingsMusicVolumeControl = builtUi.settingsMusicVolumeControl;
@@ -1526,6 +1567,15 @@ export class SurvivalMode {
     selfDestructBanner.hidden = true;
     root.appendChild(selfDestructBanner);
 
+    // Endless runs never stop, so the wave number changing is the only signal
+    // that anything happened. One big numeral, gone in a second and a half —
+    // it is a punctuation mark on a fight that is still going, not a card.
+    const endlessWaveBanner = document.createElement('div');
+    endlessWaveBanner.className = 'survival-endless-banner';
+    endlessWaveBanner.setAttribute('role', 'status');
+    endlessWaveBanner.hidden = true;
+    root.appendChild(endlessWaveBanner);
+
     const countdownOverlay = overlayPanel();
     countdownOverlay.style.pointerEvents = 'none';
     const countdownLabel = document.createElement('div');
@@ -1659,6 +1709,20 @@ export class SurvivalMode {
     settingsButton.setAttribute('aria-haspopup', 'dialog');
     settingsButton.addEventListener('click', () => this.setSettingsOpen(true));
     root.appendChild(settingsButton);
+
+    // Creative's own exit, sat beside Settings rather than buried inside it.
+    // The sandbox loop is build, test, change something, test again, so the way
+    // back to the bench has to be one press from the arena — in every other
+    // mode leaving mid-wave forfeits the wave, which is why it stays hidden in
+    // the settings panel there.
+    const hudGarageButton = document.createElement('button');
+    hudGarageButton.type = 'button';
+    hudGarageButton.className =
+      'ui-button ui-button--medium survival-garage-button';
+    hudGarageButton.textContent = 'Garage';
+    hudGarageButton.hidden = true;
+    hudGarageButton.addEventListener('click', () => this.onReturnToGarage());
+    root.appendChild(hudGarageButton);
 
     const settingsOverlay = document.createElement('div');
     settingsOverlay.className = 'survival-settings-overlay';
@@ -1842,6 +1906,7 @@ export class SurvivalMode {
       selfDestructButton,
       selfDestructHint,
       selfDestructBanner,
+      endlessWaveBanner,
       countdownOverlay,
       countdownValue,
       arenaLoadingOverlay,
@@ -1855,6 +1920,7 @@ export class SurvivalMode {
       gameOverBoard,
       settingsOverlay,
       settingsButton,
+      hudGarageButton,
       settingsEyebrow,
       settingsSfxVolumeControl,
       settingsMusicVolumeControl,
@@ -1973,8 +2039,21 @@ export class SurvivalMode {
    */
   private onReturnToGarage(): void {
     if (this.disposed || this.phase === 'gameOver') return;
-    this.discardPendingWaveRewards();
     this.damageNumbers?.clear();
+    // A sandbox bench trip is not an abandoned wave: the loop is build, test,
+    // change something, test again, and rewinding to the wave's start would
+    // undo the fight the player stepped out of to think about. The live wave
+    // and the live vehicle go back with them, so deploying again picks up
+    // exactly where they left rather than restarting.
+    if (this.mode.midRunGarage) {
+      const payload = this.clearedWavePayload();
+      this.callbacks.onReturnToGarage({
+        ...payload.clearedRun,
+        partHp: payload.partHp,
+      });
+      return;
+    }
+    this.discardPendingWaveRewards();
     this.callbacks.onReturnToGarage(this.currentRunState());
   }
 
@@ -2330,12 +2409,6 @@ export class SurvivalMode {
     this.updateFlameLance();
     this.updateSignature();
     this.controls.weaponAim = this.autoAim.step();
-    const mineSweeper = this.resolveLiveMineSweeper();
-    this.currentMineSweeperLevel =
-      mineSweeper === null ? 0 : (mineSweeper.placed.config.level ?? 1);
-    const mineRevealRadius = mineSweeperRadius(
-      mineSweeper === null ? 0 : (mineSweeper.placed.config.level ?? 1),
-    );
     this.vehicle.preStep(
       FIXED_DT,
       this.controls,
@@ -2355,6 +2428,7 @@ export class SurvivalMode {
     this.pickups.step(FIXED_DT);
     this.waves.fixedUpdate(FIXED_DT);
     this.zombies.step(FIXED_DT);
+    this.flushMeleeHit();
     // After the zombies moved, so a sentry shoots where they are now. It also
     // runs after the pickup pass, so a sentry crate collected this step gets
     // its first shot off on the same step it was taken.
@@ -2362,7 +2436,6 @@ export class SurvivalMode {
     // After the zombie step, so a pass sees the projectiles as they are right
     // now rather than one frame's travel behind them.
     this.updateDroneInterceptors();
-    this.updateMineWarningPulse(mineRevealRadius);
 
     this.world.step(this.eventQueue);
     this.vehicle.postStepStability(FIXED_DT);
@@ -2444,6 +2517,25 @@ export class SurvivalMode {
     this.vfx.shellBurst(shot.to.x, shot.to.y, shot.to.z, shot.splashRadiusM);
     playExplosionSfx({ gain: 0.3, playbackRate: 0.92 });
     this.shakeCameraAt(shot.to.x, shot.to.z, 0.9);
+  }
+
+  /**
+   * Spend the step's melee contacts as one kick and one reticle confirm.
+   *
+   * Coalescing is the whole point: the drum in a packed horde reports a contact
+   * per zombie, and both answers are things that must not stack — shakes add up
+   * to the camera's ceiling, and `flashHit` forces a layout to restart its
+   * keyframes. One per step is the same cadence a shot already gets.
+   */
+  private flushMeleeHit(): void {
+    if (this.meleeHitForce <= 0) return;
+    this.shakeCameraAt(
+      this.meleeHitX,
+      this.meleeHitZ,
+      MELEE_SHAKE_STRENGTH * this.meleeHitForce,
+    );
+    this.scopeCursor.flashHit('hit');
+    this.meleeHitForce = 0;
   }
 
   /**
@@ -2791,10 +2883,6 @@ export class SurvivalMode {
     // While the arena is still building the loading scrim owns the screen, so
     // the countdown card waits behind it rather than counting down over it.
     this.countdownOverlay.style.display = this.arenaReady ? 'block' : 'none';
-    this.mineWarningDistances = new WeakMap<object, number>();
-    this.mineWarningPulsed = new WeakSet<object>();
-    this.mineWarningPulseSeconds = 0;
-    this.integrityFill.style.boxShadow = '';
     this.syncGameplayActivity();
   }
 
@@ -2858,6 +2946,51 @@ export class SurvivalMode {
     }
     this.addPendingWaveKillReward(reward);
     this.waves.recordZombieKilled();
+  }
+
+  /**
+   * An endless run rolled into its next wave without pausing.
+   *
+   * This is the cleared-wave bookkeeping with everything that would interrupt
+   * the fight taken out: the score and the clear bonus are paid, the wave
+   * readout moves, and play continues. No phase change, no clear card, no
+   * garage — and no clearing of landmines, trails or sentries, because those
+   * belong to a fight that is still going on.
+   */
+  private onEndlessWaveAdvanced(wave: number, reward: number): void {
+    if (this.phase === 'gameOver') return;
+    if (!this.debugProgressionSuppressed) {
+      this.runScore = addScore(this.runScore, waveClearScore(wave));
+      // Creative runs are practice, so they never touch lifetime progression —
+      // a sandbox with unlimited money must not be able to unlock anything.
+      if (this.mode.scored) this.callbacks.onWaveCleared(wave);
+    }
+    // Paid straight into the wave's pending purse rather than parked in
+    // `pendingWaveReward`, which the clear card owns and an endless run never
+    // shows: left there, the next advance would overwrite it unbanked.
+    this.addPendingWaveKillReward(
+      Number.isSafeInteger(reward) && reward > 0 ? reward : 0,
+    );
+    this.setCurrentWave(wave + 1);
+    this.showWaveBanner(wave + 1);
+  }
+
+  /**
+   * Flash the new wave number over the fight. Restarting the animation needs
+   * the element out of the document's animation list for a frame, which is what
+   * the forced reflow between the class removal and its re-addition buys —
+   * without it, two advances close together leave the second one silent.
+   */
+  private showWaveBanner(wave: number): void {
+    window.clearTimeout(this.endlessBannerTimer);
+    this.endlessWaveBanner.textContent = `WAVE ${wave}`;
+    this.endlessWaveBanner.hidden = false;
+    this.endlessWaveBanner.classList.remove('is-in');
+    void this.endlessWaveBanner.offsetWidth;
+    this.endlessWaveBanner.classList.add('is-in');
+    this.endlessBannerTimer = window.setTimeout(() => {
+      this.endlessWaveBanner.hidden = true;
+    }, 1500);
   }
 
   private onWaveComplete(wave: number, reward: number): void {
@@ -3348,12 +3481,14 @@ export class SurvivalMode {
     this.phaseGhosts.update(frameDt);
     this.tracerRenderer.update(frameDt, this.camera);
     // Camera-relative LOD, so a firefight across the graveyard costs less than
-    // the same firefight under the player's nose.
+    // the same firefight under the player's nose — with the rig itself pinned
+    // to full detail, since the follow camera sits far enough back that
+    // everything bolted to the vehicle would otherwise be thinned out.
     this.vfx.setViewpoint(this.camera.position);
+    this.vfx.setFocus(this.vehicle.body.translation());
     this.vfx.update(frameDt);
     this.warningHud.update(frameDt);
     this.syncWarnings(frameDt);
-    this.syncMineWarningHud(frameDt);
     this.followCamera.update(frameDt);
     this.damageNumbers.update(frameDt, this.camera);
     this.arena.follow(this.vehicleGroup);
@@ -3368,9 +3503,11 @@ export class SurvivalMode {
       position.z,
       Math.atan2(this.minimapForward.x, this.minimapForward.z),
       this.zombies.getAliveTargets(),
-      this.currentMineSweeperLevel >= MINE_SWEEPER_MINIMAP_LEVEL
-        ? this.zombies.activeMines()
-        : undefined,
+      // Buried mines are always on the radar. They used to be gated behind the
+      // Mine Sweeper block, and with that part gone the counter-play to a
+      // Worker burying the approach has to live somewhere — so it lives here,
+      // free, for every rig.
+      this.zombies.activeMines(),
       this.pickups.activeMarkers(),
       this.zombies.activeBoss(),
     );
@@ -3544,15 +3681,6 @@ export class SurvivalMode {
     chit.style.setProperty('--pickup-color', color);
     chit.addEventListener('animationend', () => chit.remove());
     this.pickupToasts.appendChild(chit);
-  }
-
-  private resolveLiveMineSweeper(): RuntimePart | null {
-    for (const part of this.vehicle.assembled.parts.values()) {
-      if (part.placed.defId !== 'mine-sweeper') continue;
-      if (!this.isAttachedAlivePart(part)) continue;
-      return part;
-    }
-    return null;
   }
 
   /**
@@ -4062,13 +4190,21 @@ export class SurvivalMode {
     }
     if (ability.kind === 'thump') {
       const thump = effectiveThump(ability, level);
-      // Shove every zombie in a moderate circle straight away from the chassis.
+      // Shove every zombie in the circle straight away from the chassis, with a
+      // share of the shove going upward so the ring throws bodies rather than
+      // skidding them along the floor.
       this.zombies.knockbackWithin(
         { x: pos.x, z: pos.z },
         thump.radiusM,
         thump.knockbackSpeed,
+        SurvivalMode.THUMP_LIFT_FRACTION,
       );
       this.spawnThumpRing(thump.radiusM);
+      this.vfx.thumperSlam(pos.x, pos.y, pos.z, thump.radiusM);
+      // The rams land on the rig's own ground, so the kick is at full strength
+      // by definition — the shake is most of what sells a ground-pound.
+      this.followCamera.addShake(SurvivalMode.THUMP_CAMERA_SHAKE);
+      playSfx('abilityThump');
       return thump.cooldownSeconds;
     }
     if (ability.kind === 'pulse') {
@@ -4484,57 +4620,6 @@ export class SurvivalMode {
     this.selfDestructHint.textContent = `Press K — ${reach}m Blast`;
   }
 
-  private updateMineWarningPulse(revealRadiusM: number): void {
-    if (
-      this.phase !== 'active' ||
-      this.currentMineSweeperLevel < 3 ||
-      revealRadiusM <= 0
-    ) {
-      return;
-    }
-
-    const position = this.vehicle.body.translation();
-    const radiusSq = revealRadiusM * revealRadiusM;
-    const mines = this.zombies.activeMines();
-    for (let index = 0; index < mines.length; index += 1) {
-      const mine = mines[index];
-      if (mine.state !== 'armed') continue;
-      const dx = mine.x - position.x;
-      const dz = mine.z - position.z;
-      const distanceSq = dx * dx + dz * dz;
-      if (distanceSq > radiusSq) continue;
-
-      const previousDistance = this.mineWarningDistances.get(mine);
-      const distance = Math.sqrt(distanceSq);
-      this.mineWarningDistances.set(mine, distance);
-      if (
-        previousDistance === undefined ||
-        distance >= previousDistance - 0.08 ||
-        this.mineWarningPulsed.has(mine)
-      ) {
-        continue;
-      }
-
-      this.mineWarningPulsed.add(mine);
-      this.mineWarningPulseSeconds = 0.18;
-      playSfx('mineWarning');
-      return;
-    }
-  }
-
-  private syncMineWarningHud(frameDt: number): void {
-    if (this.mineWarningPulseSeconds <= 0) return;
-    this.mineWarningPulseSeconds = Math.max(
-      0,
-      this.mineWarningPulseSeconds - frameDt,
-    );
-    const intensity = this.mineWarningPulseSeconds / 0.18;
-    this.integrityFill.style.boxShadow =
-      intensity > 0
-        ? `0 0 ${Math.round(14 * intensity)}px rgba(255, 174, 61, 0.85)`
-        : '';
-  }
-
   /**
    * Refresh the ability boxes from the live loadout. The bar is a
    * fighting-phase HUD: it shows from the pre-wave countdown through the wave
@@ -4935,52 +5020,91 @@ export class SurvivalMode {
     if (this.charmPulseTtl <= 0) this.charmPulse.visible = false;
   }
 
-  /** Duration of the Thumper shockwave ring, seconds. */
-  private static readonly THUMP_RING_SECONDS = 0.45;
+  /** Duration of the Thumper shockwave rings, seconds. */
+  private static readonly THUMP_RING_SECONDS = 0.6;
+  /**
+   * The Thumper's ground rings, outer first: how thick each is as a fraction of
+   * its own radius, how bright it starts, and how far behind the leading edge it
+   * runs (0 = on the rim, 1 = still at the chassis when the lead ring lands).
+   * Two rings rather than one is what makes the slam read as a wave with mass
+   * behind its edge instead of a single expanding hoop.
+   */
+  private static readonly THUMP_RING_PASSES: readonly {
+    readonly inner: number;
+    readonly opacity: number;
+    readonly lag: number;
+  }[] = [
+    { inner: 0.86, opacity: 0.85, lag: 0 },
+    { inner: 0.6, opacity: 0.4, lag: 0.34 },
+  ];
+  /**
+   * Share of the Thumper's horizontal shove that is redirected upward, so the
+   * ring launches zombies off their feet. Kept well under 1 — the ability buys
+   * ground, and a lift that dominated the push would fire the horde straight up
+   * and drop it back exactly where it stood.
+   */
+  private static readonly THUMP_LIFT_FRACTION = 0.4;
+  /**
+   * Camera kick when the rams land. Below the scuttle charge's, above a shell
+   * landing next to the rig: the Thumper is on a short cooldown and will be
+   * fired many times a wave, so it registers without becoming exhausting.
+   */
+  private static readonly THUMP_CAMERA_SHAKE = 0.85;
 
   /**
-   * Kick off the Thumper shockwave: a flat ring that snaps outward from the
+   * Kick off the Thumper shockwave: two flat rings that snap outward from the
    * chassis to the knockback radius, showing which zombies got shoved. The
-   * unit-radius ring lies flat on the ground as a child of the vehicle group and
-   * is created lazily and reused; the target radius is applied via scale.
+   * unit-radius rings lie flat on the ground as children of the vehicle group and
+   * are created lazily and reused; the target radius is applied via scale.
    */
   private spawnThumpRing(radiusM: number): void {
-    if (this.thumpRing === null) {
-      const material = new THREE.MeshBasicMaterial({
-        color: 0xffcf80,
-        transparent: true,
-        opacity: 0.6,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      });
-      // Unit ring (outer radius 1) laid flat; scaled to the blast radius.
-      const mesh = new THREE.Mesh(
-        new THREE.RingGeometry(0.82, 1, 48),
-        material,
-      );
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.position.y = 0.15;
-      mesh.name = 'thump-ring';
-      this.vehicleGroup.add(mesh);
-      this.thumpRing = mesh;
-      this.thumpRingMaterial = material;
+    if (this.thumpRings.length === 0) {
+      for (const [index, pass] of SurvivalMode.THUMP_RING_PASSES.entries()) {
+        const material = new THREE.MeshBasicMaterial({
+          color: 0xffcf80,
+          transparent: true,
+          opacity: pass.opacity,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        });
+        // Unit ring (outer radius 1) laid flat; scaled to the blast radius.
+        const mesh = new THREE.Mesh(
+          new THREE.RingGeometry(pass.inner, 1, 48),
+          material,
+        );
+        mesh.rotation.x = -Math.PI / 2;
+        // Staggered heights, so the two rings never z-fight where they overlap.
+        mesh.position.y = 0.14 + index * 0.03;
+        mesh.name = `thump-ring-${index}`;
+        this.vehicleGroup.add(mesh);
+        this.thumpRings.push(mesh);
+        this.thumpRingMaterials.push(material);
+      }
     }
     this.thumpRingRange = Math.max(0.1, radiusM);
     this.thumpRingTtl = SurvivalMode.THUMP_RING_SECONDS;
-    this.thumpRing.visible = true;
+    for (const ring of this.thumpRings) ring.visible = true;
   }
 
-  /** Expand and fade the Thumper shockwave ring, hiding it when spent. */
+  /** Expand and fade the Thumper shockwave rings, hiding them when spent. */
   private syncThumpRing(frameDt: number): void {
-    if (this.thumpRing === null || this.thumpRingTtl <= 0) return;
+    if (this.thumpRings.length === 0 || this.thumpRingTtl <= 0) return;
     this.thumpRingTtl = Math.max(0, this.thumpRingTtl - frameDt);
     const progress = 1 - this.thumpRingTtl / SurvivalMode.THUMP_RING_SECONDS;
-    const scale = this.thumpRingRange * (0.25 + 0.75 * progress);
-    this.thumpRing.scale.set(scale, scale, scale);
-    if (this.thumpRingMaterial) {
-      this.thumpRingMaterial.opacity = 0.6 * (1 - progress);
+    for (const [index, pass] of SurvivalMode.THUMP_RING_PASSES.entries()) {
+      const ring = this.thumpRings[index];
+      if (ring === undefined) continue;
+      // Each ring runs the same sweep, started `lag` of the way later, so the
+      // trailing one is still crossing the ground when the lead one lands.
+      const local = Math.max(0, (progress - pass.lag) / (1 - pass.lag));
+      const scale = this.thumpRingRange * (0.18 + 0.82 * local);
+      ring.scale.set(scale, scale, scale);
+      const material = this.thumpRingMaterials[index];
+      if (material) material.opacity = pass.opacity * (1 - local) ** 1.4;
     }
-    if (this.thumpRingTtl <= 0) this.thumpRing.visible = false;
+    if (this.thumpRingTtl <= 0) {
+      for (const ring of this.thumpRings) ring.visible = false;
+    }
   }
 
   /** How far the Missile Launcher Q rocket seeks a cluster / flies ahead, m. */
@@ -5426,6 +5550,7 @@ export class SurvivalMode {
   resize(width: number, height: number): void {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.followCamera.setViewportHeight(height);
     this.mobileHud.refresh();
   }
 
@@ -5495,6 +5620,7 @@ export class SurvivalMode {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    window.clearTimeout(this.endlessBannerTimer);
     this.stopIconRender();
     stopDriveSfx();
     this.tuningUnsubscribe?.();
@@ -5523,6 +5649,7 @@ export class SurvivalMode {
     this.pickups.dispose();
     this.sentries.dispose();
     this.zombies.setDamageListener(null);
+    this.zombies.onMeleeHit = null;
     this.damageNumbers.dispose();
     this.zombies.dispose();
     this.vfx.dispose();

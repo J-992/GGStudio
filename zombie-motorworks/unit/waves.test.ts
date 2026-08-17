@@ -5,9 +5,11 @@ import {
   healthMultiplierForWave,
   hordeIntervalForWave,
   maxActiveZombiesForWave,
+  spawnsAllAtOnce,
   speedMultiplierForWave,
   waveRewardForWave,
   zombieCompositionForWave,
+  zombieCountForWave,
 } from '../src/survival/WaveManager.ts';
 import type { ZombieSystem } from '../src/survival/zombies/ZombieSystem.ts';
 import { ZOMBIE_POOL_COUNTS } from '../src/survival/zombies/zombieConfig.ts';
@@ -56,7 +58,7 @@ describe('wave formulas', () => {
   });
 
   it('scales walker counts to the 70 cap', () => {
-    expect(zombieCompositionForWave(1).walker).toBe(30);
+    expect(zombieCompositionForWave(1).walker).toBe(24);
     expect(zombieCompositionForWave(6).walker).toBe(28);
     expect(zombieCompositionForWave(21).walker).toBe(70);
     expect(zombieCompositionForWave(51).walker).toBe(70);
@@ -94,8 +96,44 @@ describe('wave formulas', () => {
     expect(maxActiveZombiesForWave(50)).toBe(48);
   });
 
+  it('lets the opening waves hold their whole roster at once', () => {
+    for (const wave of [1, 2]) {
+      expect(spawnsAllAtOnce(wave)).toBe(true);
+      expect(maxActiveZombiesForWave(wave)).toBeGreaterThanOrEqual(
+        zombieCountForWave(wave),
+      );
+    }
+    // Wave 3 is back on the paced schedule, and its roster outgrows the cap.
+    expect(spawnsAllAtOnce(3)).toBe(false);
+    expect(maxActiveZombiesForWave(3)).toBeLessThan(zombieCountForWave(3));
+  });
+
+  it('empties an opening wave queue on the first spawn tick', () => {
+    let active = 0;
+    const zombiePool = {
+      setWaveMultipliers: () => undefined,
+      setBossEncounter: () => undefined,
+      getActiveCount: () => active,
+      trySpawnHorde: (kinds: readonly unknown[]) => {
+        active += kinds.length;
+        return kinds.length;
+      },
+    } as unknown as ZombieSystem;
+    const waves = new WaveManager(zombiePool, {
+      onRemainingChanged: () => undefined,
+      onWaveComplete: () => undefined,
+    });
+
+    waves.startWave(2);
+    waves.fixedUpdate(1 / 60);
+    expect(active).toBe(zombieCountForWave(2));
+  });
+
   it.each([
-    { wave: 1, interval: 1.45 },
+    // Waves 1-2 burst: the interval only covers whatever the pool held back.
+    { wave: 1, interval: 0.2 },
+    { wave: 2, interval: 0.2 },
+    { wave: 3, interval: 1.45 },
     { wave: 5, interval: 1.45 },
     { wave: 6, interval: 1.25 },
     { wave: 12, interval: 1.25 },
@@ -181,7 +219,7 @@ describe('wave formulas', () => {
     waves.startWave(1);
     expect(waveMultipliers[0]).toBeCloseTo(0.7);
     expect(waveMultipliers.slice(1)).toEqual([1, 1]);
-    expect(waves.prepareDebugKillAll()).toBe(30);
+    expect(waves.prepareDebugKillAll()).toBe(24);
     expect(remaining).toBe(0);
     expect(completion).toEqual({ wave: 1, reward: 50 });
   });

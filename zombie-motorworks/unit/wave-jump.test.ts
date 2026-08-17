@@ -118,19 +118,16 @@ describe('jumping into a wave', () => {
     expect(state.activeRun).toEqual({ wave: 11 });
   });
 
-  it('grants the parts a player would have unlocked by then', () => {
+  it('banks the progression a player would have by then', () => {
     setDevModeForTesting(true);
     const { app, state } = appUnderTest();
 
     app.devWaveJump(12);
 
-    const profile = state.profile as {
-      highestWaveCleared: number;
-      unlockedDefIds: string[];
-    };
+    const profile = state.profile as { highestWaveCleared: number };
+    // Jumping to wave 12 means the eleven waves under it are cleared, which is
+    // what every wave-gated readout in the game keys off.
     expect(profile.highestWaveCleared).toBe(11);
-    // The Mine Sweeper unlocks on wave 7, so wave 12 must already have it.
-    expect(profile.unlockedDefIds).toContain('mine-sweeper');
   });
 
   it('grants money to build with', () => {

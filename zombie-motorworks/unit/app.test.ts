@@ -53,6 +53,7 @@ function appWithDamagedCheckpoint(
     missingParts: [],
     kills: 0,
     biomeId: 'graveyard',
+    modeId: 'campaign',
     seed: 1234,
     score: 0,
     bankedEarnings: 0,
@@ -163,16 +164,6 @@ describe('starter blueprint', () => {
 });
 
 describe('application profile progression', () => {
-  it('unlocks the Mine Sweeper at wave 7 but not wave 6', () => {
-    const beforeGate = defaultProfile();
-    recordWaveCleared(beforeGate, 6);
-    expect(beforeGate.unlockedDefIds).not.toContain('mine-sweeper');
-
-    const atGate = defaultProfile();
-    recordWaveCleared(atGate, 7);
-    expect(atGate.unlockedDefIds).toContain('mine-sweeper');
-  });
-
   it('keeps the highest cleared wave when an earlier wave is cleared later', () => {
     const profile = defaultProfile();
     recordWaveCleared(profile, 9);
@@ -211,7 +202,7 @@ describe('application profile progression', () => {
   it('clears both progression fields for a New Game profile reset', () => {
     const profile = defaultProfile();
     profile.money = 999;
-    profile.unlockedDefIds.push('mine-sweeper');
+    profile.unlockedDefIds.push('thumper');
     profile.highestWaveCleared = 12;
     profile.phoneAddictsKilled = 3;
 

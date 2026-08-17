@@ -161,7 +161,7 @@ const SPECIALIST_PREVIEWS: Record<SpecialistZombieKind, SpecialistPreview> = {
   worker: {
     name: 'Worker',
     tagline: 'Buries mines',
-    counters: ['mine-sweeper', 'armour-plate'],
+    counters: ['tread-tank', 'armour-plate'],
   },
   'phone-addict': {
     name: 'Phone Addict',

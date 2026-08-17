@@ -117,6 +117,7 @@ import {
   STUCK_TIME_THRESHOLD,
   THROWER_ATTACK_EXIT_MARGIN,
   THROWER_VISUAL_HEIGHT,
+  THUMP_KNOCKBACK_DURATION,
   WALK_BOB_AMPLITUDE,
   WALK_BOB_FREQUENCY,
   WORKER_RETREAT_RANGE,
@@ -1664,6 +1665,10 @@ export class Zombie {
     this.health -= this.bossDef
       ? Math.min(damage, this.bossDef.impactDamageCap)
       : damage;
+    // Every other way a zombie takes damage whitens it for a moment —
+    // `takeDamage`, `applyPlowScrape`, `applyPlowCrush`. Ramming and melee were
+    // the one path that did not, which is why a sawblade landed silently.
+    this.hitFlashTimer = HIT_FLASH_DURATION;
     this.state = ZombieState.KnockedBack;
     this.knockbackTimer = KNOCKBACK_DURATION;
 
@@ -1686,8 +1691,17 @@ export class Zombie {
    * it into the KnockedBack state. Charmed/dead/spawning zombies are skipped. A
    * zombie sitting exactly on the origin gets an arbitrary outward push so it is
    * never left in place.
+   *
+   * `liftFraction` adds an upward share of the same impulse, so the shockwave
+   * takes them off their feet instead of skidding them along the floor — a
+   * ground-pound the player can see land. It is a fraction of the horizontal
+   * speed rather than a fixed lift so a bigger shove throws them higher, and it
+   * runs through {@link knockbackScale} too, so a boss is no easier to pop into
+   * the air than it is to push. The zombie is also held down for the whole
+   * flight ({@link THUMP_KNOCKBACK_DURATION}) rather than the standard beat, so
+   * it cannot start walking again mid-air.
    */
-  applyKnockback(dirX: number, dirZ: number, speed: number): void {
+  applyKnockback(dirX: number, dirZ: number, speed: number, liftFraction = 0): void {
     if (!this.isTargetable || speed <= 0) return;
 
     let length = Math.hypot(dirX, dirZ);
@@ -1698,11 +1712,12 @@ export class Zombie {
     }
 
     this.state = ZombieState.KnockedBack;
-    this.knockbackTimer = KNOCKBACK_DURATION;
+    this.knockbackTimer =
+      liftFraction > 0 ? THUMP_KNOCKBACK_DURATION : KNOCKBACK_DURATION;
 
     const impulseMagnitude = this.body.mass() * speed * this.knockbackScale();
     this.impulseScratch.x = (dirX / length) * impulseMagnitude;
-    this.impulseScratch.y = 0;
+    this.impulseScratch.y = impulseMagnitude * Math.max(0, liftFraction);
     this.impulseScratch.z = (dirZ / length) * impulseMagnitude;
     this.body.applyImpulse(this.impulseScratch, true);
   }

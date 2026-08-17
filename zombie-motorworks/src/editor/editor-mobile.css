@@ -215,6 +215,9 @@
   .inventory-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Definite rows, same as the shop shelf above: a tile that sized itself off
+     its own width left the row at min-content and the art overlapped. */
+  grid-auto-rows: 88px;
   min-height: 0;
   flex: none;
   gap: var(--ui-space-2);

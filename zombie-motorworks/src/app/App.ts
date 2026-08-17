@@ -23,6 +23,27 @@ import { validateBlueprint } from '../core/placement.ts';
 import { planRebuild } from '../core/rebuild.ts';
 import { analyzeVehicle } from '../core/analysis.ts';
 import { getPartDef, PART_CATALOG } from '../core/parts.ts';
+
+/**
+ * Stock count handed to every part in a mode with an unlimited inventory. Big
+ * enough that no build could exhaust it, small enough that the garage's counts
+ * still render as a number rather than scientific notation.
+ */
+const INFINITE_STOCK = 9_999;
+import {
+  CREATIVE_WALLET,
+  DEFAULT_GAME_MODE_ID,
+  getGameMode,
+  type GameModeId,
+} from '../core/gameModes.ts';
+import {
+  canPlayDaily,
+  dailyBiome,
+  dailyLoadout,
+  dailySeed,
+  dayIdFor,
+} from '../core/dailyChallenge.ts';
+import { dailyStore } from './dailyStore.ts';
 import { getEffectiveDef } from '../core/upgrades.ts';
 import { composeOrientations, orientationFromSteps } from '../core/grid.ts';
 import {
@@ -48,17 +69,14 @@ import {
 import type { BiomeId } from '../core/biomes.ts';
 import {
   DEFAULT_BUILD_ID,
+  buildBeginnerBlueprint,
   buildStarterRig,
   buildStarterUnlocks,
   isBuildId,
   type BuildId,
 } from '../core/builds.ts';
 import type { DebugCameraPose } from '../core/cameraPose.ts';
-import {
-  defaultProfile,
-  MINE_SWEEPER_UNLOCK_WAVE,
-  type PlayerProfile,
-} from '../core/profile.ts';
+import { defaultProfile, type PlayerProfile } from '../core/profile.ts';
 import type { RunOutcome } from '../core/leaderboard.ts';
 import type { SavedRun } from '../core/runSave.ts';
 import { randomSeed } from '../core/rng.ts';
@@ -106,6 +124,8 @@ export interface RunCheckpoint {
   kills: number;
   /** Arena recipe shared by every wave in this run. */
   biomeId: BiomeId;
+  /** Rule set this run is played under; fixed for its whole life. */
+  modeId: GameModeId;
   /** Procedural arena seed shared by every wave in this run. */
   seed: number;
   /** Arcade run score committed before `wave`. */
@@ -132,10 +152,19 @@ export function fullPartHp(bp: VehicleBlueprint): Record<string, number> {
   );
 }
 
-/** The immutable wave-start state for a brand-new run. */
+/**
+ * The immutable wave-start state for a brand-new run.
+ *
+ * `seed` is a parameter rather than always a fresh roll because the Daily Run
+ * derives its arena from the calendar: two players on the same date have to get
+ * the same map out of the same generator, or the board is comparing different
+ * games. Every other mode leaves it out and takes the dice.
+ */
 export function createInitialRunCheckpoint(
   bp: VehicleBlueprint,
   biomeId: BiomeId,
+  modeId: GameModeId = DEFAULT_GAME_MODE_ID,
+  seed: number = randomSeed(),
 ): RunCheckpoint {
   return {
     wave: 1,
@@ -147,7 +176,8 @@ export function createInitialRunCheckpoint(
     missingParts: [],
     kills: 0,
     biomeId,
-    seed: randomSeed(),
+    modeId,
+    seed,
     score: 0,
     bankedEarnings: 0,
     elapsedSeconds: 0,
@@ -190,6 +220,11 @@ export function createClearedWaveCheckpoint(input: {
   missingParts: readonly PlacedPart[];
   kills: number;
   biomeId: BiomeId;
+  /**
+   * Carried forward unchanged: a run cannot change rules mid-flight. Optional
+   * because Campaign is the default and every pre-existing caller means it.
+   */
+  modeId?: GameModeId;
   seed: number;
   score: number;
   bankedEarnings: number;
@@ -207,6 +242,7 @@ export function createClearedWaveCheckpoint(input: {
   return {
     wave: input.nextWave,
     blueprint,
+    modeId: input.modeId ?? DEFAULT_GAME_MODE_ID,
     partHp: partHpForBlueprint(blueprint, input.partHp),
     missingParts: mergeMissingParts(
       input.missingParts,
@@ -263,6 +299,7 @@ export function runStateFromCheckpoint(
     partHp: { ...checkpoint.partHp },
     kills: checkpoint.kills,
     biomeId: checkpoint.biomeId,
+    modeId: checkpoint.modeId,
     seed: checkpoint.seed,
     score: checkpoint.score,
     elapsedSeconds: checkpoint.elapsedSeconds,
@@ -322,12 +359,6 @@ function devWalletForWave(wave: number): number {
 
 export function recordWaveCleared(profile: PlayerProfile, wave: number): void {
   profile.highestWaveCleared = Math.max(profile.highestWaveCleared ?? 0, wave);
-  if (
-    wave >= MINE_SWEEPER_UNLOCK_WAVE &&
-    !profile.unlockedDefIds.includes('mine-sweeper')
-  ) {
-    profile.unlockedDefIds.push('mine-sweeper');
-  }
 }
 
 /** Apply the lifetime kill progress used by the EMP unlock gate. */
@@ -403,7 +434,7 @@ export class App {
   private survival: SurvivalMode | null = null;
   private title: TitleScreen | null = null;
   private bp: VehicleBlueprint = createEmptyBlueprint('starter-rig');
-  private readonly profile: PlayerProfile;
+  private profile: PlayerProfile;
   private readonly saveExistedAtBoot: boolean;
   /** Survive editor <-> runtime-mode round trips: undo history and camera/layer. */
   private readonly history: CommandHistory;
@@ -423,6 +454,18 @@ export class App {
   private preferredBuildId: BuildId;
   private profileDirty = false;
   private profileFlushTimer: number | undefined;
+  /** Rules the run in flight is played under; see `enterSandboxMode`. */
+  private activeModeId: GameModeId = DEFAULT_GAME_MODE_ID;
+  /** The campaign profile, parked while a sandbox mode plays on a copy. */
+  private sandboxProfileBackup: PlayerProfile | null = null;
+  /** While true, nothing writes the profile to storage. */
+  private profileSealed = false;
+  /**
+   * Whether this run's garage opens without a Store. True for Creative, and for
+   * a Daily draft day. A property of one attempt, not of a saved player, which
+   * is why it lives here rather than on the profile.
+   */
+  private storeHidden = false;
   private saveFailureNotified = false;
   private pendingEditorNotice: string | undefined;
   private pendingIsNewGame = false;
@@ -632,6 +675,10 @@ export class App {
       missingParts: savedRun.missingParts.map((part) => ({ ...part })),
       kills: savedRun.kills,
       biomeId: savedRun.biomeId,
+      // A save on disk is always a campaign run: every other mode is sealed
+      // against persistence (see `persistsProgress`), so none of them can have
+      // written this record and the schema needs no mode field.
+      modeId: 'campaign',
       seed: savedRun.seed,
       score: savedRun.score,
       bankedEarnings: savedRun.bankedEarnings,
@@ -697,6 +744,10 @@ export class App {
                 missingParts: () => this.checkpointMissingParts(),
               }
             : undefined,
+        purchaseRules: {
+          infiniteInventory: getGameMode(this.activeModeId).infiniteInventory,
+          hideStore: this.storeHidden,
+        },
         notice: this.pendingEditorNotice,
         isNewGame: this.pendingIsNewGame,
         onChooseBuild: (buildId) => this.applyChosenBuild(buildId),
@@ -723,9 +774,13 @@ export class App {
         onContinue: () => this.beginContinueGame(),
         onResumeRun: () => this.resumeSavedRun(),
         onBiomeSelected: (biomeId) => this.selectPreferredBiome(biomeId),
+        onDailyRun: () => this.beginDailyRun(),
+        onEndlessRun: () => this.beginEndlessRun(),
+        onCreativeRun: () => this.beginCreativeRun(),
       },
       runSaveStore.load(),
       this.preferredBiomeId,
+      dailyStore.load(),
     );
   }
 
@@ -780,10 +835,15 @@ export class App {
 
   private returnToTitle(): void {
     if (!this.editor || (this.activeRun && this.inBuildPhase)) return;
-    this.bp = this.editor.blueprint();
-    this.editor.persistGarage();
+    // A Creative garage is a scratch pad on a throwaway profile; persisting it
+    // would write the sandbox rig over the campaign's saved blueprint.
+    if (this.sandboxProfileBackup === null) {
+      this.bp = this.editor.blueprint();
+      this.editor.persistGarage();
+    }
     this.editor.dispose();
     this.editor = null;
+    this.leaveSandboxMode();
     this.showTitle();
   }
 
@@ -838,7 +898,134 @@ export class App {
    * anything. Only `beginFirstRun` above skips ahead.
    */
   private beginNewGame(): void {
+    this.leaveSandboxMode();
     this.resetToStarterRig();
+    this.openEditor();
+  }
+
+  /**
+   * Enter a mode that must not touch the campaign save.
+   *
+   * Daily, Endless and Creative all run on a throwaway profile: the Daily has
+   * to hand everyone the same starting wallet or its board is meaningless,
+   * Creative hands out a trillion dollars, and none of the three should be able
+   * to spend, unlock or wipe anything the player earned in their campaign.
+   *
+   * The campaign profile is committed to disk first and kept in memory as a
+   * backup, then persistence is sealed for as long as the sandbox is live. Its
+   * mutations happen on a copy that is simply dropped on the way out — nothing
+   * downstream has to know it is playing in a sandbox.
+   */
+  private enterSandboxMode(modeId: GameModeId): void {
+    this.leaveSandboxMode();
+    this.flushDirtyProfile();
+    this.sandboxProfileBackup = JSON.parse(
+      JSON.stringify(this.profile),
+    ) as PlayerProfile;
+    this.profileSealed = true;
+    this.activeModeId = modeId;
+
+    const mode = getGameMode(modeId);
+    // A fresh default profile, so every Daily attempt starts from the same
+    // wallet and the same shelf whatever the player's campaign looks like.
+    this.profile = defaultProfile();
+    this.profile.buildId = DEFAULT_BUILD_ID;
+    this.preferredBuildId = DEFAULT_BUILD_ID;
+    if (mode.allPartsUnlocked) {
+      this.profile.unlockedDefIds = Object.keys(PART_CATALOG);
+    }
+
+    // The Daily overrides the mode's flat wallet with the day's own roll: a
+    // budget day sets a wallet, a draft day sets none and hands over a fixed
+    // crate of blocks instead.
+    const loadout = modeId === 'daily' ? dailyLoadout(dayIdFor()) : null;
+    this.profile.money = loadout?.money ?? mode.startingMoney;
+
+    // Every part at a count nothing decrements. `PART_CATALOG` rather than the
+    // store's shelf list, so a Creative build can reach blocks the store never
+    // sells — the signature blocks included.
+    this.profile.inventory = mode.infiniteInventory
+      ? Object.fromEntries(
+          Object.keys(PART_CATALOG).map((defId) => [defId, INFINITE_STOCK]),
+        )
+      : { ...(loadout?.kit ?? {}) };
+    // Undefined rather than empty: the garage seeds a fresh bar from whatever
+    // is in the inventory, which is exactly what puts a draft kit on the bar.
+    delete this.profile.hotbarDefIds;
+
+    // A draft day has nothing to sell — the kit is the whole allowance — so the
+    // Store goes with it, the same way Creative's does.
+    this.storeHidden = mode.hideStore || loadout?.kind === 'crate';
+
+    this.bp =
+      mode.startingRig === 'beginner'
+        ? buildBeginnerBlueprint()
+        : buildStarterBlueprint(DEFAULT_BUILD_ID);
+    this.clearSessionState();
+  }
+
+  /**
+   * Put the campaign profile back and let it persist again. Safe to call when
+   * no sandbox is live, which is why every exit path can call it blindly.
+   */
+  private leaveSandboxMode(): void {
+    const backup = this.sandboxProfileBackup;
+    this.sandboxProfileBackup = null;
+    this.profileSealed = false;
+    this.activeModeId = DEFAULT_GAME_MODE_ID;
+    this.storeHidden = false;
+    if (backup === null) return;
+
+    this.profile = backup;
+    this.preferredBiomeId = backup.preferredBiomeId ?? DEFAULT_BIOME_ID;
+    this.preferredBuildId = backup.buildId ?? DEFAULT_BUILD_ID;
+    this.bp = buildStarterBlueprint(this.preferredBuildId);
+    this.clearSessionState();
+    // Written back rather than merely restored in memory: `profileStore` caches
+    // the object it last saw, and the sandbox copy is the one it is holding.
+    this.profileDirty = true;
+    this.flushProfile();
+  }
+
+  /**
+   * Today's Daily Run: one attempt, an arena and a seed the calendar picked,
+   * and a starter rig identical to everyone else's.
+   */
+  private beginDailyRun(): void {
+    const dayId = dayIdFor();
+    if (!canPlayDaily(dailyStore.load())) return;
+    this.enterSandboxMode('daily');
+    this.disposeTitle();
+    this.preferredBiomeId = dailyBiome(dayId);
+    // Opens in the Garage, not the arena: the whole of a Daily is what you do
+    // with the day's wallet or the day's draft, and that decision has to be
+    // made before the first zombie, not after it.
+    const loadout = dailyLoadout(dayId);
+    this.pendingEditorNotice =
+      loadout.kind === 'crate'
+        ? 'Daily draft — this kit is everything you get. Build and drive out.'
+        : `Daily budget — $${loadout.money.toLocaleString()} and the whole catalog.`;
+    this.openEditor();
+  }
+
+  /** Endless: the beginner chassis, $2,000, and a horde that never stops. */
+  private beginEndlessRun(): void {
+    this.enterSandboxMode('endless');
+    this.disposeTitle();
+    this.pendingEditorNotice =
+      'Endless — $2,000 to spend, one build, and no garage once you deploy.';
+    this.openEditor();
+  }
+
+  /**
+   * Creative opens in the Garage rather than the arena, because building is the
+   * point of it — the endless horde is there to test what you built against.
+   */
+  private beginCreativeRun(): void {
+    this.enterSandboxMode('creative');
+    this.disposeTitle();
+    this.pendingEditorNotice =
+      'Creative Mode — every part unlocked, unlimited cash, endless waves.';
     this.openEditor();
   }
 
@@ -959,14 +1146,25 @@ export class App {
     if (this.checkpoint !== null) {
       this.resumeRun(bp);
     } else {
-      this.startRun(bp, this.preferredBiomeId);
+      this.startRun(bp, this.preferredBiomeId, this.activeModeId);
     }
   }
 
-  private startRun(bp: VehicleBlueprint, biomeId: BiomeId): void {
+  private startRun(
+    bp: VehicleBlueprint,
+    biomeId: BiomeId,
+    modeId: GameModeId = DEFAULT_GAME_MODE_ID,
+    seed?: number,
+  ): void {
     runSaveStore.clear();
+    this.activeModeId = modeId;
     this.runMoneyEarned = 0;
-    this.checkpoint = createInitialRunCheckpoint(bp, biomeId);
+    // A fixed-seed mode takes its arena from the calendar however it got here —
+    // including the Garage's Fight button, which knows nothing about dailies.
+    const runSeed =
+      seed ??
+      (getGameMode(modeId).fixedSeed ? dailySeed(dayIdFor()) : randomSeed());
+    this.checkpoint = createInitialRunCheckpoint(bp, biomeId, modeId, runSeed);
     this.activeRun = { wave: this.checkpoint.wave };
     this.inBuildPhase = false;
     this.persistRunCheckpoint('wave');
@@ -1052,7 +1250,7 @@ export class App {
       },
       onGameOver: (state, pendingMoneyDiscarded, score, kills) =>
         this.concludeRun(state, pendingMoneyDiscarded, score, kills),
-      onGameOverContinue: () => this.openEditor(),
+      onGameOverContinue: () => this.continueFromGameOver(),
       onGameOverMenu: () => this.leaveFinishedRun(),
       onResetWave: (state) => this.resetSurvivalWave(state),
       onReturnToGarage: (state) => this.returnToGarageMidWave(state),
@@ -1136,11 +1334,38 @@ export class App {
     score: number,
     kills: number,
   ): RunOutcome {
+    const mode = getGameMode(this.activeModeId);
+    const at = Date.now();
+    if (mode.id === 'daily') {
+      // Filed before the board so a daily attempt is spent even if it scored
+      // nothing — the one-run-a-day rule is the mode, not a reward for doing
+      // well, and a wipe on wave one still has to burn the attempt.
+      dailyStore.record({
+        dayId: dayIdFor(at),
+        score,
+        wave: run.wave,
+        kills,
+        at,
+      });
+    }
+    // A Creative run is practice on unlimited money; ranking it would make
+    // every board meaningless. It still gets a game-over card of its own.
+    if (!mode.scored) {
+      this.resetProgressionForNewRun();
+      return {
+        score,
+        wave: run.wave,
+        kills,
+        isPersonalBest: false,
+        rank: null,
+        entries: leaderboardStore.load(),
+      };
+    }
     const recorded = leaderboardStore.record({
       score,
       wave: run.wave,
       kills,
-      at: Date.now(),
+      at,
       durationSeconds: Math.max(0, Math.round(run.elapsedSeconds ?? 0)),
       biomeId: this.checkpoint?.biomeId ?? this.preferredBiomeId,
     });
@@ -1167,7 +1392,21 @@ export class App {
   private leaveFinishedRun(): void {
     this.survival?.dispose();
     this.survival = null;
+    this.leaveSandboxMode();
     this.showTitle();
+  }
+
+  /**
+   * "Continue" on the game-over card. A campaign run drops the player back into
+   * their garage; a sandbox run has no garage to go back to — its was a throw-
+   * away — so it returns to the title, where the mode can be started again.
+   */
+  private continueFromGameOver(): void {
+    if (this.sandboxProfileBackup !== null) {
+      this.leaveFinishedRun();
+      return;
+    }
+    this.openEditor();
   }
 
   /**
@@ -1225,6 +1464,18 @@ export class App {
   private returnToGarageMidWave(run: RunState): void {
     this.flushProfile();
     if (this.checkpoint !== null) {
+      // A sandbox bench trip re-bases the checkpoint on where the run actually
+      // is, so stepping into the garage and back out does not rewind the wave
+      // or heal the rig. Every other mode keeps the rewind: leaving mid-wave
+      // there forfeits the wave, and the checkpoint is what it forfeits to.
+      if (getGameMode(this.activeModeId).midRunGarage) {
+        this.checkpoint = {
+          ...this.checkpoint,
+          wave: run.wave,
+          partHp: { ...this.checkpoint.partHp, ...run.partHp },
+          elapsedSeconds: run.elapsedSeconds ?? this.checkpoint.elapsedSeconds,
+        };
+      }
       this.bp = this.checkpoint.blueprint;
       this.activeRun = { wave: this.checkpoint.wave };
     } else {
@@ -1457,6 +1708,13 @@ export class App {
     if (!Number.isSafeInteger(moneyDelta)) {
       throw new Error('Money change must be a safe integer');
     }
+    // Creative's wallet does not move. Letting spends land would work — the
+    // balance is unspendable by any real build — but the readout would tick
+    // downward all session, which is not what "unlimited" looks like.
+    if (getGameMode(this.activeModeId).infiniteMoney) {
+      this.profile.money = CREATIVE_WALLET;
+      return;
+    }
     const next = this.profile.money + moneyDelta;
     if (!Number.isSafeInteger(next) || next < 0) {
       throw new Error('Insufficient funds');
@@ -1514,7 +1772,9 @@ export class App {
   };
 
   private flushProfile(): void {
-    if (!this.profileDirty) return;
+    // The seal is checked before the dirty flag so a sandbox mutation stays
+    // marked dirty and is simply never written — `leaveSandboxMode` clears it.
+    if (this.profileSealed || !this.profileDirty) return;
     try {
       profileStore.save(this.profile);
       this.profileDirty = false;
@@ -1524,6 +1784,10 @@ export class App {
   }
 
   private saveProfileOrThrow(): void {
+    // The Garage saves through this on every purchase. In a sandbox mode the
+    // write is skipped rather than refused: the caller only needs to know the
+    // buy succeeded, and in Creative it always does.
+    if (this.profileSealed) return;
     try {
       profileStore.save(this.profile);
       this.profileDirty = false;
@@ -1543,6 +1807,12 @@ export class App {
 
   private persistRunCheckpoint(phase: 'wave' | 'build'): void {
     if (this.checkpoint === null) return;
+    // A sandbox run leaves no save behind. Without this a Daily or Endless run
+    // would write a resumable checkpoint that the title screen then offers as
+    // "Resume Run", and picking it up would restore a sandbox run as a campaign
+    // one — the save format has no mode field precisely because this cannot
+    // happen.
+    if (!getGameMode(this.checkpoint.modeId).persistsProgress) return;
     try {
       runSaveStore.save(
         savedRunFromCheckpoint(

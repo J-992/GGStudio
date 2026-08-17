@@ -24,7 +24,6 @@ export const SIMPLE_PART_IDS: readonly string[] = [
   'phase-drive',
   'engine-small',
   'fuel-tank',
-  'mine-sweeper',
   'turret',
   'armour-plate',
   'cannon-heavy',
@@ -78,10 +77,6 @@ export const KID_LABELS: Record<string, PartLabel> = {
   },
   'engine-small': { name: 'Engine', blurb: 'Makes the truck go!' },
   'fuel-tank': { name: 'Fuel Tank', blurb: 'Keeps the engine fueled up!' },
-  'mine-sweeper': {
-    name: 'Mine Finder',
-    blurb: 'Beeps when buried mines are close by!',
-  },
   turret: {
     name: 'Zombie Blaster',
     blurb: 'Blasts zombies all by itself — click to aim it where you want!',
@@ -228,45 +223,27 @@ function partsOwned(state: GarageTourSnapshot): number {
 }
 
 /**
- * Four stops that name the garage, then the loop itself. The action steps
- * compare against the snapshot taken when the tour started rather than against
- * absolute counts, so a player who already owns a yard full of parts still has
- * to buy one to move on.
+ * The loop itself, in three moves the player makes rather than reads.
+ *
+ * This used to open with four narration stops that named the Store, the stats
+ * read-out and the ability slots before the player was allowed to touch
+ * anything — 216 words in front of a game whose whole pitch is "drive a truck
+ * at a crowd". A portal player gives you about fifteen seconds, and prose is
+ * the slowest way to spend them, so the narration is gone and every surviving
+ * step is one the player advances by doing something.
+ *
+ * What the narration used to explain is now the garage's own job: panels are
+ * labelled, tiles carry their price, and the spotlight points at the thing to
+ * press. The action steps compare against the snapshot taken when the tour
+ * started rather than against absolute counts, so a player who already owns a
+ * yard full of parts still has to buy one to move on.
  */
 export const GARAGE_TOUR_STEPS: readonly GarageTourStep[] = [
   {
-    id: 'welcome',
-    title: 'Welcome to the Garage',
-    text: 'This is where the truck gets built. Four quick stops, then you run the loop yourself. Nothing you have already built gets touched.',
-    anchor: 'viewport',
-    advance: 'next',
-  },
-  {
-    id: 'store',
-    title: 'The Store',
-    text: 'Every block, wheel, gun, and gadget is bought here. The tabs split the shelves into Essentials, Weapons, Defence, and Mobility, and each tile carries its price. Your cash sits up in the top-right corner.',
-    anchor: 'store',
-    advance: 'next',
-  },
-  {
-    id: 'stats',
-    title: 'Vehicle Stats',
-    text: 'The read-out for the whole truck: how heavy it is, how likely it is to roll, how much damage it puts out, and how fast it goes. Watch these move as you bolt parts on.',
-    anchor: 'stats',
-    advance: 'next',
-  },
-  {
-    id: 'abilities',
-    title: 'Abilities',
-    text: 'Some parts bring an ability you fire by hand mid-wave with Q, E, and R. Three boxes, so three abilities — click a box to change which part fills it.',
-    anchor: 'abilities',
-    advance: 'next',
-  },
-  {
     id: 'buy',
     title: 'Buy a part',
-    text: 'Your turn. Pick anything you can afford in the Store and click its tile. Buying puts the part straight in your hands, ready to place.',
-    action: 'Buy any part from the Store',
+    text: 'Anything you can afford. Buying puts it straight in your hands.',
+    action: 'Buy any part',
     anchor: 'store',
     advance: 'action',
     isDone: (now, start) => partsOwned(now) > partsOwned(start),
@@ -274,8 +251,8 @@ export const GARAGE_TOUR_STEPS: readonly GarageTourStep[] = [
   {
     id: 'attach',
     title: 'Bolt it on',
-    text: 'Move over the truck and click a green cell to attach the part — red means it cannot go there, because everything has to touch what it mounts to. The build bar along the bottom keeps your blocks one click away.',
-    action: 'Attach the part to the truck',
+    text: 'Green cells take the part. Red ones are not touching anything.',
+    action: 'Attach it to the truck',
     anchor: 'buildBar',
     // The truck is the target here, so nothing gets dimmed.
     dim: false,
@@ -284,8 +261,8 @@ export const GARAGE_TOUR_STEPS: readonly GarageTourStep[] = [
   },
   {
     id: 'fight',
-    title: 'Start the wave',
-    text: 'That is the whole loop: buy, bolt on, drive out. Press Fight Zombies to take this truck into a wave — the tour ends the moment you do.',
+    title: 'Drive out',
+    text: 'Buy, bolt on, drive out. That is the whole game.',
     action: 'Press Fight Zombies',
     anchor: 'fight',
     advance: 'action',

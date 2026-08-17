@@ -212,7 +212,7 @@ body,
 .title-actions {
   display: grid;
   gap: 10px;
-  width: min(340px, 100%);
+  width: min(400px, 100%);
   margin: 0 auto;
 }
 
@@ -221,6 +221,370 @@ body,
   font-size: 17px;
   font-weight: 800;
   letter-spacing: 0.03em;
+}
+
+/* Resume carries the wave it returns to as a second line, so the button says
+   what it does and where it lands without a sentence. */
+.title-resume {
+  display: grid;
+  gap: 2px;
+  place-items: center;
+}
+
+.title-resume__label {
+  font: 400 var(--ui-text-16)/1 var(--ui-font-display);
+  letter-spacing: 0.06em;
+}
+
+.title-resume__wave {
+  font: 700 var(--ui-text-10)/1 var(--ui-font-body);
+  letter-spacing: 0.16em;
+  opacity: 0.8;
+  text-transform: uppercase;
+}
+
+/*
+ * Mode picker. Four rows, each one an icon, a name, a one-line pitch and an
+ * optional callout chip. The icon is what makes the list scannable: the modes
+ * are told apart by shape before a single word is read, which is the whole
+ * reason this replaced a stack of identical text buttons.
+ */
+.title-modes {
+  display: grid;
+  gap: 6px;
+}
+
+/*
+ * Each mode is a plate, not a tab, built to the same recipe as the garage's
+ * Fight button: a lit gradient bed, an inset top highlight and bottom shadow
+ * so it sits proud of the panel, a sheen that sweeps it, an icon that moves,
+ * and a chevron on the launch edge.
+ *
+ * The four differ by hue and by what their icon does, because a menu whose
+ * rows are all one colour is a menu that reads as a list of settings. Campaign
+ * keeps the house olive; the Daily takes brass, the metal the leaderboard is
+ * already made of; Endless goes cold and rotten; Creative goes violet, a hue
+ * nothing else in the game uses, because nothing else in the game hands you a
+ * trillion dollars.
+ */
+.title-mode {
+  --mode-accent: var(--ui-signal-strong);
+  --mode-top: #4c5c2c;
+  --mode-bottom: #232c14;
+  --mode-edge: #6a7d3f;
+  --mode-ink: #e8efd2;
+
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 62px;
+  padding: 10px 12px;
+  overflow: hidden;
+  border: 1px solid var(--mode-edge);
+  background: linear-gradient(var(--mode-top), var(--mode-bottom) 68%);
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 0.14),
+    inset 0 -3px 0 var(--ui-black),
+    3px 4px 0 rgb(0 0 0 / 0.36);
+  color: var(--mode-ink);
+  text-align: left;
+  transition:
+    transform 90ms steps(2, end),
+    filter 90ms steps(2, end);
+}
+
+.title-mode--daily {
+  --mode-accent: #ffd98a;
+  --mode-top: #6d5622;
+  --mode-bottom: #2f2510;
+  --mode-edge: #9b7c33;
+  --mode-ink: #f6e6c0;
+}
+
+.title-mode--endless {
+  --mode-accent: #7fe0b0;
+  --mode-top: #245243;
+  --mode-bottom: #0e2019;
+  --mode-edge: #3c7d64;
+  --mode-ink: #d6f3e6;
+}
+
+.title-mode--creative {
+  --mode-accent: #dda6ff;
+  --mode-top: #4e2a63;
+  --mode-bottom: #1f1029;
+  --mode-edge: #7a459b;
+  --mode-ink: #f0dcff;
+}
+
+/* Lifts toward the player and brightens, the way every other pressable plate
+   in the garage does. No colour change: the hue is the mode's identity. */
+.title-mode:hover:not(:disabled),
+.title-mode:focus-visible:not(:disabled) {
+  filter: brightness(1.22);
+  transform: translate(-1px, -1px);
+}
+
+.title-mode:active:not(:disabled) {
+  filter: brightness(0.95);
+  transform: translate(1px, 2px);
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 0.1),
+    inset 0 -2px 0 var(--ui-black),
+    1px 1px 0 rgb(0 0 0 / 0.36);
+}
+
+/* A spent Daily is drained rather than dimmed: the colour is what says the
+   door is shut, so the plate goes grey while the layout holds still. */
+.title-mode:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.85) brightness(0.62);
+}
+
+/* Sheen sweeps the plate on a long cycle. The four are deliberately offset so
+   the list ripples top to bottom instead of flashing as one slab. */
+.title-mode__sheen {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -60%;
+  width: 38%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    rgb(255 255 255 / 0.16),
+    transparent
+  );
+  pointer-events: none;
+  animation: title-mode-sheen 5.2s ease-in-out infinite;
+}
+
+.title-mode--daily .title-mode__sheen {
+  animation-delay: 0.5s;
+}
+
+.title-mode--endless .title-mode__sheen {
+  animation-delay: 1s;
+}
+
+.title-mode--creative .title-mode__sheen {
+  animation-delay: 1.5s;
+}
+
+.title-mode:disabled .title-mode__sheen {
+  display: none;
+}
+
+@keyframes title-mode-sheen {
+  0%,
+  70% {
+    transform: translateX(0);
+  }
+
+  94%,
+  100% {
+    transform: translateX(440%);
+  }
+}
+
+.title-mode__icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--mode-edge);
+  background: radial-gradient(circle at 50% 35%, rgb(0 0 0 / 0.15), rgb(0 0 0 / 0.55));
+  box-shadow: inset 0 -2px 0 rgb(0 0 0 / 0.5);
+  color: var(--mode-accent);
+  pointer-events: none;
+}
+
+.title-mode__glyph {
+  width: 26px;
+  height: 26px;
+  filter: drop-shadow(0 0 5px currentColor);
+  pointer-events: none;
+}
+
+/* Each glyph does the thing its mode does: the rig rolls, the calendar ticks
+   over, the horde shuffles forward, the wrench keeps turning. */
+.title-mode--campaign .title-mode__glyph {
+  animation: mode-glyph-roll 2.6s ease-in-out infinite;
+}
+
+.title-mode--daily .title-mode__glyph {
+  animation: mode-glyph-tick 3s steps(2, end) infinite;
+}
+
+.title-mode--endless .title-mode__glyph {
+  animation: mode-glyph-shuffle 1.8s steps(3, end) infinite;
+}
+
+.title-mode--creative .title-mode__glyph {
+  animation: mode-glyph-turn 4s ease-in-out infinite;
+}
+
+@keyframes mode-glyph-roll {
+  0%,
+  100% {
+    transform: translateX(-2px) rotate(-2deg);
+  }
+
+  50% {
+    transform: translateX(2px) rotate(2deg);
+  }
+}
+
+@keyframes mode-glyph-tick {
+  0%,
+  88% {
+    transform: translateY(0);
+  }
+
+  94% {
+    transform: translateY(-3px);
+  }
+
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes mode-glyph-shuffle {
+  0%,
+  100% {
+    transform: translateX(-2px);
+  }
+
+  50% {
+    transform: translateX(2px);
+  }
+}
+
+@keyframes mode-glyph-turn {
+  0%,
+  100% {
+    transform: rotate(-8deg);
+  }
+
+  50% {
+    transform: rotate(8deg);
+  }
+}
+
+/* The launch edge. It creeps on its own and jumps on hover, so the plate looks
+   like it wants to be pressed even while nothing is pointing at it. */
+.title-mode__chevron {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: var(--mode-accent);
+  opacity: 0.55;
+  pointer-events: none;
+  animation: mode-chevron 1.4s steps(2, end) infinite;
+}
+
+.title-mode:hover:not(:disabled) .title-mode__chevron {
+  opacity: 1;
+}
+
+.title-mode__chevron-glyph {
+  width: 100%;
+  height: 100%;
+}
+
+@keyframes mode-chevron {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  50% {
+    transform: translateX(3px);
+  }
+}
+
+.title-mode__copy {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.title-mode__name {
+  color: #fff;
+  font: 400 var(--ui-text-20)/1 var(--ui-font-display);
+  letter-spacing: 0.05em;
+  text-shadow: 2px 2px 0 rgb(0 0 0 / 0.6);
+  text-transform: uppercase;
+}
+
+.title-mode__tagline {
+  color: var(--mode-ink);
+  font: var(--ui-text-10)/1.35 var(--ui-font-body);
+  opacity: 0.82;
+  text-shadow: 0 1px 0 rgb(0 0 0 / 0.5);
+}
+
+.title-mode:hover:not(:disabled) .title-mode__tagline {
+  opacity: 1;
+}
+
+/* The callout chip: the one place on this screen that tells a player where to
+   press. A filled stamp rather than an outline, because on a lit plate an
+   outlined chip disappears into the gradient behind it. */
+.title-mode__badge {
+  position: relative;
+  align-self: center;
+  padding: 4px 8px;
+  border: 1px solid rgb(0 0 0 / 0.45);
+  background: var(--mode-accent);
+  box-shadow: 2px 2px 0 rgb(0 0 0 / 0.4);
+  color: #14180f;
+  font: 700 var(--ui-text-10)/1 var(--ui-font-body);
+  letter-spacing: 0.12em;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.title-mode__badge[hidden] {
+  display: none;
+}
+
+.title-mode__badge[data-tone='danger'] {
+  background: var(--ui-danger);
+  color: #fff0ee;
+}
+
+/* "START HERE" is the only badge a first-time player sees, so it is the only
+   one that moves — every other chip on this screen is holding still. */
+.title-mode__badge[data-tone='signal'] {
+  animation: title-badge-pulse 1.4s steps(2, end) infinite;
+}
+
+@keyframes title-badge-pulse {
+  50% {
+    background: #fff;
+    box-shadow:
+      2px 2px 0 rgb(0 0 0 / 0.4),
+      0 0 12px 2px var(--mode-accent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .title-mode,
+  .title-mode__sheen,
+  .title-mode__glyph,
+  .title-mode__chevron,
+  .title-mode__badge[data-tone='signal'] {
+    animation: none;
+    transition: none;
+  }
 }
 
 .title-confirm {
@@ -1431,6 +1795,28 @@ canvas.viewport {
   }
 }
 
+/*
+ * CrazyGames' windowed player is barely 400px tall. Even flattened to 16/9 the
+ * cards overrun it and the dialog starts scrolling, which puts the three pick
+ * buttons below the fold on the one screen where the player has to choose.
+ * Flatten the previews the rest of the way instead — they stay legible, and
+ * all three rigs stay comparable at a glance.
+ */
+@media (max-height: 440px) {
+  .build-prompt {
+    padding: 10px;
+  }
+
+  .build-prompt__art {
+    aspect-ratio: 24 / 9;
+  }
+
+  .build-prompt__options {
+    gap: 6px;
+    margin-top: 8px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* The art still shows — it is the point, and it does not move — but it cuts
      rather than dissolves. */
@@ -2160,9 +2546,14 @@ button:disabled {
   box-shadow: inset 2px 2px 0 var(--ui-black) !important;
 }
 
+/*
+ * Every panel hung off the top bar shares one anchor. EditorMode measures the
+ * bar and writes `--garage-panel-top`; the 72px fallback is the one-row height
+ * and covers the first frame before the observer reports.
+ */
 .garage-dock {
   position: absolute;
-  top: 72px;
+  top: var(--garage-panel-top, 72px);
   bottom: 12px;
   left: 8px;
   z-index: 13;
@@ -2276,12 +2667,17 @@ button:disabled {
   bottom: calc(100% + 6px);
   left: 0;
   display: flex;
-  max-height: min(46vh, 420px);
+  /* Bounded in both axes. Creative owns the whole catalog, and at 46vh the
+     grid grew tall enough on a large screen to cover the rig it is there to
+     build — the list scrolls inside this instead. `overflow: hidden` is the
+     backstop: nothing in the grid can paint outside the panel's own box. */
+  max-height: min(38vh, 300px);
   flex-direction: column;
   gap: 6px;
+  overflow: hidden;
   padding: 8px;
   border: 1px solid var(--ui-edge);
-  background: rgb(12 14 12 / 0.62);
+  background: rgb(12 14 12 / 0.92);
   box-shadow:
     0 8px 0 rgb(0 0 0 / 0.35),
     inset 0 0 0 1px rgb(255 255 255 / 0.04);
@@ -2650,30 +3046,41 @@ button:disabled {
  * Inventory tiles only. The store tile used to share this geometry and spent
  * three rounds fighting it: `aspect-ratio` and percentage padding both feed a
  * box's height back off its own width, and a grid item sized that way resolves
- * to nothing during intrinsic row sizing. The store shelf owns its dimensions
- * outright further down instead.
+ * to nothing during intrinsic row sizing — so a row would size to min-content
+ * and the artwork would spill onto the row below. The tile fills the definite
+ * row the grid hands it instead; nothing here derives a height from a width.
  */
 .inventory-item {
   display: grid;
   width: 100%;
+  height: 100%;
   min-height: 0;
-  aspect-ratio: 1;
   place-items: center;
   overflow: hidden;
   padding: 20px 5px 17px;
   text-align: left;
 }
 
-/* Inventory grid: one square tile per owned block type. */
+/* Inventory grid: one tile per owned block type, on a fixed row height. */
 .inventory-grid {
   grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  grid-auto-rows: 92px;
 }
 
 .inventory-tile {
   position: relative;
-  padding: 18px 4px 20px;
+  padding: 18px 4px 18px;
   cursor: grab;
   touch-action: none;
+}
+
+/*
+ * Sized to the band left between the name chip at the top and the count at the
+ * bottom, so the art never has to be clipped to fit.
+ */
+.inventory-tile .part-thumbnail {
+  width: 48px;
+  height: 48px;
 }
 
 .part-btn.is-part-dragging {
@@ -2816,8 +3223,7 @@ button:disabled {
 /* Name and blurb stay in the DOM for screen readers and for search matching. */
 .store-item > strong,
 .store-item .part-description,
-.store-item .part-price-breakdown,
-.store-item .part-unlock-milestone {
+.store-item .part-price-breakdown {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -3287,7 +3693,7 @@ button:disabled {
 
 .selected-panel {
   position: absolute;
-  top: 72px;
+  top: var(--garage-panel-top, 72px);
   right: 8px;
   bottom: 12px;
   z-index: 13;
@@ -4146,7 +4552,7 @@ button:disabled {
 
 .vehicle-stats {
   position: absolute;
-  top: 72px;
+  top: var(--garage-panel-top, 72px);
   right: 8px;
   bottom: auto;
   left: auto;
@@ -4154,7 +4560,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   width: 260px;
-  max-height: calc(100% - 138px);
+  max-height: calc(100% - var(--garage-panel-top, 72px) - 66px);
   overflow-y: auto;
   padding: 0;
   background: var(--panel-bg-strong);
@@ -4318,13 +4724,19 @@ button:disabled {
 
 /*
  * CrazyGames reviews desktop games in a responsive 821 x 462 iframe as well
- * as the roomier desktop player sizes.  That is still a mouse-and-keyboard
- * layout, but it cannot afford the full-width garage sidebars and the tall
- * right-hand stack.  Keep the panels available and scrollable; reduce their
- * footprint and give the stats, loadout, and inspector separate vertical
- * lanes instead of letting them cover each other.
+ * as the roomier desktop player sizes, and its windowed player runs about
+ * 924 x 400.  That is still a mouse-and-keyboard layout, but it cannot afford
+ * the full-width garage sidebars and the tall right-hand stack.  Keep the
+ * panels available and scrollable; reduce their footprint and give the stats,
+ * loadout, and inspector separate vertical lanes instead of letting them cover
+ * each other.
+ *
+ * Height matters here as much as width: at 400px tall the frame is wide enough
+ * to escape the 900px ceiling while having far less room to stack panels in,
+ * so either axis running short pulls in the compact layout.
  */
-@media (min-width: 761px) and (max-width: 900px) {
+@media (min-width: 761px) and (max-width: 900px),
+  (min-width: 761px) and (max-height: 560px) {
   .topbar {
     flex-wrap: nowrap;
     gap: 4px;
@@ -4397,17 +4809,18 @@ button:disabled {
     grid-auto-rows: 120px;
   }
 
-  .store-details {
-    display: none;
-  }
-
   .selected-panel {
     width: 224px;
   }
 
+  /*
+   * Three lanes up the right edge, measured off the bottom so they clear one
+   * another whatever the window height: build bar 14 + 62, ability planner
+   * 84 + ~95, stats above that.
+   */
   .vehicle-stats {
     right: 8px;
-    bottom: 156px;
+    bottom: 188px;
     width: 190px;
     max-height: none;
   }
@@ -4418,7 +4831,7 @@ button:disabled {
 
   .ability-loadout {
     right: 8px;
-    bottom: 82px;
+    bottom: 84px;
     gap: 6px;
     padding: 8px;
   }
@@ -4450,6 +4863,15 @@ button:disabled {
      controls remain usable there, and hiding the duplicate rail preserves the
      build view instead of layering two panels on the same controls. */
   .garage-ui.has-selection .ability-loadout {
+    display: none;
+  }
+}
+
+/* The store's detail flyout needs horizontal room beside the dock, not
+   vertical room, so it survives a short window and only goes when the frame
+   is genuinely narrow. */
+@media (min-width: 761px) and (max-width: 900px) {
+  .store-details {
     display: none;
   }
 }
@@ -4506,12 +4928,7 @@ button:disabled {
   }
 
   .part-btn
-    small:not(
-      .part-price,
-      .part-price-breakdown,
-      .part-unlock-milestone,
-      .inventory-count
-    ) {
+    small:not(.part-price, .part-price-breakdown, .inventory-count) {
     display: none;
   }
 
@@ -4526,6 +4943,16 @@ button:disabled {
 
   .inventory-grid {
     grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+    grid-auto-rows: 78px;
+  }
+
+  .inventory-tile {
+    padding: 16px 4px 16px;
+  }
+
+  .inventory-tile .part-thumbnail {
+    width: 40px;
+    height: 40px;
   }
 
   .hotbar-panel {
@@ -4596,6 +5023,30 @@ button:disabled {
   box-shadow:
     5px 6px 0 rgb(0 0 0 / 0.4),
     inset 0 -2px 0 var(--ui-black);
+}
+
+/* Creative's bench door, tucked under Settings in the same corner stack. */
+.survival-garage-button {
+  position: absolute;
+  top: 54px;
+  right: 12px;
+  z-index: 19;
+  border-color: #7a459b;
+  background: linear-gradient(#4e2a63, #1f1029 68%);
+  box-shadow:
+    5px 6px 0 rgb(0 0 0 / 0.4),
+    inset 0 -2px 0 var(--ui-black);
+  color: #f0dcff;
+}
+
+.survival-garage-button:hover:not(:disabled) {
+  border-color: #a05fc6;
+  background: linear-gradient(#663a80, #2b1639 68%);
+  color: #fff;
+}
+
+.survival-garage-button[hidden] {
+  display: none;
 }
 
 .survival-settings-overlay {
@@ -4871,9 +5322,9 @@ button:disabled {
   left: 12px;
   z-index: 15;
   display: grid;
-  width: 300px;
-  gap: 12px;
-  padding: 13px;
+  width: 225px;
+  gap: 9px;
+  padding: 10px;
   background: var(--panel-bg-strong);
   box-shadow:
     7px 8px 0 rgb(0 0 0 / 0.42),
@@ -4882,8 +5333,8 @@ button:disabled {
 
 .survival-speed {
   display: grid;
-  gap: 9px;
-  padding-bottom: 10px;
+  gap: 7px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--ui-edge);
 }
 
@@ -4891,7 +5342,7 @@ button:disabled {
   display: flex;
   align-items: end;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
 }
 
 .survival-speed__header > span,
@@ -4905,12 +5356,12 @@ button:disabled {
 .survival-speed__readout {
   display: flex;
   align-items: baseline;
-  gap: 5px;
+  gap: 4px;
 }
 
 .survival-speed__readout span {
   color: var(--ui-text);
-  font: 400 var(--ui-text-28)/0.8 var(--ui-font-display);
+  font: 400 var(--ui-text-20)/0.8 var(--ui-font-display);
 }
 
 .survival-speed small {
@@ -4920,7 +5371,7 @@ button:disabled {
 
 .survival-speed__gauge {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .survival-speed__track {
@@ -4930,7 +5381,7 @@ button:disabled {
 
   position: relative;
   display: grid;
-  height: 14px;
+  height: 11px;
   grid-template-columns:
     var(--speed-safe-width) var(--speed-damage-width)
     minmax(0, 1fr);
@@ -4966,22 +5417,26 @@ button:disabled {
 
 .survival-speed__marker {
   position: absolute;
-  top: -3px;
-  bottom: -3px;
+  top: -2px;
+  bottom: -2px;
   left: var(--speed-marker-position);
   z-index: 2;
-  width: 3px;
+  width: 2px;
   border: 1px solid var(--ui-black);
   background: #f1eee2;
   box-shadow: 2px 2px 0 rgb(0 0 0 / 0.55);
   transform: translateX(-1px);
 }
 
+/* Three tier labels on one line. Equal columns split the narrowed panel too
+   evenly for "DAMAGE 40–79" to survive, and a wrapped legend costs more height
+   than the whole row is worth, so the middle band takes the slack instead. */
 .survival-speed__legend {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
-  font: 9px/1 var(--ui-font-body);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 3px;
+  white-space: nowrap;
+  font: 8px/1 var(--ui-font-body);
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -5003,7 +5458,7 @@ button:disabled {
 
 .survival-health {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 
 .survival-health > div:first-child {
@@ -5017,7 +5472,7 @@ button:disabled {
 }
 
 .survival-health__track {
-  height: 12px;
+  height: 9px;
   padding: 2px;
   background: var(--ui-recess);
   box-shadow: inset 2px 2px 0 var(--ui-black);
@@ -5038,7 +5493,7 @@ button:disabled {
 /* Onboard fuel gauge — the resource the player manages, refilled at crates. */
 .survival-fuel {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 
 .survival-fuel > div:first-child {
@@ -5059,7 +5514,7 @@ button:disabled {
 }
 
 .survival-fuel__track {
-  height: 12px;
+  height: 9px;
   padding: 2px;
   background: var(--ui-recess);
   box-shadow: inset 2px 2px 0 var(--ui-black);
@@ -5714,6 +6169,62 @@ button:disabled {
 }
 
 /*
+ * Endless-mode wave stamp. The fight never pauses in Endless or Creative, so
+ * this is the whole of the wave-change feedback: one oversized numeral that
+ * punches in and fades, high enough on the screen to stay clear of the rig.
+ * Pointer-transparent, because it lands while the player is still driving.
+ */
+.survival-endless-banner {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  z-index: 19;
+  padding: 6px 22px;
+  border-top: 2px solid var(--ui-signal);
+  border-bottom: 2px solid var(--ui-signal);
+  color: var(--ui-text);
+  font: 400 clamp(28px, 6vw, 46px) / 1 var(--ui-font-display);
+  letter-spacing: 0.1em;
+  pointer-events: none;
+  text-shadow: 4px 4px 0 var(--ui-black);
+  transform: translateX(-50%);
+}
+
+.survival-endless-banner[hidden] {
+  display: none;
+}
+
+.survival-endless-banner.is-in {
+  animation: endless-banner 1500ms steps(12, end) forwards;
+}
+
+@keyframes endless-banner {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scale(1.3);
+  }
+
+  14% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+
+  72% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .survival-endless-banner.is-in {
+    animation: none;
+  }
+}
+
+/*
  * Damage vignette. Two stacked full-bleed layers under the HUD panels: a hit
  * flash whose opacity is driven from SurvivalMode, and a slow pulse that runs
  * while the vehicle is close to failing. Both are pure compositor work — no
@@ -6347,6 +6858,40 @@ button:disabled {
     font-size: var(--ui-text-16);
   }
 
+  /* The chip moves under the pitch rather than beside it: on a narrow phone a
+     third column squeezes the tagline down to two words per line. The chevron
+     goes with it, since a lone arrow in its own column costs more width than
+     it earns at this size. */
+  .title-mode {
+    grid-template-columns: 38px minmax(0, 1fr);
+    gap: 10px;
+    min-height: 56px;
+  }
+
+  .title-mode__icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .title-mode__glyph {
+    width: 22px;
+    height: 22px;
+  }
+
+  .title-mode__name {
+    font-size: var(--ui-text-16);
+  }
+
+  .title-mode__badge {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 2px;
+  }
+
+  .title-mode__chevron {
+    display: none;
+  }
+
   .title-maps {
     margin-bottom: 14px;
   }
@@ -6424,6 +6969,12 @@ button:disabled {
        so there is no room beside it — the button clears it vertically instead
        of sitting on top of the last wave tile. */
     top: 122px;
+    right: 8px;
+  }
+
+  /* Stays stacked under Settings once that has cleared the wave timeline. */
+  .survival-garage-button {
+    top: 164px;
     right: 8px;
   }
 
@@ -6541,13 +7092,35 @@ button:disabled {
   }
 
   .title-actions {
-    width: min(300px, 100%);
+    width: min(380px, 100%);
     gap: 6px;
   }
 
   .title-action {
     min-height: var(--touch-target);
     font-size: var(--ui-text-14);
+  }
+
+  /* Landscape trades vertical room for horizontal: the rows compress rather
+     than reflow, so all four modes still fit above the fold. */
+  .title-mode {
+    grid-template-columns: 34px minmax(0, 1fr) auto auto;
+    min-height: 46px;
+    padding: 6px 10px;
+  }
+
+  .title-mode__icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .title-mode__glyph {
+    width: 20px;
+    height: 20px;
+  }
+
+  .title-mode__name {
+    font-size: var(--ui-text-16);
   }
 
   /* Sized off the panel's own height so they still flank it rather than
@@ -6598,47 +7171,53 @@ button:disabled {
 }
 
 /*
- * CrazyGames' compact desktop iframe is 821 x 462.  It is still a
- * mouse-and-keyboard game, so retain the complete combat HUD, but reduce each
- * fixed panel before its corners compete for the road.  This deliberately
- * excludes the touch layout: `survival-mobile.css` owns that composition.
+ * CrazyGames' compact desktop iframe is 821 x 462, and its windowed player runs
+ * about 924 x 400.  Both are still mouse-and-keyboard, so retain the complete
+ * combat HUD, but reduce each fixed panel before its corners compete for the
+ * road.  A short frame is as constrained as a narrow one, so either axis
+ * running out pulls this in.  This deliberately excludes the touch layout:
+ * `survival-mobile.css` owns that composition.
  */
-@media (min-width: 761px) and (max-width: 900px) {
+@media (min-width: 761px) and (max-width: 900px),
+  (min-width: 761px) and (max-height: 560px) {
   .survival-driver-hud {
     bottom: 10px;
     left: 10px;
-    width: 248px;
-    gap: 8px;
-    padding: 9px;
+    width: 186px;
+    gap: 6px;
+    padding: 7px;
   }
 
   .survival-speed {
-    gap: 6px;
-    padding-bottom: 7px;
+    gap: 5px;
+    padding-bottom: 5px;
   }
 
   .survival-speed__header {
-    gap: 8px;
+    gap: 6px;
   }
 
   .survival-speed__readout span {
-    font-size: var(--ui-text-20);
+    font-size: var(--ui-text-16);
   }
 
   .survival-speed__gauge,
   .survival-health,
   .survival-fuel {
-    gap: 5px;
+    gap: 4px;
   }
 
-  .survival-speed__track,
+  .survival-speed__track {
+    height: 9px;
+  }
+
   .survival-boss-hud__track {
     height: 12px;
   }
 
   .survival-health__track,
   .survival-fuel__track {
-    height: 10px;
+    height: 8px;
   }
 
   .survival-ability-bar {

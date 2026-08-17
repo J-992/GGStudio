@@ -3,7 +3,12 @@ import type { PartDefinition, PlowDefinition } from '../../core/types.ts';
 /** Wave-one zombie stats. WaveManager supplies health/speed/damage multipliers. */
 export const BASE_ZOMBIE_STATS = {
   health: 40,
-  speed: 3.2,
+  // Every kind derives its walk speed from this (bosses included, via their own
+  // multiplier), so this is the one lever that makes the whole roster quicker.
+  // At 3.2 a horde could be outrun at a jog and waves turned into a lap of the
+  // arena with nothing chasing; 3.5 keeps the rig comfortably faster while the
+  // pack actually closes when the player stops to shoot.
+  speed: 3.5,
   attackDamage: 10.5,
   attackInterval: 1,
   reward: 3,
@@ -85,6 +90,13 @@ export const LETHAL_IMPACT_SPEED = 80 / 3.6;
 export const IMPACT_DAMAGE_PER_SPEED = 1.8;
 export const KNOCKBACK_SPEED = 9;
 export const KNOCKBACK_DURATION = 0.35;
+/**
+ * How long a Thumper shockwave holds a zombie in the knocked-back state. Longer
+ * than a ram's beat because the blast throws them into the air: the standard
+ * 0.35s would hand control back while they are still off the ground, and they
+ * would start walking mid-flight.
+ */
+export const THUMP_KNOCKBACK_DURATION = 1;
 export const IMPACT_COOLDOWN_SECONDS = 0.4;
 
 /**

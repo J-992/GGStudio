@@ -610,6 +610,7 @@ export class ChamberMode {
     }
     this.syncView(frameDt);
     this.vfx.setViewpoint(this.camera.position);
+    this.vfx.setFocus(this.vehicle.body.translation());
     this.vfx.update(frameDt);
     this.renderer.render(this.scene, this.camera);
   }

@@ -333,20 +333,27 @@ export interface ThumpStats {
 }
 
 /** Knockback speed (m/s) added per upgrade level beyond the first. */
-const THUMP_KNOCKBACK_PER_LEVEL = 3;
+const THUMP_KNOCKBACK_PER_LEVEL = 6;
+/** Blast radius (m) added per upgrade level beyond the first. */
+const THUMP_RADIUS_PER_LEVEL = 0.8;
 
 /**
- * Scales a thump ability by the placed part's upgrade level. The radius stays a
- * fixed, moderate circle; each level beyond the first adds
- * {@link THUMP_KNOCKBACK_PER_LEVEL} m/s of knockback speed, so higher levels
- * fling zombies harder. Level 1 → 14 m/s, level 5 → 26 (with the default
- * thumper payload).
+ * Scales a thump ability by the placed part's upgrade level. Both halves of the
+ * ram grow: each level beyond the first adds
+ * {@link THUMP_KNOCKBACK_PER_LEVEL} m/s of knockback speed and
+ * {@link THUMP_RADIUS_PER_LEVEL} m of reach, so an upgraded Thumper clears a
+ * wider circle *and* throws what it catches further. Level 1 → 26 m/s over 9m,
+ * level 5 → 50 m/s over 12.2m (with the default thumper payload).
+ *
+ * Radius used to be fixed here. It grows now because the ability deals no
+ * damage at all: the only thing an upgrade can buy is space, and buying it in
+ * one axis alone made the later levels read as no upgrade at all.
  */
 export function effectiveThump(def: AbilityDefinition, level = 1): ThumpStats {
   const steps = upgradeSteps(level);
   return {
     knockbackSpeed: (def.baseDamage ?? 0) + steps * THUMP_KNOCKBACK_PER_LEVEL,
-    radiusM: def.rangeM ?? 0,
+    radiusM: (def.rangeM ?? 0) + steps * THUMP_RADIUS_PER_LEVEL,
     cooldownSeconds: def.cooldownSeconds,
   };
 }

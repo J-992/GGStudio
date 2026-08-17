@@ -1,4 +1,5 @@
 import type { BiomeId } from './biomes.ts';
+import type { GameModeId } from './gameModes.ts';
 import { getPartDef } from './parts.ts';
 import { STARTER_UNLOCKS } from './profile.ts';
 import { getEffectiveDef, upgradePrice } from './upgrades.ts';
@@ -12,6 +13,14 @@ export interface RunState {
   seed?: number;
   /** Arena seconds accumulated across every wave of the run so far. */
   elapsedSeconds?: number;
+  /**
+   * Which set of rules this run is played under. Absent means Campaign, which
+   * keeps every persisted run and every existing call site correct without a
+   * migration: the three alternative modes are all unsaveable by design (see
+   * `persistsProgress` in `gameModes.ts`), so a run that came off disk is
+   * always a campaign run.
+   */
+  modeId?: GameModeId;
 }
 
 /** Cost to restore one part to its effective maximum HP. */

@@ -100,11 +100,11 @@ describe('measuring a wave', () => {
     const row = waveLabRow(1);
     // Asserted kind by kind rather than against the whole object, so shipping a
     // new zombie that wave one does not use cannot fail this.
-    expect(row.counts.walker).toBe(30);
-    expect(row.population).toBe(30);
-    // 30 walkers at the walker slider's 0.7x of the 40hp base, no wave
+    expect(row.counts.walker).toBe(24);
+    expect(row.population).toBe(24);
+    // 24 walkers at the walker slider's 0.7x of the 40hp base, no wave
     // multiplier yet.
-    expect(row.threat).toBe(840);
+    expect(row.threat).toBe(672);
     expect(row.specialistShare).toBe(0);
     expect(row.isBossWave).toBe(false);
   });
@@ -150,17 +150,18 @@ describe('measuring a wave', () => {
 
   it('prices a wave by its own composition and clear bonus', () => {
     const row = waveLabRow(1);
-    expect(row.killReward).toBe(30 * 3);
+    expect(row.killReward).toBe(24 * 3);
     expect(row.wavePayout).toBe(50);
-    expect(row.totalPayout).toBe(140);
-    expect(row.payPerThreat).toBeCloseTo(140 / 840, 6);
+    expect(row.totalPayout).toBe(122);
+    expect(row.payPerThreat).toBeCloseTo(122 / 672, 6);
   });
 
   it('charges spawn time for a wave too big to arrive at once', () => {
     // Hordes average 11, so 73 zombies is seven hordes: six waits of 1.25s.
     expect(waveLabRow(11).spawnFloorSeconds).toBeCloseTo(7.5, 5);
-    // 30 takes three hordes: two waits, at the early 1.45s tempo.
-    expect(waveLabRow(1).spawnFloorSeconds).toBeCloseTo(2.9, 5);
+    // Waves 1-2 are released as a single burst, so they wait for nothing.
+    expect(waveLabRow(1).spawnFloorSeconds).toBe(0);
+    expect(waveLabRow(2).spawnFloorSeconds).toBe(0);
   });
 });
 
@@ -168,9 +169,10 @@ describe('run summary', () => {
   const rows = waveLabRows(20);
 
   it('finds the wave where zombies start queueing instead of appearing', () => {
-    // Wave one already asks for more bodies than the cap allows, so the queue
-    // is there from the first wave rather than opening up later in the run.
-    expect(summarize(rows).firstOverflowWave).toBe(1);
+    // Waves 1-2 are burst waves: the cap is raised to hold each of them whole,
+    // so the queue only opens up on wave 3, the first wave paced the ordinary
+    // horde-at-a-time way.
+    expect(summarize(rows).firstOverflowWave).toBe(3);
   });
 
   it('reports how far the reward curve drifts behind the difficulty curve', () => {

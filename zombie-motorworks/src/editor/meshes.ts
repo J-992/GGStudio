@@ -24,6 +24,10 @@ import { buildFuelTankMesh } from './parts/fuelTank.ts';
 import { buildMeleeMesh } from './parts/melee.ts';
 import { buildNitroInjectorMesh, buildPhaseDriveMesh } from './parts/mobility.ts';
 import {
+  buildMindControlBeamMesh,
+  buildThumperMesh,
+} from './parts/psionics.ts';
+import {
   buildFalloutSiloMesh,
   buildPyreCoreMesh,
   buildStormRodMesh,
@@ -98,9 +102,10 @@ export function buildPartMesh(def: PartDefinition, placed: PlacedPart, opacity =
     return group;
   }
 
-  // Ability parts with a modelled device of their own: defence emitters and
-  // mobility hardware. Anything else with an ability falls through to the
-  // generic block-plus-dome treatment at the bottom of this function.
+  // Ability parts with a modelled device of their own: defence emitters,
+  // mobility hardware, and the two blocks in `parts/psionics.ts`. Anything else
+  // with an ability falls through to the generic block-plus-dome treatment at
+  // the bottom of this function.
   if (def.id === 'shield-generator') {
     group.add(buildShieldGeneratorMesh(placed, color, opacity));
     return withUpgradeKit(group, def, placed, color, opacity);
@@ -113,6 +118,16 @@ export function buildPartMesh(def: PartDefinition, placed: PlacedPart, opacity =
 
   if (def.id === 'drone-swarm') {
     group.add(buildDroneSwarmMesh(placed, color, opacity));
+    return withUpgradeKit(group, def, placed, color, opacity);
+  }
+
+  if (def.id === 'thumper') {
+    group.add(buildThumperMesh(placed, color, opacity));
+    return withUpgradeKit(group, def, placed, color, opacity);
+  }
+
+  if (def.id === 'mind-control-beam') {
+    group.add(buildMindControlBeamMesh(placed, color, opacity));
     return withUpgradeKit(group, def, placed, color, opacity);
   }
 

@@ -18,6 +18,7 @@ import {
   GLOW_PARTICLE_CAPACITY,
   LIT_PARTICLE_CAPACITY,
   LOD_CULL_DISTANCE_M,
+  LOD_FOCUS_RADIUS_M,
   LOD_FULL_DISTANCE_M,
   LOD_HALF_DISTANCE_M,
   VFX_GROUND_Y,
@@ -111,6 +112,8 @@ export class VfxSystem {
   private readonly glow: VoxelParticles;
   private readonly spec: ParticleSpec = defaultParticleSpec();
   private readonly viewpoint = new THREE.Vector3(0, 0, 0);
+  private readonly focus = new THREE.Vector3(0, 0, 0);
+  private hasFocus = false;
   private frameBudget = FRAME_SPAWN_BUDGET;
   private quality = 1;
   private disposed = false;
@@ -136,6 +139,19 @@ export class VfxSystem {
    */
   setViewpoint(position: Vector3Like): void {
     this.viewpoint.set(position.x, position.y, position.z);
+  }
+
+  /**
+   * What the player is actually watching — the rig. Anything within
+   * `LOD_FOCUS_RADIUS_M` of it emits at full detail however far back the camera
+   * has pulled; culling still answers to the viewpoint. Pass `null` for a mode
+   * with no such subject, which leaves the LOD purely camera-relative.
+   */
+  setFocus(position: Vector3Like | null): void {
+    this.hasFocus = position !== null;
+    if (position !== null) {
+      this.focus.set(position.x, position.y, position.z);
+    }
   }
 
   /** Global multiplier on every emitter's particle count (1 = authored). */
@@ -188,6 +204,10 @@ export class VfxSystem {
     if (detail <= 0) return;
     const force = Math.max(0.25, Math.min(1.5, power));
 
+    // Every weapon plays the same confirmation on top of its own spray, so a
+    // landed hit reads identically whatever is bolted to the rig.
+    this.hitConfirm(x, y, z, dirX, dirZ, force);
+
     switch (kind) {
       case 'blade':
         this.sawShred(x, y, z, dirX, dirZ, detail, force);
@@ -201,6 +221,57 @@ export class VfxSystem {
       case 'ram':
         this.ramImpact(x, y, z, dirX, dirZ, detail, force);
         break;
+    }
+  }
+
+  /**
+   * The hit marker: a hot core and four short spokes thrown out from the
+   * contact point as an X, gone inside a tenth of a second.
+   *
+   * Melee is driven on the keyboard, so the reticle — where a shot confirms
+   * itself — is not where the player is looking. This lands the confirmation in
+   * the world, on the body that was hit. The spokes are deliberately
+   * gravity-free and short-lived so the mark reads as a flash of contact rather
+   * than joining the debris the weapon's own spray is already throwing.
+   */
+  private hitConfirm(
+    x: number,
+    y: number,
+    z: number,
+    dirX: number,
+    dirZ: number,
+    force: number,
+  ): void {
+    if (this.quality <= 0) return;
+
+    this.flash(x, y, z, 0.42 * force, 0.08, VFX_PALETTE.sparkHot);
+
+    // Spokes span the plane across the hit direction: the tangent gives the
+    // horizontal arms, world up the vertical ones, so the X stays legible from
+    // the overhead follow camera whichever way the rig is pointing.
+    const tanX = -dirZ;
+    const tanZ = dirX;
+    const speed = 6.5 * force;
+    for (let i = 0; i < 4; i++) {
+      const sideways = i < 2 ? 1 : -1;
+      const upward = i % 2 === 0 ? 1 : -1;
+      this.reset0();
+      this.spec.x = x;
+      this.spec.y = y;
+      this.spec.z = z;
+      // A little drift along the hit direction so the mark sits on the body
+      // rather than floating in front of it.
+      this.spec.vx = tanX * speed * sideways * 0.72 + dirX * speed * 0.22;
+      this.spec.vy = speed * upward * 0.62;
+      this.spec.vz = tanZ * speed * sideways * 0.72 + dirZ * speed * 0.22;
+      this.spec.size = 0.075 * force;
+      this.spec.endSize = 0.012;
+      this.spec.lifeSeconds = 0.1;
+      this.spec.colorStart = VFX_PALETTE.sparkHot;
+      this.spec.colorEnd = VFX_PALETTE.spark;
+      this.spec.gravity = 0;
+      this.spec.drag = 1.6;
+      this.glow.spawn(this.take());
     }
   }
 
@@ -219,10 +290,10 @@ export class VfxSystem {
     force: number,
   ): void {
     // Tangent to the disc at the contact point: the direction teeth travel.
+    // The bite flash this used to throw here is now the shared hit confirm,
+    // which sits at the same point in the same colour, only brighter.
     const tanX = -dirZ;
     const tanZ = dirX;
-
-    this.flash(x, y, z, 0.34 * force, 0.07, VFX_PALETTE.sparkHot);
 
     const sparks = this.count(11 * force, detail);
     for (let i = 0; i < sparks; i++) {
@@ -2383,6 +2454,122 @@ export class VfxSystem {
   }
 
   /**
+   * Thumper Q: both rams bottoming out into the ground at once.
+   *
+   * Built to read as *mass landing*, which is what separates it from the Pulse
+   * Emitter's field ring standing next to it in the same ability slot. Four
+   * layers, in the order the eye reads them:
+   *
+   * 1. A hard amber flash at the contact point, and a second wider one — the
+   *    two rams meeting, over in a tenth of a second.
+   * 2. A double shockwave: a tight fast ring that beats the knockback out to
+   *    the rim, and a slower, heavier one chasing it. Both stop dead on
+   *    `radiusM` inside one life, so the ring draws the exact reach of the
+   *    ability rather than an approximation of it.
+   * 3. Slabs of broken ground thrown up and outward — the matter layer only,
+   *    heavy, bouncing, and sticking where they land, so the ground keeps a
+   *    record of the hit after the light has gone.
+   * 4. A low dust skirt dragged out under all of it.
+   *
+   * Everything is amber or dirt: no ember, no red, nothing burning. A player
+   * should never mistake a Thumper for something that dealt damage, because it
+   * never does.
+   */
+  thumperSlam(x: number, y: number, z: number, radiusM: number): void {
+    if (this.disposed || radiusM <= 0) return;
+    const detail = this.detailAt(x, y, z);
+    if (detail <= 0) return;
+
+    // Impact flash: white-hot core inside a wide amber bloom.
+    this.flash(x, y + 0.2, z, radiusM * 0.42, 0.09, VFX_PALETTE.ramHot);
+    this.flash(x, y + 0.3, z, radiusM * 0.9, 0.19, VFX_PALETTE.ram);
+
+    // Two shockwave rings. The lead ring is fast, bright and thin; the trailing
+    // one is slower and heavier, so the wave has weight behind its edge.
+    const rings: [number, number, number, number, number][] = [
+      // [count, lifeMin, lifeMax, sizeMin, sizeMax]
+      [34, 0.2, 0.28, 0.16, 0.26],
+      [22, 0.34, 0.46, 0.24, 0.4],
+    ];
+    for (let pass = 0; pass < rings.length; pass++) {
+      const [base, lifeMin, lifeMax, sizeMin, sizeMax] = rings[pass];
+      const arc = this.count(base, detail);
+      for (let i = 0; i < arc; i++) {
+        const angle =
+          (i / Math.max(1, arc)) * Math.PI * 2 + this.randSigned(0.12);
+        const life = this.rand(lifeMin, lifeMax);
+        // Travel the whole radius within one life, so the ring lands on the rim
+        // exactly as it dies — the same timing trick `pulseRing` uses.
+        const speed = (radiusM / life) * this.rand(0.88, 1);
+        this.reset0();
+        this.spec.x = x + Math.cos(angle) * 0.3;
+        this.spec.y = y + 0.12;
+        this.spec.z = z + Math.sin(angle) * 0.3;
+        this.spec.vx = Math.cos(angle) * speed;
+        this.spec.vy = this.rand(0.2, 1.4);
+        this.spec.vz = Math.sin(angle) * speed;
+        this.spec.size = this.rand(sizeMin, sizeMax);
+        this.spec.endSize = 0.04;
+        this.spec.lifeSeconds = life;
+        this.spec.colorStart = pass === 0 ? VFX_PALETTE.ramHot : VFX_PALETTE.ram;
+        this.spec.colorEnd = pass === 0 ? VFX_PALETTE.ram : VFX_PALETTE.dust;
+        this.spec.gravity = 0;
+        this.spec.drag = 1;
+        this.spec.spin = 5;
+        this.glow.spawn(this.take());
+      }
+    }
+
+    // Ground broken out under the rams: heavy, unlit, thrown outward and up,
+    // and left where it lands. This is the layer that says the hit was physical.
+    const slabs = this.count(20, detail);
+    for (let i = 0; i < slabs; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = this.rand(4, 12);
+      this.reset0();
+      this.spec.x = x + Math.cos(angle) * this.rand(0.2, 1);
+      this.spec.y = y + 0.1;
+      this.spec.z = z + Math.sin(angle) * this.rand(0.2, 1);
+      this.spec.vx = Math.cos(angle) * speed;
+      this.spec.vy = this.rand(4, 9.5);
+      this.spec.vz = Math.sin(angle) * speed;
+      this.spec.size = this.rand(0.16, 0.32);
+      this.spec.endSize = this.spec.size * 0.8;
+      this.spec.lifeSeconds = this.rand(0.9, 1.6);
+      this.spec.colorStart = i % 3 === 0 ? VFX_PALETTE.dust : VFX_PALETTE.rubble;
+      this.spec.colorEnd = VFX_PALETTE.smokeDark;
+      this.spec.gravity = -22;
+      this.spec.spin = 11;
+      this.spec.bounce = 0.35;
+      this.spec.stick = true;
+      this.lit.spawn(this.take());
+    }
+
+    // Dust skirt dragged out along the ground under the wave.
+    const dust = this.count(16, detail);
+    for (let i = 0; i < dust; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = this.rand(5, 13);
+      this.reset0();
+      this.spec.x = x + Math.cos(angle) * this.rand(0.3, 1.4);
+      this.spec.y = y + this.rand(0.05, 0.25);
+      this.spec.z = z + Math.sin(angle) * this.rand(0.3, 1.4);
+      this.spec.vx = Math.cos(angle) * speed;
+      this.spec.vy = this.rand(0.3, 1.4);
+      this.spec.vz = Math.sin(angle) * speed;
+      this.spec.size = this.rand(0.28, 0.5);
+      this.spec.endSize = this.spec.size * this.rand(2.4, 3.4);
+      this.spec.lifeSeconds = this.rand(0.7, 1.3);
+      this.spec.colorStart = VFX_PALETTE.dust;
+      this.spec.colorEnd = VFX_PALETTE.smokeDark;
+      this.spec.gravity = 0.4;
+      this.spec.drag = 2.6;
+      this.spec.spin = 2;
+      this.lit.spawn(this.take());
+    }
+  }
+
+  /**
    * A Necromancer mid-channel: witch-light drawn *up* out of the ground around
    * its feet, and, as the cast charges, more of it turning with the sigil and
    * getting pulled inward toward the caster. Cheap enough to run several times
@@ -3526,6 +3713,19 @@ export class VfxSystem {
     const distanceSq = dx * dx + dy * dy + dz * dz;
     if (distanceSq > LOD_CULL_DISTANCE_M * LOD_CULL_DISTANCE_M) return 0;
     if (distanceSq <= LOD_FULL_DISTANCE_M * LOD_FULL_DISTANCE_M) return 1;
+    // Close to the rig is full detail whatever the camera says, so effects
+    // mounted on the vehicle stop being thinned out by the follow distance.
+    if (this.hasFocus) {
+      const fx = x - this.focus.x;
+      const fy = y - this.focus.y;
+      const fz = z - this.focus.z;
+      if (
+        fx * fx + fy * fy + fz * fz <=
+        LOD_FOCUS_RADIUS_M * LOD_FOCUS_RADIUS_M
+      ) {
+        return 1;
+      }
+    }
     if (distanceSq <= LOD_HALF_DISTANCE_M * LOD_HALF_DISTANCE_M) return 0.5;
     return 0.25;
   }
