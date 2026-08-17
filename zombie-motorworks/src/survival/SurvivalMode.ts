@@ -116,6 +116,7 @@ import {
 } from './MobileHud.ts';
 import { driveTowardHeading } from '../core/joystick.ts';
 import { buildLeaderboardTable } from '../ui/leaderboardTable.ts';
+import { applySplashBackground, pickLoadingSplash } from '../ui/splashArt.ts';
 import { VfxSystem } from '../vfx/VfxSystem.ts';
 import { WarningHud } from './WarningHud.ts';
 import { StrikeGauge } from './StrikeGauge.ts';
@@ -1546,17 +1547,26 @@ export class SurvivalMode {
       'position:absolute;inset:0;z-index:40;display:flex;flex-direction:column;' +
       'align-items:center;justify-content:center;gap:18px;background:#0b0d0b;' +
       'transition:opacity 240ms ease-out';
+    // Key art behind the bar. `arenaReady` is latched for the life of the mode,
+    // so this screen is shown once per mount and one painting is picked here
+    // rather than per wave.
+    applySplashBackground(arenaLoadingOverlay, pickLoadingSplash());
     const arenaLoadingLabel = document.createElement('div');
     arenaLoadingLabel.textContent = 'ROLLING OUT';
+    // A shadow the flat-background version did not need: the label sits over
+    // paint now, and one of the two paintings is bright green right where this
+    // lands.
     arenaLoadingLabel.style.cssText =
-      'font-size:15px;font-weight:800;letter-spacing:.24em;color:#a0af6c';
+      'font-size:15px;font-weight:800;letter-spacing:.24em;color:#c2d47f;' +
+      'text-shadow:0 2px 6px rgb(0 0 0 / 0.85)';
     const arenaLoadingTrack = document.createElement('div');
     arenaLoadingTrack.style.cssText =
-      'width:min(19rem,62vw);height:10px;background:#090b09;' +
-      'border:2px solid #070907;overflow:hidden';
+      'width:min(19rem,62vw);height:10px;background:rgb(9 11 9 / 0.86);' +
+      'border:2px solid #070907;overflow:hidden;' +
+      'box-shadow:0 3px 10px rgb(0 0 0 / 0.6)';
     const arenaLoadingFill = document.createElement('div');
     arenaLoadingFill.style.cssText =
-      'height:100%;width:0%;background:#89995a;transition:width 180ms linear';
+      'height:100%;width:0%;background:#a8bd68;transition:width 180ms linear';
     arenaLoadingTrack.appendChild(arenaLoadingFill);
     arenaLoadingOverlay.append(arenaLoadingLabel, arenaLoadingTrack);
     root.appendChild(arenaLoadingOverlay);

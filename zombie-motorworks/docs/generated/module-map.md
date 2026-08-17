@@ -4,18 +4,18 @@
 > edit by hand. Search this file for a path or exported symbol; do not read
 > it end to end as routine task setup.
 
-- Source Modules: 152
-- Source lines: 66,611
+- Source Modules: 153
+- Source lines: 66,802
 - Test files scanned: 123
 
 ## Largest Modules
 
 | Module | LOC |
 | --- | ---: |
-| [`src/survival/SurvivalMode.ts`](../../src/survival/SurvivalMode.ts) | 5639 |
+| [`src/survival/SurvivalMode.ts`](../../src/survival/SurvivalMode.ts) | 5649 |
 | [`src/survival/zombies/Zombie.ts`](../../src/survival/zombies/Zombie.ts) | 3650 |
 | [`src/vfx/VfxSystem.ts`](../../src/vfx/VfxSystem.ts) | 3551 |
-| [`src/editor/ui.ts`](../../src/editor/ui.ts) | 3181 |
+| [`src/editor/ui.ts`](../../src/editor/ui.ts) | 3213 |
 | [`src/editor/EditorMode.ts`](../../src/editor/EditorMode.ts) | 2848 |
 | [`src/survival/zombies/ZombieSystem.ts`](../../src/survival/zombies/ZombieSystem.ts) | 2354 |
 | [`src/app/App.ts`](../../src/app/App.ts) | 1734 |
@@ -145,7 +145,7 @@
 
 - Exports: `assetUrl`
 - Imports: none
-- Imported by: `src/app/TitleScreen.ts`, `src/app/sfx.ts`, `src/survival/VoxelAssetLoader.ts`
+- Imported by: `src/app/TitleScreen.ts`, `src/app/sfx.ts`, `src/survival/VoxelAssetLoader.ts`, `src/ui/splashArt.ts`
 - External packages: `virtual:asset-manifest`
 - Direct tests: none
 
@@ -177,7 +177,7 @@
 
 - Exports: `BUILD_IDS`, `BUILD_METER_PIPS`, `BuildDefinition`, `BuildId`, `BUILDS`, `buildStarterRig`, `buildStarterUnlocks`, `DEFAULT_BUILD_ID`, `getBuild`, `isBuildId`, `isSignatureDefId`, `SIGNATURE_DEF_IDS`
 - Imports: `src/core/blueprint.ts`, `src/core/grid.ts`, `src/core/types.ts`
-- Imported by: `src/app/App.ts`, `src/core/profile.ts`, `src/editor/EditorMode.ts`, `src/editor/ui.ts`
+- Imported by: `src/app/App.ts`, `src/core/profile.ts`, `src/editor/EditorMode.ts`, `src/editor/ui.ts`, `src/ui/splashArt.ts`
 - External packages: none
 - Direct tests: `unit/app.test.ts`, `unit/builds.test.ts`, `unit/profile-store.test.ts`, `unit/profile.test.ts`
 
@@ -591,10 +591,10 @@
 - External packages: none
 - Direct tests: `unit/share-helpers.test.ts`
 
-### [`src/editor/ui.ts`](../../src/editor/ui.ts) (3181 LOC)
+### [`src/editor/ui.ts`](../../src/editor/ui.ts) (3213 LOC)
 
 - Exports: `AbilityLoadoutSlotView`, `AbilitySlotStatus`, `buildEditorUI`, `EditorUI`, `EditorUIHandlers`, `NewGarageDisposalSummary`, `RunRepairEconomy`, `SelectedPartEconomy`, `STORE_PURCHASE_EVENT`, `StorePurchaseDetail`, `UpgradeAdviceView`
-- Imports: `src/core/abilities.ts`, `src/core/builds.ts`, `src/core/economy.ts`, `src/core/hotbar.ts`, `src/core/partUpgrades.ts`, `src/core/signatures.ts`, `src/core/tutorial.ts`, `src/core/types.ts`, `src/core/upgrades.ts`, `src/editor/BuildPreview.ts`
+- Imports: `src/core/abilities.ts`, `src/core/builds.ts`, `src/core/economy.ts`, `src/core/hotbar.ts`, `src/core/partUpgrades.ts`, `src/core/signatures.ts`, `src/core/tutorial.ts`, `src/core/types.ts`, `src/core/upgrades.ts`, `src/editor/BuildPreview.ts`, `src/ui/splashArt.ts`
 - Imported by: `src/editor/EditorMode.ts`, `src/editor/MobileGarage.ts`
 - External packages: none
 - Direct tests: none
@@ -763,10 +763,10 @@
 - External packages: none
 - Direct tests: none
 
-### [`src/survival/SurvivalMode.ts`](../../src/survival/SurvivalMode.ts) (5639 LOC)
+### [`src/survival/SurvivalMode.ts`](../../src/survival/SurvivalMode.ts) (5649 LOC)
 
 - Exports: `applyZombieShot`, `createWaveClearPayload`, `SurvivalCallbacks`, `SurvivalMode`, `SurvivalPhase`, `SurvivalTelemetry`, `WaveClearPayload`
-- Imports: `src/app/badgeStore.ts`, `src/app/sfx.ts`, `src/core/abilities.ts`, `src/core/badges.ts`, `src/core/biomes.ts`, `src/core/economy.ts`, `src/core/joystick.ts`, `src/core/leaderboard.ts`, `src/core/parts.ts`, `src/core/rng.ts`, `src/core/score.ts`, `src/core/signatures.ts`, `src/core/structural.ts`, `src/core/turretModules.ts`, `src/core/tutorial.ts`, `src/core/types.ts`, `src/core/waveTimeline.ts`, `src/editor/PartIconRenderer.ts`, `src/editor/meshes.ts`, `src/runtime/assembler.ts`, `src/runtime/vehicle.ts`, `src/runtime/weapons.ts`, `src/runtime/wheels.ts`, `src/survival/AutoAim.ts`, `src/survival/DamageNumbers.ts`, `src/survival/DroneEscort.ts`, `src/survival/FollowCamera.ts`, `src/survival/Minimap.ts`, `src/survival/MobileHud.ts`, `src/survival/PhaseGhosts.ts`, `src/survival/Pickups.ts`, `src/survival/ReinforceWard.ts`, `src/survival/SentryTurrets.ts`, `src/survival/SignatureStrikes.ts`, `src/survival/StrikeGauge.ts`, `src/survival/ThreatAlert.ts`, `src/survival/ThreatPointer.ts`, `src/survival/Tracers.ts`, `src/survival/WarningHud.ts`, `src/survival/WaveClearCard.ts`, `src/survival/WaveManager.ts`, `src/survival/WaveTimelineHud.ts`, `src/survival/arena/Arena.ts`, `src/survival/arena/ArenaBuilder.ts`, `src/survival/arena/recipes/index.ts`, `src/survival/devtuning/DevTunerPanel.ts`, `src/survival/devtuning/DevTuning.ts`, `src/survival/devtuning/devMode.ts`, `src/survival/dropTable.ts`, `src/survival/threatPreview.ts`, `src/survival/vehicleWarnings.ts`, `src/survival/waveBalance.ts`, `src/survival/zombies/Zombie.ts`, `src/survival/zombies/ZombieSystem.ts`, `src/survival/zombies/bossConfig.ts`, `src/survival/zombies/zombieConfig.ts`, `src/ui/AbilityBar.ts`, `src/ui/BuffBar.ts`, `src/ui/ScopeCursor.ts`, `src/ui/audioVolumeControl.ts`, `src/ui/device.ts`, `src/ui/leaderboardTable.ts`, `src/ui/system.ts`, `src/ui/touch/TouchControls.ts`, `src/vfx/VfxSystem.ts`, `src/vfx/shotVfx.ts`
+- Imports: `src/app/badgeStore.ts`, `src/app/sfx.ts`, `src/core/abilities.ts`, `src/core/badges.ts`, `src/core/biomes.ts`, `src/core/economy.ts`, `src/core/joystick.ts`, `src/core/leaderboard.ts`, `src/core/parts.ts`, `src/core/rng.ts`, `src/core/score.ts`, `src/core/signatures.ts`, `src/core/structural.ts`, `src/core/turretModules.ts`, `src/core/tutorial.ts`, `src/core/types.ts`, `src/core/waveTimeline.ts`, `src/editor/PartIconRenderer.ts`, `src/editor/meshes.ts`, `src/runtime/assembler.ts`, `src/runtime/vehicle.ts`, `src/runtime/weapons.ts`, `src/runtime/wheels.ts`, `src/survival/AutoAim.ts`, `src/survival/DamageNumbers.ts`, `src/survival/DroneEscort.ts`, `src/survival/FollowCamera.ts`, `src/survival/Minimap.ts`, `src/survival/MobileHud.ts`, `src/survival/PhaseGhosts.ts`, `src/survival/Pickups.ts`, `src/survival/ReinforceWard.ts`, `src/survival/SentryTurrets.ts`, `src/survival/SignatureStrikes.ts`, `src/survival/StrikeGauge.ts`, `src/survival/ThreatAlert.ts`, `src/survival/ThreatPointer.ts`, `src/survival/Tracers.ts`, `src/survival/WarningHud.ts`, `src/survival/WaveClearCard.ts`, `src/survival/WaveManager.ts`, `src/survival/WaveTimelineHud.ts`, `src/survival/arena/Arena.ts`, `src/survival/arena/ArenaBuilder.ts`, `src/survival/arena/recipes/index.ts`, `src/survival/devtuning/DevTunerPanel.ts`, `src/survival/devtuning/DevTuning.ts`, `src/survival/devtuning/devMode.ts`, `src/survival/dropTable.ts`, `src/survival/threatPreview.ts`, `src/survival/vehicleWarnings.ts`, `src/survival/waveBalance.ts`, `src/survival/zombies/Zombie.ts`, `src/survival/zombies/ZombieSystem.ts`, `src/survival/zombies/bossConfig.ts`, `src/survival/zombies/zombieConfig.ts`, `src/ui/AbilityBar.ts`, `src/ui/BuffBar.ts`, `src/ui/ScopeCursor.ts`, `src/ui/audioVolumeControl.ts`, `src/ui/device.ts`, `src/ui/leaderboardTable.ts`, `src/ui/splashArt.ts`, `src/ui/system.ts`, `src/ui/touch/TouchControls.ts`, `src/vfx/VfxSystem.ts`, `src/vfx/shotVfx.ts`
 - Imported by: `src/app/App.ts`
 - External packages: `@dimforge/rapier3d-compat`, `three`
 - Direct tests: `unit/ice-cannon-slow.test.ts`, `unit/pending-rewards.test.ts`, `unit/run-checkpoint.test.ts`, `unit/run-score.test.ts`, `unit/turret-piercing.test.ts`, `unit/wave-clear-repair.test.ts`
@@ -1180,6 +1180,14 @@
 - Exports: `buildLeaderboardTable`, `LeaderboardTableOptions`
 - Imports: `src/core/biomes.ts`, `src/core/leaderboard.ts`, `src/survival/arena/recipes/index.ts`
 - Imported by: `src/app/TitleScreen.ts`, `src/survival/SurvivalMode.ts`
+- External packages: none
+- Direct tests: none
+
+### [`src/ui/splashArt.ts`](../../src/ui/splashArt.ts) (149 LOC)
+
+- Exports: `applySplashBackground`, `flashRigSplash`, `LOADING_SPLASH_URLS`, `pickLoadingSplash`, `preloadRigSplashArt`, `preloadSplashArt`, `RIG_SPLASH_URLS`, `SPLASH_SCRIM`
+- Imports: `src/core/assetVersion.ts`, `src/core/builds.ts`
+- Imported by: `src/editor/ui.ts`, `src/survival/SurvivalMode.ts`
 - External packages: none
 - Direct tests: none
 

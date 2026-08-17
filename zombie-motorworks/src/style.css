@@ -1071,6 +1071,10 @@ canvas.viewport {
 .build-prompt__option {
   --build-accent: var(--ui-signal);
 
+  /* Anchors the hover painting, which covers the card rather than sitting in
+     the art box. */
+  position: relative;
+  overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   /* Named areas, not source order: the phone layout re-flows the same six
@@ -1113,6 +1117,52 @@ canvas.viewport {
 .build-prompt__option:focus-visible {
   background: var(--ui-surface-3);
   border-color: var(--build-accent);
+}
+
+/* The hover state: the rig's key art takes the whole card.
+   `pointer-events: none` matters more than it looks — the painting sits over
+   the button it belongs to, and without this the pointer would leave the card
+   the moment the art appeared, which flickers forever. */
+.build-prompt__splash {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease-out;
+}
+
+/* Keyboard focus gets the painting on any device, and so does the card that was
+   just picked — that one holds it for a second on its way into the game, which
+   is the only time a touch player sees this art at all. Hover is gated on a
+   real pointer, since a tap can leave `:hover` stuck on a card. */
+.build-prompt__option:focus-visible .build-prompt__splash,
+.build-prompt__option--picked .build-prompt__splash {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .build-prompt__option:hover .build-prompt__splash {
+    opacity: 1;
+  }
+}
+
+.build-prompt__splash-name {
+  width: 100%;
+  padding: 22px 10px 8px;
+  /* The paintings are dark at the bottom but not reliably so — the fallout one
+     has a lit dome down there — hence a gradient rather than plain text. */
+  background: linear-gradient(rgb(6 8 6 / 0), rgb(6 8 6 / 0.86));
+  color: var(--ui-text);
+  font: 400 var(--ui-text-16)/1.2 var(--ui-font-display);
+  letter-spacing: 0.03em;
+  text-shadow: 0 2px 6px rgb(0 0 0 / 0.9);
+  text-transform: uppercase;
 }
 
 .build-prompt__art {
@@ -1378,6 +1428,14 @@ canvas.viewport {
 
   .build-prompt__chassis {
     display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The art still shows — it is the point, and it does not move — but it cuts
+     rather than dissolves. */
+  .build-prompt__splash {
+    transition: none;
   }
 }
 

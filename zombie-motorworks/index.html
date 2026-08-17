@@ -34,12 +34,42 @@
         align-items: center;
         justify-content: center;
         gap: 1.25rem;
+        /* The flat colour is the one that matters: the key art is painted on
+           top of this by the driver below, once it has decoded, and until then
+           the splash has to look deliberate rather than empty. */
         background: #0b0d0b;
         color: #d7d4c8;
         font-family: 'Courier New', monospace;
         -webkit-user-select: none;
         user-select: none;
         transition: opacity 260ms ease-out;
+      }
+      /* The art fades in behind the type instead of replacing the background
+         outright, so a slow decode never lands as a hard cut under a bar that
+         is already moving. */
+      #boot-art {
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background: center / cover no-repeat;
+        opacity: 0;
+        transition: opacity 420ms ease-out;
+      }
+      #boot-art[data-shown='1'] {
+        opacity: 1;
+      }
+      /* Same wash the in-game loading screens use: these paintings are busy and
+         bright, and the bar and its label sit right in the middle of them. */
+      #boot-art::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+          ellipse at center,
+          rgb(6 8 6 / 0.42) 0%,
+          rgb(6 8 6 / 0.72) 62%,
+          rgb(6 8 6 / 0.9) 100%
+        );
       }
       #boot-splash[data-done='1'] {
         opacity: 0;
@@ -85,6 +115,7 @@
          behind a reduced-motion preference that disables its only feedback. */
       @media (prefers-reduced-motion: reduce) {
         #boot-splash,
+        #boot-art,
         .boot-fill {
           transition: none;
         }
@@ -94,6 +125,7 @@
   <body>
     <div id="app"></div>
     <div id="boot-splash">
+      <div id="boot-art"></div>
       <div class="boot-mark">Scrap Rig</div>
       <div class="boot-sub">Zombie Motorworks</div>
       <div class="boot-track"><div class="boot-fill" id="boot-fill"></div></div>
@@ -107,6 +139,34 @@
         var status = document.getElementById('boot-status');
         var splash = document.getElementById('boot-splash');
         var shown = 0;
+
+        // Key art for the boot screen. Relative paths, matching `base: './'` in
+        // the Vite config, so a deploy under a sub-path still finds them; and
+        // set from script rather than from the CSS above so the build never
+        // tries to resolve a `public/` file as a bundled asset.
+        //
+        // Duplicated from `src/ui/splashArt.ts`, which cannot be imported here:
+        // this whole block runs before the module graph is fetched, which is the
+        // reason the splash paints as early as it does. Renaming these files
+        // means editing both places.
+        var art = document.getElementById('boot-art');
+        if (art) {
+          var paintings = [
+            'assets/splash/loading-overrun.webp',
+            'assets/splash/loading-breakout.webp',
+          ];
+          var chosen = paintings[Math.floor(Math.random() * paintings.length)];
+          // Decoded off to the side first, then swapped in. Assigning the
+          // background directly would leave the splash flat until the bytes
+          // land and then pop, which reads worse than the bar alone.
+          var probe = new Image();
+          probe.onload = function () {
+            art.style.backgroundImage = 'url("' + chosen + '")';
+            art.dataset.shown = '1';
+          };
+          probe.src = chosen;
+        }
+
         return {
           set: function (fraction, label) {
             // Monotonic: a later stage reporting a smaller number must never

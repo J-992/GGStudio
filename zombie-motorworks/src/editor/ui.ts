@@ -34,6 +34,10 @@ import {
 } from '../core/builds.ts';
 import { mountSpinningRigPreview } from './BuildPreview.ts';
 import { upgradePrice } from '../core/upgrades.ts';
+import { RIG_SPLASH_URLS, preloadRigSplashArt } from '../ui/splashArt.ts';
+
+/** How long the picked card sits on its key art before the garage rebuilds. */
+const BUILD_PICK_HOLD_MS = 1000;
 
 /**
  * What a store tile announces after a purchase actually goes through.
@@ -1083,17 +1087,10 @@ export function buildEditorUI(
   const buildPromptCanvases: [BuildId, HTMLCanvasElement][] = [];
   let firstBuildOption: HTMLButtonElement | null = null;
 
-  /** Tear down the three GL contexts. Idempotent: called on close and on pick. */
+  /** Tear down the three GL contexts. Idempotent: called on open and on pick. */
   const stopBuildPromptPreviews = (): void => {
     for (const stop of stopBuildPreviews) stop();
     stopBuildPreviews = [];
-  };
-  const closeBuildPrompt = (): void => {
-    buildPromptOverlay.hidden = true;
-    stopBuildPromptPreviews();
-    // The picker was holding the welcome back; now that the screen is clear it
-    // can have its turn.
-    presentWelcome();
   };
 
   for (const buildId of BUILD_IDS) {
@@ -1117,6 +1114,27 @@ export function buildEditorUI(
     preview.className = 'build-prompt__preview';
     art.appendChild(preview);
     buildPromptCanvases.push([build.id, preview]);
+
+    // Key art over the whole card on hover. The spinning preview says what the
+    // rig is made of; the painting says what driving it is like, which is the
+    // thing a player is actually choosing between and the thing no amount of
+    // pips and glyphs can carry. It covers the card rather than just the art
+    // box because at card size the painting needs the room to read at all.
+    //
+    // Purely a hover affordance, so it is `aria-hidden` and the card keeps the
+    // spelled-out label it already had. Touch never sees it — there is no
+    // hover to trigger it — which is part of why picking also flashes.
+    const splash = document.createElement('span');
+    splash.className = 'build-prompt__splash';
+    splash.setAttribute('aria-hidden', 'true');
+    splash.style.backgroundImage = `url("${RIG_SPLASH_URLS[build.id]}")`;
+    // The name rides along on a gradient at the foot of the art: the painting
+    // hides the card's own heading, and a player sweeping across three cards
+    // should not lose track of which one is lit up.
+    const splashName = document.createElement('span');
+    splashName.className = 'build-prompt__splash-name';
+    splashName.textContent = build.name;
+    splash.appendChild(splashName);
 
     const name = document.createElement('strong');
     name.className = 'build-prompt__name';
@@ -1186,10 +1204,20 @@ export function buildEditorUI(
       glyph('build-prompt__pick-arrow', PICKER_PICK_ICON_SVG),
     );
 
-    option.append(art, name, chassis, meters, kit, pick);
+    option.append(art, name, chassis, meters, kit, pick, splash);
     option.addEventListener('click', () => {
-      closeBuildPrompt();
-      handlers.onChooseBuild?.(build.id);
+      // The picked card holds its hover state — key art over the whole card —
+      // for a beat before the garage is rebuilt around the new rig, so the
+      // choice lands on the painting rather than on an instant cut.
+      option.classList.add('build-prompt__option--picked');
+      // The other two stop taking clicks for that second; a second pick landing
+      // mid-hold would start two rebuilds.
+      buildPromptOptions.style.pointerEvents = 'none';
+      window.setTimeout(() => {
+        buildPromptOverlay.hidden = true;
+        stopBuildPromptPreviews();
+        handlers.onChooseBuild?.(build.id);
+      }, BUILD_PICK_HOLD_MS);
     });
     buildPromptOptions.appendChild(option);
     firstBuildOption ??= option;
@@ -2934,6 +2962,10 @@ export function buildEditorUI(
     },
     showBuildPrompt: () => {
       buildPromptOverlay.hidden = false;
+      // Warmed on open rather than at module load: a hover that has to wait on
+      // a fetch shows a blank card first, and the pick flash has no time to
+      // decode anything at all.
+      preloadRigSplashArt();
       firstBuildOption?.focus();
       // Previews are mounted on open and torn down on close: three live WebGL
       // contexts are not something to hold for a whole garage session.
