@@ -22,7 +22,7 @@ const layout: DesertLayout = {
   sideRoadZ: 8,
   roadHalfWidth: 1.7,
   assetRoot: 'assets',
-  groundAsset: 'graveyard/SM-0-Ground',
+  groundAsset: 'graveyard/SM-0-Ground.glb',
   patches: [{ surface: 'hardpan', count: [5, 9], radius: [6, 14] }],
   scatters: [
     {
@@ -68,7 +68,7 @@ const layout: DesertLayout = {
     {
       table: [
         {
-          asset: 'nature/Rock_1',
+          asset: 'nature/Rock_1.glb',
           weight: 1,
           scale: [0.6, 1.8],
           tint: { Rock: 0xb9975f },
@@ -76,7 +76,7 @@ const layout: DesertLayout = {
           colliderSize: [0.7, 0.6, 0.7],
         },
         {
-          asset: 'nature/Rock_2',
+          asset: 'nature/Rock_2.glb',
           weight: 1,
           scale: [0.6, 1.8],
           tint: { Rock: 0xb9975f },
@@ -84,7 +84,7 @@ const layout: DesertLayout = {
           colliderSize: [0.7, 0.6, 0.7],
         },
         {
-          asset: 'nature/Rock_4',
+          asset: 'nature/Rock_4.glb',
           weight: 1,
           scale: [0.6, 1.8],
           tint: { Rock: 0xb9975f },
@@ -98,7 +98,7 @@ const layout: DesertLayout = {
     },
   ],
   perimeterProp: {
-    asset: 'graveyard/SM-8-Pillar',
+    asset: 'graveyard/SM-8-Pillar.glb',
     weight: 1,
     tint: 0xa88b60,
   },

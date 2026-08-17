@@ -6,6 +6,7 @@ import {
   recordSalvagedPart,
   recordWaveCleared,
   resetProfileForNewGame,
+  shouldSkipTitleAtBoot,
   type RunCheckpoint,
 } from '../src/app/App.ts';
 import { createEmptyBlueprint } from '../src/core/blueprint.ts';
@@ -77,6 +78,20 @@ function appWithDamagedCheckpoint(
     seam: app.debugSeam() as unknown as RepairDebugSeam,
   };
 }
+
+describe('boot destination', () => {
+  it('sends a player with nothing saved straight into a new game', () => {
+    expect(shouldSkipTitleAtBoot(false, false)).toBe(true);
+  });
+
+  it('keeps the title for anyone with something to come back to', () => {
+    // A garage, a run in flight, or both: each is a choice the title screen
+    // exists to offer, and a new game would erase it.
+    expect(shouldSkipTitleAtBoot(true, false)).toBe(false);
+    expect(shouldSkipTitleAtBoot(false, true)).toBe(false);
+    expect(shouldSkipTitleAtBoot(true, true)).toBe(false);
+  });
+});
 
 describe('starter blueprint', () => {
   it('ships every build with its signature block already fitted', () => {

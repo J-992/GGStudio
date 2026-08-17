@@ -22,7 +22,7 @@ const layout: SnowfieldLayout = {
   sideRoadZ: 8,
   roadHalfWidth: 1.7,
   assetRoot: 'assets',
-  groundAsset: 'graveyard/SM-0-Ground',
+  groundAsset: 'graveyard/SM-0-Ground.glb',
   patches: [{ surface: 'ice', count: [4, 7], radius: [5, 11] }],
   scatters: [
     {
@@ -57,7 +57,7 @@ const layout: SnowfieldLayout = {
     {
       table: [
         {
-          asset: 'nature/Rock_1',
+          asset: 'nature/Rock_1.glb',
           weight: 1,
           scale: [0.7, 1.6],
           tint: { Rock: 0xdce9f5 },
@@ -65,7 +65,7 @@ const layout: SnowfieldLayout = {
           colliderSize: [0.7, 0.6, 0.7],
         },
         {
-          asset: 'nature/Rock_2',
+          asset: 'nature/Rock_2.glb',
           weight: 1,
           scale: [0.7, 1.6],
           tint: { Rock: 0xdce9f5 },
@@ -79,7 +79,7 @@ const layout: SnowfieldLayout = {
     },
   ],
   perimeterProp: {
-    asset: 'graveyard/SM-7-Fence',
+    asset: 'graveyard/SM-7-Fence.glb',
     weight: 1,
     tint: 0x9fb3c6,
   },

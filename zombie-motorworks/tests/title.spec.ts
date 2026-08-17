@@ -26,11 +26,24 @@ interface RawSave {
   blueprints: string | null;
 }
 
-async function openTitle(page: Page): Promise<void> {
+/**
+ * A first-time player never sees the title, and no longer starts in the garage
+ * either: boot drops them straight into wave one on the default rig, and the
+ * garage introduces itself at the build phase afterwards. Fresh-save tests that
+ * want the garage abandon that first run to get there.
+ */
+async function bootFreshToGarage(page: Page): Promise<void> {
   await page.goto('/?debug=1');
   await page.waitForFunction(
     () =>
-      window.__scrapRig !== undefined && window.__scrapRig.mode() === 'title',
+      window.__scrapRig !== undefined &&
+      window.__scrapRig.mode() === 'survival',
+    null,
+    { timeout: 20_000 },
+  );
+  await page.evaluate(() => window.__scrapRig.backToEditor());
+  await page.waitForFunction(
+    () => window.__scrapRig.mode() === 'editor',
     null,
     { timeout: 20_000 },
   );
@@ -56,26 +69,10 @@ async function rawSave(page: Page): Promise<RawSave> {
   );
 }
 
-async function expectContinueUnavailable(page: Page): Promise<void> {
-  const continueButton = page.getByRole('button', {
-    name: 'Continue',
-    exact: true,
-    includeHidden: true,
-  });
-  await expect(continueButton).toBeHidden();
-  await expect(continueButton).toBeDisabled();
-}
-
-async function startNewGame(page: Page): Promise<void> {
-  expect(await page.evaluate(() => window.__scrapRig.newGame())).toBe(true);
-  await page.waitForFunction(() => window.__scrapRig.mode() === 'editor');
-}
-
 async function createDistinctSave(page: Page): Promise<{
   profile: ReturnType<Window['__scrapRig']['profile']>;
   blueprint: BlueprintSnapshot;
 }> {
-  await startNewGame(page);
   expect(await page.evaluate(() => window.__scrapRig.grantMoney(431))).toBe(
     true,
   );
@@ -117,31 +114,36 @@ async function createDistinctSave(page: Page): Promise<{
   return snapshot;
 }
 
-test('fresh boot stays on the title until New Game starts a default garage', async ({
+test('fresh boot skips the title and drops straight into the first wave', async ({
   page,
 }) => {
-  await openTitle(page);
-
-  expect(await page.evaluate(() => window.__scrapRig.mode())).toBe('title');
+  await page.goto('/?debug=1');
+  await page.waitForFunction(
+    () =>
+      window.__scrapRig !== undefined &&
+      window.__scrapRig.mode() === 'survival',
+    null,
+    { timeout: 20_000 },
+  );
+  // No title, and no garage in front of the first zombie: the whole point of
+  // the ordering is that a new player is driving before they are building.
   await expect(
     page.getByText('ZOMBIE MOTORWORKS', { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByText('Build the last ride out of the graveyard.', {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole('button', { name: 'New Game', exact: true }),
-  ).toBeVisible();
-  await expectContinueUnavailable(page);
-  expect(await rawSave(page)).toEqual({ profile: null, blueprints: null });
-  expect(await page.evaluate(() => window.__scrapRig.continueGame())).toBe(
-    false,
-  );
-  expect(await page.evaluate(() => window.__scrapRig.mode())).toBe('title');
+  ).toHaveCount(0);
+  await expect(page.locator('.garage-dock')).toHaveCount(0);
+});
 
-  await startNewGame(page);
+test('the garage reached from that first run opens on the rig picker', async ({
+  page,
+}) => {
+  await bootFreshToGarage(page);
+
+  await expect(
+    page.getByText('ZOMBIE MOTORWORKS', { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: 'Choose Your Rig', exact: true }),
+  ).toBeVisible();
 
   expect(await page.evaluate(() => window.__scrapRig.profile())).toEqual(
     DEFAULT_PROFILE,
@@ -164,7 +166,7 @@ test('fresh boot stays on the title until New Game starts a default garage', asy
 test('Continue restores the saved money and active blueprint after reload', async ({
   page,
 }) => {
-  await openTitle(page);
+  await bootFreshToGarage(page);
   const expected = await createDistinctSave(page);
   const persisted = await rawSave(page);
   expect(persisted.profile).not.toBeNull();
@@ -194,7 +196,7 @@ test('Continue restores the saved money and active blueprint after reload', asyn
 });
 
 test('New Game confirms before erasing an existing save', async ({ page }) => {
-  await openTitle(page);
+  await bootFreshToGarage(page);
   await createDistinctSave(page);
   await reloadToTitle(page);
   const beforeConfirmation = await rawSave(page);
@@ -240,8 +242,7 @@ test('New Game confirms before erasing an existing save', async ({ page }) => {
 });
 
 test('Menu disposes the editor and returns to the title', async ({ page }) => {
-  await openTitle(page);
-  await startNewGame(page);
+  await bootFreshToGarage(page);
 
   await page.getByRole('button', { name: 'Menu', exact: true }).click();
 
@@ -256,8 +257,7 @@ test('Menu disposes the editor and returns to the title', async ({ page }) => {
 });
 
 test('Menu is hidden during an active run Build Phase', async ({ page }) => {
-  await openTitle(page);
-  await startNewGame(page);
+  await bootFreshToGarage(page);
   expect(await page.evaluate(() => window.__scrapRig.enterSurvival())).toBe(
     true,
   );

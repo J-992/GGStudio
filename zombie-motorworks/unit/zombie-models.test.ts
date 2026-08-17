@@ -60,7 +60,7 @@ describe('boss model selection', () => {
     // model to whatever classic definition happened to be active.
     const alchemist = BOSS_DEFINITIONS['acid-alchemist'];
     expect(modelFileFor('behemoth', 0, alchemist)).toBe('behemoth.rigged.glb');
-    expect(modelFileFor('walker', 0, alchemist)).toBe('Zed_1');
+    expect(modelFileFor('walker', 0, alchemist)).toBe('Zed_1.glb');
   });
 });
 
@@ -68,9 +68,9 @@ describe('ordinary kind model selection', () => {
   it('spreads walkers across the six numbered Zed exports', () => {
     const files = Array.from({ length: 6 }, (_, i) => modelFileFor('walker', i, null));
     expect(new Set(files).size).toBe(6);
-    expect(files[0]).toBe('Zed_1');
+    expect(files[0]).toBe('Zed_1.glb');
     // Wraps rather than running off the end of the export list.
-    expect(modelFileFor('walker', 6, null)).toBe('Zed_1');
+    expect(modelFileFor('walker', 6, null)).toBe('Zed_1.glb');
   });
 
   it.each([

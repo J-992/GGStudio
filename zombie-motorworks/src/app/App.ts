@@ -1,12 +1,13 @@
 /**
  * Application shell: owns the WebGL renderer and switches between the title,
- * editor, test chamber, and survival modes. RAPIER.init() runs once at boot.
+ * editor, test chamber, and survival modes. The Rapier wasm handshake runs once
+ * per session and is owned by `physics.ts`, which boot starts early so the
+ * compile overlaps the module fetches rather than following them.
  * Runtime modes deep-clone the blueprint; returning restores the editor with
  * the original untouched.
  */
 
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d-compat';
 import type {
   PartConfig,
   PlacedPart,
@@ -31,7 +32,9 @@ import {
   type EditorViewState,
 } from '../editor/EditorMode.ts';
 import { CommandHistory } from '../core/commands.ts';
-import { maxPixelRatio, shouldUseTouchControls } from '../ui/device.ts';
+import { beginPhysicsInit } from './physics.ts';
+import { reportBootStage } from './bootSplash.ts';
+import { maxPixelRatio } from '../ui/device.ts';
 import { ChamberMode, type ScenarioName } from '../chamber/ChamberMode.ts';
 import type { VehicleControls } from '../runtime/vehicle.ts';
 import { SurvivalMode } from '../survival/SurvivalMode.ts';
@@ -47,7 +50,6 @@ import {
   DEFAULT_BUILD_ID,
   buildStarterRig,
   buildStarterUnlocks,
-  buildWelcomeNotice,
   isBuildId,
   type BuildId,
 } from '../core/builds.ts';
@@ -74,8 +76,12 @@ import {
   playSfx,
   startGarageMusic,
   stopGarageMusic,
+  unlockAudio,
   type SfxName,
 } from './sfx.ts';
+
+/** Gestures a browser accepts as "the user is here" for unlocking audio. */
+const FIRST_GESTURE_EVENTS = ['pointerdown', 'keydown', 'touchstart'] as const;
 
 const EDITOR_SFX: Record<EditorSfxCue, SfxName> = {
   click: 'uiClick',
@@ -375,6 +381,21 @@ export function resetProfileForNewGame(profile: PlayerProfile): void {
   delete profile.phoneAddictsKilled;
 }
 
+/**
+ * Whether boot should hand the player a new game rather than the title screen.
+ *
+ * Only a player with nothing at all — no garage, no profile, no run in
+ * progress — skips it. Both saves have to be checked: a run save alone means
+ * someone who quit mid-run, and dropping them into a brand-new game would
+ * erase the run they came back for.
+ */
+export function shouldSkipTitleAtBoot(
+  hasStoredSave: boolean,
+  hasStoredRun: boolean,
+): boolean {
+  return !hasStoredSave && !hasStoredRun;
+}
+
 export class App {
   private renderer!: THREE.WebGLRenderer;
   private editor: EditorMode | null = null;
@@ -444,8 +465,31 @@ export class App {
     requestAnimationFrame(this.onViewportChange);
   };
 
-  async start(): Promise<void> {
-    await RAPIER.init();
+  /**
+   * Web Audio stays suspended until a gesture, and the title screen used to be
+   * the guaranteed one: every route out of it went through a button. A
+   * first-time player now boots straight into the Garage, so the unlock is
+   * hung off the first gesture anywhere instead of off any one screen's
+   * buttons. One shot — it removes itself.
+   */
+  private readonly onFirstGesture = (): void => {
+    for (const type of FIRST_GESTURE_EVENTS) {
+      window.removeEventListener(type, this.onFirstGesture, true);
+    }
+    unlockAudio();
+  };
+
+  /**
+   * Build the renderer, wait for physics, then mount the first mode.
+   *
+   * `physicsReady` is handed in rather than started here so the wasm compile
+   * overlaps the module fetches boot is already doing. Callers with nothing
+   * in flight can omit it and this starts the handshake itself.
+   */
+  async start(physicsReady?: Promise<void>): Promise<void> {
+    // Everything down to the frame loop is physics-free, so it happens before
+    // the wait rather than after it: by the time the engine lands the canvas is
+    // sized, listening, and ready to be drawn into.
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     // A phone's native 3x ratio is more fragments than the frame budget wants
     // and more detail than a moving 3D scene shows, so it is capped — but only
@@ -467,11 +511,29 @@ export class App {
     // with a `resize` — so the same work is queued a frame later rather than
     // read straight out of a stale layout.
     window.addEventListener('orientationchange', this.onOrientationChange);
+    for (const type of FIRST_GESTURE_EVENTS) {
+      window.addEventListener(type, this.onFirstGesture, true);
+    }
+    reportBootStage('rendererReady');
+
+    // Modes build Rapier worlds in their constructors, so this is the point the
+    // engine actually has to exist.
+    await (physicsReady ?? beginPhysicsInit());
+    reportBootStage('engineReady');
 
     const jumpTo = waveJumpTarget();
     if (jumpTo === null || !this.devWaveJump(jumpTo)) {
-      this.showTitle(this.saveExistedAtBoot);
+      // A first-time player has nothing to resume and no garage to protect, so
+      // the title screen is a menu whose only real answer is "New Game" — and
+      // the Garage behind it is a build editor they have no reason to trust
+      // yet. `beginFirstRun` drops them straight into wave one instead, and the
+      // Garage introduces itself afterwards. Everything the title offers —
+      // maps, leaderboard, badges — is one Menu press away, and the map they
+      // skip past is the one a new run defaults to anyway.
+      if (this.isFirstBoot()) this.beginFirstRun();
+      else this.showTitle(this.saveExistedAtBoot);
     }
+    reportBootStage('modeReady');
 
     const loop = (): void => {
       requestAnimationFrame(loop);
@@ -481,6 +543,15 @@ export class App {
       this.survival?.update();
     };
     loop();
+  }
+
+  /**
+   * True when this browser has never played. Read through `saveExistedAtBoot`
+   * so a profile this session writes cannot retroactively change what boot
+   * decided.
+   */
+  private isFirstBoot(): boolean {
+    return shouldSkipTitleAtBoot(this.saveExistedAtBoot, runSaveStore.has());
   }
 
   /** True when a resumable run save exists. */
@@ -686,10 +757,11 @@ export class App {
     // Reopened rather than refreshed: the editor caches meshes, selection and
     // overlays off the blueprint it was constructed with, and every one of
     // those is stale the moment the rig underneath changes.
-    this.pendingEditorNotice = buildWelcomeNotice(
-      buildId,
-      shouldUseTouchControls() ? 'touch' : 'pointer',
-    );
+    //
+    // No welcome banner: the rig the player just picked arrives with its weapon
+    // already fitted and its ability already bound, and a paragraph explaining
+    // that lands over the build grid on the one screen where they want to
+    // start building.
     this.openEditor();
   }
 
@@ -715,23 +787,58 @@ export class App {
     this.showTitle();
   }
 
-  private beginNewGame(): void {
+  /**
+   * Wipe progress and put the default rig in the bay. Shared by both entry
+   * points below, which differ only in where they take the player next.
+   */
+  private resetToStarterRig(): void {
     this.disposeTitle();
     this.clearStoredSave();
     resetProfileForNewGame(this.profile);
     this.resetSessionState();
-    // The garage opens on the default rig and immediately puts the picker over
-    // it; `applyChosenBuild` swaps in whatever the player lands on and grants
-    // that build's unlocks. The default's are granted here as well so the rig
-    // on screen is always fully repairable even if the picker is somehow
-    // dismissed — the overlap costs a player who switches builds one unlock
-    // they will not use, which is a rounding error against being handed a rig
-    // with a wheel the Store refuses to sell them.
+    // Unlocks are granted for the default rig up front so the truck the player
+    // is handed is fully repairable from wave one. `applyChosenBuild` grants
+    // the picked rig's unlocks on top when they choose in the garage — the
+    // overlap costs one unused unlock, against being handed a rig with a wheel
+    // the Store refuses to sell them.
     this.preferredBuildId = DEFAULT_BUILD_ID;
     this.profile.buildId = DEFAULT_BUILD_ID;
     this.grantBuildUnlocks();
     this.bp = buildStarterBlueprint(DEFAULT_BUILD_ID);
     this.pendingIsNewGame = true;
+  }
+
+  /**
+   * A brand-new player's first seconds: driving, not building.
+   *
+   * Booting used to land on the Garage — a full parts editor, under a rig
+   * picker, under a welcome dialog — and ask for a purchase and a grid
+   * placement before it would let anyone near a zombie. That is a lot of
+   * reading in front of a game whose actual loop is "drive a truck at a crowd",
+   * and it was the first thing every new player met.
+   *
+   * So the order is inverted for them: the default rig is already assembled and
+   * already armed, and wave one starts immediately. The Garage arrives at the
+   * build phase afterwards, when "spend what you just earned on the truck you
+   * just drove" is a sentence the player can already parse, and
+   * `pendingIsNewGame` carries the rig picker across to it.
+   */
+  private beginFirstRun(): void {
+    this.resetToStarterRig();
+    this.startRun(this.bp, this.preferredBiomeId);
+  }
+
+  /**
+   * "New Game" from the title screen.
+   *
+   * Deliberately still the Garage-first route. This player has already played —
+   * they reached a title screen and chose to start over — so the rig picker is
+   * a decision they can make, and skipping them past it to re-run a wave they
+   * have already seen would be taking that choice away rather than sparing them
+   * anything. Only `beginFirstRun` above skips ahead.
+   */
+  private beginNewGame(): void {
+    this.resetToStarterRig();
     this.openEditor();
   }
 

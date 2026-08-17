@@ -9,6 +9,14 @@
   /* Apple's 44 point guidance is also a comfortable floor on coarse Android
      pointers, where a visually small control is otherwise easy to miss. */
   --touch-target: 44px;
+  /* The stick's drawn radius (mirrors `DEFAULT_JOYSTICK_CONFIG.radiusPx`) and
+     how far past the ring a thumb still counts as being on it. They live here,
+     not in touch.css, because layouts outside the stick's own subtree have to
+     keep clear of the pad — the survival ability row is lifted exactly this
+     high on a narrow screen so it can never land on the corner the stick
+     answers to. */
+  --joystick-radius: 56px;
+  --joystick-pad-halo: 20px;
   --hud-scale: 1;
   --collapsible-toggle-size: var(--ui-control-md);
 }

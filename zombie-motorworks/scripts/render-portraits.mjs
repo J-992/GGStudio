@@ -62,7 +62,10 @@ async function main() {
 
   for (const { name, asset, ...extra } of targets) {
     const url = new URL('/portrait.html', baseUrl);
-    url.searchParams.set('asset', `/assets/zombies/${asset}`);
+    // The OBJ sources moved out of `public/` when the runtime switched to
+    // GLB — `public/` ships verbatim, and shipping both would have doubled the
+    // download. `vite.config.ts` serves `/art-src` in dev for exactly this.
+    url.searchParams.set('asset', `/art-src/zombies/${asset}`);
     url.searchParams.set('w', String(SIZE));
     url.searchParams.set('h', String(SIZE));
     for (const [key, value] of Object.entries(extra)) {

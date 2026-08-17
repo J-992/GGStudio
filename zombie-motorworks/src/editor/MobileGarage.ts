@@ -3,13 +3,13 @@
 import './editor-mobile.css';
 
 import { onTouchControlsChange, shouldUseTouchControls } from '../ui/device.ts';
+import { STORE_PURCHASE_EVENT, type StorePurchaseDetail } from './ui.ts';
 
 const COMPACT_BUTTON_GLYPHS: Readonly<Record<string, string>> = {
   'New Garage': '+',
   Menu: '☰',
   'Save & Quit': '⇥',
   Tutorial: '?',
-  Help: 'i',
   Share: '↗',
   'Test Drive': '▶',
 };
@@ -55,6 +55,44 @@ export interface MobileGarage {
  * The ordinary editor panels stay alive, with their event listeners and live
  * content intact. Mobile only promotes one of them over the canvas at a time.
  */
+/**
+ * One mark per screen, drawn at 16 px on the pixel grid so they stay crisp
+ * beside the labels: a shopfront awning, a crate of blocks, a stat bar chart,
+ * and a share arrow. `currentColor` keeps each one on the button's own colour,
+ * including the danger tint the stats button takes when the rig has an error.
+ */
+const ACTION_ICONS: Readonly<Record<OpenGarageSheet, string>> = {
+  shop:
+    `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" ` +
+    `focusable="false" shape-rendering="crispEdges">` +
+    `<path d="M2 3h12v3H2Z" fill="currentColor" opacity="0.55"/>` +
+    `<path d="M3 7h10v6H3Z" fill="none" stroke="currentColor" ` +
+    `stroke-width="2"/>` +
+    `<path d="M6 9h4v4H6Z" fill="currentColor"/>` +
+    `</svg>`,
+  inventory:
+    `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" ` +
+    `focusable="false" shape-rendering="crispEdges">` +
+    `<path d="M2 3h12v10H2Z" fill="none" stroke="currentColor" ` +
+    `stroke-width="2"/>` +
+    `<path d="M4 5h3v3H4Zm5 0h3v3H9Zm-5 4h3v2H4Zm5 0h3v2H9Z" ` +
+    `fill="currentColor"/>` +
+    `</svg>`,
+  stats:
+    `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" ` +
+    `focusable="false" shape-rendering="crispEdges">` +
+    `<path d="M2 10h3v4H2Zm4.5-4h3v8h-3ZM11 2h3v12h-3Z" ` +
+    `fill="currentColor"/>` +
+    `</svg>`,
+  share:
+    `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" ` +
+    `focusable="false" shape-rendering="crispEdges">` +
+    `<path d="M7 3h2v7H7Z" fill="currentColor"/>` +
+    `<path d="M4 6 8 2l4 4H9V4H7v2Z" fill="currentColor"/>` +
+    `<path d="M3 9h2v4h6V9h2v6H3Z" fill="currentColor" opacity="0.7"/>` +
+    `</svg>`,
+};
+
 export function installMobileGarage(root: HTMLElement): MobileGarage {
   let installed = false;
   let disposed = false;
@@ -73,13 +111,14 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
   let abilityLoadout: HTMLElement | null = null;
   let sharePanel: HTMLElement | null = null;
   let actionBar: HTMLElement | null = null;
-  let actionToggle: HTMLButtonElement | null = null;
   let actionGroup: HTMLElement | null = null;
   let statsSheet: HTMLElement | null = null;
   let inventoryHeader: HTMLElement | null = null;
   let inventoryBody: HTMLElement | null = null;
   let originalStoreTitle = '';
   let inventoryChildren: Node[] = [];
+  let purchaseToast: HTMLElement | null = null;
+  let purchaseToastTimer: number | null = null;
   const actionButtons = new Map<OpenGarageSheet, HTMLButtonElement>();
   const closeButtons = new Map<OpenGarageSheet, HTMLButtonElement>();
   const restoredAttributes: RestoredAttribute[] = [];
@@ -174,21 +213,13 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     }
   };
 
-  const setActionMenuExpanded = (expanded: boolean): void => {
-    if (!actionToggle || !actionGroup) return;
-    actionToggle.setAttribute('aria-expanded', String(expanded));
-    actionGroup.hidden = !expanded;
-  };
-
   const updateStatsAlert = (): void => {
     const statsButton = actionButtons.get('stats');
     if (!statsButton) return;
     if (vehicleStats?.querySelector('.issue-error')) {
       statsButton.setAttribute('data-alert', 'true');
-      actionToggle?.setAttribute('data-alert', 'true');
     } else {
       statsButton.removeAttribute('data-alert');
-      actionToggle?.removeAttribute('data-alert');
     }
   };
 
@@ -211,7 +242,6 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
 
     const previousSheet = currentSheet;
     currentSheet = sheet;
-    setActionMenuExpanded(false);
     root.setAttribute('data-garage-sheet', sheet);
     for (const [name, button] of actionButtons) {
       button.setAttribute('aria-expanded', String(name === sheet));
@@ -220,7 +250,9 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     if (sheet !== 'none') {
       closeButtons.get(sheet)?.focus({ preventScroll: true });
     } else if (restoreActionFocus && previousSheet !== 'none') {
-      actionToggle?.focus({ preventScroll: true });
+      // Back to the tab that opened it, which is where the player's attention
+      // already is now that the bar no longer collapses into one button.
+      actionButtons.get(previousSheet)?.focus({ preventScroll: true });
     }
   };
 
@@ -310,31 +342,14 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     actionBar.className = 'garage-action-bar';
     actionBar.setAttribute('aria-label', 'Garage screens');
 
+    // No toggle: four destinations behind a menu button cost a tap each and
+    // hide where the player is. They are cheap enough to leave on screen.
     actionGroup = document.createElement('div');
     actionGroup.className = 'garage-action-bar__group';
     actionGroup.id = `garage-action-menu-${nextSheetId}`;
     nextSheetId += 1;
     actionGroup.setAttribute('role', 'group');
     actionGroup.setAttribute('aria-label', 'Garage screens');
-    actionGroup.hidden = true;
-
-    actionToggle = document.createElement('button');
-    actionToggle.type = 'button';
-    actionToggle.className = 'garage-action-bar__toggle';
-    actionToggle.textContent = '☰ MENU';
-    actionToggle.setAttribute('data-touch-passthrough', '');
-    actionToggle.setAttribute('aria-label', 'Garage menu');
-    actionToggle.setAttribute('aria-controls', actionGroup.id);
-    actionToggle.setAttribute('aria-expanded', 'false');
-    actionToggle.addEventListener(
-      'click',
-      () => {
-        setActionMenuExpanded(
-          actionToggle?.getAttribute('aria-expanded') !== 'true',
-        );
-      },
-      { signal: listenerController?.signal },
-    );
 
     const names: readonly OpenGarageSheet[] = [
       'shop',
@@ -346,7 +361,14 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'garage-action-bar__button';
-      button.textContent = name.toUpperCase();
+      const icon = document.createElement('span');
+      icon.className = 'garage-action-bar__icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.innerHTML = ACTION_ICONS[name];
+      const label = document.createElement('span');
+      label.className = 'garage-action-bar__label';
+      label.textContent = name.toUpperCase();
+      button.append(icon, label);
       button.setAttribute('data-touch-passthrough', '');
       button.setAttribute('aria-controls', ids[name]);
       button.setAttribute('aria-expanded', 'false');
@@ -357,7 +379,7 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
       actionButtons.set(name, button);
       actionGroup.appendChild(button);
     }
-    actionBar.append(actionGroup, actionToggle);
+    actionBar.append(actionGroup);
     root.appendChild(actionBar);
     generatedElements.push(actionBar);
   };
@@ -378,7 +400,9 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     const runBanner = root.querySelector<HTMLElement>('.run-banner.run-active');
     root.style.setProperty(
       '--garage-run-banner-h',
-      runBanner ? `${Math.round(runBanner.getBoundingClientRect().height)}px` : '0px',
+      runBanner
+        ? `${Math.round(runBanner.getBoundingClientRect().height)}px`
+        : '0px',
     );
     updateStatsAlert();
   };
@@ -391,10 +415,37 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     });
   };
 
-  const onStoreChoice = (event: MouseEvent): void => {
-    if (!(event.target instanceof Element)) return;
-    if (!event.target.closest('.part-btn')) return;
-    setSheet('none');
+  /**
+   * Say what was bought without closing the shop.
+   *
+   * Shopping is a run of purchases — a frame, four wheels, the gun — and
+   * dropping the player back on the build screen after each one made the phone
+   * shop unusable for anything but a single part. The receipt goes on top of
+   * the shelf they are still looking at instead.
+   */
+  const onStorePurchase = (event: Event): void => {
+    const detail = (event as CustomEvent<StorePurchaseDetail>).detail;
+    if (!detail || storePanel === null) return;
+
+    if (purchaseToast === null) {
+      const toast = root.ownerDocument.createElement('div');
+      toast.className = 'garage-purchase-toast';
+      toast.setAttribute('role', 'status');
+      storePanel.appendChild(toast);
+      generatedElements.push(toast);
+      purchaseToast = toast;
+    }
+    purchaseToast.textContent = `1 ${detail.name} bought!`;
+    // Re-triggered rather than queued: buying three in a row should read as one
+    // receipt counting up, not as three overlapping cards.
+    purchaseToast.classList.remove('is-visible');
+    void purchaseToast.offsetWidth;
+    purchaseToast.classList.add('is-visible');
+    if (purchaseToastTimer !== null) clearTimeout(purchaseToastTimer);
+    purchaseToastTimer = window.setTimeout(() => {
+      purchaseToastTimer = null;
+      purchaseToast?.classList.remove('is-visible');
+    }, 1400);
   };
 
   const install = (): void => {
@@ -457,7 +508,7 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
       share: shareId,
     });
 
-    storePanel.addEventListener('click', onStoreChoice, {
+    storePanel.addEventListener(STORE_PURCHASE_EVENT, onStorePurchase, {
       signal: listenerController.signal,
     });
     window.addEventListener('resize', scheduleRefresh, {
@@ -475,6 +526,11 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     if (!installed) return;
     setSheet('none');
     installed = false;
+    if (purchaseToastTimer !== null) {
+      clearTimeout(purchaseToastTimer);
+      purchaseToastTimer = null;
+    }
+    purchaseToast = null;
     listenerController?.abort();
     listenerController = null;
     statsObserver?.disconnect();
@@ -500,7 +556,6 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     actionButtons.clear();
     closeButtons.clear();
     actionBar = null;
-    actionToggle = null;
     actionGroup = null;
     statsSheet = null;
     inventoryHeader = null;
@@ -517,7 +572,7 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
       );
     } else {
       root.style.removeProperty('--garage-topbar-h');
-    root.style.removeProperty('--garage-run-banner-h');
+      root.style.removeProperty('--garage-run-banner-h');
     }
 
     topbar = null;

@@ -28,6 +28,11 @@ export interface Arena {
   /** Blend the arena's fog toward a hazard density, 0 = the biome's clear-weather value. */
   setHazardFog(density: number): void;
   whenReady(): Promise<void>;
+  /**
+   * Settled-versus-total async placements, for the loading bar shown while the
+   * arena builds. A `total` of 0 means there was nothing to wait for.
+   */
+  progress(): { loaded: number; total: number };
   follow(vehicleObj: THREE.Object3D): void;
   dispose(): void;
 }

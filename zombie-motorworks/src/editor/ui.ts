@@ -28,16 +28,37 @@ import { storeOffer } from '../core/economy.ts';
 import {
   BUILDS,
   BUILD_IDS,
+  BUILD_METER_PIPS,
   buildStarterRig,
   type BuildId,
 } from '../core/builds.ts';
 import { mountSpinningRigPreview } from './BuildPreview.ts';
 import { upgradePrice } from '../core/upgrades.ts';
+import { RIG_SPLASH_URLS, preloadRigSplashArt } from '../ui/splashArt.ts';
+
+/** How long the picked card sits on its key art before the garage rebuilds. */
+const BUILD_PICK_HOLD_MS = 1000;
+
+/**
+ * What a store tile announces after a purchase actually goes through.
+ *
+ * The event bubbles off the tile, so anything showing the store — the desktop
+ * panel or the phone's full-screen sheet — can react without the store knowing
+ * which of them is on screen.
+ */
+export interface StorePurchaseDetail {
+  readonly defId: string;
+  readonly name: string;
+}
+
+/** Event name for {@link StorePurchaseDetail}. */
+export const STORE_PURCHASE_EVENT = 'garage-part-purchased';
 
 export interface EditorUIHandlers {
   /** Unlocks a locked part, or buys and arms an already-unlocked part. */
-  onPurchasePart?(defId: string): void;
-  onBuyPart(defId: string): void;
+  onPurchasePart?(defId: string): boolean;
+  /** Buys a part into the inventory; false when the purchase was refused. */
+  onBuyPart(defId: string): boolean;
   onArmPart(defId: string): void;
   /** Drag an owned block from Inventory/build bar directly onto the rig. */
   onPartDragStart(defId: string, clientX: number, clientY: number): boolean;
@@ -296,6 +317,21 @@ export interface EditorUI {
   deny(text: string): void;
   /** Open the first-run rig picker. Modal, and only closable by choosing. */
   showBuildPrompt(): void;
+  /**
+   * Swap in a freshly rendered icon for every tile showing `defId`.
+   *
+   * Icons are rendered a few per frame rather than all at once, so tiles are
+   * built against the SVG fallback and upgraded here as the real ones land.
+   */
+  setPartIcon(defId: string, url: string): void;
+  /**
+   * Offer the guided tour, if this browser has never been offered it. Idempotent.
+   *
+   * Called by EditorMode once the garage is the only thing on screen — either
+   * straight away, or after the rig picker closes — so the welcome never lands
+   * on top of another dialog.
+   */
+  presentWelcome(): void;
   /** Nudge shown at the start of every new game to buy a starting weapon. */
   ghostTip: HTMLDivElement;
   /**
@@ -571,6 +607,10 @@ function partThumbnail(
   image.className = 'part-thumbnail';
   image.alt = '';
   image.draggable = false;
+  // Tagged so `setPartIcon` can find every tile showing this part once its
+  // rendered icon arrives — icons are drawn a few per frame now, so a tile is
+  // routinely built before its icon exists.
+  image.dataset.partIcon = def.id;
   if (iconUrl) {
     image.src = iconUrl;
     return image;
@@ -809,6 +849,45 @@ const DEPLOY_ICON_SVG =
   `<path d="M12.5 3.5 21 12l-8.5 8.5Z" fill="currentColor"/>` +
   `</svg>`;
 
+/**
+ * Marks the first-run rig picker leads its rows with. The picker is the one
+ * screen a player meets before they know a single word of the game's
+ * vocabulary, and on a phone there is no room for the words anyway, so each
+ * row is a glyph and a value: reticle for the click attack, bolt for the
+ * ability, dial for speed, shield for armour, chevron for "take this one".
+ */
+const PICKER_ATTACK_ICON_SVG =
+  `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+  `<circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="2.4"/>` +
+  `<path d="M11 1h2v5h-2zM11 18h2v5h-2zM1 11h5v2H1zM18 11h5v2h-5zM10.5 10.5h3v3h-3z" fill="currentColor"/>` +
+  `</svg>`;
+const PICKER_ABILITY_ICON_SVG =
+  `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+  `<path d="M14 1 4 13.5h5.2L8 23l10-12.5h-5.2z" fill="currentColor"/>` +
+  `</svg>`;
+const PICKER_SPEED_ICON_SVG =
+  `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+  `<path d="M12 4a9.5 9.5 0 0 0-9.5 9.5h3.2a6.3 6.3 0 0 1 12.6 0h3.2A9.5 9.5 0 0 0 12 4Z" fill="currentColor"/>` +
+  `<path d="M11.4 13.6 17 8.4l1.8 2-6 4.4z" fill="currentColor"/>` +
+  `</svg>`;
+const PICKER_ARMOUR_ICON_SVG =
+  `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+  `<path d="M12 1.5 21 4.4v7.1c0 5.1-3.6 9.4-9 11.3-5.4-1.9-9-6.2-9-11.3V4.4z" fill="currentColor"/>` +
+  `</svg>`;
+const PICKER_PICK_ICON_SVG =
+  `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+  `<path d="M7 3.5 17.5 12 7 20.5Z" fill="currentColor"/>` +
+  `</svg>`;
+
+/** One inline glyph, sized and tinted entirely by `className`. */
+function glyph(className: string, svg: string): HTMLSpanElement {
+  const mark = document.createElement('span');
+  mark.className = className;
+  mark.setAttribute('aria-hidden', 'true');
+  mark.innerHTML = svg;
+  return mark;
+}
+
 /** Crate-of-blocks mark for the inventory button on the build bar. */
 function inventoryIcon(): HTMLImageElement {
   const svg =
@@ -822,6 +901,26 @@ function inventoryIcon(): HTMLImageElement {
   image.draggable = false;
   image.src = `data:image/svg+xml,${encodeURIComponent(svg)}`;
   return image;
+}
+
+/**
+ * Give a repair-banner button a fixed glyph and a label span to write into.
+ *
+ * The label carries a price that changes every wave; keeping it in its own span
+ * means the caller can rewrite it without also erasing the icon beside it.
+ */
+function bannerButtonLabel(
+  button: HTMLButtonElement,
+  glyph: string,
+): HTMLSpanElement {
+  const icon = document.createElement('span');
+  icon.className = 'run-banner__button-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = glyph;
+  const label = document.createElement('span');
+  label.className = 'run-banner__button-label';
+  button.replaceChildren(icon, label);
+  return label;
 }
 
 export function buildEditorUI(
@@ -962,7 +1061,9 @@ export function buildEditorUI(
   // "start on whichever one you happened to be given", which is not a choice
   // the player made.
   const buildPromptOverlay = document.createElement('div');
-  buildPromptOverlay.className = 'garage-confirm-overlay';
+  // Its own overlay class: the picker is the one dialog that wants the whole
+  // viewport, so it trims the padding every other confirm keeps.
+  buildPromptOverlay.className = 'garage-confirm-overlay build-prompt-overlay';
   buildPromptOverlay.hidden = true;
   buildPromptOverlay.setAttribute('role', 'dialog');
   buildPromptOverlay.setAttribute('aria-modal', 'true');
@@ -978,9 +1079,7 @@ export function buildEditorUI(
   buildPromptTitle.textContent = 'Choose Your Rig';
   const buildPromptDescription = document.createElement('p');
   buildPromptDescription.id = 'build-prompt-description';
-  buildPromptDescription.textContent =
-    'Each one comes with its own weapon bolted on — left-click to fire it — ' +
-    'and its own ability. Everything in the Store works with all three.';
+  buildPromptDescription.textContent = 'Store parts fit all three.';
   const buildPromptOptions = document.createElement('div');
   buildPromptOptions.className = 'build-prompt__options';
 
@@ -988,14 +1087,10 @@ export function buildEditorUI(
   const buildPromptCanvases: [BuildId, HTMLCanvasElement][] = [];
   let firstBuildOption: HTMLButtonElement | null = null;
 
-  /** Tear down the three GL contexts. Idempotent: called on close and on pick. */
+  /** Tear down the three GL contexts. Idempotent: called on open and on pick. */
   const stopBuildPromptPreviews = (): void => {
     for (const stop of stopBuildPreviews) stop();
     stopBuildPreviews = [];
-  };
-  const closeBuildPrompt = (): void => {
-    buildPromptOverlay.hidden = true;
-    stopBuildPromptPreviews();
   };
 
   for (const buildId of BUILD_IDS) {
@@ -1003,13 +1098,43 @@ export function buildEditorUI(
     const option = document.createElement('button');
     option.type = 'button';
     option.className = `build-prompt__option build-prompt__option--${build.id}`;
+    // The card is art and glyphs, and the phone layout drops the chassis line
+    // and the button's words outright, so the accessible name is spelled out
+    // here instead of being assembled from whatever text survives the CSS.
+    option.setAttribute(
+      'aria-label',
+      `Start with the ${build.name}. ${build.chassis}. ` +
+        `Click: ${build.signatureName}${build.signatureAuto ? ', automatic' : ''}. ` +
+        `Ability: ${build.abilityName}.`,
+    );
 
-    const art = document.createElement('div');
+    const art = document.createElement('span');
     art.className = 'build-prompt__art';
     const preview = document.createElement('canvas');
     preview.className = 'build-prompt__preview';
     art.appendChild(preview);
     buildPromptCanvases.push([build.id, preview]);
+
+    // Key art over the whole card on hover. The spinning preview says what the
+    // rig is made of; the painting says what driving it is like, which is the
+    // thing a player is actually choosing between and the thing no amount of
+    // pips and glyphs can carry. It covers the card rather than just the art
+    // box because at card size the painting needs the room to read at all.
+    //
+    // Purely a hover affordance, so it is `aria-hidden` and the card keeps the
+    // spelled-out label it already had. Touch never sees it — there is no
+    // hover to trigger it — which is part of why picking also flashes.
+    const splash = document.createElement('span');
+    splash.className = 'build-prompt__splash';
+    splash.setAttribute('aria-hidden', 'true');
+    splash.style.backgroundImage = `url("${RIG_SPLASH_URLS[build.id]}")`;
+    // The name rides along on a gradient at the foot of the art: the painting
+    // hides the card's own heading, and a player sweeping across three cards
+    // should not lose track of which one is lit up.
+    const splashName = document.createElement('span');
+    splashName.className = 'build-prompt__splash-name';
+    splashName.textContent = build.name;
+    splash.appendChild(splashName);
 
     const name = document.createElement('strong');
     name.className = 'build-prompt__name';
@@ -1017,36 +1142,82 @@ export function buildEditorUI(
     const chassis = document.createElement('span');
     chassis.className = 'build-prompt__chassis';
     chassis.textContent = build.chassis;
-    const blurb = document.createElement('span');
-    blurb.className = 'build-prompt__blurb';
-    blurb.textContent = build.blurb;
+    // No blurb: three paragraphs of flavour is the bulk of this dialog, and
+    // none of it separates the rigs the way the meters and the two kit rows
+    // below already do.
+
+    // Speed and armour as pips rather than as the chassis sentence: a phone
+    // card has room for two three-pip bars long before it has room for
+    // "Four wheels, plated", and the bars are the part a player compares.
+    const meters = document.createElement('span');
+    meters.className = 'build-prompt__meters';
+    for (const [icon, filled] of [
+      [PICKER_SPEED_ICON_SVG, build.speed],
+      [PICKER_ARMOUR_ICON_SVG, build.armour],
+    ] as const) {
+      const meter = document.createElement('span');
+      meter.className = 'build-prompt__meter';
+      meter.appendChild(glyph('build-prompt__meter-icon', icon));
+      const pips = document.createElement('span');
+      pips.className = 'build-prompt__pips';
+      for (let i = 0; i < BUILD_METER_PIPS; i += 1) {
+        const pip = document.createElement('span');
+        pip.className =
+          i < filled
+            ? 'build-prompt__pip build-prompt__pip--on'
+            : 'build-prompt__pip';
+        pips.appendChild(pip);
+      }
+      meter.appendChild(pips);
+      meters.appendChild(meter);
+    }
 
     const kit = document.createElement('span');
     kit.className = 'build-prompt__kit';
-    for (const [label, value] of [
-      ['Click', build.signatureName],
-      ['Ability', build.abilityName],
+    for (const [icon, value, auto] of [
+      [PICKER_ATTACK_ICON_SVG, build.signatureName, build.signatureAuto],
+      [PICKER_ABILITY_ICON_SVG, build.abilityName, false],
     ] as const) {
       const row = document.createElement('span');
       row.className = 'build-prompt__kit-row';
-      const rowLabel = document.createElement('span');
-      rowLabel.className = 'build-prompt__kit-label';
-      rowLabel.textContent = label;
+      row.appendChild(glyph('build-prompt__kit-icon', icon));
       const rowValue = document.createElement('span');
       rowValue.className = 'build-prompt__kit-value';
       rowValue.textContent = value;
-      row.append(rowLabel, rowValue);
+      row.appendChild(rowValue);
+      if (auto) {
+        const autoTag = document.createElement('span');
+        autoTag.className = 'build-prompt__kit-auto';
+        autoTag.textContent = 'Auto';
+        row.appendChild(autoTag);
+      }
       kit.appendChild(row);
     }
 
     const pick = document.createElement('span');
     pick.className = 'build-prompt__pick';
-    pick.textContent = 'Start with this rig';
+    const pickLabel = document.createElement('span');
+    pickLabel.className = 'build-prompt__pick-label';
+    pickLabel.textContent = 'Start with this rig';
+    pick.append(
+      pickLabel,
+      glyph('build-prompt__pick-arrow', PICKER_PICK_ICON_SVG),
+    );
 
-    option.append(art, name, chassis, blurb, kit, pick);
+    option.append(art, name, chassis, meters, kit, pick, splash);
     option.addEventListener('click', () => {
-      closeBuildPrompt();
-      handlers.onChooseBuild?.(build.id);
+      // The picked card holds its hover state — key art over the whole card —
+      // for a beat before the garage is rebuilt around the new rig, so the
+      // choice lands on the painting rather than on an instant cut.
+      option.classList.add('build-prompt__option--picked');
+      // The other two stop taking clicks for that second; a second pick landing
+      // mid-hold would start two rebuilds.
+      buildPromptOptions.style.pointerEvents = 'none';
+      window.setTimeout(() => {
+        buildPromptOverlay.hidden = true;
+        stopBuildPromptPreviews();
+        handlers.onChooseBuild?.(build.id);
+      }, BUILD_PICK_HOLD_MS);
     });
     buildPromptOptions.appendChild(option);
     firstBuildOption ??= option;
@@ -1233,7 +1404,6 @@ export function buildEditorUI(
   const utilityButtons = document.createElement('div');
   utilityButtons.className = 'topbar-utilities';
   let setShareOpen = (_open: boolean): void => undefined;
-  const helpButton = btn('Help', () => toggleHelp());
   const shareTopButton = btn('Share', () => {
     const open = shareTopButton.getAttribute('aria-expanded') !== 'true';
     setShareOpen(open);
@@ -1244,7 +1414,6 @@ export function buildEditorUI(
     menuBtn,
     saveAndQuitBtn,
     btn('Tutorial', handlers.onStartTutorial),
-    helpButton,
     shareTopButton,
   );
   top.appendChild(utilityButtons);
@@ -1293,10 +1462,14 @@ export function buildEditorUI(
   runBannerText.className = 'run-banner__text';
   const runBannerWarning = document.createElement('span');
   runBannerWarning.className = 'run-banner__warning';
-  const repairAllBtn = btn('Repair All $0', handlers.onRepairAll);
+  // Icon plus label, in two spans: the cost changes every wave, and writing it
+  // as `textContent` on the button would take the icon with it.
+  const repairAllBtn = btn('', handlers.onRepairAll);
   repairAllBtn.className = 'primary run-banner__repair';
-  const rebuildAllBtn = btn('Rebuild Car $0', handlers.onRebuildCar);
+  const repairAllLabel = bannerButtonLabel(repairAllBtn, '\u271A');
+  const rebuildAllBtn = btn('', handlers.onRebuildCar);
   rebuildAllBtn.className = 'primary run-banner__rebuild';
+  const rebuildAllLabel = bannerButtonLabel(rebuildAllBtn, '\u21BB');
   const runBannerActions = document.createElement('div');
   runBannerActions.className = 'run-banner__actions';
   runBannerActions.append(repairAllBtn, rebuildAllBtn);
@@ -1706,8 +1879,19 @@ export function buildEditorUI(
       unlockMilestone,
     );
     storeButton.addEventListener('click', () => {
-      if (handlers.onPurchasePart) handlers.onPurchasePart(id);
-      else handlers.onBuyPart(id);
+      const bought = handlers.onPurchasePart
+        ? handlers.onPurchasePart(id)
+        : handlers.onBuyPart(id);
+      if (!bought) return;
+      // Announced rather than returned: the shop is a full screen on a phone
+      // and the status line it would normally report to is behind it, so the
+      // sheet that is on screen gets to say what was bought.
+      storeButton.dispatchEvent(
+        new CustomEvent<StorePurchaseDetail>(STORE_PURCHASE_EVENT, {
+          bubbles: true,
+          detail: { defId: id, name: displayName },
+        }),
+      );
     });
     storeButton.addEventListener('animationend', () =>
       storeButton.classList.remove('is-revealed'),
@@ -2242,25 +2426,34 @@ export function buildEditorUI(
   });
   root.appendChild(upgradeTip);
 
-  const help = buildHelpOverlay();
-  help.style.display = 'none';
-  root.appendChild(help);
+  // Legacy key: the help overlay it belonged to is gone, replaced by the
+  // tutorial. It is still read so a player who dismissed the old panel is not
+  // handed the welcome dialog now.
   const HELP_SEEN_KEY = 'scraprig.help-seen';
-  const toggleHelp = (): void => {
-    const showing = help.style.display !== 'none';
-    help.style.display = showing ? 'none' : 'block';
-    if (!showing) localStorage.setItem(HELP_SEEN_KEY, '1');
-  };
-  help.querySelector('button')?.addEventListener('click', toggleHelp);
   const debugMode = new URLSearchParams(location.search).get('debug') === '1';
   const WELCOME_SEEN_KEY = 'scraprig.welcome-seen';
   const TUTORIAL_DONE_KEY = 'scraprig.tutorial-done';
-  if (
-    !debugMode &&
-    !localStorage.getItem(TUTORIAL_DONE_KEY) &&
-    !localStorage.getItem(HELP_SEEN_KEY) &&
-    !localStorage.getItem(WELCOME_SEEN_KEY)
-  ) {
+  let welcomePresented = false;
+  /**
+   * Offer the tour, once, when the garage has the player's whole attention.
+   *
+   * Deliberately not raised during construction. A first-time player reaches
+   * this garage straight off their first wave, and the rig picker is already
+   * waiting for them — two modals stacked on a screen they have never seen is
+   * exactly the wall this ordering exists to remove. EditorMode calls this
+   * either instead of the picker or after the picker resolves.
+   */
+  const presentWelcome = (): void => {
+    if (welcomePresented) return;
+    welcomePresented = true;
+    if (
+      debugMode ||
+      localStorage.getItem(TUTORIAL_DONE_KEY) ||
+      localStorage.getItem(HELP_SEEN_KEY) ||
+      localStorage.getItem(WELCOME_SEEN_KEY)
+    ) {
+      return;
+    }
     const welcome = buildWelcomeDialog(
       () => {
         localStorage.setItem(WELCOME_SEEN_KEY, '1');
@@ -2273,7 +2466,7 @@ export function buildEditorUI(
       },
     );
     root.appendChild(welcome);
-  }
+  };
 
   const showNoSelection = (): void => {
     root.classList.remove('has-selection');
@@ -2675,7 +2868,7 @@ export function buildEditorUI(
         runBannerWarning.textContent = repair?.nextWaveNotice ?? '';
         runBannerWarning.hidden = repair?.nextWaveNotice === undefined;
         if (repair) {
-          repairAllBtn.textContent = `Repair All $${repair.totalCost}`;
+          repairAllLabel.textContent = `Repair All $${repair.totalCost}`;
           repairAllBtn.disabled =
             repair.totalCost === 0 || !repair.canRepairAll;
           repairAllBtn.title =
@@ -2684,7 +2877,7 @@ export function buildEditorUI(
               : repair.canRepairAll
                 ? 'Fully repair all surviving parts'
                 : 'Not enough money';
-          rebuildAllBtn.textContent = `Rebuild Car $${repair.rebuildCost}`;
+          rebuildAllLabel.textContent = `Rebuild Car $${repair.rebuildCost}`;
           rebuildAllBtn.disabled =
             repair.rebuildCost === 0 || !repair.canRebuildAll;
           rebuildAllBtn.title =
@@ -2758,8 +2951,21 @@ export function buildEditorUI(
         importOverlay.hidden = false;
         importAsNewSlot.focus();
       }),
+    presentWelcome,
+    setPartIcon: (defId, url) => {
+      const selector = `img.part-thumbnail[data-part-icon="${CSS.escape(defId)}"]`;
+      for (const image of root.querySelectorAll<HTMLImageElement>(selector)) {
+        // The SVG fallback is drawn inline, so swapping `src` is the whole
+        // upgrade: same element, same layout, no reflow of the panel.
+        image.src = url;
+      }
+    },
     showBuildPrompt: () => {
       buildPromptOverlay.hidden = false;
+      // Warmed on open rather than at module load: a hover that has to wait on
+      // a fetch shows a blank card first, and the pick flash has no time to
+      // decode anything at all.
+      preloadRigSplashArt();
       firstBuildOption?.focus();
       // Previews are mounted on open and torn down on close: three live WebGL
       // contexts are not something to hold for a whole garage session.
@@ -3003,26 +3209,5 @@ function buildWelcomeDialog(
   close.addEventListener('click', onClose);
   actions.append(tutorial, close);
   wrap.append(prompt, actions);
-  return wrap;
-}
-
-function buildHelpOverlay(): HTMLDivElement {
-  const wrap = document.createElement('div');
-  wrap.className = 'panel help-panel';
-  wrap.innerHTML = `
-    <div class="help-panel__header"><b>How to build a vehicle</b><button>Close</button></div>
-    <div class="cat-title">quick start</div>
-    <ol><li>Buy a part in the Store to add it to Inventory and arm it for immediate placement.</li>
-    <li>Open Inventory with the crate button beside the build bar, then click a block to slot it (5 slots; click it again or right-click a slot to clear it).</li>
-    <li>Click a bar slot to arm that block, then place it. Green can place; red explains why it cannot. A slot showing x0 jumps you to that block in the Store.</li>
-    <li>Build blocks around the Truck Heart. Everything needs to connect face-to-face.</li>
-    <li>Select a placed part to upgrade, rotate, or sell it in the right inspector.</li>
-    <li>Use Test Drive when the vehicle is ready.</li></ol>
-    <div class="cat-title">controls</div>
-    <table><tr><td>Orbit / zoom</td><td>left-drag / mouse wheel; keys <b>1-5</b> choose views</td></tr>
-    <tr><td>Rotate selected / held part</td><td><b>R</b> turn; <b>F</b> flip</td></tr>
-    <tr><td>Return to inventory</td><td><b>M</b> on a selected part — keep it, free to place again</td></tr>
-    <tr><td>Sell for cash</td><td>right-click a part, or <b>Delete</b> on a selected part</td></tr>
-    <tr><td>Undo / redo</td><td>Ctrl+Z / Ctrl+Shift+Z</td></tr><tr><td>Layers</td><td>the Height slider in the top bar slices the build</td></tr></table>`;
   return wrap;
 }

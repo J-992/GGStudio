@@ -25,6 +25,9 @@
   --ui-rust: #8a5035;
   --ui-rust-dark: #4a2a20;
   --ui-bone: #b7a873;
+  /* Fuel reads as its own resource, not as another green meter: the tank is the
+     one gauge the player refills rather than repairs. */
+  --ui-fuel: #d1802f;
   --ui-danger: #9b4b42;
   --ui-danger-dark: #4f2522;
 

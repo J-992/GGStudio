@@ -22,36 +22,72 @@
 
 .touch-controls__zone {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  z-index: 10;
   pointer-events: auto;
   touch-action: none;
 }
 
-.touch-controls__zone--joystick {
-  left: 0;
-  width: 45%;
-  padding-bottom: max(16px, env(safe-area-inset-bottom));
-  padding-left: max(16px, env(safe-area-inset-left));
-}
-
+/*
+ * The aim pad is the whole screen.
+ *
+ * The stick used to own the left 45% outright, which meant the half of the
+ * arena the player drives into was the half they could not shoot at: a tap
+ * there moved the wheels instead of putting a shell down. Now anywhere the
+ * player can see a zombie is somewhere they can tap to hit it, and the stick
+ * keeps only the corner it is actually drawn in.
+ */
 .touch-controls__zone--aim {
-  right: 0;
-  width: 55%;
-  padding-right: max(16px, env(safe-area-inset-right));
-  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  inset: 0;
+  z-index: 10;
 }
 
+/*
+ * A pad barely bigger than the ring it drives, parked in the same corner.
+ * It stacks above the aim pad, so a thumb that lands on the stick steers
+ * without also calling a shot down on the driver's own bumper — and every
+ * pixel outside this box is arena the right thumb can shoot at.
+ */
+.touch-controls__zone--joystick {
+  bottom: 0;
+  left: 0;
+  z-index: 11;
+  width: calc(
+    max(16px, env(safe-area-inset-left)) + var(--joystick-radius, 56px) * 2 +
+      var(--joystick-pad-halo, 20px)
+  );
+  height: calc(
+    max(16px, env(safe-area-inset-bottom)) + var(--joystick-radius, 56px) * 2 +
+      var(--joystick-pad-halo, 20px)
+  );
+}
+
+/* Parked in the bottom-left corner and never moved. The element itself is the
+   stick's centre — a zero-sized point the base and knob hang off — so the
+   corner offsets below are measured to the middle of the base, not its edge. */
 .touch-joystick {
   position: absolute;
+  bottom: calc(
+    max(16px, env(safe-area-inset-bottom)) + var(--joystick-radius, 56px)
+  );
+  left: calc(
+    max(16px, env(safe-area-inset-left)) + var(--joystick-radius, 56px)
+  );
   /* Above the driver panel it is very likely to be drawn over: a stick the
      player cannot see is a stick they cannot centre. */
   z-index: 15;
   width: 0;
   height: 0;
+  opacity: 0.72;
   pointer-events: none;
   touch-action: none;
+}
+
+/* Idle it is furniture; under a thumb it is the control being used. */
+.touch-joystick.is-engaged {
+  opacity: 1;
+}
+
+.touch-joystick[hidden] {
+  display: none;
 }
 
 .touch-joystick__base,
@@ -85,7 +121,15 @@
   background: color-mix(in srgb, var(--ui-signal) 86%, transparent);
   box-shadow: inset 0 0 0 4px var(--ui-signal-dark);
   transform: translate3d(0, 0, 0);
-  transition: transform 35ms linear;
+  /* Only the snap back to centre is animated. */
+  transition: transform 110ms ease-out;
+}
+
+/* Under a thumb the knob is the thumb: any easing here is latency between
+   where the player is pressing and where the game says they are pressing,
+   and on a stick this small a frame of lag is a frame of understeer. */
+.touch-joystick.is-engaged .touch-joystick__knob {
+  transition: none;
 }
 
 /* Above the minimap and the driver panel: a control the player has to reach

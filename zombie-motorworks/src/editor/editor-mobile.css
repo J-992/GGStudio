@@ -7,20 +7,28 @@
   --garage-stack-gap: var(--ui-space-2);
   --garage-hotbar-height: var(--touch-target);
   --garage-action-height: var(--touch-target);
+  --garage-action-width: 148px;
+  /* Four tabs in one column; landscape re-states this as two rows of two. */
+  --garage-action-stack: calc(
+    var(--garage-action-height) * 4 + var(--ui-space-2) * 3
+  );
   --garage-action-bottom: calc(
     var(--garage-edge-bottom) + var(--garage-hotbar-height) +
       var(--garage-stack-gap)
   );
+  /* The status line clears the whole tab stack, not one row of it. */
   --garage-bottom-clearance: calc(
-    var(--garage-action-bottom) + var(--garage-action-height) +
+    var(--garage-action-bottom) + var(--garage-action-stack) +
       var(--garage-stack-gap)
   );
   --garage-topbar-height: calc(
     var(--touch-target) + var(--touch-target) + var(--ui-space-2) +
       var(--ui-space-1) + var(--ui-space-1)
   );
+  /* Only the first frame's guess: MobileGarage measures the real card into
+     --garage-run-banner-h. Two stacked buttons and a line of text. */
   --garage-run-banner-height: calc(
-    var(--touch-target) + var(--ui-space-2) + 2px
+    var(--touch-target) + var(--touch-target) + var(--ui-space-6)
   );
 }
 
@@ -146,6 +154,40 @@
   padding: var(--ui-space-3);
 }
 
+/*
+ * Purchase receipt, floated over the shelf the player is still shopping on.
+ * Non-interactive and short-lived: it reports, it never has to be dismissed.
+ */
+[data-mobile-garage='on'] .garage-purchase-toast {
+  position: absolute;
+  right: var(--ui-space-3);
+  bottom: var(--ui-space-3);
+  left: var(--ui-space-3);
+  z-index: 2;
+  padding: var(--ui-space-2);
+  border: 1px solid var(--ui-signal-dark);
+  background: var(--ui-surface-2);
+  box-shadow:
+    inset 3px 0 0 var(--ui-signal),
+    0 4px 0 rgb(0 0 0 / 0.4);
+  color: var(--ui-signal-strong);
+  font: 400 var(--ui-text-12)/1.2 var(--ui-font-display);
+  letter-spacing: 0.04em;
+  opacity: 0;
+  pointer-events: none;
+  text-align: center;
+  text-transform: uppercase;
+  transform: translateY(var(--ui-space-2));
+  transition:
+    opacity 120ms linear,
+    transform 120ms linear;
+}
+
+[data-mobile-garage='on'] .garage-purchase-toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 /* Three broad columns remain quickly scannable in either phone orientation. */
 [data-mobile-garage='on'] [data-garage-sheet-panel='shop'] .store-list {
   display: grid;
@@ -233,8 +275,8 @@
   min-height: calc(var(--touch-target) + var(--ui-space-5));
 }
 
-/* One corner toggle leaves the build visible until its destinations are needed. */
-/* Above the notice and the status line: those are read, this is pressed. */
+/* The four screens are always on the bar: no toggle, no reveal, and each one
+   marked so it is recognised before it is read. */
 [data-mobile-garage='on'] .garage-action-bar,
 [data-mobile-garage='on'] .garage-action-bar__group {
   z-index: 19;
@@ -246,7 +288,7 @@
   left: var(--garage-edge-left);
   z-index: 18;
   display: flex;
-  width: calc(var(--touch-target) + var(--touch-target));
+  width: var(--garage-action-width);
   max-width: calc(100vw - var(--garage-edge-left) - var(--garage-edge-right));
   flex-direction: column;
   gap: var(--ui-space-2);
@@ -257,19 +299,17 @@
   width: 100%;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--ui-space-2);
-  transform-origin: bottom left;
 }
 
-[data-mobile-garage='on'] .garage-action-bar__group:not([hidden]) {
-  animation: garage-action-menu-enter 140ms ease-out;
-}
-
-[data-mobile-garage='on']
-  :is(.garage-action-bar__button, .garage-action-bar__toggle) {
+[data-mobile-garage='on'] .garage-action-bar__button {
   position: relative;
+  display: grid;
   width: 100%;
   min-width: 0;
   min-height: var(--touch-target);
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ui-space-2);
   padding: 0 var(--ui-space-2);
   border: 1px solid var(--ui-edge);
   border-bottom: 3px solid var(--ui-signal-dark);
@@ -278,19 +318,32 @@
   color: var(--ui-text);
   font: 400 var(--ui-text-12)/1 var(--ui-font-display);
   letter-spacing: 0.06em;
+  text-align: left;
 }
 
-[data-mobile-garage='on'] .garage-action-bar__toggle {
-  height: var(--garage-action-height);
+[data-mobile-garage='on'] .garage-action-bar__icon {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: var(--ui-signal);
+}
+
+[data-mobile-garage='on'] .garage-action-bar__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The open screen stays marked on the bar behind it. */
+[data-mobile-garage='on'] .garage-action-bar__button[aria-expanded='true'] {
   border-color: var(--ui-signal-dark);
   background: var(--ui-surface-2);
+  color: var(--ui-signal-strong);
 }
 
-[data-mobile-garage='on']
-  :is(
-    .garage-action-bar__button,
-    .garage-action-bar__toggle
-  )[data-alert='true'] {
+[data-mobile-garage='on'] .garage-action-bar__button[data-alert='true'] {
   border-color: var(--ui-danger);
   background: var(--ui-danger-dark);
   box-shadow:
@@ -299,10 +352,12 @@
 }
 
 [data-mobile-garage='on']
-  :is(
-    .garage-action-bar__button,
-    .garage-action-bar__toggle
-  )[data-alert='true']::after {
+  .garage-action-bar__button[data-alert='true']
+  .garage-action-bar__icon {
+  color: var(--ui-danger);
+}
+
+[data-mobile-garage='on'] .garage-action-bar__button[data-alert='true']::after {
   position: absolute;
   top: var(--ui-space-1);
   right: var(--ui-space-1);
@@ -312,31 +367,26 @@
   background: var(--ui-danger);
 }
 
-@keyframes garage-action-menu-enter {
-  from {
-    opacity: 0;
-    transform: translateY(var(--ui-space-2)) scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-/* The build bar is only its five armed slots; inventory moved to the row above. */
+/* The build bar is only its five armed slots; inventory moved to the row above.
+   Stretched to both edges the slots become wide letterboxes whose thumbnails no
+   longer read as parts, so the bar keeps five squares and centres them. */
 [data-mobile-garage='on'] .hotbar-panel {
-  right: var(--garage-edge-right);
+  right: auto;
   bottom: var(--garage-edge-bottom);
-  left: var(--garage-edge-left);
-  width: auto;
+  left: 50%;
+  width: min(
+    calc(var(--garage-hotbar-height) * 5 + var(--ui-space-2) * 4),
+    calc(100vw - var(--garage-edge-left) - var(--garage-edge-right))
+  );
   height: var(--garage-hotbar-height);
   gap: var(--ui-space-2);
-  transform: none;
+  transform: translateX(-50%);
 }
 
 [data-mobile-garage='on'] .hotbar-list {
+  grid-template-columns: repeat(5, minmax(0, var(--garage-hotbar-height)));
   grid-template-rows: var(--garage-hotbar-height);
+  justify-content: center;
   gap: var(--ui-space-2);
 }
 
@@ -349,13 +399,18 @@
   display: none;
 }
 
+/* Centred over the build bar it sits above, rather than a second edge-to-edge
+   band across the arena. */
 [data-mobile-garage='on'] .garage-status {
-  right: var(--garage-edge-right);
+  right: auto;
   bottom: var(--garage-bottom-clearance);
-  left: var(--garage-edge-left);
+  left: 50%;
   width: auto;
-  max-width: none;
-  transform: none;
+  max-width: min(
+    420px,
+    calc(100vw - var(--garage-edge-left) - var(--garage-edge-right))
+  );
+  transform: translateX(-50%);
 }
 
 /* Safe-area offsets keep command chrome clear of camera cut-outs. */
@@ -449,41 +504,58 @@
   min-height: var(--touch-target);
 }
 
+/* Every run leaves the garage through this one button, so on mobile it is the
+   one control that keeps its words: the utilities around it collapse to
+   glyphs, Fight Zombies stays a labelled plate wide enough to read. */
 [data-mobile-garage='on']
   .topbar[data-density='compact']
   .btn-hero.btn-hero-fight {
-  width: var(--touch-target);
-  min-width: var(--touch-target);
+  min-width: 0;
+  flex: 1 1 auto;
   justify-content: center;
-  gap: 0;
-  padding: 0;
+  gap: var(--ui-space-1);
+  padding-inline: var(--ui-space-2);
 }
 
-[data-mobile-garage='on']
-  .topbar[data-density='compact']
-  :is(.btn-fight__label, .btn-fight__deploy) {
-  display: none;
+[data-mobile-garage='on'] .topbar[data-density='compact'] .btn-fight__label {
+  font-size: var(--ui-text-10);
+  white-space: nowrap;
 }
 
-/* Repairs own the first strip because their controls persist through build phase;
-   transient notices follow below instead of obscuring them. */
+[data-mobile-garage='on'] .topbar[data-density='compact'] .btn-fight__icon {
+  width: 14px;
+  height: 14px;
+}
+
+[data-mobile-garage='on'] .topbar[data-density='compact'] .btn-fight__deploy {
+  width: 11px;
+  height: 11px;
+}
+
+/*
+ * Between waves the repair controls are a card in the top-left corner, not a
+ * strip across the screen. Full width it covered the whole top of the arena
+ * with two words and two buttons, and put those buttons under the right thumb
+ * where the camera controls are — stacked on the left they sit beside the rig
+ * they are about, and leave the build visible.
+ */
 [data-mobile-garage='on'] .run-banner.run-active {
   top: calc(
     var(--garage-topbar-h, var(--garage-topbar-height)) +
       var(--garage-edge-top) + var(--ui-space-2)
   );
-  right: var(--garage-edge-right);
+  right: auto;
   left: var(--garage-edge-left);
-  display: flex !important;
+  display: grid !important;
   box-sizing: border-box;
-  width: auto;
+  width: min(200px, calc(100vw - var(--garage-edge-left) * 2));
   min-width: 0;
   max-width: none;
-  height: var(--garage-run-banner-height);
-  max-height: var(--garage-run-banner-height);
-  align-items: center;
-  gap: var(--ui-space-2);
-  padding: var(--ui-space-1);
+  height: auto;
+  max-height: none;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ui-space-1);
+  padding: var(--ui-space-2);
   overflow: hidden;
   transform: none;
   white-space: normal;
@@ -492,37 +564,28 @@
 [data-mobile-garage='on'] .run-banner__text,
 [data-mobile-garage='on'] .run-banner__warning {
   min-width: 0;
+  grid-column: 1;
   overflow: hidden;
-  font: 700 var(--ui-text-11)/1.05 var(--ui-font-display);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-[data-mobile-garage='on'] .run-banner__text {
-  flex: 1 1 auto;
+  font: 700 var(--ui-text-10)/1.25 var(--ui-font-display);
   text-align: left;
-}
-
-[data-mobile-garage='on'] .run-banner__warning {
-  flex: 0 1 auto;
+  white-space: normal;
 }
 
 [data-mobile-garage='on'] .run-banner__actions {
-  display: flex;
+  display: grid;
   min-width: 0;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
   grid-row: auto;
-  grid-column: auto;
-  gap: var(--ui-space-2);
+  grid-column: 1;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ui-space-1);
 }
 
 [data-mobile-garage='on']
   .run-banner__actions
   :is(.run-banner__repair, .run-banner__rebuild) {
-  min-width: var(--touch-target);
+  width: 100%;
+  min-width: 0;
   min-height: var(--touch-target);
-  flex: 0 1 auto;
   padding-inline: var(--ui-space-1);
   font-size: var(--ui-text-10);
   white-space: nowrap;
@@ -551,8 +614,14 @@
   right: var(--garage-edge-right);
   left: auto;
   z-index: 14;
-  width: min(420px, calc(100% - var(--garage-edge-left) - var(--garage-edge-right)));
-  max-width: min(420px, calc(100% - var(--garage-edge-left) - var(--garage-edge-right)));
+  width: min(
+    420px,
+    calc(100% - var(--garage-edge-left) - var(--garage-edge-right))
+  );
+  max-width: min(
+    420px,
+    calc(100% - var(--garage-edge-left) - var(--garage-edge-right))
+  );
   max-height: 25dvh;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -601,6 +670,15 @@
     padding-inline: 0;
   }
 
+  /* Second row is Menu, Tutorial, Test Drive, Fight, money — five items in
+     seven cells, so Fight takes the three the glyph buttons do not need and
+     ends the row as a full plate rather than another square. */
+  [data-mobile-garage='on']
+    .topbar[data-density='compact']
+    .btn-hero.btn-hero-fight {
+    grid-column: span 3;
+  }
+
   [data-mobile-garage='on']
     .topbar[data-density='compact']
     .topbar-layer__slider {
@@ -624,10 +702,28 @@
     );
   }
 
-  /* Removing only this inter-control gap keeps the four 44px options below the
-     repair strip at 430px high; their own 8px stack rhythm remains intact. */
+  /* Two columns rather than four rows: at 430 px high a single stack of tabs
+     runs up into the repair card in the corner above it. */
+  [data-mobile-garage='on'] {
+    --garage-action-width: 208px;
+    --garage-action-stack: calc(
+      var(--garage-action-height) * 2 + var(--ui-space-1)
+    );
+  }
+
   [data-mobile-garage='on'] .garage-action-bar {
     gap: 0;
+  }
+
+  [data-mobile-garage='on'] .garage-action-bar__group {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--ui-space-1);
+  }
+
+  [data-mobile-garage='on'] .garage-action-bar__button {
+    gap: var(--ui-space-1);
+    padding-inline: var(--ui-space-1);
+    font-size: var(--ui-text-10);
   }
 
   [data-mobile-garage='on'] .topbar[data-density='compact'] {
@@ -674,16 +770,19 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-mobile-garage='on'] .garage-action-bar__group:not([hidden]) {
-    animation: none;
+  [data-mobile-garage='on'] .garage-purchase-toast {
+    transition: none;
   }
 }
 
-/* Dialogs retain an independent pan region inside the visible phone viewport. */
+/* Dialogs retain an independent pan region inside the visible phone viewport.
+   The rig picker is deliberately not in this list: it is three previews side
+   by side or stacked, and squeezing it to 420px is what made the cards too
+   narrow to read. It sets its own width in style.css and keeps only the
+   scrolling behaviour below. */
 [data-mobile-garage='on']
   :is(
-    .build-prompt,
-    .garage-confirm,
+    .garage-confirm:not(.build-prompt),
     .share-overlay,
     .share-dialog,
     .import-overlay,
@@ -693,6 +792,11 @@
   max-height: calc(100dvh - var(--ui-space-5));
   overflow-y: auto;
   overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+[data-mobile-garage='on'] .build-prompt {
+  max-height: calc(100dvh - var(--ui-space-4));
   touch-action: pan-y;
 }
 

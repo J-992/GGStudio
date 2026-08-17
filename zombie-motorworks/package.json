@@ -17,7 +17,10 @@
     "test": "playwright test",
     "context:generate": "node scripts/context-docs.mjs",
     "context:check": "node scripts/context-docs.mjs --check",
-    "render:portraits": "node scripts/render-portraits.mjs"
+    "render:portraits": "node scripts/render-portraits.mjs",
+    "assets:convert": "node scripts/convert-voxel-assets.mjs",
+    "assets:verify": "node scripts/verify-voxel-assets.mjs",
+    "verify:rapier": "node scripts/verify-rapier-wasm.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.14.0",

@@ -9,9 +9,183 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="theme-color" content="#0b0d0b" />
     <title>Scrap Rig — Zombie Motorworks</title>
+    <!--
+      The boot splash is inlined rather than imported so it paints on the first
+      HTML parse, before the module graph or the stylesheet has been fetched.
+      Anything external here would put a blank frame back on the critical path,
+      which is the whole thing this element exists to remove.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0b0d0b;
+      }
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.25rem;
+        /* The flat colour is the one that matters: the key art is painted on
+           top of this by the driver below, once it has decoded, and until then
+           the splash has to look deliberate rather than empty. */
+        background: #0b0d0b;
+        color: #d7d4c8;
+        font-family: 'Courier New', monospace;
+        -webkit-user-select: none;
+        user-select: none;
+        transition: opacity 260ms ease-out;
+      }
+      /* The art fades in behind the type instead of replacing the background
+         outright, so a slow decode never lands as a hard cut under a bar that
+         is already moving. */
+      #boot-art {
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background: center / cover no-repeat;
+        opacity: 0;
+        transition: opacity 420ms ease-out;
+      }
+      #boot-art[data-shown='1'] {
+        opacity: 1;
+      }
+      /* Same wash the in-game loading screens use: these paintings are busy and
+         bright, and the bar and its label sit right in the middle of them. */
+      #boot-art::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+          ellipse at center,
+          rgb(6 8 6 / 0.42) 0%,
+          rgb(6 8 6 / 0.72) 62%,
+          rgb(6 8 6 / 0.9) 100%
+        );
+      }
+      #boot-splash[data-done='1'] {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .boot-mark {
+        font-size: clamp(1.5rem, 7vw, 2.75rem);
+        letter-spacing: 0.32em;
+        text-indent: 0.32em;
+        color: #a0af6c;
+        text-transform: uppercase;
+      }
+      .boot-sub {
+        margin-top: -0.75rem;
+        font-size: clamp(0.625rem, 2.6vw, 0.8125rem);
+        letter-spacing: 0.24em;
+        text-indent: 0.24em;
+        color: #555950;
+        text-transform: uppercase;
+      }
+      .boot-track {
+        width: min(19rem, 62vw);
+        height: 10px;
+        background: #090b09;
+        border: 2px solid #070907;
+        overflow: hidden;
+      }
+      .boot-fill {
+        height: 100%;
+        width: 0%;
+        background: #89995a;
+        transition: width 200ms linear;
+      }
+      .boot-status {
+        min-height: 1em;
+        font-size: clamp(0.5625rem, 2.4vw, 0.6875rem);
+        letter-spacing: 0.18em;
+        text-indent: 0.18em;
+        color: #85877e;
+        text-transform: uppercase;
+      }
+      /* The splash owns the screen until boot hands over, so it must not sit
+         behind a reduced-motion preference that disables its only feedback. */
+      @media (prefers-reduced-motion: reduce) {
+        #boot-splash,
+        #boot-art,
+        .boot-fill {
+          transition: none;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="boot-splash">
+      <div id="boot-art"></div>
+      <div class="boot-mark">Scrap Rig</div>
+      <div class="boot-sub">Zombie Motorworks</div>
+      <div class="boot-track"><div class="boot-fill" id="boot-fill"></div></div>
+      <div class="boot-status" id="boot-status">Warming up the garage</div>
+    </div>
+    <script>
+      // Published before the module graph loads so the very first bytes of
+      // `main.ts` already have somewhere to report to.
+      window.__bootSplash = (function () {
+        var fill = document.getElementById('boot-fill');
+        var status = document.getElementById('boot-status');
+        var splash = document.getElementById('boot-splash');
+        var shown = 0;
+
+        // Key art for the boot screen. Relative paths, matching `base: './'` in
+        // the Vite config, so a deploy under a sub-path still finds them; and
+        // set from script rather than from the CSS above so the build never
+        // tries to resolve a `public/` file as a bundled asset.
+        //
+        // Duplicated from `src/ui/splashArt.ts`, which cannot be imported here:
+        // this whole block runs before the module graph is fetched, which is the
+        // reason the splash paints as early as it does. Renaming these files
+        // means editing both places.
+        var art = document.getElementById('boot-art');
+        if (art) {
+          var paintings = [
+            'assets/splash/loading-overrun.webp',
+            'assets/splash/loading-breakout.webp',
+          ];
+          var chosen = paintings[Math.floor(Math.random() * paintings.length)];
+          // Decoded off to the side first, then swapped in. Assigning the
+          // background directly would leave the splash flat until the bytes
+          // land and then pop, which reads worse than the bar alone.
+          var probe = new Image();
+          probe.onload = function () {
+            art.style.backgroundImage = 'url("' + chosen + '")';
+            art.dataset.shown = '1';
+          };
+          probe.src = chosen;
+        }
+
+        return {
+          set: function (fraction, label) {
+            // Monotonic: a later stage reporting a smaller number must never
+            // walk the bar backwards, which reads as an error to a player.
+            shown = Math.max(shown, Math.min(1, Math.max(0, fraction)));
+            if (fill) fill.style.width = (shown * 100).toFixed(1) + '%';
+            if (label && status) status.textContent = label;
+          },
+          done: function () {
+            if (!splash || splash.dataset.done === '1') return;
+            if (fill) fill.style.width = '100%';
+            splash.dataset.done = '1';
+            setTimeout(function () {
+              if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+            }, 300);
+          },
+        };
+      })();
+    </script>
     <script type="module" src="/src/app/main.ts"></script>
   </body>
 </html>

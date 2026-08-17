@@ -954,6 +954,21 @@ canvas.viewport {
   grid-column: 2;
 }
 
+/* A mark for each action — a cross for patching what survived, a cycle for
+   buying back what did not — so the two are told apart before the price is
+   read, at any width. */
+.run-banner__repair,
+.run-banner__rebuild {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.run-banner__button-icon {
+  font: 400 var(--ui-text-14)/1 var(--ui-font-display);
+}
+
 .garage-confirm-overlay {
   position: absolute;
   inset: 0;
@@ -1022,31 +1037,60 @@ canvas.viewport {
   margin-top: 18px;
 }
 
-/* First-run rig picker. Wider than any other garage dialog because each of the
-   three cards carries a live spinning preview above its stats — looking at the
-   rigs is the whole point of the screen. */
+/* First-run rig picker. The widest dialog in the garage, and the only one led
+   by pictures: each card is a live spinning preview with a glyph strip under
+   it — a dial and a shield for the chassis, a reticle and a bolt for the kit —
+   so the three rigs are compared by looking at them rather than by reading
+   three paragraphs in a language the player has not learned yet.
+
+   Phones get the same card turned on its side: art on the left, name and
+   glyphs on the right, a chevron at the end. All three stay on screen without
+   scrolling and without shrinking the previews into thumbnails. */
+.build-prompt-overlay {
+  padding: 12px;
+}
+
 .build-prompt {
-  width: min(1000px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
+  /* `100%` rather than a viewport formula: the overlay is the padded box the
+     dialog is centred in, so this fills whatever it actually leaves — inside a
+     portal iframe the viewport and that box are not the same size. */
+  width: min(1060px, 100%);
+  max-height: 100%;
+  padding: 18px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .build-prompt__options {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
   margin-top: 16px;
 }
 
 .build-prompt__option {
   --build-accent: var(--ui-signal);
 
+  /* Anchors the hover painting, which covers the card rather than sitting in
+     the art box. */
+  position: relative;
+  overflow: hidden;
   display: grid;
-  /* The preview row is fixed and the kit row is pinned to the bottom, so three
-     cards with different amounts of blurb still line their stats up. */
-  grid-template-rows: auto auto auto 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr);
+  /* Named areas, not source order: the phone layout re-flows the same six
+     children into art, text and chevron columns without touching the DOM. */
+  grid-template-areas:
+    'art'
+    'name'
+    'chassis'
+    'meters'
+    'kit'
+    'pick';
+  /* The kit row takes the slack, so three cards with different name lengths
+     still line their pick buttons up. */
+  grid-template-rows: auto auto auto auto 1fr auto;
   gap: 8px;
-  padding: 12px;
+  padding: 10px;
   background: var(--ui-surface-2);
   border: 1px solid var(--ui-edge-soft);
   border-top: 4px solid var(--build-accent);
@@ -1075,7 +1119,55 @@ canvas.viewport {
   border-color: var(--build-accent);
 }
 
+/* The hover state: the rig's key art takes the whole card.
+   `pointer-events: none` matters more than it looks — the painting sits over
+   the button it belongs to, and without this the pointer would leave the card
+   the moment the art appeared, which flickers forever. */
+.build-prompt__splash {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease-out;
+}
+
+/* Keyboard focus gets the painting on any device, and so does the card that was
+   just picked — that one holds it for a second on its way into the game, which
+   is the only time a touch player sees this art at all. Hover is gated on a
+   real pointer, since a tap can leave `:hover` stuck on a card. */
+.build-prompt__option:focus-visible .build-prompt__splash,
+.build-prompt__option--picked .build-prompt__splash {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .build-prompt__option:hover .build-prompt__splash {
+    opacity: 1;
+  }
+}
+
+.build-prompt__splash-name {
+  width: 100%;
+  padding: 22px 10px 8px;
+  /* The paintings are dark at the bottom but not reliably so — the fallout one
+     has a lit dome down there — hence a gradient rather than plain text. */
+  background: linear-gradient(rgb(6 8 6 / 0), rgb(6 8 6 / 0.86));
+  color: var(--ui-text);
+  font: 400 var(--ui-text-16)/1.2 var(--ui-font-display);
+  letter-spacing: 0.03em;
+  text-shadow: 0 2px 6px rgb(0 0 0 / 0.9);
+  text-transform: uppercase;
+}
+
 .build-prompt__art {
+  grid-area: art;
+  display: block;
   width: 100%;
   aspect-ratio: 4 / 3;
   background: var(--ui-recess);
@@ -1090,26 +1182,62 @@ canvas.viewport {
 }
 
 .build-prompt__name {
+  grid-area: name;
   font: 400 var(--ui-text-16)/1.2 var(--ui-font-display);
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
 
 .build-prompt__chassis {
+  grid-area: chassis;
   color: var(--build-accent);
-  font: var(--ui-text-10)/1 var(--ui-font-body);
+  font: var(--ui-text-10)/1.3 var(--ui-font-body);
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
-.build-prompt__blurb {
+.build-prompt__meters {
+  grid-area: meters;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+}
+
+.build-prompt__meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.build-prompt__meter-icon {
+  display: block;
+  width: 13px;
+  height: 13px;
   color: var(--ui-text-muted);
-  font: var(--ui-text-10)/1.45 var(--ui-font-body);
+}
+
+.build-prompt__pips {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.build-prompt__pip {
+  width: 11px;
+  height: 6px;
+  background: var(--ui-text-faint);
+  opacity: 0.45;
+}
+
+.build-prompt__pip--on {
+  background: var(--build-accent);
+  opacity: 1;
 }
 
 .build-prompt__kit {
+  grid-area: kit;
   display: grid;
+  align-content: start;
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--ui-edge);
@@ -1117,12 +1245,32 @@ canvas.viewport {
 
 .build-prompt__kit-row {
   display: grid;
-  grid-template-columns: minmax(0, 46px) minmax(0, 1fr);
-  align-items: baseline;
-  gap: 8px;
+  /* A glyph column instead of the old "CLICK"/"ABILITY" labels: the words cost
+     a third of the card's width and pushed every weapon name onto three
+     lines. */
+  grid-template-columns: 15px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
 }
 
-.build-prompt__kit-label {
+.build-prompt__kit-icon {
+  display: block;
+  width: 15px;
+  height: 15px;
+  color: var(--build-accent);
+}
+
+.build-prompt__kit-value {
+  font: var(--ui-text-12)/1.2 var(--ui-font-body);
+  font-weight: 700;
+}
+
+.build-prompt__kit-auto {
+  grid-column: 2;
+  justify-self: start;
+  padding: 1px 4px;
+  background: var(--ui-recess);
+  border: 1px solid var(--ui-edge);
   color: var(--ui-text-muted);
   font: var(--ui-text-10)/1 var(--ui-font-body);
   font-weight: 700;
@@ -1130,14 +1278,13 @@ canvas.viewport {
   text-transform: uppercase;
 }
 
-.build-prompt__kit-value {
-  color: var(--build-accent);
-  font: var(--ui-text-12)/1.2 var(--ui-font-body);
-  font-weight: 700;
-}
-
 .build-prompt__pick {
-  margin-top: 4px;
+  grid-area: pick;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 2px;
   padding: 7px 10px;
   background: var(--ui-recess);
   border: 1px solid var(--ui-edge);
@@ -1149,6 +1296,25 @@ canvas.viewport {
   text-transform: uppercase;
 }
 
+.build-prompt__pick-arrow {
+  display: block;
+  width: 11px;
+  height: 11px;
+  color: var(--build-accent);
+}
+
+.build-prompt
+  :is(
+    .build-prompt__meter-icon,
+    .build-prompt__kit-icon,
+    .build-prompt__pick-arrow
+  )
+  svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .build-prompt__option:hover .build-prompt__pick,
 .build-prompt__option:focus-visible .build-prompt__pick {
   background: var(--build-accent);
@@ -1156,15 +1322,120 @@ canvas.viewport {
   color: var(--ui-black);
 }
 
-@media (max-width: 860px) {
-  /* Stacked, with the previews kept short so all three stay reachable without
-     the dialog running off a phone screen. */
+.build-prompt__option:hover .build-prompt__pick-arrow,
+.build-prompt__option:focus-visible .build-prompt__pick-arrow {
+  color: var(--ui-black);
+}
+
+@media (max-width: 900px) and (min-height: 560px) {
+  /* Phone portrait: one card per row, art down the left at a third of the
+     width. The chassis sentence and the button's words go — the meters say the
+     same thing in pips, and the card's aria-label still carries the prose. */
+  .build-prompt {
+    padding: 12px;
+  }
+
+  .build-prompt h2 {
+    font-size: var(--ui-text-20);
+  }
+
   .build-prompt__options {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .build-prompt__option {
+    /* Capped as well as proportional: the art drives the card's height here,
+       and on a wide-but-short screen an uncapped third of the width pushes the
+       third rig below the fold. */
+    grid-template-columns: minmax(96px, min(34%, 180px)) minmax(0, 1fr) auto;
+    grid-template-areas:
+      'art name pick'
+      'art meters pick'
+      'art kit pick';
+    grid-template-rows: auto auto 1fr;
+    column-gap: 12px;
+    row-gap: 6px;
+    /* The accent moves to the leading edge: a top bar over a landscape card
+       reads as a divider between rows rather than as that rig's colour. */
+    border-top: 1px solid var(--ui-edge-soft);
+    border-left: 4px solid var(--build-accent);
   }
 
   .build-prompt__art {
-    aspect-ratio: 16 / 7;
+    align-self: center;
+  }
+
+  .build-prompt__chassis {
+    display: none;
+  }
+
+  .build-prompt__kit {
+    padding-top: 6px;
+  }
+
+  .build-prompt__pick {
+    align-self: stretch;
+    margin-top: 0;
+    padding: 0 4px;
+    background: none;
+    border: 0;
+  }
+
+  .build-prompt__pick-label {
+    display: none;
+  }
+
+  .build-prompt__pick-arrow {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Touch has no hover, so the chevron is the standing affordance and must not
+     invert to black-on-accent when a tap sticks a :hover on the card. */
+  .build-prompt__option:hover .build-prompt__pick,
+  .build-prompt__option:focus-visible .build-prompt__pick {
+    background: none;
+    color: var(--ui-text-muted);
+  }
+
+  .build-prompt__option:hover .build-prompt__pick-arrow,
+  .build-prompt__option:focus-visible .build-prompt__pick-arrow {
+    color: var(--build-accent);
+  }
+}
+
+@media (max-height: 560px) {
+  /* Phone landscape: three columns still fit side by side, so only the art and
+     the type give ground. */
+  .build-prompt {
+    padding: 12px;
+  }
+
+  .build-prompt h2 {
+    font-size: var(--ui-text-20);
+  }
+
+  .build-prompt__options {
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .build-prompt__art {
+    aspect-ratio: 16 / 9;
+  }
+
+  .build-prompt__chassis {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The art still shows — it is the point, and it does not move — but it cuts
+     rather than dissolves. */
+  .build-prompt__splash {
+    transition: none;
   }
 }
 
@@ -4007,41 +4278,6 @@ button:disabled {
   font: var(--ui-text-10)/1.3 var(--ui-font-body);
 }
 
-.help-panel {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 20;
-  width: min(620px, 92vw);
-  max-height: 84vh;
-  overflow-y: auto;
-  padding: 18px 22px;
-  font-family: var(--ui-font-body);
-  line-height: 1.5;
-  transform: translate(-50%, -50%);
-}
-
-.help-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.help-panel__header b {
-  font-family: var(--ui-font-display);
-  font-size: var(--ui-text-16);
-  text-transform: uppercase;
-}
-
-.help-panel ol {
-  margin-left: 18px;
-}
-
-.help-panel table {
-  width: 100%;
-  font-size: var(--ui-text-11);
-}
-
 @media (max-width: 1080px) {
   .garage-dock {
     width: 238px;
@@ -4077,6 +4313,144 @@ button:disabled {
 
   .garage-ui.has-selection .vehicle-stats {
     right: 276px;
+  }
+}
+
+/*
+ * CrazyGames reviews desktop games in a responsive 821 x 462 iframe as well
+ * as the roomier desktop player sizes.  That is still a mouse-and-keyboard
+ * layout, but it cannot afford the full-width garage sidebars and the tall
+ * right-hand stack.  Keep the panels available and scrollable; reduce their
+ * footprint and give the stats, loadout, and inspector separate vertical
+ * lanes instead of letting them cover each other.
+ */
+@media (min-width: 761px) and (max-width: 900px) {
+  .topbar {
+    flex-wrap: nowrap;
+    gap: 4px;
+    padding: 5px 6px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .topbar > * {
+    flex: 0 0 auto;
+  }
+
+  .garage-name {
+    width: 118px;
+    min-height: 30px;
+  }
+
+  .topbar button,
+  .topbar select {
+    min-height: 30px;
+    padding: 5px 7px;
+    font-size: var(--ui-text-11);
+  }
+
+  .topbar .icon-btn {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+  }
+
+  .topbar .icon-btn__glyph {
+    width: 16px;
+    height: 16px;
+  }
+
+  .topbar-layer {
+    gap: 5px;
+    height: 30px;
+    padding: 0 6px;
+  }
+
+  .topbar-layer__label {
+    display: none;
+  }
+
+  .topbar-layer__slider {
+    width: 66px;
+  }
+
+  .money-readout {
+    min-width: 60px;
+    padding: 6px;
+  }
+
+  .btn-hero {
+    padding: 7px 10px;
+    font-size: var(--ui-text-12);
+  }
+
+  .btn-hero.btn-hero-fight {
+    gap: 5px;
+    padding: 7px 9px;
+  }
+
+  .garage-dock {
+    width: 210px;
+  }
+
+  .store-list {
+    grid-auto-rows: 120px;
+  }
+
+  .store-details {
+    display: none;
+  }
+
+  .selected-panel {
+    width: 224px;
+  }
+
+  .vehicle-stats {
+    right: 8px;
+    bottom: 156px;
+    width: 190px;
+    max-height: none;
+  }
+
+  .garage-ui.has-selection .vehicle-stats {
+    right: 240px;
+  }
+
+  .ability-loadout {
+    right: 8px;
+    bottom: 82px;
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .ability-loadout > header {
+    gap: 8px;
+  }
+
+  .ability-loadout__boxes {
+    gap: 5px;
+  }
+
+  .ability-loadout__slot {
+    width: 64px;
+    height: 62px;
+    gap: 2px;
+    padding: 10px 4px 5px;
+  }
+
+  .ability-loadout__glyph {
+    font-size: var(--ui-text-16);
+  }
+
+  .ability-loadout__part {
+    font-size: 7px;
+  }
+
+  /* The inspector owns this edge while a part is selected.  Its own ability
+     controls remain usable there, and hiding the duplicate rail preserves the
+     build view instead of layering two panels on the same controls. */
+  .garage-ui.has-selection .ability-loadout {
+    display: none;
   }
 }
 
@@ -4695,7 +5069,7 @@ button:disabled {
   display: block;
   width: 100%;
   height: 100%;
-  background: var(--ui-signal);
+  background: var(--ui-fuel);
   transition: width 100ms steps(4, end);
 }
 
@@ -4812,6 +5186,15 @@ button:disabled {
   color: var(--ui-text);
   cursor: pointer;
   text-align: center;
+}
+
+/*
+ * Pointer layouts want the bar to be exactly the abilities the rig is carrying,
+ * so an unbound slot takes no space at all. Touch overrides this in
+ * survival-mobile.css, where the rail's shape has to hold still.
+ */
+.survival-ability-slot.is-empty {
+  display: none;
 }
 
 .survival-ability-slot__glyph {
@@ -6111,6 +6494,74 @@ button:disabled {
   }
 }
 
+/*
+ * The screen the game loads into, on a phone held sideways: about 400 px of
+ * height for a panel whose type is sized off viewport width, which is the wide
+ * axis here. Everything on it is re-scaled against height instead, so the
+ * kicker, the title, the map rows and the buttons all land on one screen
+ * without the panel becoming something to scroll.
+ */
+@media (max-height: 560px) {
+  .title-screen {
+    place-items: center;
+    padding: 8px;
+    overflow-y: auto;
+  }
+
+  .title-panel {
+    width: min(520px, 94vw);
+    padding: 14px 18px 16px;
+  }
+
+  .title-panel h1 {
+    font-size: clamp(26px, 7vh, 40px);
+  }
+
+  .title-kicker {
+    margin-bottom: 4px;
+  }
+
+  .title-subtitle {
+    margin: 8px 0 12px;
+  }
+
+  .title-map-panel__heading {
+    margin-bottom: 10px;
+    font-size: var(--ui-text-20);
+  }
+
+  .title-maps {
+    gap: 4px;
+    margin-bottom: 12px;
+  }
+
+  .title-map {
+    gap: 8px;
+    padding: 6px 10px;
+  }
+
+  .title-actions {
+    width: min(300px, 100%);
+    gap: 6px;
+  }
+
+  .title-action {
+    min-height: var(--touch-target);
+    font-size: var(--ui-text-14);
+  }
+
+  /* Sized off the panel's own height so they still flank it rather than
+     towering over a card a third of their height. */
+  .title-zombie {
+    height: clamp(180px, 62vh, 300px);
+  }
+
+  .title-confirm {
+    margin-top: 12px;
+    padding-top: 10px;
+  }
+}
+
 /* Survival minimap */
 .minimap {
   position: absolute;
@@ -6143,5 +6594,150 @@ button:disabled {
     bottom: auto;
     width: 104px;
     height: 104px;
+  }
+}
+
+/*
+ * CrazyGames' compact desktop iframe is 821 x 462.  It is still a
+ * mouse-and-keyboard game, so retain the complete combat HUD, but reduce each
+ * fixed panel before its corners compete for the road.  This deliberately
+ * excludes the touch layout: `survival-mobile.css` owns that composition.
+ */
+@media (min-width: 761px) and (max-width: 900px) {
+  .survival-driver-hud {
+    bottom: 10px;
+    left: 10px;
+    width: 248px;
+    gap: 8px;
+    padding: 9px;
+  }
+
+  .survival-speed {
+    gap: 6px;
+    padding-bottom: 7px;
+  }
+
+  .survival-speed__header {
+    gap: 8px;
+  }
+
+  .survival-speed__readout span {
+    font-size: var(--ui-text-20);
+  }
+
+  .survival-speed__gauge,
+  .survival-health,
+  .survival-fuel {
+    gap: 5px;
+  }
+
+  .survival-speed__track,
+  .survival-boss-hud__track {
+    height: 12px;
+  }
+
+  .survival-health__track,
+  .survival-fuel__track {
+    height: 10px;
+  }
+
+  .survival-ability-bar {
+    bottom: 10px;
+    gap: 7px;
+  }
+
+  .survival-ability-slot {
+    width: 64px;
+    height: 64px;
+    padding: 7px 4px 5px;
+  }
+
+  .survival-ability-slot__glyph,
+  .survival-ability-slot__timer {
+    font-size: var(--ui-text-20);
+  }
+
+  .survival-ability-slot__name {
+    font-size: var(--ui-text-10);
+  }
+
+  .survival-buffs {
+    bottom: 82px;
+    width: 176px;
+  }
+
+  .survival-boss-hud {
+    top: 68px;
+    width: min(320px, calc(100vw - 20px));
+    gap: 4px;
+  }
+
+  .survival-boss-hud__name {
+    font-size: var(--ui-text-12);
+  }
+
+  .survival-warnings {
+    top: 68px;
+    width: 210px;
+    gap: 6px;
+  }
+
+  .survival-warning {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 7px;
+    padding: 6px 8px 6px 6px;
+  }
+
+  .survival-warning__icon {
+    width: 28px;
+    height: 28px;
+    transform: scale(0.82);
+    transform-origin: left center;
+  }
+
+  .survival-warning__copy > span {
+    margin-top: 2px;
+  }
+
+  .survival-cash {
+    top: 10px;
+    left: 12px;
+  }
+
+  .survival-cash__value {
+    font-size: var(--ui-text-28);
+  }
+
+  .survival-pickup {
+    top: 58px;
+    left: 12px;
+  }
+
+  .survival-pickup__chit {
+    font-size: var(--ui-text-16);
+  }
+
+  .survival-prompts {
+    bottom: 42%;
+    gap: 8px;
+  }
+
+  .survival-prompt {
+    grid-template-columns: 34px minmax(0, 1fr);
+    min-width: 244px;
+    gap: 8px;
+    padding: 8px 10px 8px 8px;
+  }
+
+  .survival-prompt__icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .minimap {
+    right: 10px;
+    bottom: 10px;
+    width: 148px;
+    height: 148px;
   }
 }

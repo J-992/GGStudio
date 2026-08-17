@@ -1,19 +1,77 @@
 import * as THREE from 'three';
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { assetUrl } from '../core/assetVersion.ts';
 
 const templates = new Map<string, Promise<THREE.Group>>();
+
+/**
+ * Above this width or height a texture is an atlas rather than a voxel palette,
+ * and wants mipmaps.
+ *
+ * MagicaVoxel bakes its colours into a palette strip a few hundred pixels wide;
+ * every texel on one of those is a flat colour block, so mipmapping it costs
+ * memory and buys nothing. The prop atlases are a megapixel of real detail, and
+ * sampling those at full resolution from across the arena is both the slowest
+ * and the ugliest option — the shimmer on a distant fence line came from here.
+ */
+const MIPMAP_MIN_DIMENSION = 256;
 
 function configureTexture(texture: THREE.Texture | null): void {
   if (!texture) return;
   texture.colorSpace = THREE.SRGBColorSpace;
+  const image = texture.image as { width?: number; height?: number } | null;
+  const mipmapped =
+    Math.max(image?.width ?? 0, image?.height ?? 0) > MIPMAP_MIN_DIMENSION;
+  // Magnification stays nearest either way: up close this is pixel art, and
+  // smoothing it is exactly the mush the pixel-ratio cap exists to avoid.
   texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  texture.generateMipmaps = false;
+  // Minification is where the two cases part. Nearest between mip levels keeps
+  // each level crisp while still stepping down with distance.
+  texture.minFilter = mipmapped
+    ? THREE.NearestMipmapLinearFilter
+    : THREE.NearestFilter;
+  texture.generateMipmaps = mipmapped;
+  texture.anisotropy = mipmapped ? 4 : 1;
   texture.needsUpdate = true;
+}
+
+/**
+ * Geometry, materials and textures owned by a cached template.
+ *
+ * Instances are `clone(true)`, which shares all three, so an arena tearing
+ * itself down must leave these alone — freeing them would hand the next arena a
+ * template whose GPU buffers are already gone. `isTemplateOwned` is how
+ * `ArenaBuilder.dispose` tells its own scratch resources from these.
+ */
+const ownedGeometries = new WeakSet<THREE.BufferGeometry>();
+const ownedMaterials = new WeakSet<THREE.Material>();
+const ownedTextures = new WeakSet<THREE.Texture>();
+
+function claimTemplateResources(root: THREE.Object3D): void {
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    ownedGeometries.add(child.geometry);
+    const materials = Array.isArray(child.material)
+      ? child.material
+      : [child.material];
+    for (const material of materials) {
+      ownedMaterials.add(material);
+      const mapped = material as THREE.Material & { map?: THREE.Texture | null };
+      if (mapped.map) ownedTextures.add(mapped.map);
+    }
+  });
+}
+
+/** True when a cached template still needs this resource alive. */
+export function isTemplateOwned(resource: object): boolean {
+  return (
+    ownedGeometries.has(resource as THREE.BufferGeometry) ||
+    ownedMaterials.has(resource as THREE.Material) ||
+    ownedTextures.has(resource as THREE.Texture)
+  );
 }
 
 function voxelMaterial(source: THREE.Material): THREE.MeshLambertMaterial {
@@ -45,16 +103,23 @@ function replaceMaterials(object: THREE.Object3D): void {
   });
 }
 
+/**
+ * Load one of the few remaining OBJ props.
+ *
+ * The arena's props are compressed GLB, built by
+ * `scripts/convert-voxel-assets.mjs`. Five scatter props — the palms and the
+ * pines — stay OBJ because each carries two materials on one mesh, and
+ * `loadVoxelInstanceSource` (which is how scattered props get instanced) needs
+ * exactly one mesh per asset; a two-primitive glTF loads as two. Those five are
+ * the only reason this loader is still here, and they are named without an
+ * extension, which is what routes them to it.
+ */
 async function loadObjObject(baseUrl: string): Promise<THREE.Object3D> {
-  const materials = await new MTLLoader().loadAsync(`${baseUrl}.mtl`);
+  const materials = await new MTLLoader().loadAsync(assetUrl(`${baseUrl}.mtl`));
   materials.preload();
-  return new OBJLoader().setMaterials(materials).loadAsync(`${baseUrl}.obj`);
-}
-
-async function loadFbxObject(url: string): Promise<THREE.Object3D> {
-  const object = await new FBXLoader().loadAsync(url);
-  object.scale.setScalar(0.01);
-  return object;
+  return new OBJLoader()
+    .setMaterials(materials)
+    .loadAsync(assetUrl(`${baseUrl}.obj`));
 }
 
 /**
@@ -137,7 +202,7 @@ function correctVertexColors(object: THREE.Object3D): void {
 const glbLoader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 
 async function loadGlbObject(url: string): Promise<THREE.Object3D> {
-  const scene = (await glbLoader.loadAsync(url)).scene;
+  const scene = (await glbLoader.loadAsync(assetUrl(url))).scene;
   correctVertexColors(scene);
   return scene;
 }
@@ -145,9 +210,7 @@ async function loadGlbObject(url: string): Promise<THREE.Object3D> {
 async function loadTemplate(baseUrl: string): Promise<THREE.Group> {
   const object = baseUrl.endsWith('.glb')
     ? await loadGlbObject(baseUrl)
-    : baseUrl.endsWith('.fbx')
-      ? await loadFbxObject(baseUrl)
-      : await loadObjObject(baseUrl);
+    : await loadObjObject(baseUrl);
   replaceMaterials(object);
 
   const bounds = new THREE.Box3().setFromObject(object);
@@ -156,6 +219,7 @@ async function loadTemplate(baseUrl: string): Promise<THREE.Group> {
 
   const root = new THREE.Group();
   root.add(object);
+  claimTemplateResources(root);
   return root;
 }
 
@@ -241,13 +305,22 @@ export async function instantiateVoxelAsset(
   return instance;
 }
 
-/** Geometry/material/pivot source for batching a single-mesh asset. */
+/**
+ * Geometry, material and placement matrix for batching a single-mesh asset.
+ *
+ * `localMatrix` is the mesh's full transform within its template, and an
+ * `InstancedMesh` built from `geometry` must apply it — it is not merely the
+ * recentring offset. A compressed GLB stores positions as normalized integers
+ * and carries the scale that decodes them on its node, so dropping that matrix
+ * draws the prop at raw quantization units instead of metres.
+ */
 export async function loadVoxelInstanceSource(baseUrl: string): Promise<{
   readonly geometry: THREE.BufferGeometry;
   readonly material: THREE.Material;
-  readonly pivot: THREE.Vector3;
+  readonly localMatrix: THREE.Matrix4;
 }> {
   const root = await templateFor(baseUrl);
+  root.updateMatrixWorld(true);
   const object = root.children[0];
   const meshes: THREE.Mesh[] = [];
   object.traverse((child) => {
@@ -261,12 +334,45 @@ export async function loadVoxelInstanceSource(baseUrl: string): Promise<{
   return {
     geometry: meshes[0].geometry,
     material: meshes[0].material as THREE.Material,
-    pivot: object.position.clone(),
+    // Relative to the template root rather than the mesh's own world matrix,
+    // so this stays correct even if the root is ever given a transform.
+    localMatrix: root.matrixWorld
+      .clone()
+      .invert()
+      .multiply(meshes[0].matrixWorld),
   };
 }
 
-/** Dispose and forget cached templates after a survival scene is torn down. */
+/**
+ * The asset set currently worth keeping resident — in practice a biome id.
+ * `null` means nothing is cached.
+ */
+let currentScope: string | null = null;
+
+/**
+ * Keep `scope`'s templates loaded, dropping whatever the previous scope left.
+ *
+ * The cache used to be wiped on every `ArenaBuilder.dispose`, which meant a
+ * player bouncing between the Garage and the arena re-fetched and — far worse —
+ * re-parsed the entire arena on every single wave. Templates now outlive one
+ * arena and are only thrown away when the player actually changes biome, which
+ * is the only time they stop being the right ones to hold.
+ */
+export function retainVoxelAssetScope(scope: string): void {
+  if (currentScope === scope) return;
+  clearVoxelAssetCache();
+  currentScope = scope;
+}
+
+/**
+ * Dispose and forget every cached template.
+ *
+ * Callers must be certain nothing on screen still points at these — instances
+ * share the template's geometry, materials and textures. In practice that means
+ * a biome change, where the whole arena is being replaced anyway.
+ */
 export function clearVoxelAssetCache(): void {
+  currentScope = null;
   const pendingTemplates = [...templates.values()];
   templates.clear();
   for (const pending of pendingTemplates) {

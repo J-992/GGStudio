@@ -22,10 +22,15 @@ const COLORS: Record<string, number> = {
   'frame-reinforced': 0x5a606b,
   'engine-small': 0xa03c3c,
   'fuel-tank': 0xb0803a,
-  'wheel-standard': 0x23262b,
-  'wheel-offroad': 0x1b1e22,
-  'wheel-moto': 0x2c3038,
-  'tread-tank': 0x3a3f36,
+  // Tyre rubber. All three used to sit within a few points of black, which made
+  // the three wheels one silhouette in the shop and on the rig. They are still
+  // rubber, but each carries its own tint and its own value — cool grey road
+  // rubber, warm mud-stained off-road, dark blue-black racing — and the colour
+  // that actually separates them at a glance is the rim (see `parts/wheels.ts`).
+  'wheel-standard': 0x3f454e,
+  'wheel-offroad': 0x413a30,
+  'wheel-moto': 0x2b303a,
+  'tread-tank': 0x3f4439,
   turret: 0x39424e,
   'armour-plate': 0x69737a,
   'cannon-heavy': 0x303840,
@@ -64,7 +69,7 @@ const COLORS: Record<string, number> = {
 const CATEGORY_FALLBACK: Record<string, number> = {
   structural: 0x8a8f98,
   functional: 0xa08a4a,
-  movement: 0x23262b,
+  movement: 0x3f454e,
   protection: 0x606d60,
   weapon: 0x3f4750,
 };

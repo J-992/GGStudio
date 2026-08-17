@@ -19,8 +19,6 @@
 
 import { createEmptyBlueprint } from './blueprint.ts';
 import { orientationFromSteps } from './grid.ts';
-import { PART_CATALOG } from './parts.ts';
-import { SIGNATURE_KIND_META } from './signatures.ts';
 import type {
   PartConfig,
   PlacedPart,
@@ -42,9 +40,22 @@ export interface BuildDefinition {
   signatureDefId: string;
   /** Name of the click attack, for the picker's stat rows. */
   signatureName: string;
+  /** True when the click attack fires itself, shown as an AUTO pip. */
+  signatureAuto?: boolean;
   /** Name of the ability the block puts in the bar. */
   abilityName: string;
+  /**
+   * Picker meters, 0 to {@link BUILD_METER_PIPS}. These summarise the chassis
+   * line as two bars a player can compare at a glance on a phone, where the
+   * words do not fit; they are presentation, not simulation inputs, and
+   * nothing in the physics or economy reads them.
+   */
+  speed: number;
+  armour: number;
 }
+
+/** Pips drawn per picker meter. */
+export const BUILD_METER_PIPS = 3;
 
 export const BUILDS: Record<BuildId, BuildDefinition> = {
   light: {
@@ -56,8 +67,11 @@ export const BUILDS: Record<BuildId, BuildDefinition> = {
       'fires itself — just point at the horde — and it dashes clean through ' +
       'them when they close.',
     signatureDefId: 'storm-rod',
-    signatureName: 'Chain Lightning (auto)',
+    signatureName: 'Chain Lightning',
+    signatureAuto: true,
     abilityName: 'Dash',
+    speed: 3,
+    armour: 0,
   },
   medium: {
     id: 'medium',
@@ -69,6 +83,8 @@ export const BUILDS: Record<BuildId, BuildDefinition> = {
     signatureDefId: 'pyre-core',
     signatureName: 'Fireball',
     abilityName: 'Fire Blast',
+    speed: 2,
+    armour: 2,
   },
   heavy: {
     id: 'heavy',
@@ -81,6 +97,8 @@ export const BUILDS: Record<BuildId, BuildDefinition> = {
     signatureDefId: 'fallout-silo',
     signatureName: 'Nuke Launcher',
     abilityName: 'Reinforce',
+    speed: 1,
+    armour: 3,
   },
 };
 
@@ -92,7 +110,8 @@ export const BUILD_IDS: readonly BuildId[] = ['light', 'medium', 'heavy'];
 /** Narrows persisted or URL-supplied values to a real build id. */
 export function isBuildId(value: unknown): value is BuildId {
   return (
-    typeof value === 'string' && Object.prototype.hasOwnProperty.call(BUILDS, value)
+    typeof value === 'string' &&
+    Object.prototype.hasOwnProperty.call(BUILDS, value)
   );
 }
 
@@ -335,41 +354,6 @@ export function buildStarterRig(buildId: unknown): VehicleBlueprint {
     ...createEmptyBlueprint(`${build.name.toLowerCase().replace(/\s+/g, '-')}`),
     parts: BUILD_RIGS[build.id](),
   };
-}
-
-/**
- * The line the garage shows once a rig has been chosen: what is bolted on, and
- * which button fires it.
- *
- * A player who has just picked a build has never seen its weapon and has no
- * reason to guess that the fire control does anything — every other gun in the
- * game aims itself. This is the only place that is explained, so it names the
- * block, the strike, and the control together.
- *
- * The control is a parameter rather than something this module works out for
- * itself: `core` is engine-independent and must not reach for a pointer type.
- * Telling a phone player to left-click is worse than saying nothing, so the
- * caller — which does know what it is running on — supplies the gesture.
- */
-export function buildWelcomeNotice(
-  buildId: unknown,
-  input: 'pointer' | 'touch' = 'pointer',
-): string {
-  const build = getBuild(buildId);
-  const def = PART_CATALOG[build.signatureDefId];
-  const strike = def?.signature
-    ? SIGNATURE_KIND_META[def.signature.kind].label
-    : build.signatureName;
-  const gesture =
-    input === 'touch'
-      ? 'touch anywhere on the right of the arena'
-      : 'left-click anywhere in the arena';
-  return (
-    `${build.name} it is. Your ${def?.name ?? 'signature block'} is already ` +
-    `fitted — ${gesture} to fire ${strike}, and watch ` +
-    `the reticle for when it is ready. Upgrade the block here to hit harder ` +
-    `and reload faster.`
-  );
 }
 
 /**

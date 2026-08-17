@@ -14,8 +14,9 @@ import {
 } from '../../core/rng.ts';
 import type { SurfaceKind } from '../../core/surfaces.ts';
 import {
-  clearVoxelAssetCache,
+  isTemplateOwned,
   loadVoxelInstanceSource,
+  retainVoxelAssetScope,
 } from '../VoxelAssetLoader.ts';
 import type { Arena, ArenaBounds, MinimapFeature } from './Arena.ts';
 import {
@@ -66,6 +67,7 @@ export class ArenaBuilder implements Arena {
   private readonly root = new THREE.Group();
   private readonly minimapFeatureList: MinimapFeature[] = [];
   private readonly pendingPlacements: Promise<void>[] = [];
+  private settledPlacements = 0;
   private readonly followPosition = new THREE.Vector3();
   private readonly fallbackGeometry = new THREE.BoxGeometry(1, 1, 1);
   private readonly fallbackMaterial = new THREE.MeshLambertMaterial({
@@ -116,6 +118,10 @@ export class ArenaBuilder implements Arena {
   ) {
     const { layout, look } = biome;
     const collidersEnabled = options.collidersEnabled ?? true;
+    // Claim the cache for this biome before anything is requested. Re-entering
+    // the same arena keeps every template already parsed; changing biome drops
+    // the old set, which is the only point at which holding it stops paying.
+    retainVoxelAssetScope(biome.id);
     this.rng = makeRng(seed);
     this.roadLayout = this.readRoadLayout(layout);
     this.bounds = {
@@ -205,6 +211,28 @@ export class ArenaBuilder implements Arena {
     ]).then(() => undefined);
   }
 
+  /**
+   * Settled-versus-total placements, for the loading bar the player waits
+   * behind. Both counts are final once this constructor has returned, because
+   * every placement is queued from it.
+   */
+  progress(): { loaded: number; total: number } {
+    const placer = this.voxelPlacer.progress();
+    return {
+      loaded: this.settledPlacements + placer.loaded,
+      total: this.pendingPlacements.length + placer.total,
+    };
+  }
+
+  /** Queue a placement and count it toward `progress` when it settles. */
+  private track(pending: Promise<void>): void {
+    this.pendingPlacements.push(
+      pending.finally(() => {
+        this.settledPlacements += 1;
+      }),
+    );
+  }
+
   /** Move the warm focus pool to the supplied vehicle visual. Call per frame. */
   follow(vehicleObj: THREE.Object3D): void {
     if (this.disposed) return;
@@ -239,16 +267,24 @@ export class ArenaBuilder implements Arena {
       }
     });
 
+    // Anything a cached template owns is skipped: instances share the
+    // template's geometry, materials and textures, and those outlive this
+    // arena now so the next one does not have to re-parse them. Freeing them
+    // here would leave the cache handing out already-released GPU buffers.
     const textures = new Set<THREE.Texture>();
     for (const material of materials) {
       const mapped = material as THREE.Material & {
         map?: THREE.Texture | null;
       };
       if (mapped.map) textures.add(mapped.map);
-      material.dispose();
+      if (!isTemplateOwned(material)) material.dispose();
     }
-    for (const geometry of geometries) geometry.dispose();
-    for (const texture of textures) texture.dispose();
+    for (const geometry of geometries) {
+      if (!isTemplateOwned(geometry)) geometry.dispose();
+    }
+    for (const texture of textures) {
+      if (!isTemplateOwned(texture)) texture.dispose();
+    }
     this.moon.shadow.map?.dispose();
     this.focusLight.shadow.map?.dispose();
 
@@ -258,7 +294,6 @@ export class ArenaBuilder implements Arena {
       this.scene.background = this.previousBackground;
     }
     if (this.scene.fog === this.fog) this.scene.fog = this.previousFog;
-    clearVoxelAssetCache();
   }
 
   private readRoadLayout(layout: BiomeLayout): CrossRoadLayout | null {
@@ -426,7 +461,7 @@ export class ArenaBuilder implements Arena {
     const pendingPlacement = loadVoxelInstanceSource(
       `${layout.assetRoot}/${layout.groundAsset}`,
     )
-      .then(({ geometry, material, pivot }) => {
+      .then(({ geometry, material, localMatrix }) => {
         if (this.disposed) return;
         // Every biome shares one ground mesh, so the tint is the only thing
         // making snow white and sand tan. Clone before recolouring: the loader
@@ -452,12 +487,7 @@ export class ArenaBuilder implements Arena {
           tiles.length,
         );
         mesh.name = `${this.biome.id}-ground`;
-        const pivotMatrix = new THREE.Matrix4().makeTranslation(
-          pivot.x,
-          pivot.y,
-          pivot.z,
-        );
-        const matrix = new THREE.Matrix4();
+                const matrix = new THREE.Matrix4();
         const quaternion = new THREE.Quaternion();
         const up = new THREE.Vector3(0, 1, 0);
         const position = new THREE.Vector3();
@@ -467,7 +497,7 @@ export class ArenaBuilder implements Arena {
           position.set(tile.x, tile.y, tile.z);
           quaternion.setFromAxisAngle(up, tile.rotation);
           scale.set(tile.scale, tile.scaleY, tile.scale);
-          matrix.compose(position, quaternion, scale).multiply(pivotMatrix);
+          matrix.compose(position, quaternion, scale).multiply(localMatrix);
           mesh.setMatrixAt(i, matrix);
         }
         mesh.instanceMatrix.needsUpdate = true;
@@ -483,7 +513,7 @@ export class ArenaBuilder implements Arena {
           error,
         );
       });
-    this.pendingPlacements.push(pendingPlacement);
+    this.track(pendingPlacement);
     return fallback;
   }
 
@@ -515,7 +545,7 @@ export class ArenaBuilder implements Arena {
     );
 
     this.placeRoadTile({
-      asset: roadAsset('Road-Crossing-A'),
+      asset: roadAsset('Road-Crossing-A.glb'),
       x: roadX - laneHalfWidth,
       y: 0.02,
       z: sideRoadZ,
@@ -523,7 +553,7 @@ export class ArenaBuilder implements Arena {
       tint: this.biome.look.roadTint,
     });
     this.placeRoadTile({
-      asset: roadAsset('Road-Crossing-B'),
+      asset: roadAsset('Road-Crossing-B.glb'),
       x: roadX + laneHalfWidth,
       y: 0.02,
       z: sideRoadZ,
@@ -548,15 +578,15 @@ export class ArenaBuilder implements Arena {
         const gateCrosswalk =
           arm.dirZ === -1 && Math.abs(z + 29) < ROAD_TILE_SPACING / 2;
         const assetA = gateCrosswalk
-          ? 'Road-Crossing-A'
+          ? 'Road-Crossing-A.glb'
           : i % 2 === 0
-            ? 'Road-Street6-A'
-            : 'Road-Street8-A';
+            ? 'Road-Street6-A.glb'
+            : 'Road-Street8-A.glb';
         const assetB = gateCrosswalk
-          ? 'Road-Crossing-B'
+          ? 'Road-Crossing-B.glb'
           : i % 2 === 0
-            ? 'Road-Street6-B'
-            : 'Road-Street8-B';
+            ? 'Road-Street6-B.glb'
+            : 'Road-Street8-B.glb';
         const y = 0.025 + (i % 2) * 0.005;
         if (arm.dirZ !== 0) {
           this.placeRoadTile({
