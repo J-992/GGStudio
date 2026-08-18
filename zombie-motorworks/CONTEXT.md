@@ -85,12 +85,19 @@ They describe work at the time they were written and can be stale.
   boots straight into it (`beginFirstRun`) on a rig that is not a Build at all —
   `firstPlayRig` in `core/builds.ts`, a demo carrying six engines, a Heavy
   Cannon, two blasters, a blade and a shield. Survival runs a **First Play
-  Coach** over it: five steps (`core/firstPlay.ts`) that stop the fixed step
-  dead, show one line, and start it again on the input they asked for. The
-  health bar and the wave timeline stay hidden until their own step reveals
-  them. The wave fields an authored roster rather than the curve's
-  (`FIRST_PLAY_WAVE_COMPOSITION`, applied through
-  `WaveManager.setCompositionOverride`). Clearing it shows the **First Play
+  Coach** over it: three steps (`core/firstPlay.ts`) that put one line along the
+  top edge and clear it on the input they asked for — drive, shoot, ability, and
+  nothing that is not a hand learning something. The wave never stops for them,
+  and it skips the countdown too. The whole HUD starts covered: each readout is
+  uncovered by an arena event rather than by a card (`FIRST_PLAY_HUD_TRIGGERS`
+  — health on first damage, wallet and wave strip on first kill, speed on the
+  first ram-capable speed, fuel below 70%, minimap never). The wave fields an
+  authored roster rather than the curve's (`FIRST_PLAY_WAVE_COMPOSITION`,
+  applied through `WaveManager.setCompositionOverride`), releases it in front
+  of the rig rather than on the arena rim (`ZombieSystem.setSpawnAhead`), and
+  releases it *before* the first prompt opens, so the opening line is read over
+  a standing crowd. Kill milestones pay small bonuses on the way
+  (`FIRST_PLAY_MILESTONES`). Clearing it shows the **First Play
   Victory** card (`survival/FirstPlayVictory.ts`) — the celebration, not a
   payout: three counted-up stats and one button, START RUN, which is the only
   way off it. No threat alert, no wave-clear card, no Continue Now, no badges.
@@ -310,9 +317,10 @@ Storage access failures must not make the in-memory game unusable.
   snapshot against the one taken when the tour opened rather than against
   absolute counts. **First Play** (`core/firstPlay.ts`) is the time-stop lesson
   over the arena, on the first wave only. See the vocabulary entry above.
-- The First Play coach freezes by returning early from `SurvivalMode.update`,
-  which outranks the phase. Anything that ends a wave has to finish the coach or
-  the frame stays stopped behind the card that replaced it.
+- The First Play coach never stops the world. Its banner is a read-out along the
+  top edge and every window it measures — how long a prompt has been up, the gap
+  to the next one — is arena seconds off `stepPhysics`, so it advances only while
+  a wave is actually being played.
 
 ## Task Routing
 

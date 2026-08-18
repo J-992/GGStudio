@@ -78,8 +78,6 @@ export interface EditorUIHandlers {
   onUndo(): void;
   onRedo(): void;
   onSymmetryToggle(on: boolean): void;
-  onView(view: 'persp' | 'front' | 'rear' | 'side' | 'top'): void;
-  onLayerChange(layer: number): void;
   onTestDrive(): void;
   onFightZombies(): void;
   onStartTutorial(): void;
@@ -1085,7 +1083,12 @@ export function buildEditorUI(
   buildPromptOptions.className = 'build-prompt__options';
 
   let stopBuildPreviews: (() => void)[] = [];
-  const buildPromptCanvases: [BuildId, HTMLCanvasElement][] = [];
+  /**
+   * The art boxes the previews mount into. Hosts rather than canvases: freeing
+   * a GL context poisons its canvas, so `mountSpinningRigPreview` builds and
+   * discards one per open instead of reusing a long-lived element.
+   */
+  const buildPromptPreviewHosts: [BuildId, HTMLElement][] = [];
   let firstBuildOption: HTMLButtonElement | null = null;
 
   /** Tear down the three GL contexts. Idempotent: called on open and on pick. */
@@ -1111,10 +1114,7 @@ export function buildEditorUI(
 
     const art = document.createElement('span');
     art.className = 'build-prompt__art';
-    const preview = document.createElement('canvas');
-    preview.className = 'build-prompt__preview';
-    art.appendChild(preview);
-    buildPromptCanvases.push([build.id, preview]);
+    buildPromptPreviewHosts.push([build.id, art]);
 
     // Key art over the whole card on hover. The spinning preview says what the
     // rig is made of; the painting says what driving it is like, which is the
@@ -1299,6 +1299,15 @@ export function buildEditorUI(
   });
   root.appendChild(importOverlay);
 
+  // The bar is a row of controls over the garage, not a panel: no plate, no
+  // border, no shadow (see `.topbar`). What is left on it is what the player
+  // uses while building — undo, mirror, and the two ways out — with everything
+  // occasional pushed into one cluster on the right.
+  //
+  // Gone from here entirely: the view picker (keys 1-5 already switch camera,
+  // and nobody hunted a dropdown mid-build), the build-height slider, and the
+  // vehicle-name field, which now sits in the Share panel next to the code it
+  // actually labels.
   const top = document.createElement('div');
   top.className = 'topbar';
   root.appendChild(top);
@@ -1306,6 +1315,7 @@ export function buildEditorUI(
   nameInput.type = 'text';
   nameInput.className = 'garage-name';
   nameInput.title = 'Vehicle name';
+  nameInput.setAttribute('aria-label', 'Vehicle name');
   nameInput.addEventListener('change', () =>
     handlers.onRename(nameInput.value),
   );
@@ -1318,7 +1328,6 @@ export function buildEditorUI(
     openNewGarageDialog(newGarageBtn),
   );
   newGarageBtn.setAttribute('aria-haspopup', 'dialog');
-  top.append(nameInput, newGarageBtn);
   const history = document.createElement('div');
   history.className = 'topbar-history';
   const undoBtn = iconBtn(UNDO_ICON_SVG, 'Undo', handlers.onUndo, 'Ctrl+Z');
@@ -1351,56 +1360,13 @@ export function buildEditorUI(
   symmetryBtn.setAttribute('aria-label', 'Mirror build, off');
   symmetryBtn.title = 'Mirror build: off';
   top.appendChild(symmetryBtn);
-  const viewSelect = document.createElement('select');
-  viewSelect.title = 'View (keys 1-5)';
-  for (const [label, value] of [
-    ['3D', 'persp'],
-    ['Front', 'front'],
-    ['Rear', 'rear'],
-    ['Side', 'side'],
-    ['Top', 'top'],
-  ] as const) {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = label;
-    viewSelect.appendChild(option);
-  }
-  viewSelect.addEventListener('change', () =>
-    handlers.onView(
-      viewSelect.value as 'persp' | 'front' | 'rear' | 'side' | 'top',
-    ),
-  );
-  top.appendChild(viewSelect);
-
-  // Build height lives in the top bar beside the view picker: it slices the
-  // model the same way the camera presets do, so the two belong together.
-  const layerControl = document.createElement('label');
-  layerControl.className = 'topbar-layer';
-  const layerLabel = document.createElement('span');
-  layerLabel.className = 'topbar-layer__label';
-  layerLabel.textContent = 'Height';
-  const layerSlider = document.createElement('input');
-  layerSlider.type = 'range';
-  layerSlider.className = 'topbar-layer__slider';
-  layerSlider.min = '-1';
-  layerSlider.max = '8';
-  layerSlider.value = '-1';
-  layerSlider.setAttribute('aria-label', 'Build height');
-  const layerValue = document.createElement('span');
-  layerValue.className = 'topbar-layer__value';
-  layerValue.textContent = 'All';
-  layerSlider.addEventListener('input', () => {
-    const layer = Number(layerSlider.value);
-    const text = layer < 0 ? 'All' : String(layer);
-    layerValue.textContent = text;
-    layerSlider.setAttribute('aria-valuetext', text);
-    layerControl.title = `Build height: ${text}`;
-    handlers.onLayerChange(layer);
-  });
-  layerSlider.setAttribute('aria-valuetext', 'All');
-  layerControl.title = 'Build height: All';
-  layerControl.append(layerLabel, layerSlider, layerValue);
-  top.appendChild(layerControl);
+  // Everything between the build tools and the two ways out. A flex spacer
+  // rather than `margin-left: auto` on the cluster, so the bar still reads
+  // left-to-right when it wraps on a narrow window.
+  const topSpacer = document.createElement('span');
+  topSpacer.className = 'topbar-spacer';
+  topSpacer.setAttribute('aria-hidden', 'true');
+  top.appendChild(topSpacer);
 
   const utilityButtons = document.createElement('div');
   utilityButtons.className = 'topbar-utilities';
@@ -1416,6 +1382,7 @@ export function buildEditorUI(
     saveAndQuitBtn,
     btn('Tutorial', handlers.onStartTutorial),
     shareTopButton,
+    newGarageBtn,
   );
   top.appendChild(utilityButtons);
   const testBtn = btn('Test Drive', handlers.onTestDrive);
@@ -1543,6 +1510,12 @@ export function buildEditorUI(
   shareHint.className = 'share-hint';
   shareHint.textContent =
     'Send your rig to a friend, or paste one they sent you.';
+  // The name rides with the code, which is the only place it is ever read.
+  const shareName = document.createElement('label');
+  shareName.className = 'share-name';
+  const shareNameLabel = document.createElement('span');
+  shareNameLabel.textContent = 'Name';
+  shareName.append(shareNameLabel, nameInput);
   const shareActions = document.createElement('div');
   shareActions.className = 'share-actions';
   const copyCodeBtn = btn('Copy build code', handlers.onCopyCode);
@@ -1557,7 +1530,7 @@ export function buildEditorUI(
     handlers.onImport(shareInput.value);
     shareInput.value = '';
   });
-  share.body.append(shareHint, shareActions, shareInput, importBtn);
+  share.body.append(shareHint, shareName, shareActions, shareInput, importBtn);
   const syncShareButton = (): void => {
     const open = !share.panel.classList.contains('is-collapsed');
     shareTopButton.setAttribute('aria-expanded', String(open));
@@ -2945,9 +2918,9 @@ export function buildEditorUI(
       // Previews are mounted on open and torn down on close: three live WebGL
       // contexts are not something to hold for a whole garage session.
       stopBuildPromptPreviews();
-      for (const [buildId, canvas] of buildPromptCanvases) {
+      for (const [buildId, host] of buildPromptPreviewHosts) {
         stopBuildPreviews.push(
-          mountSpinningRigPreview(canvas, buildStarterRig(buildId)),
+          mountSpinningRigPreview(host, buildStarterRig(buildId)),
         );
       }
     },

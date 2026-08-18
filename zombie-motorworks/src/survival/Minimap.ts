@@ -163,6 +163,11 @@ export class Minimap {
     }
   }
 
+  /** Hide or show the whole map; the First Play wave keeps it off. */
+  setVisible(visible: boolean): void {
+    if (this.root !== null) this.root.hidden = !visible;
+  }
+
   update(
     vehicleX: number,
     vehicleZ: number,

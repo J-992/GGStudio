@@ -435,15 +435,7 @@
   flex: 0 0 auto;
 }
 
-[data-mobile-garage='on'] .topbar[data-density='compact'] .garage-name {
-  width: auto;
-  min-width: 0;
-  flex: 1 1 96px;
-}
-
-[data-mobile-garage='on']
-  .topbar[data-density='compact']
-  :is(button, select, .garage-name, .topbar-layer) {
+[data-mobile-garage='on'] .topbar[data-density='compact'] button {
   min-height: var(--touch-target);
 }
 
@@ -474,27 +466,9 @@
   display: none;
 }
 
-[data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-layer__label {
+/* Nothing to push against on a phone: the bar wraps instead of spreading. */
+[data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-spacer {
   display: none;
-}
-
-[data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-layer {
-  box-sizing: border-box;
-  min-width: 0;
-  max-width: 100%;
-  flex: 1 1 0;
-  gap: var(--ui-space-1);
-  overflow: hidden;
-  padding-inline: var(--ui-space-1);
-}
-
-[data-mobile-garage='on']
-  .topbar[data-density='compact']
-  .topbar-layer__slider {
-  width: 0;
-  min-width: 0;
-  max-width: 100%;
-  flex: 1 1 0;
 }
 
 [data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-utilities {
@@ -657,20 +631,14 @@
 
   [data-mobile-garage='on']
     .topbar[data-density='compact']
-    :is(button, select, .garage-name, .topbar-layer, .money-readout) {
+    :is(button, .money-readout) {
     width: 100%;
     min-width: 0;
     max-width: 100%;
   }
 
-  [data-mobile-garage='on']
-    .topbar[data-density='compact']
-    :is(select, .garage-name, .money-readout) {
+  [data-mobile-garage='on'] .topbar[data-density='compact'] .money-readout {
     padding-inline: var(--ui-space-1);
-  }
-
-  [data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-layer {
-    padding-inline: 0;
   }
 
   /* Second row is Menu, Tutorial, Test Drive, Fight, money — five items in
@@ -680,19 +648,6 @@
     .topbar[data-density='compact']
     .btn-hero.btn-hero-fight {
     grid-column: span 3;
-  }
-
-  [data-mobile-garage='on']
-    .topbar[data-density='compact']
-    .topbar-layer__slider {
-    width: 100%;
-    min-width: 0;
-  }
-
-  [data-mobile-garage='on']
-    .topbar[data-density='compact']
-    .topbar-layer__value {
-    display: none;
   }
 }
 
@@ -734,11 +689,6 @@
     flex-wrap: nowrap;
   }
 
-  [data-mobile-garage='on'] .topbar[data-density='compact'] .garage-name {
-    min-width: var(--touch-target);
-    flex: 1 1 var(--touch-target);
-  }
-
   [data-mobile-garage='on']
     .topbar[data-density='compact']
     :is(.topbar-history, .topbar-utilities) {
@@ -747,23 +697,6 @@
 
   [data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-utilities {
     order: initial;
-  }
-
-  [data-mobile-garage='on'] .topbar[data-density='compact'] select {
-    width: calc(var(--touch-target) + var(--ui-space-3));
-    min-width: var(--touch-target);
-    padding-inline: var(--ui-space-1);
-  }
-
-  [data-mobile-garage='on'] .topbar[data-density='compact'] .topbar-layer {
-    min-width: calc(var(--touch-target) + var(--touch-target));
-    flex: 1 1 calc(var(--touch-target) + var(--touch-target));
-  }
-
-  [data-mobile-garage='on']
-    .topbar[data-density='compact']
-    .topbar-layer__value {
-    display: none;
   }
 
   [data-mobile-garage='on'] .topbar[data-density='compact'] .money-readout {

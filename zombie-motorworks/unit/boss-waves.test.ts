@@ -26,6 +26,7 @@ function fakeZombies(overrides: Partial<ZombieSystem> = {}): {
   const bossEncounters: (BossEncounter | null)[] = [];
   let active = 0;
   const zombies = {
+    warmKinds: () => undefined,
     setWaveMultipliers: () => undefined,
     setBossEncounter: (encounter: BossEncounter | null) => {
       bossEncounters.push(encounter);

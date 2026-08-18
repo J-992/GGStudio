@@ -3,7 +3,7 @@
 A player can:
 
 1. Build a vehicle in the 3D grid (place/move/rotate/mirror/duplicate/delete).
-2. Orbit/pan/zoom and use ortho views + layer slicing + x-ray/hide modes.
+2. Orbit/pan/zoom and use ortho views + x-ray/hide modes.
 3. Place frame, driver cab (root), engine (on engine mount), fuel tank, wheel mounts, wheels with suspension.
 4. Configure driven / steering / braking wheels and suspension presets.
 5. Add face-mounted armour and cosmetic shell (separate systems).

@@ -171,10 +171,7 @@ import { formatWaveComposition, newThreatsForWave } from './waveBalance.ts';
 import { bossEncounterWarning, bossForWave } from './zombies/bossConfig.ts';
 import { threatPreviewForWave } from './threatPreview.ts';
 import { ThreatAlert, type ThreatAlertView } from './ThreatAlert.ts';
-import {
-  partIconUrls,
-  renderPartIcons,
-} from '../editor/PartIconRenderer.ts';
+import { partIconUrls, renderPartIcons } from '../editor/PartIconRenderer.ts';
 import { PART_CATALOG } from '../core/parts.ts';
 import { SIMPLE_PART_IDS } from '../core/tutorial.ts';
 import {
@@ -185,7 +182,12 @@ import {
 import { WaveTimelineHud } from './WaveTimelineHud.ts';
 import { FirstPlayCoach } from './FirstPlayCoach.ts';
 import { FirstPlayVictory } from './FirstPlayVictory.ts';
-import type { FirstPlayInput } from '../core/firstPlay.ts';
+import {
+  firstPlayHudPiecesFor,
+  type FirstPlayHudPiece,
+  type FirstPlayHudTrigger,
+  type FirstPlayInput,
+} from '../core/firstPlay.ts';
 import { ZombieSystem } from './zombies/ZombieSystem.ts';
 import { isDevMode } from './devtuning/devMode.ts';
 import { devTuning, subscribeTuning } from './devtuning/DevTuning.ts';
@@ -201,6 +203,64 @@ import type { Zombie, ZombieKind } from './zombies/Zombie.ts';
 
 const FIXED_DT = 1 / 60;
 const COUNTDOWN_SECONDS = 3;
+
+/**
+ * Kill-streak feedback: how long one kill keeps the streak alive, how many
+ * kills earn a chit, what each one pays, and how hard the camera nods.
+ *
+ * Two and a half seconds is about one pass through a clump — long enough that
+ * plowing a crowd is a streak and short enough that picking stragglers off one
+ * at a time is not. The shake starts small on purpose: it is punctuation on top
+ * of the per-hit kicks the guns already throw, and only a long run earns its
+ * way up to the ceiling.
+ *
+ * The payout is a ladder with a ceiling, and it has to be: this used to pay a
+ * dollar per kill in the streak on every third kill, which is quadratic in the
+ * length of the run. A thirty-kill plow paid $3+$6+…+$30 = $165 while the
+ * thirty kills underneath it were worth $90, so the seasoning was earning
+ * nearly twice the meal and a single good pass through a late crowd could out-
+ * earn the wave that produced it. Now each chit is worth $2 more than the last
+ * and stops climbing at $8, so a long run pays out linearly rather than
+ * exploding: that same thirty-kill plow pays $2+$4+$6+$8+$8 = $28, a bit under
+ * a third of the kills it rode on, which is what a bonus should be worth.
+ *
+ * The chit still says the streak count and the dollars side by side, so nothing
+ * here needs the player to do the arithmetic — the ladder just has to feel like
+ * it is going somewhere, and four rungs before the ceiling does that.
+ */
+const KILL_STREAK_WINDOW_SECONDS = 2.5;
+const KILL_STREAK_STEP = 6;
+const KILL_STREAK_BONUS_PER_CHIT = 2;
+const KILL_STREAK_BONUS_CAP = 8;
+const KILL_STREAK_SHAKE = 0.16;
+const KILL_STREAK_SHAKE_MAX = 0.42;
+
+/** Tank level the tutorial's fuel gauge waits for before it appears. */
+const FIRST_PLAY_FUEL_REVEAL_PCT = 70;
+
+/**
+ * Bonus payouts scattered through the tutorial wave, so the first thing a new
+ * player does keeps paying out instead of going quiet for two minutes.
+ *
+ * Money only — no unlocks, no badges. The rig is handed back at the garage
+ * door, so nothing here can be spent on keeping an overpowered demo; what it
+ * does buy is the wallet in the corner visibly jumping four times before the
+ * victory card ever appears, and a slightly fuller purse walking into the
+ * first real shopping trip, which is the exact moment the demo rig is taken
+ * away. Deliberately modest against the wave's own take — thirty walkers and
+ * five throwers pay about $130, and the clear bonus another $50.
+ */
+const FIRST_PLAY_MILESTONES: readonly {
+  kills: number;
+  label: string;
+  bonus: number;
+  pitch: number;
+}[] = [
+  { kills: 1, label: 'FIRST BLOOD', bonus: 10, pitch: 1 },
+  { kills: 10, label: '10 DOWN', bonus: 20, pitch: 1.08 },
+  { kills: 20, label: '20 DOWN', bonus: 30, pitch: 1.16 },
+  { kills: 30, label: 'RAMPAGE', bonus: 50, pitch: 1.24 },
+];
 /**
  * How long the pre-wave gate waits on the arena before starting anyway.
  *
@@ -208,8 +268,14 @@ const COUNTDOWN_SECONDS = 3;
  * a dropped fetch must cost a player some scenery rather than the whole run —
  * `VoxelAssetLoader` already falls back to placeholders, so the arena is
  * playable either way.
+ *
+ * Short on purpose. This used to be twelve seconds, which on a cold first boot
+ * sat on top of the boot splash's own download and turned the opening into
+ * fifteen seconds of progress bar — the single largest thing between a new
+ * player and the game. A tombstone popping in behind the rig costs nothing;
+ * another six seconds of waiting costs the player.
  */
-const ARENA_LOAD_TIMEOUT_SECONDS = 12;
+const ARENA_LOAD_TIMEOUT_SECONDS = 5;
 /**
  * Keys `updateControls` reads as driving, for the First Play coach's benefit.
  * Kept here rather than derived from the control block below because the coach
@@ -589,17 +655,20 @@ function tracerOptionsForShot(
 
 interface SurvivalUi {
   root: HTMLDivElement;
+  /** The corner panel the three driving readouts stack inside. */
+  driverHud: HTMLDivElement;
   speedValue: HTMLSpanElement;
   speedTrack: HTMLDivElement;
-  speedSafeLabel: HTMLSpanElement;
-  speedDamageLabel: HTMLSpanElement;
-  speedKillLabel: HTMLSpanElement;
+  /** The whole speed block, so the First Play coach can keep it covered. */
+  speedPanel: HTMLDivElement;
   integrityValue: HTMLSpanElement;
   integrityFill: HTMLSpanElement;
   /** The whole health block, so the First Play coach can keep it covered. */
   healthPanel: HTMLDivElement;
   fuelValue: HTMLSpanElement;
   fuelFill: HTMLSpanElement;
+  /** The whole fuel block, on the same footing as the other two readouts. */
+  fuelPanel: HTMLDivElement;
   waveTimeline: WaveTimelineHud;
   bossHud: HTMLElement;
   bossNameValue: HTMLElement;
@@ -753,11 +822,10 @@ export class SurvivalMode {
   private meleeHitZ = 0;
   private warningRefreshSeconds = 0;
   private lastWarnings: VehicleWarning[] = [];
+  private readonly driverHud: HTMLDivElement;
   private readonly speedValue: HTMLSpanElement;
   private readonly speedTrack: HTMLDivElement;
-  private readonly speedSafeLabel: HTMLSpanElement;
-  private readonly speedDamageLabel: HTMLSpanElement;
-  private readonly speedKillLabel: HTMLSpanElement;
+  private readonly speedPanel: HTMLDivElement;
   private readonly integrityValue: HTMLSpanElement;
   private readonly integrityFill: HTMLSpanElement;
   private readonly healthPanel: HTMLDivElement;
@@ -769,8 +837,23 @@ export class SurvivalMode {
   private readonly firstPlay: FirstPlayCoach | null;
   /** The tutorial wave's celebration, built alongside its coach. */
   private readonly firstPlayVictory: FirstPlayVictory | null;
+  /**
+   * Readouts the first wave has uncovered so far.
+   *
+   * Empty at wave start and grown by {@link revealFirstPlayHud} as the arena
+   * gives each one a reason to exist. Irrelevant on every other deployment,
+   * where `firstPlay` is null and the whole HUD is up from frame one.
+   */
+  private readonly firstPlayHud = new Set<FirstPlayHudPiece>();
+  /** Kills so far this wave, for the tutorial's milestone toasts. */
+  private firstPlayKills = 0;
+  /** Kills landed inside the streak window; see `creditKillStreak`. */
+  private killStreak = 0;
+  /** Arena time the current streak lapses at. */
+  private killStreakExpiresAt = -1;
   private readonly fuelValue: HTMLSpanElement;
   private readonly fuelFill: HTMLSpanElement;
+  private readonly fuelPanel: HTMLDivElement;
   private lastHudFuel = -1;
   /** Centre-screen bar of special abilities, one box per special. */
   private readonly abilityBar: AbilityBar;
@@ -912,6 +995,11 @@ export class SurvivalMode {
    */
   private arenaReady = false;
   private arenaLoadSeconds = 0;
+  /** Settled by `markArenaReady` (or by `dispose`); see {@link whenPlayable}. */
+  private resolvePlayable: (() => void) | null = null;
+  private readonly playable = new Promise<void>((resolve) => {
+    this.resolvePlayable = resolve;
+  });
   /** Stops the background part-icon render when this mode goes away. */
   private stopIconRender: () => void = () => undefined;
   private phase: SurvivalPhase = 'countdown';
@@ -1238,14 +1326,14 @@ export class SurvivalMode {
     this.ui.addEventListener('click', this.onUiButtonClick, true);
     this.speedValue = builtUi.speedValue;
     this.speedTrack = builtUi.speedTrack;
-    this.speedSafeLabel = builtUi.speedSafeLabel;
-    this.speedDamageLabel = builtUi.speedDamageLabel;
-    this.speedKillLabel = builtUi.speedKillLabel;
+    this.speedPanel = builtUi.speedPanel;
+    this.driverHud = builtUi.driverHud;
     this.integrityValue = builtUi.integrityValue;
     this.integrityFill = builtUi.integrityFill;
     this.healthPanel = builtUi.healthPanel;
     this.fuelValue = builtUi.fuelValue;
     this.fuelFill = builtUi.fuelFill;
+    this.fuelPanel = builtUi.fuelPanel;
     this.waveTimelineHud = builtUi.waveTimeline;
     this.bossHud = builtUi.bossHud;
     this.bossNameValue = builtUi.bossNameValue;
@@ -1346,6 +1434,13 @@ export class SurvivalMode {
           });
     if (this.firstPlay !== null) {
       this.waves.setCompositionOverride(FIRST_PLAY_WAVE_COMPOSITION);
+      // In front of the windscreen rather than out on the arena's rim, so the
+      // wall of bodies the roster exists to be is actually in shot.
+      this.zombies.setSpawnAhead(true);
+      // The boot splash is still up and stays up until this arena is ready
+      // (see `whenPlayable`), so a second full-bleed loading scrim underneath
+      // it would only be the same wait counted twice.
+      this.arenaLoadingOverlay.hidden = true;
     }
     this.syncFirstPlayHud();
 
@@ -1526,19 +1621,19 @@ export class SurvivalMode {
     speedMarker.className = 'survival-speed__marker';
     speedMarker.setAttribute('aria-hidden', 'true');
     speedTrack.append(safeTier, damageTier, killTier, speedMarker);
-    const speedLegend = document.createElement('div');
-    speedLegend.className = 'survival-speed__legend';
-    const speedSafeLabel = document.createElement('span');
-    const speedDamageLabel = document.createElement('span');
-    const speedKillLabel = document.createElement('span');
-    speedLegend.append(speedSafeLabel, speedDamageLabel, speedKillLabel);
-    speedGauge.append(speedTrack, speedLegend);
+    // No written legend under the bar. The three bands are already coloured
+    // and the live one already lights up, so spelling out "SAFE <29 / DAMAGE
+    // 29-47 / KILL 48+" in 8px type was three lines of arithmetic restating a
+    // thing the bar says by being a bar.
+    speedGauge.append(speedTrack);
     speedRow.append(speedHeader, speedGauge);
     const health = document.createElement('div');
     health.className = 'survival-health';
     const healthHeader = document.createElement('div');
     const healthLabel = document.createElement('span');
-    healthLabel.textContent = 'Vehicle Health';
+    // Short labels: the panel is a glance target, not a spec sheet. The full
+    // wording survives on the aria-labels, which is where it does real work.
+    healthLabel.textContent = 'Hull';
     const integrityValue = document.createElement('span');
     healthHeader.append(healthLabel, integrityValue);
     const healthTrack = document.createElement('div');
@@ -1963,16 +2058,16 @@ export class SurvivalMode {
 
     return {
       root,
+      driverHud: hud,
       speedValue,
       speedTrack,
-      speedSafeLabel,
-      speedDamageLabel,
-      speedKillLabel,
+      speedPanel: speedRow,
       integrityValue,
       integrityFill,
       healthPanel: health,
       fuelValue,
       fuelFill,
+      fuelPanel: fuel,
       waveTimeline,
       bossHud,
       bossNameValue,
@@ -2074,10 +2169,9 @@ export class SurvivalMode {
   }
 
   private syncGameplayActivity(): void {
-    // A coach freeze is deliberately *not* a gameplay break. Each card lasts a
-    // second or two and there are five of them, so reporting every one would
-    // strobe the platform SDK through ten state changes in the opening minute
-    // for no benefit to the player.
+    // A coach prompt is not a gameplay break and never was one to report: the
+    // wave keeps simulating underneath it, which is the whole point of the
+    // banner replacing the time stop it used to be.
     this.callbacks.onGameplayActiveChanged?.(
       !this.settingsOpen &&
         (this.phase === 'countdown' || this.phase === 'active'),
@@ -2085,26 +2179,71 @@ export class SurvivalMode {
   }
 
   /**
-   * Put the HUD where the First Play coach says it should be.
+   * Put the HUD where the first wave says it should be.
    *
-   * Everything here is derived from the coach rather than tracked separately,
-   * so it is safe to call on any change and idempotent when nothing moved. A
-   * run without a coach reveals everything, which is the ordinary HUD.
+   * A brand-new player is shown the rig, the ability box, and nothing else.
+   * Every readout is covered until the arena hands it a reason to exist (see
+   * `FIRST_PLAY_HUD_TRIGGERS`), at which point it slides in with a one-shot
+   * highlight — a bar that arrives at the moment it starts mattering explains
+   * itself, where the same bar sitting there from frame one is instrument
+   * clutter in front of somebody who does not yet know what a wave is.
+   *
+   * Idempotent and safe to call on any change. A run without a coach shows
+   * everything, which is the ordinary HUD.
    */
   private syncFirstPlayHud(): void {
-    const coach = this.firstPlay;
-    const healthUp = coach === null || coach.isRevealed('health');
-    const timelineUp = coach === null || coach.isRevealed('waveTimeline');
-    this.healthPanel.hidden = !healthUp;
-    this.waveTimelineHud.root.hidden = !timelineUp;
-    this.healthPanel.classList.toggle(
-      'is-first-play-spotlight',
-      coach?.isSpotlighting('health') === true,
-    );
-    this.waveTimelineHud.root.classList.toggle(
-      'is-first-play-spotlight',
-      coach?.isSpotlighting('waveTimeline') === true,
-    );
+    const tutorial = this.firstPlay !== null;
+    const up = (piece: FirstPlayHudPiece): boolean =>
+      !tutorial || this.firstPlayHud.has(piece);
+    this.healthPanel.hidden = !up('health');
+    this.speedPanel.hidden = !up('speed');
+    this.fuelPanel.hidden = !up('fuel');
+    this.cashCounter.hidden = !up('cash');
+    this.waveTimelineHud.root.hidden = !up('waveTimeline');
+    this.minimap.setVisible(up('minimap'));
+    // The panel is three stacked readouts with dividers between them; with all
+    // three covered it would still draw as an empty box in the corner.
+    this.driverHud.hidden =
+      this.healthPanel.hidden &&
+      this.speedPanel.hidden &&
+      this.fuelPanel.hidden;
+  }
+
+  /**
+   * Uncover whatever `trigger` has just earned, once.
+   *
+   * A no-op outside the tutorial and after the piece is already up, so the
+   * call sites can be the plainest possible test in the HUD sync loop rather
+   * than each carrying its own latch.
+   */
+  private revealFirstPlayHud(trigger: FirstPlayHudTrigger): void {
+    if (this.firstPlay === null) return;
+    let revealed = false;
+    for (const piece of firstPlayHudPiecesFor(trigger)) {
+      if (this.firstPlayHud.has(piece)) continue;
+      this.firstPlayHud.add(piece);
+      revealed = true;
+    }
+    if (!revealed) return;
+    this.syncFirstPlayHud();
+    for (const piece of firstPlayHudPiecesFor(trigger)) {
+      const element =
+        piece === 'health'
+          ? this.healthPanel
+          : piece === 'speed'
+            ? this.speedPanel
+            : piece === 'fuel'
+              ? this.fuelPanel
+              : piece === 'cash'
+                ? this.cashCounter
+                : piece === 'waveTimeline'
+                  ? this.waveTimelineHud.root
+                  : null;
+      if (element === null) continue;
+      element.classList.remove('is-first-play-reveal');
+      void element.offsetWidth;
+      element.classList.add('is-first-play-reveal');
+    }
   }
 
   /**
@@ -2507,16 +2646,6 @@ export class SurvivalMode {
       this.renderer.render(this.scene, this.camera);
       return;
     }
-    // Time stop. The coach's cards are read over a genuinely stopped arena —
-    // nothing steps, nothing animates, the crowd hangs mid-stride — so a new
-    // player is never asked to read while something is closing on them. Zero
-    // delta rather than an early return so the frame is still drawn.
-    if (this.firstPlay?.isFrozen() === true) {
-      this.pollHeldFirstPlayInput();
-      this.syncView(0);
-      this.renderer.render(this.scene, this.camera);
-      return;
-    }
     frameDt = Math.min(Math.max(frameDt, 0), 0.1);
     if (this.devPanel) {
       // God mode and time scale are read live so they need no per-edit wiring.
@@ -2576,8 +2705,10 @@ export class SurvivalMode {
     }
     this.waveElapsedSeconds += FIXED_DT;
     this.runElapsedSeconds += FIXED_DT;
-    // Arena time, not wall clock: the gap between two lessons is measured in
-    // the seconds the player actually spends driving.
+    // Arena time, not wall clock: every window the coach measures — how long a
+    // prompt has been up, and the gap to the next one — is counted in seconds
+    // the player actually spent driving.
+    if (this.firstPlay?.isPrompting() === true) this.pollHeldFirstPlayInput();
     this.firstPlay?.fixedUpdate(FIXED_DT);
     this.updateControls();
     this.updateRecoveryAssist(FIXED_DT);
@@ -3000,6 +3131,8 @@ export class SurvivalMode {
   private markArenaReady(): void {
     if (this.arenaReady || this.disposed) return;
     this.arenaReady = true;
+    this.resolvePlayable?.();
+    this.resolvePlayable = null;
     this.arenaLoadingFill.style.width = '100%';
     this.arenaLoadingOverlay.style.opacity = '0';
     this.arenaLoadingOverlay.style.pointerEvents = 'none';
@@ -3008,9 +3141,29 @@ export class SurvivalMode {
     window.setTimeout(() => {
       if (!this.disposed) this.arenaLoadingOverlay.hidden = true;
     }, 260);
-    if (this.phase === 'countdown') {
+    if (this.phase === 'countdown' && this.countdownRemaining > 0) {
       this.countdownOverlay.style.display = 'block';
     }
+  }
+
+  /**
+   * Resolves once the arena is standing and the wave is free to start.
+   *
+   * Boot uses it to hold the splash over the first mount instead of handing
+   * the screen back for a second loading scrim to take it straight away. It
+   * always settles: the gate behind it either sees the arena finish or times
+   * out (`ARENA_LOAD_TIMEOUT_SECONDS`), and a disposed mode resolves too, so
+   * nothing awaiting this can strand the splash.
+   */
+  whenPlayable(): Promise<void> {
+    return this.playable;
+  }
+
+  /** Settled-versus-total arena placements, 0..1, for an external loading bar. */
+  arenaLoadFraction(): number {
+    if (this.arenaReady) return 1;
+    const { loaded, total } = this.arena.progress();
+    return total === 0 ? 1 : loaded / total;
   }
 
   /** Drive the loading bar from the arena's settled-placement count. */
@@ -3030,7 +3183,13 @@ export class SurvivalMode {
     if (this.firstPlay?.active === true) this.firstPlay.finish();
     this.setCurrentWave(wave);
     this.phase = 'countdown';
-    this.countdownRemaining = COUNTDOWN_SECONDS;
+    // The tutorial wave gets no "3, 2, 1". Three seconds of WAVE STARTING is
+    // worth having on wave seven, when the player is repositioning after a
+    // repair and wants a beat to line up — a first-time player has no context
+    // to spend it on, and it lands on top of two loading bars. The phase
+    // itself stays, because it is also the gate that holds the wave until the
+    // arena is standing.
+    this.countdownRemaining = this.firstPlay === null ? COUNTDOWN_SECONDS : 0;
     this.lastCountdownSecond = -1;
     this.pointerFiring = false;
     this.pendingWaveKillReward = 0;
@@ -3062,7 +3221,8 @@ export class SurvivalMode {
     this.damageNumbers?.clear();
     // While the arena is still building the loading scrim owns the screen, so
     // the countdown card waits behind it rather than counting down over it.
-    this.countdownOverlay.style.display = this.arenaReady ? 'block' : 'none';
+    this.countdownOverlay.style.display =
+      this.arenaReady && this.countdownRemaining > 0 ? 'block' : 'none';
     this.syncGameplayActivity();
   }
 
@@ -3091,6 +3251,17 @@ export class SurvivalMode {
     playSfx('waveStart');
     this.resetWaveStats();
     this.waves.startWave(this.currentWave);
+    if (this.firstPlay !== null) {
+      // Release the roster *before* the coach stops the clock. `startWave`
+      // only queues a spawn order; the bodies arrive on the first physics
+      // step, and the coach freezes that step on the same frame it begins —
+      // so the very first thing a new player used to see was an empty
+      // graveyard with DRIVE written on it. One zero-length step puts the
+      // whole burst on the field first, and the card opens over a crowd
+      // standing there mid-stride, which is the thing the wave is for.
+      this.waves.fixedUpdate(0);
+      this.zombies.updateVisuals(0);
+    }
     // Only now: the coach freezes the world, and freezing the countdown would
     // leave a player staring at a card over a "3" that never becomes a "1".
     this.firstPlay?.begin();
@@ -3098,6 +3269,9 @@ export class SurvivalMode {
   }
 
   private resetWaveStats(): void {
+    this.killStreak = 0;
+    this.killStreakExpiresAt = -1;
+    this.firstPlayKills = 0;
     this.waveStartKills = this.kills;
     this.waveMoneyEarned = 0;
     this.waveBadgeBonusEarned = 0;
@@ -3128,7 +3302,96 @@ export class SurvivalMode {
       this.callbacks.onPhoneAddictKilled();
     }
     this.addPendingWaveKillReward(reward);
+    // The wallet and the wave counter are both things a kill just made true,
+    // so the first one is what puts them on screen.
+    this.revealFirstPlayHud('kill');
+    this.creditKillStreak();
+    this.creditFirstPlayMilestone();
     this.waves.recordZombieKilled();
+  }
+
+  /**
+   * Pay a streak: kills landing on top of each other read as one run rather
+   * than as thirty separate events.
+   *
+   * Every wave, not just the tutorial. The window is arena time, so it is not
+   * gamed by a paused tab, and it restarts on every kill — the streak is "how
+   * long have I kept this going", not "how many did that one shell get". Every
+   * third kill inside the window throws a chit, kicks the camera and pays a
+   * bonus that climbs with the streak, which is what makes a good stretch of
+   * driving feel different from a slow one.
+   *
+   * The payout needs no per-wave table: a player picking stragglers off one at
+   * a time never triggers it at all, and a hard run through a dense pack is
+   * worth roughly a third of the kills it rode over — see the constants above
+   * for why that is a capped ladder rather than a rate per kill.
+   */
+  private creditKillStreak(): void {
+    const now = this.waveElapsedSeconds;
+    this.killStreak = now <= this.killStreakExpiresAt ? this.killStreak + 1 : 1;
+    this.killStreakExpiresAt = now + KILL_STREAK_WINDOW_SECONDS;
+    if (this.killStreak < KILL_STREAK_STEP) return;
+    if (this.killStreak % KILL_STREAK_STEP !== 0) return;
+    // `killStreak` is an exact multiple of the step here, so the division is
+    // the chit's index on the ladder: first chit pays one rung, second two,
+    // and so on until the cap flattens it.
+    const chit = this.killStreak / KILL_STREAK_STEP;
+    const bonus = Math.min(
+      KILL_STREAK_BONUS_CAP,
+      chit * KILL_STREAK_BONUS_PER_CHIT,
+    );
+    this.addPendingWaveKillReward(bonus);
+    this.popPickupToast(`${this.killStreak}x STREAK`, '#e0b95a', {
+      icon: '⚡',
+      value: `+$${bonus}`,
+      // The chit's index on the ladder doubles as its loudness: the first pop
+      // of a run is a nod and the fourth is the whole corner of the screen, so
+      // a long plow escalates on screen even though the money stopped climbing
+      // at the cap. That split is deliberate — the spectacle can keep rising
+      // for free where the economy cannot.
+      tier: chit,
+    });
+    // Nods harder the longer it has been going, up to the same ceiling a heavy
+    // shell already uses, so a twenty-kill run through a pack lands.
+    this.followCamera.addShake(
+      Math.min(KILL_STREAK_SHAKE_MAX, KILL_STREAK_SHAKE * (1 + this.killStreak / 12)),
+    );
+    // Climbs with the streak and then holds, so a long run reads as one rising
+    // line instead of an ever-shriller squeak.
+    playSfx('pickupPower', {
+      pitch: Math.min(1.3, 1 + this.killStreak * 0.02),
+    });
+  }
+
+  /**
+   * The tutorial wave's own reward ladder, on top of the streaks every wave
+   * gets.
+   *
+   * A first-time player used to get nothing at all between the opening card
+   * and the victory screen roughly two minutes later, which is most of a
+   * session with no evidence that anything they did mattered. Counted rather
+   * than paced, so it fires even for somebody grinding the wave down slowly and
+   * never landing a streak — which is exactly the player who needs the
+   * encouragement most.
+   */
+  private creditFirstPlayMilestone(): void {
+    if (this.firstPlay === null) return;
+    this.firstPlayKills += 1;
+    const milestone = FIRST_PLAY_MILESTONES.find(
+      (entry) => entry.kills === this.firstPlayKills,
+    );
+    if (milestone === undefined) return;
+    // Every milestone lands at the loudest tier. There are only four of them
+    // in the whole tutorial and each is a first — the ladder that paces a
+    // streak has nothing to pace here.
+    this.popPickupToast(milestone.label, '#c2d47f', {
+      icon: '★',
+      value: `+$${milestone.bonus}`,
+      tier: SurvivalMode.PICKUP_TIER_MAX,
+    });
+    this.addPendingWaveKillReward(milestone.bonus);
+    this.followCamera.addShake(KILL_STREAK_SHAKE);
+    playSfx('pickupPower', { pitch: milestone.pitch });
   }
 
   /**
@@ -3868,14 +4131,19 @@ export class SurvivalMode {
       case 'fuel': {
         if (this.vehicle.refuel(FUEL_REFILL_FRACTION) <= 0) return false;
         playSfx('fuelPickup');
-        this.popPickupToast('Refuelled', PICKUP_KINDS.fuel.minimapColor);
+        this.popPickupToast('REFUELLED', PICKUP_KINDS.fuel.minimapColor, {
+          icon: '▲',
+        });
         return true;
       }
       case 'cash': {
         const amount = cashDropAmount(this.currentWave);
         this.addPendingWaveKillReward(amount);
         playSfx('pickupCash');
-        this.popPickupToast(`+$${amount}`, PICKUP_KINDS.cash.minimapColor);
+        this.popPickupToast('SALVAGE CASH', PICKUP_KINDS.cash.minimapColor, {
+          icon: '$',
+          value: `+$${amount}`,
+        });
         return true;
       }
       case 'colossus': {
@@ -3887,7 +4155,9 @@ export class SurvivalMode {
           COLOSSUS_MOBILITY,
         );
         playSfx('pickupPower');
-        this.popPickupToast('COLOSSUS', PICKUP_KINDS.colossus.minimapColor);
+        this.popPickupToast('COLOSSUS', PICKUP_KINDS.colossus.minimapColor, {
+          icon: '◆',
+        });
         return true;
       }
       case 'part': {
@@ -3899,20 +4169,27 @@ export class SurvivalMode {
         this.popPickupToast(
           `SALVAGED ${getPartDef(pickup.defId).name}`,
           PICKUP_KINDS.part.minimapColor,
+          { icon: '▣' },
         );
         return true;
       }
       case 'sentry': {
         this.sentries.deploy(pickup.x, pickup.z, SENTRY_SECONDS);
         playSfx('pickupSentry');
-        this.popPickupToast('SENTRY UP', PICKUP_KINDS.sentry.minimapColor);
+        this.popPickupToast('SENTRY UP', PICKUP_KINDS.sentry.minimapColor, {
+          icon: '↑',
+        });
         return true;
       }
       case 'repair': {
         const repaired = this.vehicle.repairOne();
         playSfx(repaired === null ? 'uiDeny' : 'pickupRepair');
         if (repaired === null) {
-          this.popPickupToast('RIG INTACT', PICKUP_KINDS.repair.minimapColor);
+          this.popPickupToast(
+            'RIG INTACT',
+            PICKUP_KINDS.repair.minimapColor,
+            { icon: '+' },
+          );
           return true;
         }
         if (repaired.action === 'rebuild')
@@ -3922,6 +4199,7 @@ export class SurvivalMode {
             ? `REBUILT ${repaired.name}`
             : `PATCHED ${repaired.name}`,
           PICKUP_KINDS.repair.minimapColor,
+          { icon: '+' },
         );
         return true;
       }
@@ -3940,13 +4218,67 @@ export class SurvivalMode {
     if (mesh) mesh.visible = true;
   }
 
-  /** Float what a crate just did off the top of the screen. */
-  private popPickupToast(text: string, color: string): void {
+  /**
+   * Float what just happened off the top of the screen.
+   *
+   * Three parts, any of which may be absent: an icon, the thing that happened,
+   * and the money it paid. Splitting the value out of the label is what lets
+   * the stylesheet set the payout in the big type while the label stays small
+   * — a chit that sized both the same read as a sentence and got skipped, and
+   * the number is the only part the player is actually chasing.
+   *
+   * `tier` escalates the chit's treatment for a run of related pops (see
+   * {@link creditKillStreak}); 0 leaves it at the base weight a crate gets.
+   */
+  private popPickupToast(
+    text: string,
+    color: string,
+    options: { icon?: string; value?: string; tier?: number } = {},
+  ): void {
     const chit = document.createElement('span');
     chit.className = 'survival-pickup__chit';
-    chit.textContent = text;
     chit.style.setProperty('--pickup-color', color);
-    chit.addEventListener('animationend', () => chit.remove());
+
+    if (options.icon !== undefined) {
+      const icon = document.createElement('span');
+      icon.className = 'survival-pickup__icon';
+      // Decorative: the label beside it already says what happened, so a
+      // screen reader announcing the glyph would only add noise.
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = options.icon;
+      chit.appendChild(icon);
+    }
+
+    const label = document.createElement('span');
+    label.className = 'survival-pickup__label';
+    label.textContent = text;
+    chit.appendChild(label);
+
+    if (options.value !== undefined) {
+      const value = document.createElement('span');
+      value.className = 'survival-pickup__value';
+      value.textContent = options.value;
+      chit.appendChild(value);
+    }
+
+    if (options.tier !== undefined && options.tier > 0) {
+      chit.classList.add('survival-pickup__chit--loud');
+      // Capped in CSS terms, not here: the stylesheet only defines treatments
+      // up to the top rung, and a longer run should hold at the loudest rather
+      // than fall back to the unstyled base.
+      chit.style.setProperty(
+        '--pickup-tier',
+        String(Math.min(options.tier, SurvivalMode.PICKUP_TIER_MAX)),
+      );
+    }
+
+    // The icon carries its own flash animation and `animationend` bubbles, so
+    // the chit is only binned when the event came from the chit itself. Keyed
+    // on the target rather than the animation's name because the name differs
+    // under reduced motion, and a chit that never matched would leak forever.
+    chit.addEventListener('animationend', (event) => {
+      if (event.target === chit) chit.remove();
+    });
     this.pickupToasts.appendChild(chit);
   }
 
@@ -4189,7 +4521,11 @@ export class SurvivalMode {
     // travel time and no blast, and it needs the bodies it struck to draw the
     // arc between them.
     if (live.stats.chainTargets > 1) {
-      this.fireChain(live.stats, target);
+      this.fireChain(live.stats, target, {
+        x: pos.x,
+        y: pos.y + SurvivalMode.MAST_MUZZLE_LIFT_M,
+        z: pos.z,
+      });
       return;
     }
 
@@ -4223,6 +4559,7 @@ export class SurvivalMode {
   private fireChain(
     stats: SignatureStats,
     target: { x: number; z: number },
+    muzzle: { x: number; y: number; z: number },
   ): void {
     const path = this.zombies.chainFrom(
       target,
@@ -4237,10 +4574,21 @@ export class SurvivalMode {
 
     // The bolt itself lands on the first body; every jump after it is an arc
     // between two bodies, so the shape on screen is the shape of the damage.
+    //
+    // The lead arc from the mast is drawn too. Without it the volley appeared
+    // out of the crowd with nothing tying it to the rig, which read as an
+    // ambient hazard rather than as the player's own gun firing — and the
+    // whole point of the mast is that the player can see it working.
     const [first] = path;
+    this.vfx.lightningArc(muzzle, first);
     this.vfx.lightningStrike(first.x, first.y, first.z, 1.2);
     for (let i = 1; i < path.length; i++) {
       this.vfx.lightningArc(path[i - 1], path[i]);
+    }
+    // One pop per body touched, including the first, so the count of things
+    // that lit up on screen matches the count of things that took damage.
+    for (const hit of path) {
+      this.vfx.lightningZap(hit.x, hit.y, hit.z);
     }
     this.signatureCooldown = stats.cooldownSeconds;
     this.signatureCooldownTotal = stats.cooldownSeconds;
@@ -5395,7 +5743,27 @@ export class SurvivalMode {
    * Only the arcing bolus reads it — it decides where the trail starts, which
    * should be the block on the deck rather than the axle line.
    */
+  /**
+   * Loudest rung `popPickupToast` will style a chit at.
+   *
+   * The stylesheet defines a treatment per rung and holds at this one, so the
+   * constant has to agree with `--pickup-tier`'s ladder in `style.css` — a
+   * chit asking for a rung with no rule would silently drop to the base look
+   * partway through a run, which is the one moment it must not get quieter.
+   */
+  private static readonly PICKUP_TIER_MAX = 4;
+
   private static readonly STRIKE_LAUNCH_LIFT_M = 0.8;
+
+  /**
+   * Height above the rig's body origin that a Storm Rod arc is drawn from.
+   *
+   * Roughly the top of the mast on the light rig. It is a presentation
+   * constant only — the chain itself is resolved from the cursor, not from
+   * here — so it is tuned to where the bolt looks like it left the block
+   * rather than derived from the block's collider.
+   */
+  private static readonly MAST_MUZZLE_LIFT_M = 2.4;
   /** Seconds of char the flame lance leaves on what it washes over. */
   private static readonly LANCE_CHAR_SECONDS = 2.5;
 
@@ -5558,8 +5926,14 @@ export class SurvivalMode {
       this.lastHudSpeed = speed;
       this.speedValue.textContent = String(speed);
       this.syncSpeedGauge(speed);
+      // The tiered bar starts describing something the moment ramming can
+      // actually hurt, so that is the moment it is worth showing.
+      if (speed >= this.ramDamageThresholdKmh) {
+        this.revealFirstPlayHud('ramSpeed');
+      }
     }
     const integrity = Math.round(this.vehicle.integrityPct());
+    if (integrity < 100) this.revealFirstPlayHud('damaged');
     if (integrity !== this.lastHudIntegrity) {
       this.lastHudIntegrity = integrity;
       this.integrityValue.textContent = `${integrity}%`;
@@ -5573,12 +5947,11 @@ export class SurvivalMode {
     const fuelLitres = Math.ceil(telemetry.fuel);
     if (fuelLitres !== this.lastHudFuel) {
       this.lastHudFuel = fuelLitres;
-      const cap = Math.round(telemetry.fuelCapacity);
       const pct =
         telemetry.fuelCapacity > 0
           ? (telemetry.fuel / telemetry.fuelCapacity) * 100
           : 0;
-      this.fuelValue.textContent = `${fuelLitres} / ${cap} L`;
+      this.fuelValue.textContent = `${fuelLitres}L`;
       this.fuelFill.style.width = `${pct}%`;
       this.fuelFill.parentElement?.setAttribute(
         'aria-valuenow',
@@ -5586,6 +5959,9 @@ export class SurvivalMode {
       );
       this.fuelFill.classList.toggle('is-low', pct <= 25);
       this.fuelFill.classList.toggle('is-empty', telemetry.fuel <= 0);
+      // Fuel is not a pressure on a full tank, so the gauge waits until the
+      // first meaningful bite has come out of it.
+      if (pct <= FIRST_PLAY_FUEL_REVEAL_PCT) this.revealFirstPlayHud('lowFuel');
     }
     this.syncAbilityHud();
     this.syncBossHud();
@@ -5631,12 +6007,6 @@ export class SurvivalMode {
       'aria-valuemax',
       String(this.speedScaleMaxKmh),
     );
-
-    const damageAt = Math.round(this.ramDamageThresholdKmh);
-    const killAt = Math.ceil(this.ramKillThresholdKmh);
-    this.speedSafeLabel.textContent = `Safe <${damageAt}`;
-    this.speedDamageLabel.textContent = `Damage ${damageAt}–${killAt - 1}`;
-    this.speedKillLabel.textContent = `Kill ${killAt}+`;
   }
 
   private syncSpeedGauge(speedKmh: number): void {
@@ -5899,6 +6269,10 @@ export class SurvivalMode {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    // A mode torn down before its arena finished still has to release anything
+    // waiting on it, or boot's splash would sit over a dead scene forever.
+    this.resolvePlayable?.();
+    this.resolvePlayable = null;
     window.clearTimeout(this.endlessBannerTimer);
     this.stopIconRender();
     stopDriveSfx();

@@ -789,6 +789,51 @@ canvas.viewport {
   display: block;
 }
 
+/*
+ * Shown only between `webglcontextlost` and `webglcontextrestored`. It sits
+ * above every mode's UI layer because at that moment none of that UI is being
+ * drawn any more — the canvas underneath is a frozen or blank picture, and the
+ * player needs to be told why.
+ */
+.context-lost-notice {
+  position: absolute;
+  inset: 0;
+  z-index: 900;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(8 11 20 / 82%);
+}
+
+.context-lost-notice[hidden] {
+  display: none;
+}
+
+.context-lost-notice__panel {
+  max-width: 34ch;
+  padding: 18px 20px;
+  border: 1px solid var(--ui-edge, #3a4557);
+  border-radius: 10px;
+  background: rgb(18 23 34 / 96%);
+  color: #e7edf7;
+  text-align: center;
+}
+
+.context-lost-notice__panel strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.context-lost-notice__panel p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  opacity: 0.85;
+}
+
 .ui-layer {
   position: absolute;
   inset: 0;
@@ -1127,6 +1172,15 @@ canvas.viewport {
   }
 }
 
+/*
+ * A row of controls over the garage, not a panel.
+ *
+ * The plate, border and drop shadow are gone: with the view picker, the height
+ * slider and the name field off the bar there is nothing left that needs
+ * grouping into a container, and a full-width slab across the top of a build
+ * screen is the single biggest thing making the garage feel busy. Each control
+ * keeps its own chrome, so they still read as controls against the scene.
+ */
 .topbar {
   position: absolute;
   top: 8px;
@@ -1137,11 +1191,16 @@ canvas.viewport {
   align-items: center;
   flex-wrap: wrap;
   z-index: 12;
-  padding: 7px 8px;
-  background: var(--panel-bg-strong);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--panel-radius);
-  box-shadow: 5px 6px 0 rgb(0 0 0 / 0.36);
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+/* Pushes everything occasional to the right of the build tools. */
+.topbar-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* Undo/redo: a single hairline-joined pair of square glyph buttons. */
@@ -1182,78 +1241,6 @@ canvas.viewport {
   width: 18px;
   height: 18px;
   pointer-events: none;
-}
-
-/*
- * Build height. Promoted out of the old bottom bar so the slice control sits
- * with the view picker it belongs to.
- */
-.topbar-layer {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 7px;
-  height: 34px;
-  padding: 0 9px;
-  border: 1px solid var(--ui-edge);
-  background: var(--ui-recess);
-  box-shadow: inset 2px 2px 0 var(--ui-black);
-  cursor: pointer;
-}
-
-.topbar-layer__label {
-  color: var(--ui-text-muted);
-  font-size: var(--ui-text-11);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.topbar-layer__value {
-  min-width: 24px;
-  color: var(--ui-signal-strong);
-  font-family: var(--ui-font-body);
-  font-size: var(--ui-text-10);
-  text-align: right;
-}
-
-.topbar-layer__slider {
-  width: 96px;
-  height: 14px;
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  appearance: none;
-  cursor: pointer;
-}
-
-.topbar-layer__slider::-webkit-slider-runnable-track {
-  height: 4px;
-  background: var(--ui-surface-3);
-  box-shadow: inset 0 1px 0 var(--ui-black);
-}
-
-.topbar-layer__slider::-moz-range-track {
-  height: 4px;
-  background: var(--ui-surface-3);
-  box-shadow: inset 0 1px 0 var(--ui-black);
-}
-
-.topbar-layer__slider::-webkit-slider-thumb {
-  width: 8px;
-  height: 14px;
-  margin-top: -5px;
-  border: 0;
-  border-radius: 0;
-  background: var(--ui-signal);
-  appearance: none;
-}
-
-.topbar-layer__slider::-moz-range-thumb {
-  width: 8px;
-  height: 14px;
-  border: 0;
-  border-radius: 0;
-  background: var(--ui-signal);
 }
 
 .money-readout {
@@ -2539,29 +2526,46 @@ button:disabled {
 
 /* Garage workspace -------------------------------------------------------- */
 
+/*
+ * The rig's name. It used to be a 150px text field parked in the top bar, where
+ * it was the widest thing up there and the least used; it lives in the Share
+ * panel now, beside the code it is the label for.
+ */
+.share-name {
+  display: grid;
+  gap: 3px;
+}
+
+.share-name > span {
+  color: var(--ui-text-muted);
+  font-size: var(--ui-text-10);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .garage-name {
-  width: 150px;
-  min-height: 34px;
+  width: 100%;
+  min-height: 30px;
   background: var(--ui-recess) !important;
   box-shadow: inset 2px 2px 0 var(--ui-black) !important;
 }
 
 /*
  * Every panel hung off the top bar shares one anchor. EditorMode measures the
- * bar and writes `--garage-panel-top`; the 72px fallback is the one-row height
+ * bar and writes `--garage-panel-top`; the 52px fallback is the one-row height
  * and covers the first frame before the observer reports.
  */
 .garage-dock {
   position: absolute;
-  top: var(--garage-panel-top, 72px);
+  top: var(--garage-panel-top, 52px);
   bottom: 12px;
   left: 8px;
   z-index: 13;
   display: flex;
-  width: 280px;
+  width: 240px;
   min-height: 0;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 
 /*
@@ -2850,16 +2854,16 @@ button:disabled {
 }
 
 .dock-panel.is-collapsed {
-  flex: 0 0 38px;
+  flex: 0 0 30px;
 }
 
 .dock-panel__header {
   display: flex;
-  min-height: 38px;
-  flex: 0 0 38px;
+  min-height: 30px;
+  flex: 0 0 30px;
   align-items: center;
   justify-content: space-between;
-  padding-left: 11px;
+  padding-left: 9px;
   border-bottom: 1px solid var(--ui-edge);
   background: var(--ui-surface-1);
   box-shadow: inset 3px 0 0 var(--ui-signal-dark);
@@ -2867,7 +2871,7 @@ button:disabled {
 
 .dock-panel__header h2 {
   color: var(--ui-text);
-  font-size: var(--ui-text-14);
+  font-size: var(--ui-text-11);
   font-weight: 400;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -2875,8 +2879,8 @@ button:disabled {
 
 .dock-panel__toggle {
   position: relative;
-  width: 38px;
-  height: 37px;
+  width: 30px;
+  height: 29px;
   padding: 0;
   border: 0;
   border-left: 1px solid var(--ui-edge);
@@ -2905,8 +2909,8 @@ button:disabled {
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: 6px;
-  padding: 6px;
+  gap: 5px;
+  padding: 5px;
 }
 
 .dock-panel.is-collapsed .dock-panel__body {
@@ -3693,12 +3697,12 @@ button:disabled {
 
 .selected-panel {
   position: absolute;
-  top: var(--garage-panel-top, 72px);
+  top: var(--garage-panel-top, 52px);
   right: 8px;
   bottom: 12px;
   z-index: 13;
   display: none;
-  width: 300px;
+  width: 258px;
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
@@ -3712,7 +3716,7 @@ button:disabled {
 
 .selected-panel__header {
   flex: 0 0 auto;
-  padding: 11px 12px 10px;
+  padding: 8px 10px 7px;
   border-bottom: 1px solid var(--ui-edge);
   box-shadow: inset 3px 0 0 var(--ui-signal-dark);
 }
@@ -4754,8 +4758,7 @@ button:disabled {
     min-height: 30px;
   }
 
-  .topbar button,
-  .topbar select {
+  .topbar button {
     min-height: 30px;
     padding: 5px 7px;
     font-size: var(--ui-text-11);
@@ -4770,20 +4773,6 @@ button:disabled {
   .topbar .icon-btn__glyph {
     width: 16px;
     height: 16px;
-  }
-
-  .topbar-layer {
-    gap: 5px;
-    height: 30px;
-    padding: 0 6px;
-  }
-
-  .topbar-layer__label {
-    display: none;
-  }
-
-  .topbar-layer__slider {
-    width: 66px;
   }
 
   .money-readout {
@@ -5006,10 +4995,6 @@ button:disabled {
   /* The bar spans the full width down here, so the planner has to step up. */
   .ability-loadout {
     bottom: 70px;
-  }
-
-  .topbar-layer__slider {
-    width: 70px;
   }
 }
 
@@ -5316,26 +5301,53 @@ button:disabled {
   text-shadow: var(--survival-boss-hud-outline);
 }
 
+/*
+ * Three stacked readouts in the bottom-left corner, and deliberately no more
+ * than that. Narrower and tighter than it used to be: this is glanced at from
+ * the corner of an eye that is busy steering, so every millimetre it does not
+ * take is road the player can see.
+ */
 .survival-driver-hud {
   position: absolute;
   bottom: 12px;
   left: 12px;
   z-index: 15;
   display: grid;
-  width: 225px;
+  width: 176px;
   gap: 9px;
-  padding: 10px;
+  padding: 8px;
   background: var(--panel-bg-strong);
   box-shadow:
     7px 8px 0 rgb(0 0 0 / 0.42),
     inset 3px 0 0 var(--ui-signal-dark);
 }
 
+/*
+ * A readout the first wave has not uncovered yet takes no space at all.
+ *
+ * Spelled out rather than left to the user agent's `[hidden] { display: none }`
+ * because every one of these panels sets its own `display`, and an author rule
+ * beats a UA rule whatever the specificity — without this, `hidden` on any of
+ * them does nothing on screen at all.
+ */
+.survival-driver-hud[hidden],
+.survival-speed[hidden],
+.survival-health[hidden],
+.survival-fuel[hidden],
+.survival-cash[hidden],
+.minimap[hidden] {
+  display: none;
+}
+
+/*
+ * No divider under the speed block any more. It was the only hairline in the
+ * panel and it had to be suppressed whenever the readout below it was covered,
+ * which is a rule and an exception where the grid gap above already does the
+ * separating for free.
+ */
 .survival-speed {
   display: grid;
-  gap: 7px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--ui-edge);
+  gap: 6px;
 }
 
 .survival-speed__header {
@@ -5426,34 +5438,6 @@ button:disabled {
   background: #f1eee2;
   box-shadow: 2px 2px 0 rgb(0 0 0 / 0.55);
   transform: translateX(-1px);
-}
-
-/* Three tier labels on one line. Equal columns split the narrowed panel too
-   evenly for "DAMAGE 40–79" to survive, and a wrapped legend costs more height
-   than the whole row is worth, so the middle band takes the slack instead. */
-.survival-speed__legend {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 3px;
-  white-space: nowrap;
-  font: 8px/1 var(--ui-font-body);
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.survival-speed__legend span:nth-child(1) {
-  color: var(--ui-text-muted);
-  text-align: left;
-}
-
-.survival-speed__legend span:nth-child(2) {
-  color: #b87351;
-  text-align: center;
-}
-
-.survival-speed__legend span:nth-child(3) {
-  color: #bd6258;
-  text-align: right;
 }
 
 .survival-health {
@@ -5910,11 +5894,19 @@ button:disabled {
 
 .survival-pickup__chit {
   --pickup-color: var(--ui-bone);
+  /* Base rung. Crates never set this; a streak overwrites it per pop. */
+  --pickup-tier: 0;
 
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--pickup-color);
   font: 400 var(--ui-text-20)/1.1 var(--ui-font-display);
   letter-spacing: 0.02em;
   white-space: nowrap;
+  /* Scaling from the left edge keeps a growing chit pinned to the HUD margin
+     instead of walking out over the arena as it gets louder. */
+  transform-origin: left center;
   text-shadow:
     -2px 0 0 var(--ui-black),
     2px 0 0 var(--ui-black),
@@ -5922,6 +5914,77 @@ button:disabled {
     0 2px 0 var(--ui-black),
     3px 3px 0 rgb(0 0 0 / 0.5);
   animation: survival-pickup-chit 1600ms ease-out forwards;
+}
+
+/*
+ * The icon sits in its own boxed badge rather than running inline with the
+ * words. A bare glyph in the middle of a string is just another character and
+ * disappears into it; a slab with a hard black edge is the thing the eye lands
+ * on first, which is the whole job at this size.
+ */
+.survival-pickup__icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.35em;
+  height: 1.35em;
+  border: 2px solid var(--ui-black);
+  background: color-mix(in srgb, var(--pickup-color) 22%, var(--ui-black));
+  box-shadow: 2px 2px 0 rgb(0 0 0 / 0.55);
+  font-size: 0.85em;
+  /* The badge's own edge is the outline; the glyph's would only muddy it. */
+  text-shadow: none;
+}
+
+.survival-pickup__label {
+  font-size: 0.7em;
+  letter-spacing: 0.08em;
+}
+
+/*
+ * The money is the payoff, so it is the biggest thing on the chit and the only
+ * part in full brightness — the label beside it is context and reads at a
+ * glance without ever being the thing you look at.
+ */
+.survival-pickup__value {
+  color: color-mix(in srgb, var(--pickup-color) 45%, #fff);
+  font-size: 1.15em;
+}
+
+/*
+ * Streak and milestone chits: the loud treatment.
+ *
+ * A slab behind the whole row, type that grows with the rung, and a hit-stop
+ * pop instead of a fade-in. `--pickup-tier` drives all three from one number
+ * so a run visibly escalates; the rungs stop at 4 and hold (see
+ * `PICKUP_TIER_MAX`), because past that the chit would start eating the arena.
+ */
+.survival-pickup__chit--loud {
+  --pickup-grow: calc(1 + var(--pickup-tier) * 0.08);
+
+  padding: 3px 8px 3px 4px;
+  border: 2px solid var(--ui-black);
+  border-left: 4px solid var(--pickup-color);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--pickup-color) 30%, rgb(7 8 7 / 0.92)),
+    rgb(7 8 7 / 0.82)
+  );
+  box-shadow:
+    3px 3px 0 rgb(0 0 0 / 0.55),
+    inset 0 0 0 1px color-mix(in srgb, var(--pickup-color) 30%, transparent);
+  /* Top rungs glow, so the last chits of a long plow carry past the slab. */
+  filter: drop-shadow(
+    0 0 calc(var(--pickup-tier) * 2px)
+      color-mix(in srgb, var(--pickup-color) 60%, transparent)
+  );
+  font-size: calc(var(--ui-text-20) * var(--pickup-grow));
+  animation-name: survival-pickup-chit-loud;
+}
+
+.survival-pickup__chit--loud .survival-pickup__icon {
+  animation: survival-pickup-icon 460ms ease-out 1;
 }
 
 @keyframes survival-pickup-chit {
@@ -5950,10 +6013,79 @@ button:disabled {
   }
 }
 
+/*
+ * Punch, settle, hold, go. The chit arrives already oversized and snaps back
+ * rather than sliding in — an overshoot on the way *down* is what reads as an
+ * impact, where growing into place reads as a notification. The two-step
+ * recoil at 8%/14% is the hit-stop: one frame of overcorrection so the stop
+ * lands hard instead of easing out.
+ */
+@keyframes survival-pickup-chit-loud {
+  0% {
+    opacity: 0;
+    transform: translateX(-10px) scale(1.5);
+  }
+
+  8% {
+    opacity: 1;
+    transform: translateX(2px) scale(0.94);
+  }
+
+  14% {
+    transform: translateX(0) scale(1.08);
+  }
+
+  22% {
+    transform: translateX(0) scale(1);
+  }
+
+  78% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(0) scale(1.04);
+  }
+}
+
+/* The badge blows out white on the frame it lands, then falls back to colour. */
+@keyframes survival-pickup-icon {
+  0% {
+    background: #fff;
+    transform: scale(1.4);
+  }
+
+  30% {
+    background: color-mix(in srgb, var(--pickup-color) 70%, #fff);
+    transform: scale(1);
+  }
+
+  100% {
+    background: color-mix(in srgb, var(--pickup-color) 22%, var(--ui-black));
+    transform: scale(1);
+  }
+}
+
 /* Reduced motion keeps the reading time and drops the slide and the pop. */
 @media (prefers-reduced-motion: reduce) {
   .survival-pickup__chit {
     animation-name: survival-pickup-chit-still;
+  }
+
+  /*
+   * The loud chit keeps its slab, its size and its tier glow — none of that is
+   * motion — and gives up only the punch and the icon flash. A player who
+   * asked for less movement should still be able to see that the streak got
+   * bigger, which is the part that carries the information.
+   */
+  .survival-pickup__chit--loud {
+    animation-name: survival-pickup-chit-still;
+  }
+
+  .survival-pickup__chit--loud .survival-pickup__icon {
+    animation: none;
   }
 
   @keyframes survival-pickup-chit-still {
@@ -7005,10 +7137,10 @@ button:disabled {
     grid-template-columns: 1fr 1fr;
   }
 
+  /* Spans the pair below it; the grid gap separates them, same as on desktop. */
   .survival-speed {
     grid-column: 1 / -1;
-    padding: 0 0 10px;
-    border-bottom: 1px solid var(--ui-edge);
+    padding: 0;
   }
 
   /* Keep the wallet clear of the wave strip once the corners close in. */
@@ -7183,14 +7315,13 @@ button:disabled {
   .survival-driver-hud {
     bottom: 10px;
     left: 10px;
-    width: 186px;
+    width: 156px;
     gap: 6px;
     padding: 7px;
   }
 
   .survival-speed {
     gap: 5px;
-    padding-bottom: 5px;
   }
 
   .survival-speed__header {
@@ -7294,6 +7425,12 @@ button:disabled {
 
   .survival-pickup__chit {
     font-size: var(--ui-text-16);
+  }
+
+  /* Same ladder, smaller base — written as its own calc because the rule above
+     would otherwise flatten every rung back to one size on a narrow window. */
+  .survival-pickup__chit--loud {
+    font-size: calc(var(--ui-text-16) * var(--pickup-grow));
   }
 
   .survival-prompts {

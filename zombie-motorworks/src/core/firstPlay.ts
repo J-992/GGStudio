@@ -5,24 +5,23 @@
  * A first-time player boots straight into the arena rather than the garage (see
  * `App.beginFirstRun`), so this is the first thing anyone reads in this game.
  * That budget is about fifteen seconds, which rules out a tour: what is here
- * instead is five beats, each of which stops the world dead, says one short
+ * instead is three beats, each of which stops the world dead, says one short
  * line, and starts it again the instant the player does the thing. Nobody is
  * asked to read while zombies are closing, and nobody is asked to read more
  * than a line.
  *
  * The order is what the hands need, not what the systems are: drive, shoot,
- * press the ability, and only then the two HUD readouts. Those two arrive last
- * *and hidden* — the health bar and the wave timeline stay off the screen until
- * their own beat reveals them, because a full HUD in front of someone who does
- * not yet know what a wave is reads as noise rather than information.
+ * press the ability. Nothing else stops the world. The HUD used to cost two
+ * more time-stops — one to point at the health bar, one at the wave timeline —
+ * and neither was teaching a skill; a stopped fight with a caption on it is the
+ * most expensive way to introduce a bar that could simply slide in at the
+ * moment it starts mattering. So the readouts are event-revealed instead (see
+ * `FIRST_PLAY_HUD_TRIGGERS`), and the coach is three beats of hands.
  *
  * The counterpart to `core/tutorial.ts`, which is the Garage Tour. Same split:
  * the steps and the advance rule are pure and live here; the card, the scrim
  * and the freeze live in `survival/FirstPlayCoach.ts` and `SurvivalMode`.
  */
-
-/** A piece of HUD furniture a step uncovers as it opens. */
-export type FirstPlayReveal = 'health' | 'waveTimeline';
 
 /**
  * What the player has to do to start the world again.
@@ -30,10 +29,9 @@ export type FirstPlayReveal = 'health' | 'waveTimeline';
  * Deliberately the same input the step is teaching, rather than a Next button:
  * the lesson is over when the hand has done it once, and a card dismissed by
  * pressing W has taught driving more reliably than one dismissed by clicking
- * "Got it". `any` is for the two read-only reveals, which are not asking for a
- * skill.
+ * "Got it".
  */
-export type FirstPlayRelease = 'drive' | 'fire' | 'ability' | 'any';
+export type FirstPlayRelease = 'drive' | 'fire' | 'ability';
 
 /** Inputs the live mode reports back; they are matched against `release`. */
 export type FirstPlayInput = 'drive' | 'fire' | 'ability' | 'other';
@@ -50,12 +48,11 @@ export interface FirstPlayStep {
   /** Shown as the card's footer: the input, in the player's own words. */
   hint: string;
   touchHint: string;
-  reveals?: FirstPlayReveal;
   /**
    * Live arena seconds to let run after this step's card is dismissed, before
    * the next one stops the world again. Sized to be long enough to actually use
    * what was just taught and short enough that the lesson is one continuous
-   * beat rather than five interruptions.
+   * beat rather than three interruptions.
    */
   runSeconds: number;
 }
@@ -76,7 +73,7 @@ export const FIRST_PLAY_STEPS: readonly FirstPlayStep[] = [
     release: 'drive',
     hint: 'Press W to go',
     touchHint: 'Push the stick',
-    runSeconds: 5,
+    runSeconds: 4,
   },
   {
     id: 'shoot',
@@ -86,7 +83,7 @@ export const FIRST_PLAY_STEPS: readonly FirstPlayStep[] = [
     release: 'fire',
     hint: 'Hold left click',
     touchHint: 'Hold FIRE',
-    runSeconds: 6,
+    runSeconds: 5,
   },
   {
     id: 'ability',
@@ -96,28 +93,6 @@ export const FIRST_PLAY_STEPS: readonly FirstPlayStep[] = [
     release: 'ability',
     hint: `Press ${FIRST_PLAY_ABILITY_KEY_TOKEN}`,
     touchHint: 'Tap the shield',
-    runSeconds: 6,
-  },
-  {
-    id: 'health',
-    title: 'Your truck',
-    text: 'Zombies chew through this. At zero you are done.',
-    touchText: 'Zombies chew through this. At zero you are done.',
-    release: 'any',
-    hint: 'Press any key',
-    touchHint: 'Tap to continue',
-    reveals: 'health',
-    runSeconds: 4,
-  },
-  {
-    id: 'wave',
-    title: 'Clear it',
-    text: 'Kill every last one and the wave is yours.',
-    touchText: 'Kill every last one and the wave is yours.',
-    release: 'any',
-    hint: 'Press any key',
-    touchHint: 'Tap to continue',
-    reveals: 'waveTimeline',
     // Nothing follows, so this is only how long the last card's dismissal is
     // allowed to hold the next one off. There is no next one.
     runSeconds: 0,
@@ -129,24 +104,44 @@ export function releasesStep(
   step: FirstPlayStep,
   input: FirstPlayInput,
 ): boolean {
-  return step.release === 'any' ? true : step.release === input;
+  return step.release === input;
 }
 
+/** A piece of HUD furniture the first wave keeps off screen until it earns it. */
+export type FirstPlayHudPiece =
+  'health' | 'waveTimeline' | 'cash' | 'fuel' | 'speed' | 'minimap';
+
+/** Something that happened in the arena and is allowed to uncover a readout. */
+export type FirstPlayHudTrigger = 'damaged' | 'kill' | 'ramSpeed' | 'lowFuel';
+
 /**
- * Which HUD pieces are visible once `stepIndex` steps have *opened*.
+ * What has to happen before each readout is worth screen space.
  *
- * Reads off the step list rather than being tracked as its own flags, so a
- * reveal can never drift from the step that promised it, and a coach that is
- * finished or was never started answers correctly without a special case:
- * an index past the end reveals everything, which is also what happens on a
- * save that has already played its first wave.
+ * A bar that slides in at the moment it starts meaning something teaches itself
+ * and costs nothing; the same bar sitting there from frame one is instrument
+ * clutter in front of somebody who does not yet know what a wave is. `null` is
+ * a piece the first wave never shows at all — the minimap is a wave-2 tool, and
+ * a new player cannot read a blip map and learn to steer at the same time.
+ *
+ * `ramSpeed` fires the first time the rig is moving fast enough for a ram to
+ * hurt, which is the first moment the tiered speed bar is describing anything.
  */
-export function firstPlayRevealed(
-  stepIndex: number,
-  reveal: FirstPlayReveal,
-): boolean {
-  if (stepIndex >= FIRST_PLAY_STEPS.length) return true;
-  return FIRST_PLAY_STEPS.slice(0, stepIndex + 1).some(
-    (step) => step.reveals === reveal,
+export const FIRST_PLAY_HUD_TRIGGERS: Readonly<
+  Record<FirstPlayHudPiece, FirstPlayHudTrigger | null>
+> = {
+  health: 'damaged',
+  waveTimeline: 'kill',
+  cash: 'kill',
+  speed: 'ramSpeed',
+  fuel: 'lowFuel',
+  minimap: null,
+};
+
+/** Every readout `trigger` uncovers. */
+export function firstPlayHudPiecesFor(
+  trigger: FirstPlayHudTrigger,
+): FirstPlayHudPiece[] {
+  return (Object.keys(FIRST_PLAY_HUD_TRIGGERS) as FirstPlayHudPiece[]).filter(
+    (piece) => FIRST_PLAY_HUD_TRIGGERS[piece] === trigger,
   );
 }

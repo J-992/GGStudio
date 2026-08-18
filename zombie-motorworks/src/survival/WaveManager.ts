@@ -513,6 +513,12 @@ export class WaveManager {
       attackDamageMultiplierForWave(this.waveNumber),
     );
     this.zombies.setBossEncounter(bossForWave(this.waveNumber));
+    // The pool builds bodies on demand, so the first of any kind pulls its
+    // model down when it spawns. The roster for the whole wave is known here,
+    // before anything has been asked for, which makes this the moment to get
+    // one of each kind built and its asset loading — otherwise the opening body
+    // of a kind would wear its fallback shape for a beat.
+    this.zombies.warmKinds(this.spawnOrder);
     this.emitRemaining();
   }
 
@@ -582,6 +588,12 @@ export class WaveManager {
       attackDamageMultiplierForWave(this.waveNumber),
     );
     this.zombies.setBossEncounter(bossForWave(this.waveNumber));
+    // The pool builds bodies on demand, so the first of any kind pulls its
+    // model down when it spawns. The roster for the whole wave is known here,
+    // before anything has been asked for, which makes this the moment to get
+    // one of each kind built and its asset loading — otherwise the opening body
+    // of a kind would wear its fallback shape for a beat.
+    this.zombies.warmKinds(this.spawnOrder);
     this.emitRemaining();
     this.callbacks.onEndlessWaveAdvanced?.(
       cleared,

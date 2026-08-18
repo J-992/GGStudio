@@ -214,6 +214,18 @@ export const STUCK_TELEPORT_SECONDS = 4;
 export const HORDE_SCATTER_RADIUS = 3.5;
 export const MIN_SPAWN_DISTANCE_FROM_VEHICLE = 18;
 
+/**
+ * The tutorial wave's spawn wedge: how far off the nose the crowd lands, how
+ * much further the far chunks go, and how wide the wedge opens.
+ *
+ * Twenty-four metres is inside what the follow camera shows and outside what
+ * the rig can touch on the first frame, so the horde is on screen the moment
+ * the first card lifts. See `ZombieSystem.setSpawnAhead`.
+ */
+export const SPAWN_AHEAD_DISTANCE = 24;
+export const SPAWN_AHEAD_DISTANCE_SPREAD = 10;
+export const SPAWN_AHEAD_ARC_RADIANS = 1.5;
+
 /** A pack trims momentum without making the vehicle feel glued in place. */
 export const SWARM_DRAG_PER_CONTACT = 0.03;
 export const MAXIMUM_SWARM_DRAG = 0.3;

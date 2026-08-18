@@ -36,17 +36,36 @@ export const BOOT_STAGES = {
   /** The renderer exists and the canvas is in the document. */
   rendererReady: { at: 0.45, label: 'Lighting the bay' },
   /** Rapier's wasm has compiled. The long pole on a cold boot. */
-  engineReady: { at: 0.9, label: 'Spinning up physics' },
-  /** A mode is mounted and the frame loop is running. */
-  modeReady: { at: 1, label: 'Ready' },
+  engineReady: { at: 0.82, label: 'Spinning up physics' },
+  /**
+   * A mode is mounted and the frame loop is running.
+   *
+   * Short of the end, because on a first boot the splash does not come down
+   * here: it stays up over the arena load (see `App.holdBootSplashForArena`)
+   * and the last sliver of bar belongs to that. Every other route dismisses
+   * the splash from here, and `done()` fills the bar on its way out.
+   */
+  modeReady: { at: 0.86, label: 'Ready' },
 } as const;
 
 export type BootStage = keyof typeof BOOT_STAGES;
+
+/** The slice of bar the first-boot arena load owns, after `modeReady`. */
+export const BOOT_ARENA_SPAN: readonly [number, number] = [0.86, 1];
 
 /** Advance the boot bar to a named stage. Safe to call when no splash exists. */
 export function reportBootStage(stage: BootStage): void {
   const { at, label } = BOOT_STAGES[stage];
   driver()?.set(at, label);
+}
+
+/**
+ * Move the bar to an arbitrary point, for work that has real progress of its
+ * own rather than a fixed stage. The driver is monotonic, so a fraction behind
+ * what is already shown is ignored rather than walking the bar backwards.
+ */
+export function reportBootProgress(fraction: number, label?: string): void {
+  driver()?.set(fraction, label);
 }
 
 /**

@@ -3294,13 +3294,13 @@ export class VfxSystem {
     const detail = this.detailAt(x, y, z);
     if (detail <= 0) return;
 
-    this.flash(x, y + 0.3, z, radiusM * 1.1, 0.1, VFX_PALETTE.arcPale);
+    this.flash(x, y + 0.3, z, radiusM * 1.6, 0.14, VFX_PALETTE.arcPale);
 
     // The channel: segments up a column, each kicked off the axis so the bolt
     // forks the way lightning does. Counts are deliberately modest — the rod
     // fires twice a second all wave, so a bolt that cost as much as a one-off
     // ability would starve every other effect on screen of spawn budget.
-    const segments = this.count(9, detail);
+    const segments = this.count(16, detail);
     for (let i = 0; i < segments; i++) {
       const height = (i / Math.max(1, segments)) * 6;
       // Jitter widens with height, so the strike is pinned at the point of
@@ -3311,8 +3311,8 @@ export class VfxSystem {
       this.spec.y = y + height;
       this.spec.z = z + this.randSigned(spread);
       this.spec.vy = this.rand(-3, -1);
-      this.spec.size = this.rand(0.1, 0.2);
-      this.spec.endSize = 0.02;
+      this.spec.size = this.rand(0.18, 0.34);
+      this.spec.endSize = 0.03;
       // Higher segments die first, so the bolt reads as draining downward.
       this.spec.lifeSeconds = 0.14 + (1 - i / Math.max(1, segments)) * 0.16;
       this.spec.colorStart = VFX_PALETTE.arcPale;
@@ -3322,10 +3322,10 @@ export class VfxSystem {
     }
 
     // Ground discharge: sparks skating outward across the floor.
-    const sparks = this.count(7, detail);
+    const sparks = this.count(14, detail);
     for (let i = 0; i < sparks; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = this.rand(4, 11);
+      const speed = this.rand(4, 13);
       this.reset0();
       this.spec.x = x;
       this.spec.y = y + 0.12;
@@ -3370,21 +3370,92 @@ export class VfxSystem {
     const perpX = -dz / length;
     const perpZ = dx / length;
 
-    const steps = this.count(Math.max(4, Math.min(9, length * 2)), detail);
+    // Densely stepped and fat enough to read as a rope of light rather than a
+    // dotted line. The arc is the whole identity of the light build and it
+    // fires twice a second, so it earns a bigger share of the budget than the
+    // per-shot effects around it — but the counts still scale with length, so
+    // a short hop between two touching bodies stays cheap.
+    const steps = this.count(Math.max(7, Math.min(20, length * 4)), detail);
     for (let i = 1; i <= steps; i++) {
       const t = i / (steps + 1);
       // sin(pi*t) is zero at both ends and widest in the middle.
-      const kink = Math.sin(Math.PI * t) * this.randSigned(0.45);
+      const kink = Math.sin(Math.PI * t) * this.randSigned(0.6);
       this.reset0();
       this.spec.x = from.x + dx * t + perpX * kink;
-      this.spec.y = from.y + dy * t + this.randSigned(0.12);
+      this.spec.y = from.y + dy * t + this.randSigned(0.16);
       this.spec.z = from.z + dz * t + perpZ * kink;
-      this.spec.size = this.rand(0.09, 0.16);
-      this.spec.endSize = 0.02;
-      this.spec.lifeSeconds = this.rand(0.1, 0.18);
+      this.spec.size = this.rand(0.16, 0.3);
+      this.spec.endSize = 0.03;
+      this.spec.lifeSeconds = this.rand(0.16, 0.3);
       this.spec.colorStart = VFX_PALETTE.arcPale;
       this.spec.colorEnd = VFX_PALETTE.arc;
       this.spec.gravity = 0;
+      this.glow.spawn(this.take());
+    }
+
+    // Forks: two short stubs thrown off the middle of the run, perpendicular
+    // and dying fast. Real lightning branches, and without them a chain of
+    // clean arcs reads as a drawn diagram rather than as electricity.
+    const forks = this.count(2, detail);
+    for (let i = 0; i < forks; i++) {
+      const t = this.rand(0.25, 0.75);
+      const baseX = from.x + dx * t;
+      const baseY = from.y + dy * t;
+      const baseZ = from.z + dz * t;
+      const reach = this.rand(0.3, 0.9);
+      const sign = Math.random() < 0.5 ? -1 : 1;
+      const stubs = 3;
+      for (let j = 1; j <= stubs; j++) {
+        const k = (j / stubs) * reach * sign;
+        this.reset0();
+        this.spec.x = baseX + perpX * k + this.randSigned(0.1);
+        this.spec.y = baseY + this.rand(0, 0.4);
+        this.spec.z = baseZ + perpZ * k + this.randSigned(0.1);
+        this.spec.size = this.rand(0.07, 0.14);
+        this.spec.endSize = 0.02;
+        this.spec.lifeSeconds = this.rand(0.07, 0.14);
+        this.spec.colorStart = VFX_PALETTE.arcPale;
+        this.spec.colorEnd = VFX_PALETTE.arcDeep;
+        this.spec.gravity = 0;
+        this.glow.spawn(this.take());
+      }
+    }
+  }
+
+  /**
+   * The pop where one jump of a chain lands on a body: a hot flash on the
+   * zombie and a handful of sparks off it.
+   *
+   * Every body the chain touches gets one, so a six-target volley reads as six
+   * things being hit rather than as one strike with a tail drawn behind it.
+   * Deliberately much cheaper than {@link lightningStrike}, which stays the
+   * heavier effect reserved for the body under the cursor.
+   */
+  lightningZap(x: number, y: number, z: number): void {
+    if (this.disposed) return;
+    const detail = this.detailAt(x, y, z);
+    if (detail <= 0) return;
+
+    this.flash(x, y + 0.4, z, 0.85, 0.08, VFX_PALETTE.arcPale);
+
+    const sparks = this.count(6, detail);
+    for (let i = 0; i < sparks; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = this.rand(2, 6);
+      this.reset0();
+      this.spec.x = x + this.randSigned(0.16);
+      this.spec.y = y + this.rand(0.2, 1);
+      this.spec.z = z + this.randSigned(0.16);
+      this.spec.vx = Math.cos(angle) * speed;
+      this.spec.vy = this.rand(1, 5);
+      this.spec.vz = Math.sin(angle) * speed;
+      this.spec.size = this.rand(0.07, 0.14);
+      this.spec.endSize = 0.01;
+      this.spec.lifeSeconds = this.rand(0.14, 0.3);
+      this.spec.colorStart = VFX_PALETTE.arcPale;
+      this.spec.colorEnd = VFX_PALETTE.arcDeep;
+      this.spec.gravity = -10;
+      this.spec.drag = 0.9;
       this.glow.spawn(this.take());
     }
   }

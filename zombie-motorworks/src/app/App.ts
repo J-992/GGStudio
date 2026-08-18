@@ -54,7 +54,11 @@ import {
 } from '../editor/EditorMode.ts';
 import { CommandHistory } from '../core/commands.ts';
 import { beginPhysicsInit } from './physics.ts';
-import { reportBootStage } from './bootSplash.ts';
+import {
+  BOOT_ARENA_SPAN,
+  reportBootProgress,
+  reportBootStage,
+} from './bootSplash.ts';
 import { maxPixelRatio } from '../ui/device.ts';
 import { ChamberMode, type ScenarioName } from '../chamber/ChamberMode.ts';
 import type { VehicleControls } from '../runtime/vehicle.ts';
@@ -479,6 +483,20 @@ export class App {
    * consumes it, so it can never leak into a second wave or a resumed run.
    */
   private firstPlayWave = false;
+  /** Pending coalesced re-fit; see `onViewportChange`. */
+  private viewportFrame: number | undefined;
+  /**
+   * The pixel ratio and backing-store dimensions the canvas is currently built
+   * at. `applyViewport` compares against these to avoid reallocating a drawing
+   * buffer that would come back identical; zero means "not yet applied".
+   */
+  private appliedPixelRatio = 0;
+  private appliedDeviceWidth = 0;
+  private appliedDeviceHeight = 0;
+  /** True between `webglcontextlost` and `webglcontextrestored`. */
+  private contextLost = false;
+  /** Shown over the viewport for as long as the GL context is gone. */
+  private readonly contextNotice = createContextNotice();
 
   constructor(private readonly root: HTMLElement) {
     // Raw-key detection must happen before profile loading can synthesize an
@@ -496,26 +514,111 @@ export class App {
   }
 
   /**
+   * Queue a re-fit for the next frame.
+   *
+   * Deliberately not the work itself. `visualViewport` fires `resize` on every
+   * frame the mobile URL bar slides, on every soft-keyboard open and through a
+   * pinch-zoom, so binding the resize directly to it ran the whole re-fit
+   * dozens of times a second. Coalescing to one frame makes a burst of events
+   * cost exactly one re-fit, and `applyViewport` then drops even that when
+   * nothing actually moved.
+   */
+  private readonly onViewportChange = (): void => {
+    if (this.viewportFrame !== undefined) return;
+    this.viewportFrame = requestAnimationFrame(() => {
+      this.viewportFrame = undefined;
+      this.applyViewport();
+    });
+  };
+
+  private readonly onOrientationChange = (): void => {
+    requestAnimationFrame(this.onViewportChange);
+  };
+
+  /**
    * Re-fit the renderer and every live mode to the current viewport.
    *
    * The pixel-ratio ceiling is re-read here rather than only at boot because a
    * tablet gaining a mouse changes what `maxPixelRatio` reports, and because
    * mobile browsers can hand back a different `devicePixelRatio` after a
    * rotation.
+   *
+   * The early-out is the point of this function. `WebGLRenderer.setSize`
+   * assigns `canvas.width`/`canvas.height` unconditionally, and assigning
+   * either — even the identical value — destroys and reallocates the entire
+   * drawing buffer. With `antialias: true` at a pixel ratio of 2 that is tens
+   * of megabytes of multisampled colour and depth torn down and rebuilt per
+   * call, which is one of the surest ways to make a mobile GPU drop the
+   * context out from under the page. So the backing store is only touched when
+   * its dimensions would genuinely differ.
    */
-  private readonly onViewportChange = (): void => {
-    this.renderer.setPixelRatio(
-      Math.min(window.devicePixelRatio, maxPixelRatio()),
-    );
-    this.renderer.setSize(this.root.clientWidth, this.root.clientHeight);
-    this.editor?.resize(this.root.clientWidth, this.root.clientHeight);
-    this.chamber?.resize(this.root.clientWidth, this.root.clientHeight);
-    this.survival?.resize(this.root.clientWidth, this.root.clientHeight);
-    this.title?.resize(this.root.clientWidth, this.root.clientHeight);
+  private applyViewport(): void {
+    // Reachable before `start()` has built the renderer: a rotation during boot
+    // fires this off the listeners the constructor is not responsible for.
+    if (!this.renderer) return;
+    const width = this.root.clientWidth;
+    const height = this.root.clientHeight;
+    // A collapsed layout (a hidden container mid-transition) would otherwise
+    // resize the buffer to nothing and force a second reallocation on the way
+    // back out.
+    if (width === 0 || height === 0) return;
+
+    const ratio = Math.min(window.devicePixelRatio, maxPixelRatio());
+    const deviceWidth = Math.floor(width * ratio);
+    const deviceHeight = Math.floor(height * ratio);
+    if (
+      deviceWidth === this.appliedDeviceWidth &&
+      deviceHeight === this.appliedDeviceHeight &&
+      ratio === this.appliedPixelRatio
+    ) {
+      return;
+    }
+
+    // `setPixelRatio` reallocates on its own — it re-runs `setSize` at the
+    // dimensions already stored — so it is only called when the ratio actually
+    // moved. An ordinary resize therefore costs one reallocation rather than
+    // the two the unconditional pair used to cost.
+    if (ratio !== this.appliedPixelRatio) this.renderer.setPixelRatio(ratio);
+    this.renderer.setSize(width, height);
+    this.appliedPixelRatio = ratio;
+    this.appliedDeviceWidth = deviceWidth;
+    this.appliedDeviceHeight = deviceHeight;
+
+    this.editor?.resize(width, height);
+    this.chamber?.resize(width, height);
+    this.survival?.resize(width, height);
+    this.title?.resize(width, height);
+  }
+
+  /**
+   * The GPU handed the canvas back.
+   *
+   * Calling `preventDefault` is what makes this recoverable at all: without it
+   * the browser is not permitted to attempt a restore, so a backgrounded tab on
+   * Android — which routinely reclaims GPU resources — left a black canvas and
+   * a frame loop drawing into a dead context for the rest of the session. That
+   * was the single largest error on the portal.
+   */
+  private readonly onContextLost = (event: Event): void => {
+    event.preventDefault();
+    this.contextLost = true;
+    this.contextNotice.hidden = false;
   };
 
-  private readonly onOrientationChange = (): void => {
-    requestAnimationFrame(this.onViewportChange);
+  /**
+   * The context came back. Three rebuilds its GPU-side state lazily as objects
+   * are drawn again, but the drawing buffer returns at its default size, so the
+   * fit has to be re-applied before the first frame — and the cached dimensions
+   * have to be cleared first or `applyViewport` would correctly decide there is
+   * nothing to do.
+   */
+  private readonly onContextRestored = (): void => {
+    this.contextLost = false;
+    this.contextNotice.hidden = true;
+    this.appliedPixelRatio = 0;
+    this.appliedDeviceWidth = 0;
+    this.appliedDeviceHeight = 0;
+    this.applyViewport();
   };
 
   /**
@@ -552,8 +655,30 @@ export class App {
       Math.min(window.devicePixelRatio, maxPixelRatio()),
     );
     this.renderer.setSize(this.root.clientWidth, this.root.clientHeight);
+    // Seed what `applyViewport` compares against, so the first resize event to
+    // arrive after boot is correctly recognised as a no-op rather than
+    // reallocating the buffer that was just built.
+    this.appliedPixelRatio = Math.min(window.devicePixelRatio, maxPixelRatio());
+    this.appliedDeviceWidth = Math.floor(
+      this.root.clientWidth * this.appliedPixelRatio,
+    );
+    this.appliedDeviceHeight = Math.floor(
+      this.root.clientHeight * this.appliedPixelRatio,
+    );
     this.renderer.domElement.className = 'viewport';
     this.root.appendChild(this.renderer.domElement);
+    this.root.appendChild(this.contextNotice);
+    // A lost context is survivable, but only if the loss is acknowledged — see
+    // `onContextLost`. Registered on the canvas itself, which is where the
+    // events are dispatched.
+    this.renderer.domElement.addEventListener(
+      'webglcontextlost',
+      this.onContextLost,
+    );
+    this.renderer.domElement.addEventListener(
+      'webglcontextrestored',
+      this.onContextRestored,
+    );
     window.addEventListener('resize', this.onViewportChange);
     // Mobile Safari resizes the *visual* viewport when the URL bar slides away
     // without always firing a window resize. Without this the canvas keeps the
@@ -590,12 +715,57 @@ export class App {
 
     const loop = (): void => {
       requestAnimationFrame(loop);
+      // Every mode's `update` ends in a draw, and drawing into a lost context
+      // is at best wasted work and at worst a flood of GL errors. Holding the
+      // whole update also freezes simulation for the duration, which is what a
+      // player who backgrounded the tab wants to come back to.
+      if (this.contextLost) return;
       this.title?.update();
       this.editor?.update();
       this.chamber?.update();
       this.survival?.update();
     };
     loop();
+
+    // One loading screen, not two. A first boot used to drop the splash the
+    // instant a mode existed and immediately raise the arena's own full-bleed
+    // scrim behind it — the same wait, counted twice, in front of the player
+    // who has the least patience for it. Holding the splash over the arena
+    // load keeps it to a single bar that fills once and then hands over to a
+    // level that is standing. Started after `loop`, because the gate that
+    // times the arena load out runs on the frame loop.
+    await this.holdBootSplashForArena();
+  }
+
+  /**
+   * Keep the boot splash up, and its bar moving, until the first arena is
+   * playable.
+   *
+   * Only ever the first-boot arena: every other route out of boot lands on the
+   * title screen, which is ready the moment it is mounted. Awaited without a
+   * timeout of its own because `SurvivalMode.whenPlayable` already settles on
+   * its own gate, on a timeout, and on disposal.
+   */
+  private async holdBootSplashForArena(): Promise<void> {
+    const survival = this.survival;
+    if (survival === null) return;
+    const playable = survival.whenPlayable();
+    let live = true;
+    void playable.then(() => {
+      live = false;
+    });
+    const tick = (): void => {
+      if (!live) return;
+      reportBootProgress(
+        BOOT_ARENA_SPAN[0] +
+          survival.arenaLoadFraction() *
+            (BOOT_ARENA_SPAN[1] - BOOT_ARENA_SPAN[0]),
+        'Rolling out',
+      );
+      requestAnimationFrame(tick);
+    };
+    tick();
+    await playable;
   }
 
   /**
@@ -2100,4 +2270,30 @@ export function buildStarterBlueprint(
   buildId: BuildId = DEFAULT_BUILD_ID,
 ): VehicleBlueprint {
   return buildStarterRig(buildId);
+}
+
+/**
+ * The overlay shown while the GL context is gone.
+ *
+ * A restore is not instant and is not guaranteed to be automatic — a tab that
+ * has been backgrounded for a while may not get its context back until it is
+ * looked at again — so the player is told what happened rather than left in
+ * front of a frozen picture wondering whether the game crashed. Built once and
+ * kept hidden; the handlers only toggle `hidden`.
+ */
+function createContextNotice(): HTMLElement {
+  const notice = document.createElement('div');
+  notice.className = 'context-lost-notice';
+  notice.hidden = true;
+  notice.setAttribute('role', 'status');
+  const panel = document.createElement('div');
+  panel.className = 'context-lost-notice__panel';
+  const title = document.createElement('strong');
+  title.textContent = 'Graphics paused';
+  const body = document.createElement('p');
+  body.textContent =
+    'The browser reclaimed this game’s graphics while it was in the background. It will pick up where it left off in a moment.';
+  panel.append(title, body);
+  notice.appendChild(panel);
+  return notice;
 }

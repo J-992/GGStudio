@@ -17,6 +17,15 @@
   transform: translateX(-50%);
 }
 
+/*
+ * The strip sets its own `display`, which beats the user agent's
+ * `[hidden] { display: none }`, so the first wave's `hidden` needs saying out
+ * loud to actually take the strip off screen.
+ */
+.wave-timeline[hidden] {
+  display: none;
+}
+
 .wave-timeline * {
   pointer-events: none;
 }

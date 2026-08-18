@@ -188,11 +188,13 @@ describe('pending survival wave rewards', () => {
 
     mode.handleZombieKilled(7, 'walker');
     mode.handleZombieKilled(11, 'walker');
+    // Three kills back to back is a 3x streak, which pays $3 into the same
+    // pending purse as the kills themselves: 7 + 11 + 13 + 3.
     mode.handleZombieKilled(13, 'walker');
 
     expect(profile.money).toBe(100);
     expect(rewardCalls).toEqual([]);
-    expect(mode.pendingWaveKillReward).toBe(31);
+    expect(mode.pendingWaveKillReward).toBe(34);
 
     mode.onWaveComplete(1, 50);
     expect(profile.money).toBe(100);
@@ -200,9 +202,9 @@ describe('pending survival wave rewards', () => {
     mode.queueCompletedStepTransition();
     mode.queueCompletedStepTransition();
 
-    expect(rewardCalls).toEqual([81]);
-    expect(profile.money).toBe(181);
-    expect(mode.waveMoneyEarned).toBe(81);
+    expect(rewardCalls).toEqual([84]);
+    expect(profile.money).toBe(184);
+    expect(mode.waveMoneyEarned).toBe(84);
     expect(mode.pendingWaveKillReward).toBe(0);
     expect(mode.pendingWaveReward).toBe(0);
   });

@@ -1,5 +1,5 @@
 /**
- * 3D vehicle editor: orbit/ortho cameras, layer slicing, ghost placement,
+ * 3D vehicle editor: orbit/ortho cameras, ghost placement,
  * selection, symmetry, overlays, reversible commands, and autosave.
  */
 
@@ -121,7 +121,7 @@ const TUTORIAL_DONE_KEY = 'scraprig.tutorial-done';
 /** The top bar's own offset from the top edge — `.topbar { top: 8px }`. */
 const TOPBAR_INSET_PX = 8;
 /** Breathing room between the bar's underside and the panels hung from it. */
-const TOPBAR_PANEL_GAP_PX = 14;
+const TOPBAR_PANEL_GAP_PX = 10;
 
 /**
  * How far a build-face hit is stepped along its normal to land in the
@@ -277,11 +277,10 @@ interface GhostState {
   manualOrient?: boolean;
 }
 
-/** Camera/layer state preserved across editor <-> runtime-mode round trips. */
+/** Camera state preserved across editor <-> runtime-mode round trips. */
 export interface EditorViewState {
   cameraPos: { x: number; y: number; z: number };
   target: { x: number; y: number; z: number };
-  layer: number;
 }
 
 export type EditorSfxCue =
@@ -362,7 +361,6 @@ export class EditorMode {
   private upgradeTipBlockAnchor: THREE.Vector3 | null = null;
   private readonly blockProjection = new THREE.Vector3();
   private symmetry = false;
-  private layer = -1;
   private readonly toggles: OverlayToggles = {
     ...defaultToggles(),
     com: true,
@@ -522,11 +520,6 @@ export class EditorMode {
         onSymmetryToggle: (on) => {
           this.symmetry = on;
         },
-        onView: (v) => this.setView(v),
-        onLayerChange: (l) => {
-          this.layer = l;
-          this.rebuildMeshes();
-        },
         onTestDrive: () => {
           const report = validateBlueprint(this.bp, getPartDef);
           if (report.errors.length === 0) {
@@ -612,7 +605,6 @@ export class EditorMode {
         context.view.target.y,
         context.view.target.z,
       );
-      this.layer = context.view.layer;
     }
     this.refresh();
     if (context.notice) this.ui.setNotice(context.notice);
@@ -640,7 +632,6 @@ export class EditorMode {
         y: this.controls.target.y,
         z: this.controls.target.z,
       },
-      layer: this.layer,
     };
   }
 
@@ -1761,13 +1752,13 @@ export class EditorMode {
         }
       }
     } else {
-      // Ground / layer plane.
-      const planeY = (this.layer >= 0 ? this.layer : 0) * CELL_SIZE + 0.001;
+      // Ground plane.
+      const planeY = 0.001;
       const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY);
       const pt = new THREE.Vector3();
       if (this.raycaster.ray.intersectPlane(plane, pt) && !isFaceMounted) {
         target = this.toCell(new THREE.Vector3(pt.x, planeY + 0.02, pt.z));
-        // Nothing above the layer plane to hug: lie flat, face up.
+        // Nothing to hug on the ground: lie flat, face up.
         if (isFlatArmour)
           orient = this.orientFacing({ x: 0, y: 1, z: 0 }, ARMOUR_FACE_AXIS);
       }
@@ -2489,24 +2480,10 @@ export class EditorMode {
     this.partsGroup.clear();
     for (const part of this.bp.parts) {
       const def = getPartDef(part.defId);
-      let opacity = 1;
-      let pickable = true;
-      if (this.layer >= 0) {
-        const above =
-          def.cells.length === 0
-            ? part.pos.y > this.layer
-            : def.cells.every(
-                (c) => part.pos.y + rotateVec(part.orient, c).y > this.layer,
-              );
-        if (above) {
-          opacity = 0.12;
-          pickable = false;
-        }
-      }
-      const mesh = buildPartMesh(def, part, opacity);
-      mesh.userData.editorPickable = pickable;
+      const mesh = buildPartMesh(def, part, 1);
+      mesh.userData.editorPickable = true;
       mesh.traverse((object) => {
-        object.userData.editorPickable = pickable;
+        object.userData.editorPickable = true;
       });
       if (this.selected.has(part.id)) {
         mesh.traverse((o) => {

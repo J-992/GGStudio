@@ -192,16 +192,10 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     if (!topbar) return;
 
     setTemporaryAttribute(topbar, 'data-density', 'compact');
-    const nameInput = topbar.querySelector<HTMLElement>('.garage-name');
-    if (nameInput && !nameInput.hasAttribute('aria-label')) {
-      setTemporaryAttribute(nameInput, 'aria-label', 'Vehicle name');
-    }
-
-    const viewSelect = topbar.querySelector<HTMLElement>('select');
-    if (viewSelect && !viewSelect.hasAttribute('aria-label')) {
-      setTemporaryAttribute(viewSelect, 'aria-label', 'Garage view');
-    }
-
+    // The name field and the view picker used to be labelled here. Both have
+    // left the bar — the name lives in the Share panel with its own label, and
+    // the view picker is gone entirely — so all that is left to decorate are
+    // the buttons.
     for (const button of topbar.querySelectorAll<HTMLButtonElement>('button')) {
       const label = button.textContent?.trim();
       if (!label) continue;

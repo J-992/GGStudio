@@ -10,7 +10,7 @@
 
 ## Camera & views
 
-Orbit (drag), pan (right-drag/shift), wheel zoom, perspective default; ortho front/rear/side/top buttons (keys 1–5). Visible grid at active layer; height-layer slicing dims cells above the slice.
+Orbit (drag), pan (right-drag/shift), wheel zoom, perspective default; ortho front/rear/side/top on keys 1–5. Height-layer slicing was removed with the top bar's slider — the whole build is always drawn and always pickable.
 
 ## Placement
 
@@ -20,7 +20,7 @@ Orbit (drag), pan (right-drag/shift), wheel zoom, perspective default; ortho fro
 - Select by click; multi-select via **Shift+click**; rotate, duplicate (Ctrl+D re-arms as ghost), mirror, delete (Del). Plain left-drag always orbits. (Box select is deferred — see KNOWN_LIMITATIONS.md.)
 - Every oriented part carries a bright notch on its local +Z face so R/F rotation reads spatially.
 - The chamber names failures as they happen (banner): VEHICLE FLIPPED, WHEELS SPINNING, WHEELS OFF THE GROUND, OUT OF FUEL.
-- Editor camera, layer slice, and undo history survive the editor↔chamber round trip.
+- Editor camera and undo history survive the editor↔chamber round trip.
 - Everything runs through reversible commands (`core/commands.ts`); Ctrl+Z / Ctrl+Shift+Z.
 
 ## Visual analysis modes

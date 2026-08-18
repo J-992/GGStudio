@@ -1,15 +1,18 @@
-/* The First Play coach card. One panel, three lines, no scrim: the frozen
-   arena behind it is doing the work a dimmed background would otherwise do,
-   and the player has to be able to read the crowd they are being told to
-   drive at. Non-interactive throughout — every step is dismissed by playing. */
+/* The First Play coach strip. One thin banner along the top edge, no scrim and
+   no time stop: the world is running behind it, so it stays out of the road and
+   out of the crowd, and it reads as a prompt rather than as a dialog. The top
+   edge is free real estate for the length of the tutorial — the wave strip that
+   normally lives there is not revealed until the first kill. Non-interactive
+   throughout: every step is dismissed by playing. */
 
 .first-play {
   position: absolute;
   inset: 0;
   z-index: 78;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  padding-top: 14px;
   pointer-events: none;
 }
 
@@ -18,13 +21,14 @@
 }
 
 .first-play__card {
-  display: grid;
-  width: min(340px, calc(100vw - 32px));
-  gap: 6px;
-  padding: 12px 14px;
+  display: flex;
+  align-items: baseline;
+  max-width: min(560px, calc(100vw - 24px));
+  gap: 10px;
+  padding: 7px 12px;
   background: var(--panel-bg-strong);
   box-shadow:
-    7px 8px 0 rgb(0 0 0 / 0.42),
+    5px 6px 0 rgb(0 0 0 / 0.42),
     inset 3px 0 0 var(--ui-signal-strong);
   text-align: left;
 }
@@ -41,12 +45,15 @@
 }
 
 .first-play__text {
+  flex: 1 1 auto;
   margin: 0;
   color: var(--ui-text);
-  font: 400 var(--ui-text-14) / 1.35 var(--ui-font-body);
+  font: 400 var(--ui-text-14) / 1.3 var(--ui-font-body);
 }
 
 .first-play__hint {
+  flex: 0 0 auto;
+  white-space: nowrap;
   color: var(--ui-bone);
   font: 400 var(--ui-text-12) / 1 var(--ui-font-display);
   letter-spacing: 0.14em;
@@ -54,64 +61,24 @@
   animation: first-play-hint 1.1s ease-in-out infinite;
 }
 
-/* The two reveal steps sit beside what they are uncovering rather than in the
-   middle of the screen, so the card and the readout are read as one thing. */
-.first-play__card[data-step='health'] {
-  position: absolute;
-  bottom: 14px;
-  left: 250px;
-}
-
-/* Under the wave strip it is pointing at, rather than left to the static
-   position an absolutely positioned flex child would otherwise inherit. */
-.first-play__card[data-step='wave'] {
-  position: absolute;
-  top: 96px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.first-play__card[data-step='wave'].is-in {
-  animation-name: first-play-in-centred;
-}
-
-/* Phones stack: the driver HUD spans the full width down there, so an offset
-   card would land on top of it. Both reveal cards go back to the middle. */
-@media (width <= 760px), (height <= 520px) {
-  .first-play__card[data-step='health'],
-  .first-play__card[data-step='wave'] {
-    position: static;
-    transform: none;
-  }
-
-  .first-play__card[data-step='wave'].is-in {
-    animation-name: first-play-in;
+/* No room for one line across a phone; the banner becomes a small block, still
+   at the top, still clear of the thumbs. */
+@media (width <= 620px) {
+  .first-play__card {
+    display: grid;
+    gap: 3px;
   }
 }
 
 @keyframes first-play-in {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(-8px);
   }
 
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-/* The same entrance for the one card that also owns its own X transform; a
-   shared keyframe would drop the centring for the length of the animation. */
-@keyframes first-play-in-centred {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 10px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
   }
 }
 
@@ -126,28 +93,46 @@
   }
 }
 
-/* The readout a card has just uncovered, for as long as that card is up. */
-.survival-ui .is-first-play-spotlight {
-  animation: first-play-spotlight 700ms ease-in-out infinite;
-  outline: 2px solid var(--ui-signal-strong);
-  outline-offset: 3px;
+/*
+ * A readout arriving on screen for the first time.
+ *
+ * One shot, not a loop: the point is to catch the eye of somebody who is
+ * looking at the fight, then get out of the way. The old version ringed the
+ * element for as long as its tutorial card was up, which it could afford
+ * because the world was stopped — these arrive mid-drive, so they have to be
+ * over in well under a second.
+ */
+.survival-ui .is-first-play-reveal {
+  animation: first-play-reveal 620ms ease-out 1;
 }
 
-@keyframes first-play-spotlight {
-  0%,
-  100% {
-    outline-color: var(--ui-signal-strong);
+@keyframes first-play-reveal {
+  0% {
+    outline: 2px solid var(--ui-signal-strong);
+    outline-offset: 3px;
+    opacity: 0;
+    transform: translateY(6px);
   }
 
-  50% {
-    outline-color: transparent;
+  40% {
+    outline: 2px solid var(--ui-signal-strong);
+    outline-offset: 3px;
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  100% {
+    outline: 2px solid transparent;
+    outline-offset: 3px;
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .first-play__card.is-in,
   .first-play__hint,
-  .survival-ui .is-first-play-spotlight {
+  .survival-ui .is-first-play-reveal {
     animation: none;
   }
 }

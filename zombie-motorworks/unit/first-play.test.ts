@@ -20,8 +20,9 @@ import {
 } from '../src/core/builds.ts';
 import {
   FIRST_PLAY_ABILITY_KEY_TOKEN,
+  FIRST_PLAY_HUD_TRIGGERS,
   FIRST_PLAY_STEPS,
-  firstPlayRevealed,
+  firstPlayHudPiecesFor,
   releasesStep,
 } from '../src/core/firstPlay.ts';
 import { getPartDef } from '../src/core/parts.ts';
@@ -123,45 +124,32 @@ describe('first play rig', () => {
 });
 
 describe('first play coach steps', () => {
-  it('teaches the three inputs before it shows any HUD', () => {
-    const taught = FIRST_PLAY_STEPS.filter(
-      (step) => step.reveals === undefined,
-    );
-    expect(taught.map((step) => step.release)).toEqual([
+  it('is three input lessons and nothing else', () => {
+    // Every step earns its time-stop by teaching a hand something. The two
+    // read-only HUD cards this used to end on are event reveals now.
+    expect(FIRST_PLAY_STEPS.map((step) => step.release)).toEqual([
       'drive',
       'fire',
       'ability',
     ]);
-    // Every reveal step comes after all three.
-    const firstReveal = FIRST_PLAY_STEPS.findIndex(
-      (step) => step.reveals !== undefined,
-    );
-    expect(firstReveal).toBe(taught.length);
   });
 
-  it('keeps the health bar and the wave strip hidden until their own step', () => {
-    expect(firstPlayRevealed(0, 'health')).toBe(false);
-    expect(firstPlayRevealed(0, 'waveTimeline')).toBe(false);
-
-    const healthStep = FIRST_PLAY_STEPS.findIndex(
-      (step) => step.reveals === 'health',
-    );
-    const waveStep = FIRST_PLAY_STEPS.findIndex(
-      (step) => step.reveals === 'waveTimeline',
-    );
-    expect(healthStep).toBeGreaterThanOrEqual(0);
-    expect(waveStep).toBeGreaterThanOrEqual(0);
-
-    expect(firstPlayRevealed(healthStep - 1, 'health')).toBe(false);
-    expect(firstPlayRevealed(healthStep, 'health')).toBe(true);
-    expect(firstPlayRevealed(waveStep - 1, 'waveTimeline')).toBe(false);
-    expect(firstPlayRevealed(waveStep, 'waveTimeline')).toBe(true);
+  it('hangs every readout off an arena event, bar the ones it never shows', () => {
+    expect(FIRST_PLAY_HUD_TRIGGERS.health).toBe('damaged');
+    expect(FIRST_PLAY_HUD_TRIGGERS.waveTimeline).toBe('kill');
+    expect(FIRST_PLAY_HUD_TRIGGERS.cash).toBe('kill');
+    // The minimap is a wave-two tool; the first wave never puts it up.
+    expect(FIRST_PLAY_HUD_TRIGGERS.minimap).toBeNull();
   });
 
-  it('reveals everything once the lesson is over', () => {
-    const past = FIRST_PLAY_STEPS.length;
-    expect(firstPlayRevealed(past, 'health')).toBe(true);
-    expect(firstPlayRevealed(past, 'waveTimeline')).toBe(true);
+  it('uncovers the wallet and the wave strip together on the first kill', () => {
+    expect(firstPlayHudPiecesFor('kill').sort()).toEqual([
+      'cash',
+      'waveTimeline',
+    ]);
+    expect(firstPlayHudPiecesFor('damaged')).toEqual(['health']);
+    expect(firstPlayHudPiecesFor('lowFuel')).toEqual(['fuel']);
+    expect(firstPlayHudPiecesFor('ramSpeed')).toEqual(['speed']);
   });
 
   it('only quotes an ability key on the step that teaches one', () => {
@@ -174,17 +162,11 @@ describe('first play coach steps', () => {
     }
   });
 
-  it('lets a reveal card go on any input and a lesson only on its own', () => {
-    const drive = FIRST_PLAY_STEPS[0];
-    expect(releasesStep(drive, 'drive')).toBe(true);
-    expect(releasesStep(drive, 'fire')).toBe(false);
-    expect(releasesStep(drive, 'other')).toBe(false);
-
-    const reveal = FIRST_PLAY_STEPS.find((step) => step.release === 'any');
-    expect(reveal).toBeDefined();
-    if (reveal === undefined) return;
-    for (const input of ['drive', 'fire', 'ability', 'other'] as const) {
-      expect(releasesStep(reveal, input)).toBe(true);
+  it('releases a card only on the input it is teaching', () => {
+    for (const step of FIRST_PLAY_STEPS) {
+      for (const input of ['drive', 'fire', 'ability', 'other'] as const) {
+        expect(releasesStep(step, input)).toBe(step.release === input);
+      }
     }
   });
 });
@@ -341,6 +323,7 @@ describe('first play wave roster', () => {
         return kinds.length;
       },
       getActiveCount: () => 0,
+      warmKinds: () => undefined,
       setWaveMultipliers: () => undefined,
       setBossEncounter: () => undefined,
       activeBoss: () => null,

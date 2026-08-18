@@ -44,6 +44,19 @@ const INLINE_WASM =
   /[A-Za-z_$][\w$]*\.toByteArray\(\s*"AGFzbQ[A-Za-z0-9+/=]+"\s*\)(?:\s*\.buffer)?/;
 
 const WASM_IMPORT_NAME = '__scrapRigRapierWasmUrl';
+const RESPONSE_IMPORT_NAME = '__scrapRigRapierWasmResponse';
+
+/**
+ * Absolute, POSIX-separated path to the response helper.
+ *
+ * The import is injected into a file inside `node_modules`, so a path relative
+ * to this plugin would resolve against the wrong directory. An absolute
+ * specifier sidesteps that; the separators are normalised because Rollup wants
+ * forward slashes even where the filesystem does not.
+ */
+function responseHelperPath(): string {
+  return new URL('../src/app/rapierWasmResponse.ts', import.meta.url).pathname;
+}
 
 export function rapierWasm(): Plugin {
   return {
@@ -55,9 +68,19 @@ export function rapierWasm(): Plugin {
       if (!id.includes('rapier3d-compat')) return undefined;
       if (!INLINE_WASM.test(code)) return undefined;
 
-      // ESM imports hoist, so prepending is enough to have the URL in scope by
-      // the time `init()` can run.
-      const patched = code.replace(INLINE_WASM, WASM_IMPORT_NAME);
+      // ESM imports hoist, so prepending is enough to have both of these in
+      // scope by the time `init()` can run.
+      //
+      // The loader is handed a promise for a `Response` rather than the bare
+      // URL it would otherwise fetch itself. It awaits whatever it is given and
+      // only calls `fetch` on a string/Request/URL, so this simply takes over
+      // the fetch — which is what lets `rapierWasmResponse` correct a
+      // `Content-Type` the host got wrong before `instantiateStreaming` sees
+      // it and bails to the buffered path.
+      const patched = code.replace(
+        INLINE_WASM,
+        `${RESPONSE_IMPORT_NAME}(${WASM_IMPORT_NAME})`,
+      );
 
       // The URL has to reach `init()` as a bare string. Anything read off it
       // means the match stopped short of the end of the original expression,
@@ -75,7 +98,9 @@ export function rapierWasm(): Plugin {
       return {
         code:
           `import ${WASM_IMPORT_NAME} from ` +
-          `'@dimforge/rapier3d-compat/rapier_wasm3d_bg.wasm?url';\n${patched}`,
+          `'@dimforge/rapier3d-compat/rapier_wasm3d_bg.wasm?url';\n` +
+          `import { rapierWasmResponse as ${RESPONSE_IMPORT_NAME} } from ` +
+          `'${responseHelperPath()}';\n${patched}`,
         map: null,
       };
     },

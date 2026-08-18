@@ -51,6 +51,9 @@ import {
   MIN_IMPACT_SPEED,
   MIN_SPAWN_DISTANCE_FROM_VEHICLE,
   NECROMANCER_SUMMON_RADIUS,
+  SPAWN_AHEAD_ARC_RADIANS,
+  SPAWN_AHEAD_DISTANCE,
+  SPAWN_AHEAD_DISTANCE_SPREAD,
   PLOW_CRUSH_COOLDOWN_SECONDS,
   PLOW_HEIGHT_TOLERANCE_M,
   PLOW_HOLD_SECONDS,
@@ -233,6 +236,29 @@ function rotateByQuaternion(
 /** Pooled zombie AI, handle routing, vehicle contacts, and spawn selection. */
 export class ZombieSystem {
   private readonly pool: Zombie[] = [];
+  /**
+   * Pool slots not yet built, per kind: the next index to hand out and the end
+   * of that kind's reserved range.
+   *
+   * The pool used to be constructed whole in the constructor — all
+   * {@link ZOMBIE_POOL_SIZE} of them, every kind, before wave one. Each body is
+   * a Rapier rigid body and collider plus a model instance with its own cloned
+   * materials, and building one pulls its GLB down, so an arena stood up by
+   * fetching and decoding every zombie asset in the game including the ones for
+   * kinds that run would never see. On a low-memory phone that is a large,
+   * entirely speculative cost paid at the least forgiving moment, and it left
+   * the GPU close enough to the edge that ordinary allocation churn could tip
+   * it into losing the context.
+   *
+   * Ranges are carved up in the constructor exactly as the eager loop assigned
+   * them, so a given kind's Nth body still gets the index it always had —
+   * `modelFileFor` picks its variant off that index, and the per-index scratch
+   * arrays below stay correctly sized.
+   */
+  private readonly reserve = new Map<
+    ZombieKind,
+    { next: number; end: number }
+  >();
   private readonly colliderToZombie = new Map<number, Zombie>();
   private readonly activeScratch: Zombie[] = [];
   private readonly aliveTargets: Zombie[] = [];
@@ -266,6 +292,12 @@ export class ZombieSystem {
   private readonly spawnCandidateIndices: Int16Array;
   private readonly spawnCandidateDistances: Float32Array;
   private readonly spawnScratch = new THREE.Vector3();
+  /** Tutorial-wave spawn rule; see {@link setSpawnAhead}. */
+  private spawnAhead = false;
+  private readonly spawnAheadScratch = new THREE.Vector3();
+  private readonly spawnAheadQuaternion = new THREE.Quaternion();
+  /** Innermost arena anchor, used to keep an ahead-spawn inside the walls. */
+  private readonly spawnInnerRadius: number;
   private readonly swarmForce = { x: 0, y: 0, z: 0 };
   private readonly blastDirection = { x: 0, y: 0, z: 0 };
   private readonly fallbackGeometry: THREE.CapsuleGeometry;
@@ -409,10 +441,12 @@ export class ZombieSystem {
 
   constructor(
     private readonly world: RAPIER.World,
-    scene: THREE.Scene,
+    // Retained rather than consumed: bodies are now built on demand, so the
+    // scene and the kill callback have to outlive the constructor.
+    private readonly scene: THREE.Scene,
     private readonly spawnPoints: readonly THREE.Vector3[],
     private readonly vehicle: RuntimeVehicle,
-    onKilled: ZombieKilledCallback,
+    private readonly onKilled: ZombieKilledCallback,
     /** Optional so headless tests can drive the system without a scene budget. */
     private readonly vfx: VfxSystem | null = null,
   ) {
@@ -422,6 +456,13 @@ export class ZombieSystem {
       4,
       8,
     );
+    let innerRadius = Infinity;
+    for (const point of spawnPoints) {
+      innerRadius = Math.min(innerRadius, Math.hypot(point.x, point.z));
+    }
+    // The anchors are laid out on a ring inside the arena walls, so the closest
+    // of them is a radius everything is known to fit within.
+    this.spawnInnerRadius = Number.isFinite(innerRadius) ? innerRadius : 0;
     this.projectiles = new ThrowerProjectiles(scene, vfx);
     this.landmines = new Landmines(scene);
     this.iceTrail = new IceTrail(scene);
@@ -432,24 +473,85 @@ export class ZombieSystem {
     this.gasTrail.setPuffEmitter(
       vfx === null ? null : (x, y, z) => vfx.bossGasWisp(x, y, z),
     );
-    const poolKinds: ZombieKind[] = [];
+    // Reserve each kind's index range without building anything. Walking
+    // `ZOMBIE_POOL_COUNTS` in declaration order reproduces the index the eager
+    // loop would have given every body.
+    let nextIndex = 0;
     for (const [kind, count] of Object.entries(ZOMBIE_POOL_COUNTS) as [
       ZombieKind,
       number,
     ][]) {
-      for (let i = 0; i < count; i++) poolKinds.push(kind);
+      this.reserve.set(kind, { next: nextIndex, end: nextIndex + count });
+      nextIndex += count;
     }
-    for (let i = 0; i < poolKinds.length; i++) {
-      const zombie = new Zombie(
-        world,
-        scene,
-        i,
-        poolKinds[i],
-        this.fallbackGeometry,
-        onKilled,
-        vfx,
-        spawnPoints,
-      );
+
+    this.spawnCandidateIndices = new Int16Array(spawnPoints.length);
+    this.spawnCandidateDistances = new Float32Array(spawnPoints.length);
+    this.buildVehicleAnchors();
+  }
+
+  /**
+   * An idle body of `kind`, building one if the pool has none spare and the
+   * kind's reserve is not spent. Undefined means the kind is at its cap, which
+   * callers already treat as "no slot free".
+   */
+  private acquire(kind: ZombieKind): Zombie | undefined {
+    for (const candidate of this.pool) {
+      if (!candidate.active && candidate.kind === kind) return candidate;
+    }
+    return this.createZombie(kind);
+  }
+
+  /**
+   * Build one more body of `kind` out of its reserved index range, or undefined
+   * when that range is used up.
+   */
+  private createZombie(kind: ZombieKind): Zombie | undefined {
+    const slots = this.reserve.get(kind);
+    if (slots === undefined || slots.next >= slots.end) return undefined;
+    const index = slots.next;
+    slots.next += 1;
+
+    const zombie = new Zombie(
+      this.world,
+      this.scene,
+      index,
+      kind,
+      this.fallbackGeometry,
+      this.onKilled,
+      this.vfx,
+      this.spawnPoints,
+    );
+    this.wireZombie(zombie);
+    this.pool.push(zombie);
+    this.colliderToZombie.set(zombie.collider.handle, zombie);
+    return zombie;
+  }
+
+  /**
+   * Build bodies ahead of the moment they are needed.
+   *
+   * Lazy construction moves a kind's GLB fetch to its first spawn, which for
+   * the first body of a kind would mean a beat of fallback capsule on screen.
+   * `WaveManager.startWave` knows the whole roster before anything spawns and
+   * calls this with it, so the models are already in the loader's cache by the
+   * time the wave actually asks for a body. Kinds already built, and kinds
+   * whose reserve is spent, cost nothing here.
+   */
+  warmKinds(kinds: Iterable<ZombieKind>): void {
+    if (this.disposed) return;
+    const seen = new Set<ZombieKind>();
+    for (const kind of kinds) {
+      if (seen.has(kind)) continue;
+      seen.add(kind);
+      const built = this.pool.some((zombie) => zombie.kind === kind);
+      if (!built) this.createZombie(kind);
+    }
+  }
+
+  /** Attach the system's callbacks to one freshly built body. */
+  private wireZombie(zombie: Zombie): void {
+    {
       zombie.onSfx = (event, source) => this.emitSfx(event, source);
       zombie.onThrow = (thrower) => {
         this.emitSfx('throw', thrower);
@@ -490,13 +592,7 @@ export class ZombieSystem {
       zombie.onGasTrail = (boss, fromX, fromZ) => {
         this.gasTrail.drop(fromX, fromZ, boss.position.x, boss.position.z);
       };
-      this.pool.push(zombie);
-      this.colliderToZombie.set(zombie.collider.handle, zombie);
     }
-
-    this.spawnCandidateIndices = new Int16Array(spawnPoints.length);
-    this.spawnCandidateDistances = new Float32Array(spawnPoints.length);
-    this.buildVehicleAnchors();
   }
 
   /** Applies only to zombies spawned after this call. */
@@ -632,9 +728,7 @@ export class ZombieSystem {
       NECROMANCER_SUMMON_RADIUS,
     );
     for (let i = 0; i < wanted; i++) {
-      const minion = this.pool.find(
-        (candidate) => !candidate.active && candidate.kind === 'thrower',
-      );
+      const minion = this.acquire('thrower');
       if (!minion) break;
 
       // Even spacing around the caster, jittered so repeat casts never lay the
@@ -735,9 +829,7 @@ export class ZombieSystem {
 
     let spawned = 0;
     for (const kind of kinds) {
-      const zombie = this.pool.find(
-        (candidate) => !candidate.active && candidate.kind === kind,
-      );
+      const zombie = this.acquire(kind);
       // Preserve prefix semantics for WaveManager: it only advances past the
       // requests that were actually fulfilled.
       if (!zombie) break;
@@ -2339,8 +2431,75 @@ export class ZombieSystem {
     this.resetWatchdog(zombie);
   }
 
+  /**
+   * Put the horde in front of the rig instead of out on the arena's rim.
+   *
+   * Only the tutorial wave asks for this. The ordinary rule spawns on the ring
+   * of arena anchors, which sit 40-50u from the middle of a 105u arena, and
+   * then deliberately picks among the *farthest* of them — correct for a wave
+   * that should arrive as pressure closing in from the edges, and completely
+   * wrong for the first thing anybody ever sees, where "steer with W A S D"
+   * was followed by forty metres of empty graveyard before a single zombie
+   * came into frame. The camera shows roughly thirty metres of ground ahead of
+   * the rig, so the crowd goes at the far edge of that: on screen, in the
+   * direction the player is already pointed, and still far enough away to be a
+   * horde being driven at rather than a jump scare.
+   */
+  setSpawnAhead(enabled: boolean): void {
+    this.spawnAhead = enabled;
+  }
+
+  /**
+   * An arena-bounded point `SPAWN_AHEAD_DISTANCE`-ish metres off the rig's
+   * nose. Clamped inside the spawn ring's own inner radius, so a rig parked
+   * against a wall cannot push the crowd through it.
+   */
+  private pickSpawnPointAhead(): THREE.Vector3 {
+    const position = this.vehicle.body.translation();
+    const rotation = this.vehicle.body.rotation();
+    this.spawnAheadQuaternion.set(
+      rotation.x,
+      rotation.y,
+      rotation.z,
+      rotation.w,
+    );
+    // Vehicles face local +Z in this engine; see FollowCamera.
+    this.spawnAheadScratch
+      .set(0, 0, 1)
+      .applyQuaternion(this.spawnAheadQuaternion);
+    this.spawnAheadScratch.y = 0;
+    if (this.spawnAheadScratch.lengthSq() < 1e-6) {
+      this.spawnAheadScratch.set(0, 0, 1);
+    }
+    this.spawnAheadScratch.normalize();
+    // A wedge rather than a line, so five chunks read as a crowd across the
+    // windscreen instead of five piles stacked on one bearing.
+    const swing = (Math.random() - 0.5) * SPAWN_AHEAD_ARC_RADIANS;
+    const cos = Math.cos(swing);
+    const sin = Math.sin(swing);
+    const dirX =
+      this.spawnAheadScratch.x * cos - this.spawnAheadScratch.z * sin;
+    const dirZ =
+      this.spawnAheadScratch.x * sin + this.spawnAheadScratch.z * cos;
+    const reach =
+      SPAWN_AHEAD_DISTANCE + Math.random() * SPAWN_AHEAD_DISTANCE_SPREAD;
+
+    let x = position.x + dirX * reach;
+    let z = position.z + dirZ * reach;
+    const radius = Math.hypot(x, z);
+    if (radius > this.spawnInnerRadius && radius > 0) {
+      const scale = this.spawnInnerRadius / radius;
+      x *= scale;
+      z *= scale;
+    }
+    return this.spawnAheadScratch.set(x, 0, z);
+  }
+
   /** Strictly excludes anchors closer than 18u, then picks among the farthest half. */
   private pickSpawnPoint(): THREE.Vector3 | null {
+    if (this.spawnAhead && this.spawnPoints.length > 0) {
+      return this.pickSpawnPointAhead();
+    }
     const vehiclePosition = this.vehicle.body.translation();
     const minimumDistanceSq =
       MIN_SPAWN_DISTANCE_FROM_VEHICLE * MIN_SPAWN_DISTANCE_FROM_VEHICLE;

@@ -1,40 +1,45 @@
 /**
- * The card that stops time over a new player's first wave.
+ * The coach strip a new player reads while they are driving.
  *
- * Presentation and timing for `core/firstPlay.ts`. It owns one small card and
- * nothing else: no scrim, no arrow, no dimming. The freeze is the emphasis —
- * a stopped arena with one line of text on it does not need the screen darkened
- * as well, and the player has to be able to see the crowd they are about to be
- * asked to drive at.
+ * Presentation and timing for `core/firstPlay.ts`. It owns one thin banner and
+ * nothing else: no scrim, no arrow, no dimming, and — deliberately — no time
+ * stop. This used to freeze the fixed step under every card, which read well on
+ * paper and badly in the hand: the first thing the game ever did was take the
+ * controls away, four times, in the opening half minute. A prompt the player
+ * can ignore and drive through teaches the same thing without ever telling them
+ * to stop playing.
  *
- * `SurvivalMode` drives it: `fixedUpdate` on the arena clock while the world is
- * running, `notifyInput` from the same handlers that feed the vehicle, and
- * `isFrozen` gates the physics step. The card itself is never interactive —
- * every step is dismissed by playing, so there is no button to mis-click and
- * nothing here steals the pointer the player is aiming with.
+ * Everything it does is therefore on the arena clock and out of the way. The
+ * banner sits along the top edge, where the wave strip will eventually live and
+ * where nothing is happening yet, so the road and the crowd are never behind
+ * it. It is never interactive — every step is dismissed by playing, so there is
+ * no button to mis-click and nothing here steals the pointer the player is
+ * aiming with.
+ *
+ * `SurvivalMode` drives it: `fixedUpdate` on the arena clock, and `notifyInput`
+ * from the same handlers that feed the vehicle.
  */
 
 import './FirstPlayCoach.css';
 import {
   FIRST_PLAY_ABILITY_KEY_TOKEN,
   FIRST_PLAY_STEPS,
-  firstPlayRevealed,
   releasesStep,
   type FirstPlayInput,
-  type FirstPlayReveal,
   type FirstPlayStep,
 } from '../core/firstPlay.ts';
 import { playSfx } from '../app/sfx.ts';
 import { shouldUseTouchControls } from '../ui/device.ts';
 
 /**
- * Wall-clock milliseconds a fresh card ignores input for.
+ * Arena seconds a fresh card ignores input for.
  *
- * The world is stopped, so this cannot be counted in arena time. It exists
- * because the player's hand is still on the key from the last beat: without it
- * the press that ended one lesson also ends the next, and neither is read.
+ * The player's hand is still on the key from the last beat: without this the
+ * press that ended one lesson also ends the next, and neither is read. Short,
+ * because the world is running now — a card that hangs around after the player
+ * has already done the thing is the noise this whole file is trying not to be.
  */
-const INPUT_LOCKOUT_MS = 320;
+const INPUT_LOCKOUT_SECONDS = 0.35;
 
 /**
  * The same window for an input that was *already* being held when the card
@@ -45,13 +50,22 @@ const INPUT_LOCKOUT_MS = 320;
  * previous lesson was "hold W". So a continuing input counts too, just after
  * long enough for the line to have been read rather than blinked past.
  */
-const HELD_LOCKOUT_MS = 1400;
+const HELD_LOCKOUT_SECONDS = 1.2;
+
+/**
+ * How long one card is allowed to sit there before it gives up and moves on.
+ *
+ * Nothing is blocked while it waits, so an ignored card costs the player only
+ * the strip it occupies — but a prompt that never leaves stops being a prompt.
+ * Long enough that somebody reading it slowly is not cut off.
+ */
+const MAX_PROMPT_SECONDS = 10;
 
 export interface FirstPlayCoachHandlers {
   /**
    * A step opened, was dismissed, or the lesson finished. `SurvivalMode`
-   * re-reads `isRevealed` and re-syncs the HUD rather than being told which
-   * piece moved, so the two can never disagree about what is on screen.
+   * re-syncs the whole HUD rather than being told which piece moved, so the
+   * two can never disagree about what is on screen.
    */
   onChanged(): void;
 }
@@ -66,10 +80,13 @@ export class FirstPlayCoach {
 
   /** -1 until `begin`, then the step on screen or waiting to open. */
   private index = -1;
-  private frozen = false;
+  /** True while a card is up and listening. */
+  private showing = false;
   private finished = false;
-  private runSeconds = 0;
-  private openedAtMs = 0;
+  /** Arena seconds until the next card opens; only counts while none is up. */
+  private restSeconds = 0;
+  /** Arena seconds the card on screen has been up for. */
+  private shownSeconds = 0;
   private abilityKey = '';
 
   constructor(
@@ -80,7 +97,7 @@ export class FirstPlayCoach {
     this.root.className = 'first-play';
     this.root.hidden = true;
     // Purely a read-out: it never takes the pointer the player aims with.
-    this.root.setAttribute('aria-live', 'assertive');
+    this.root.setAttribute('aria-live', 'polite');
 
     this.card = document.createElement('section');
     this.card.className = 'first-play__card';
@@ -103,7 +120,7 @@ export class FirstPlayCoach {
     const next = key.trim().toUpperCase();
     if (next === this.abilityKey) return;
     this.abilityKey = next;
-    if (this.frozen) this.paint();
+    if (this.showing) this.paint();
   }
 
   /** Open the first card. Called once, when the first wave actually starts. */
@@ -113,25 +130,14 @@ export class FirstPlayCoach {
     this.openStep();
   }
 
-  /** True while the world must not step. */
-  isFrozen(): boolean {
-    return this.frozen;
+  /** True while a card is up, so held inputs are worth polling. */
+  isPrompting(): boolean {
+    return this.showing;
   }
 
   /** True from `begin` until the last card is dismissed. */
   get active(): boolean {
     return this.index >= 0 && !this.finished;
-  }
-
-  /** Has the lesson uncovered this piece of HUD yet? */
-  isRevealed(reveal: FirstPlayReveal): boolean {
-    if (this.finished) return true;
-    return firstPlayRevealed(this.index, reveal);
-  }
-
-  /** True while the card on screen is the one introducing `reveal`. */
-  isSpotlighting(reveal: FirstPlayReveal): boolean {
-    return this.frozen && this.step()?.reveals === reveal;
   }
 
   /**
@@ -143,21 +149,29 @@ export class FirstPlayCoach {
    * pressed; it waits out the longer window above.
    */
   notifyInput(input: FirstPlayInput, held = false): boolean {
-    if (!this.frozen) return false;
+    if (!this.showing) return false;
     const step = this.step();
     if (step === undefined) return false;
-    const lockout = held ? HELD_LOCKOUT_MS : INPUT_LOCKOUT_MS;
-    if (performance.now() - this.openedAtMs < lockout) return false;
+    const lockout = held ? HELD_LOCKOUT_SECONDS : INPUT_LOCKOUT_SECONDS;
+    if (this.shownSeconds < lockout) return false;
     if (!releasesStep(step, input)) return false;
     this.release(step);
     return true;
   }
 
-  /** Arena clock. Only runs between cards; a frozen coach is not stepping. */
+  /** Arena clock. Runs every step of the wave; nothing here stops the world. */
   fixedUpdate(dt: number): void {
-    if (this.frozen || this.finished || this.index < 0) return;
-    this.runSeconds -= Math.max(0, dt);
-    if (this.runSeconds > 0) return;
+    if (this.finished || this.index < 0) return;
+    const step = Math.max(0, dt);
+    if (this.showing) {
+      this.shownSeconds += step;
+      // Ignored for long enough that it has stopped being read. Move on rather
+      // than leave a line of text parked over the fight.
+      if (this.shownSeconds >= MAX_PROMPT_SECONDS) this.release(this.step());
+      return;
+    }
+    this.restSeconds -= step;
+    if (this.restSeconds > 0) return;
     this.index += 1;
     if (this.index >= FIRST_PLAY_STEPS.length) {
       this.finish();
@@ -170,7 +184,7 @@ export class FirstPlayCoach {
   finish(): void {
     if (this.finished) return;
     this.finished = true;
-    this.frozen = false;
+    this.showing = false;
     this.root.hidden = true;
     this.card.classList.remove('is-in');
     this.handlers.onChanged();
@@ -185,8 +199,8 @@ export class FirstPlayCoach {
   }
 
   private openStep(): void {
-    this.frozen = true;
-    this.openedAtMs = performance.now();
+    this.showing = true;
+    this.shownSeconds = 0;
     this.root.hidden = false;
     this.paint();
     // Restart the entrance animation: two cards in quick succession would
@@ -198,15 +212,15 @@ export class FirstPlayCoach {
     this.handlers.onChanged();
   }
 
-  private release(step: FirstPlayStep): void {
-    this.frozen = false;
+  private release(step: FirstPlayStep | undefined): void {
+    this.showing = false;
     this.root.hidden = true;
     this.card.classList.remove('is-in');
     if (this.index >= FIRST_PLAY_STEPS.length - 1) {
       this.finish();
       return;
     }
-    this.runSeconds = step.runSeconds;
+    this.restSeconds = step?.runSeconds ?? 0;
     this.handlers.onChanged();
   }
 

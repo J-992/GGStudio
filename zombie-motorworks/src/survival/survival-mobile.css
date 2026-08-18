@@ -604,6 +604,31 @@
   text-overflow: ellipsis;
 }
 
+/*
+ * Phones keep the slab and the icon but give up most of the growth: the rail
+ * is a fixed 116px with the overflow clipped, so a tier-4 chit at the desktop
+ * ladder would simply be cut in half — and the half that goes is the payout,
+ * which is the only part worth showing. A gentler ramp still escalates without
+ * ever outgrowing the strip.
+ */
+[data-mobile-hud='on'] .survival-pickup__chit--loud {
+  --pickup-grow: calc(1 + var(--pickup-tier) * 0.03);
+
+  padding: 2px 5px 2px 3px;
+  font-size: calc(var(--ui-text-14) * var(--pickup-grow));
+}
+
+[data-mobile-hud='on'] .survival-pickup__label {
+  /* Two words at this width would wrap the value onto a second line and the
+     rail clips it, so the label yields its space to the money first. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-mobile-hud='on'] .survival-pickup__value {
+  flex: none;
+}
+
 /* Emergency actions are upper-left icon buttons. Their live copy remains in
    the accessible DOM while the lower joystick quadrant stays empty. They hang
    off the band rather than off the viewport, so a boss bar growing the band

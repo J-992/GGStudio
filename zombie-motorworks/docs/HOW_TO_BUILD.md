@@ -21,9 +21,8 @@ your first truck step by step and checks your progress automatically.
 - Click a placed part to select it: **Turn / Flip** rotate it, the six
   **paint swatches** recolour it, **Delete** removes it.
 - **Ctrl+Z** undoes anything. **Build both sides** mirrors your placements.
-- Drag to orbit the camera, scroll to zoom, and use the view menu (or keys
-  1–5) for front/side/top views. The **Build height** slider slices tall
-  builds so you can work inside.
+- Drag to orbit the camera, scroll to zoom, and press **keys 1–5** for the
+  3D, front, rear, side and top views.
 
 ## The build card (top right)
 

@@ -1061,8 +1061,8 @@ export const PART_CATALOG: Record<string, PartDefinition> = {
     description:
       'The Sparkrunner’s mast. It fires on its own twice a second — put the ' +
       'cursor on the horde and it snaps a bolt onto the nearest zombie, then ' +
-      'arcs from it to two more. Also fills an ability slot with Dash, a ' +
-      'short blink straight through whatever is in the way (5s cooldown).',
+      'arcs from it through five more. Also fills an ability slot with Dash, ' +
+      'a short blink straight through whatever is in the way (5s cooldown).',
     cells: oneCell,
     clearanceCells: [v(0, 1, 0)],
     sockets: [singleSocket('hardpoint-ny', 'frame', ORIGIN, 'ny')],
@@ -1083,18 +1083,23 @@ export const PART_CATALOG: Record<string, PartDefinition> = {
       autoFire: true,
       cooldownSeconds: 0.5,
       // Not a blast. The bolt picks the body nearest the cursor and arcs from
-      // it to two more, so `baseRadiusM` is how far from the cursor it will
-      // look for that first body rather than an area of effect.
+      // it out through the crowd, so `baseRadiusM` is how far from the cursor
+      // it will look for that first body rather than an area of effect.
       baseDamage: 16,
       baseRadiusM: 2.4,
-      chainTargets: 3,
-      chainRangeM: 4.5,
+      // Six bodies a volley, with a longer reach between jumps. The rod's whole
+      // identity is the arc walking a queue of zombies, and at three targets it
+      // stopped inside the front rank of any real horde — the player never saw
+      // the thing the build is named for. Six jumps at 6.5 m carries the bolt
+      // through a wave-4 knot end to end.
+      chainTargets: 6,
+      chainRangeM: 6.5,
       // Each jump lands lighter, so which body you put the cursor on still
-      // matters even though the shot hits three. 16 / 9.6 / 5.8 a volley, twice
-      // a second: it shreds a wave-1 knot and visibly stops keeping up around
-      // wave 4, when walkers stop dying to two volleys and the horde is
-      // arriving faster than the arc can clear it.
-      chainFalloff: 0.6,
+      // matters even though the shot hits six. 16 / 11.2 / 7.8 / 5.5 / 3.8 /
+      // 2.7 a volley, twice a second: the tail is chip damage that finishes
+      // wounded walkers rather than a second full hit, so the chain buys reach
+      // and crowd clear without turning the lightest rig into the strongest.
+      chainFalloff: 0.7,
       rangeM: 26,
       shockSeconds: 1,
     },

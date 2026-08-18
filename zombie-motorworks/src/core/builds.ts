@@ -180,6 +180,23 @@ function rig(
 const v = (x: number, y: number, z: number): Vec3i => ({ x, y, z });
 
 /**
+ * Every starting rig carries one Zombie Blaster at base level.
+ *
+ * Each build's signature block is a *click* weapon with a cooldown and a
+ * character — chain lightning, a fireball, a nuke — and none of them is a gun
+ * you can simply hold down. Handing out three rigs whose entire answer to a
+ * walker is a special meant the first minute of a real run felt worse than the
+ * tutorial, which drives a rig bristling with belt-fed guns. The Blaster is the
+ * cheapest block in the weapon shelf, self-acquiring, and 3 damage at 7 rounds
+ * a second, so it never competes with the signature; it just means there is
+ * always something shooting.
+ *
+ * Base level on purpose: it is a floor, not a gift, and the first upgrade the
+ * player buys should still be worth buying.
+ */
+const STARTER_BLASTER = 'turret';
+
+/**
  * Tight little triwheel: one steered wheel up front on a motorcycle fork, a
  * driven pair out back. The short spine keeps mass — and therefore health —
  * low, which is the trade the whole light build is built around.
@@ -194,6 +211,9 @@ const v = (x: number, y: number, z: number): Vec3i => ({ x, y, z });
  *         [ ]         spine
  *    W [ ][ ][ ] W    rear beam and the driven pair, z = -2
  * ```
+ *
+ * Above the core the stack runs tank then Blaster, so the starting gun sits a
+ * cell higher than anything else on the rig and shoots over all of it.
  *
  * The beam is at the very back rather than one cell in, which is what makes it
  * a T. That stretches the wheelbase to four cells, so the rig tracks straight
@@ -243,6 +263,15 @@ function lightRig(): PlacedPart[] {
     ['fuel-tank', v(0, 2, 0)],
     // The mast rides high and central so the rod has a clear line up.
     ['storm-rod', v(0, 2, 1)],
+    // Zombie Blaster bolted to the roof of the tank, a full cell above the
+    // deck; see STARTER_BLASTER above. Up there its 360-degree arc clears the
+    // mast and both engine cans instead of firing through them, and it reads
+    // as the rig's gun rather than as one more block on the spine. The tank's
+    // top face is an ordinary frame socket, so the mount is legal in the
+    // garage and the player can move it if they want the height back. Both the
+    // spine cell at (0, 2, -1) and the named weapon bay at (0, 2, -2) are left
+    // open for the first gun they buy.
+    [STARTER_BLASTER, v(0, 3, 0)],
   ]);
 }
 
@@ -274,6 +303,9 @@ function mediumRig(): PlacedPart[] {
     ['armour-plate', v(1, 2, 1)],
     ['armour-plate', v(-1, 2, 1)],
     ['pyre-core', v(0, 2, 1)],
+    // Zombie Blaster on the free flank, where its arc clears the deck; see
+    // STARTER_BLASTER above.
+    [STARTER_BLASTER, v(-1, 2, 0)],
   ]);
 }
 
@@ -322,8 +354,11 @@ function heavyRig(): PlacedPart[] {
     ['armour-plate', v(-1, 2, 1)],
     ['armour-plate', v(0, 2, 1)],
     ['armour-plate', v(1, 2, 1)],
-    // Plate down one exposed flank; the other side of the deck is engine bay.
-    ['armour-plate', v(1, 2, 0)],
+    // The exposed flank carries the Zombie Blaster rather than another plate
+    // (see STARTER_BLASTER above). The Crawler is the rig that most needs a
+    // gun with a short arc on it: the silo it is built around cannot answer
+    // anything already chewing on the treads.
+    [STARTER_BLASTER, v(1, 2, 0)],
     // Two engines, mounted symmetrically about the rig's centreline so the
     // belts are fed evenly. Two rather than one is not a luxury: at nearly
     // three tonnes on two belts, a single small block leaves the Crawler

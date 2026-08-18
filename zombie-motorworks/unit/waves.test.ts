@@ -111,6 +111,7 @@ describe('wave formulas', () => {
   it('empties an opening wave queue on the first spawn tick', () => {
     let active = 0;
     const zombiePool = {
+      warmKinds: () => undefined,
       setWaveMultipliers: () => undefined,
       setBossEncounter: () => undefined,
       getActiveCount: () => active,
@@ -200,6 +201,7 @@ describe('wave formulas', () => {
     let completion: { wave: number; reward: number } | null = null;
     let waveMultipliers: number[] = [];
     const zombiePool = {
+      warmKinds: () => undefined,
       setWaveMultipliers: (...multipliers: number[]) => {
         waveMultipliers = multipliers;
       },

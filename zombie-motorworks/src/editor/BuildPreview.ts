@@ -21,13 +21,24 @@ import { getPartDef } from '../core/parts.ts';
 import { buildPartMesh } from './meshes.ts';
 
 /**
- * Mounts a spinning preview of `bp` into `canvas`. Call the returned function
- * to stop the loop and free the GL context.
+ * Mounts a spinning preview of `bp` into `host`. Call the returned function to
+ * stop the loop and free the GL context.
+ *
+ * The canvas is created here and destroyed with the preview rather than being
+ * handed in and reused, because releasing the context properly requires
+ * `forceContextLoss`, and that permanently poisons the element it is called
+ * on. A caller that kept one canvas across dialog opens would get a working
+ * preview the first time and a dead one after that. `ThreatAlert` rebuilds its
+ * canvas for the same reason.
  */
 export function mountSpinningRigPreview(
-  canvas: HTMLCanvasElement,
+  host: HTMLElement,
   bp: VehicleBlueprint,
 ): () => void {
+  const canvas = document.createElement('canvas');
+  canvas.className = 'build-prompt__preview';
+  host.appendChild(canvas);
+
   const renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: true,
@@ -122,5 +133,16 @@ export function mountSpinningRigPreview(
       for (const material of materials) material.dispose();
     });
     renderer.dispose();
+    // `dispose` only releases the resources three is tracking; the GL context
+    // itself stays live until the canvas is collected, which may be a long way
+    // off. Browsers cap live contexts per page and evict the *oldest* on
+    // overflow — which is the main viewport — so three strays per dialog open
+    // eventually take the game's own canvas down. This is the half that
+    // actually hands the context back, and matches what `PartIconRenderer` and
+    // `ThreatAlert` already do.
+    renderer.forceContextLoss();
+    // Poisoned by the call above, so it never gets reused — the next open
+    // builds a fresh one.
+    canvas.remove();
   };
 }
