@@ -2,8 +2,9 @@ import { GameObjects, Math as PMath, Scene } from 'phaser';
 import { Target } from '../objects/Target';
 import { Fx } from '../core/fx';
 import { Sfx, unlockAudio, isMuted, toggleMute } from '../core/audio';
-import { FINAL_LEVEL, KINDS, LevelConfig, levelConfig, pickKind } from '../data/levels';
-import { Stats } from '../data/upgrades';
+import { FINAL_LEVEL, KINDS, LevelConfig, POWERUP_SPEED, isPowerup, levelConfig, pickKind } from '../data/levels';
+import { Stats, UPGRADE_BY_ID } from '../data/upgrades';
+import { BeamLook, GunLook, beamLook, gunLook, kickOf, partFor } from '../data/gunkit';
 import { bankCoins, meta, run, saveMeta } from '../core/state';
 import { setGameplayActive } from '../core/lifecycle';
 import { adsAvailable, noteLevelCleared } from '../core/ads';
@@ -11,7 +12,14 @@ import { rewardButton } from '../core/adButton';
 import { reportPlatformHappyTime } from '../platform/platform';
 import { IconLabel, ic, iconImage } from '../core/icons';
 import { Turret } from '../objects/Turret';
-import { CX, CY, FONT, FONT_UI, H, HUD, LANDSCAPE, MUZZLE, PLAY, Tier, W, fmt, fmtShort, hex, tierFor } from '../core/theme';
+import { Doors } from '../objects/Doors';
+import { Backdrop } from '../core/backdrop';
+import { aheadAccent, isZoneStart, skinFor, Zone, zoneFor } from '../data/zones';
+import { gimmickIntro, seedTarget, tickGimmick } from '../core/gimmicks';
+import { Hazards, hazardIntro } from '../core/hazards';
+import { HazardSpec, hazardFor, teachesHazard } from '../data/hazards';
+import { isBonusAfter } from '../data/bonus';
+import { CX, CY, FONT, FONT_UI, H, HUD, MUZZLE, PLAY, Tier, W, fmt, fmtShort, hex } from '../core/theme';
 
 interface Streak { n: number; bonus: number; label: string; }
 
@@ -65,12 +73,20 @@ function distToSegment (px: number, py: number, x1: number, y1: number, x2: numb
 export class GameScene extends Scene
 {
     private cfg!: LevelConfig;
+    private hazard!: HazardSpec;
+    private hazards!: Hazards;
     private stats!: Stats;
     private tier!: Tier;
+    private zone!: Zone;
     private fx!: Fx;
+    private backdrop!: Backdrop;
+    private doors!: Doors;
 
     private targets: Target[] = [];
-    private state: 'play' | 'done' = 'play';
+    /** `intro` is the beat between the doors opening and the clock starting. */
+    private state: 'intro' | 'play' | 'done' = 'intro';
+    /** True when this level owes the player a first look at its zone's rule. */
+    private teaching = false;
     private revived = false;
 
     private timeLeft = 0;
@@ -96,7 +112,6 @@ export class GameScene extends Scene
     private tempMultTimer = 0;
 
     //  HUD
-    private bgGfx!: GameObjects.Graphics;
     private hudGfx!: GameObjects.Graphics;
     private coinLabel!: IconLabel;
     private scoreText!: GameObjects.Text;
@@ -113,6 +128,9 @@ export class GameScene extends Scene
     private multText!: GameObjects.Text;
     private muteBtn!: GameObjects.Image;
     private turret!: Turret;
+    private look!: GunLook;
+    private beam!: BeamLook;
+    private beam2!: BeamLook;
 
     constructor ()
     {
@@ -122,11 +140,16 @@ export class GameScene extends Scene
     create ()
     {
         this.cfg = levelConfig(run.level);
+        this.hazard = hazardFor(run.level);
         this.stats = run.stats();
-        this.tier = tierFor(run.level);
+        this.look = gunLook(run.taken, meta.perks);
+        this.zone = zoneFor(run.level);
+        this.tier = this.zone.palette;
+        this.beam = beamLook(this.look, this.tier);
+        this.beam2 = beamLook(this.look, this.tier, true);
 
         this.targets = [];
-        this.state = 'play';
+        this.state = 'intro';
         this.revived = false;
         this.timeTotal = (this.cfg.duration + this.stats.timeBonus) * 1000;
         this.timeLeft = this.timeTotal;
@@ -150,15 +173,36 @@ export class GameScene extends Scene
         this.comboTier = 0;
         this.streakKey = '';
 
+        this.teaching = isZoneStart(run.level) && !run.zonesSeen[this.zone.index];
+
         this.cameras.main.setBackgroundColor(this.tier.bg);
 
-        this.buildBackground();
+        this.backdrop = new Backdrop(this, this.zone);
+
+        //  The weather is the level's difficulty made visible: the same numbers
+        //  drive the art and the rule.
+        this.backdrop.gust = this.hazard.gust;
+        this.backdrop.storm = this.hazard.storm;
+
         this.fx = new Fx(this, 20);
+        this.hazards = new Hazards(this, this.hazard, this.tier, this.fx, {
+            onLanded: (ms: number) => this.boltLanded(ms)
+        });
+
         this.buildHud();
 
         if (this.cfg.boss)
         {
             this.spawnBoss();
+        }
+        else if (!this.teaching)
+        {
+            //  A few targets are already standing when the doors part. An empty
+            //  arena on the reveal wastes the best frame of the whole level --
+            //  except on the level that opens a zone, where the empty field is
+            //  the point: the rule has to demonstrate itself with nothing else
+            //  moving, and only then does the level fill up.
+            this.openingTargets();
         }
 
         this.input.on('pointerdown', (p: Phaser.Input.Pointer) =>
@@ -169,67 +213,118 @@ export class GameScene extends Scene
             this.requestShot(p.x, p.y);
         });
 
-        this.cameras.main.fadeIn(140, 0, 0, 0);
-        this.showLevelBanner();
+        this.doors = new Doors(this);
+
+        this.enter();
 
         //  This scene is the only place the player is actually playing; every
         //  other screen is a menu as far as the portal is concerned.
+        this.events.once('shutdown', () =>
+        {
+            setGameplayActive(false);
+            this.hazards.destroy();
+        });
+    }
+
+    /**
+     * The doors part, and -- the first time the player sets foot in a zone --
+     * its rule performs itself once on the empty field before the clock starts.
+     * Nothing here is written down; the zone shows the player what it does.
+     */
+    private enter (): void
+    {
+        void this.doors.open(320).then(() =>
+        {
+            if (!this.teaching)
+            {
+                this.beginPlay();
+                return;
+            }
+
+            run.zonesSeen[this.zone.index] = true;
+
+            //  A zone can owe the player two demonstrations: how the world
+            //  behaves, and what is trying to stop them. They play back to
+            //  back, in that order, and only ever the first time in.
+            const rule = Math.max(1, gimmickIntro(this, this.zone, this.fx));
+            const signature = teachesHazard(run.level);
+
+            this.time.delayedCall(rule, () =>
+            {
+                const shown = hazardIntro(this, signature, this.tier, this.fx);
+
+                if (shown <= 0)
+                {
+                    this.beginPlay();
+                    return;
+                }
+
+                this.time.delayedCall(shown, () => this.beginPlay());
+            });
+        });
+    }
+
+    /** The handful of targets that are already up when the doors part. */
+    private openingTargets (): void
+    {
+        //  Standing, never falling: the crowd behind the doors is a tableau,
+        //  and a target that dropped through the floor before the clock
+        //  started would be a free miss the player never had a shot at.
+        for (let i = 0; i < Math.min(3, this.cfg.maxActive); i++) this.spawn(true);
+    }
+
+    private beginPlay (): void
+    {
+        if (this.state !== 'intro') return;
+
+        this.state = 'play';
+
+        if (this.teaching && !this.cfg.boss) this.openingTargets();
+
+        //  The targets that were standing behind the doors have been ageing on
+        //  screen; the clock starting is the first moment their timer is real.
+        for (const t of this.targets) t.setLifetime(t.maxLife);
+
         setGameplayActive(true);
-        this.events.once('shutdown', () => setGameplayActive(false));
+
+        //  The glass goes up and the core arms itself with the clock, not with
+        //  the scene -- nothing shoots at a player who is still watching a door.
+        this.hazards.start();
+
+        this.installPick();
+    }
+
+    /**
+     * The upgrade chosen on the way in gets bolted onto the gun in front of the
+     * player. It plays over the opening beat of the level rather than before
+     * it, so the payoff costs nobody any clock.
+     */
+    private installPick (): void
+    {
+        const id = run.claimPick();
+
+        if (!id) return;
+
+        const up = UPGRADE_BY_ID[id];
+
+        if (!up) return;
+
+        this.turret.install(partFor(id));
+
+        Sfx.upgrade();
+        this.fx.ring(MUZZLE.x, MUZZLE.y - 40, 170, up.color, 6, 520);
+        this.fx.burst(MUZZLE.x, MUZZLE.y - 40, up.color, 18, 'hit');
+        this.cameras.main.shake(180, 0.006);
+
+        const tag = this.fx.popup(MUZZLE.x, MUZZLE.y - 118, up.name, up.color, 24, 34, 980);
+        tag.setDepth(40);
     }
 
     //  ---------------------------------------------------------------- setup
 
-    private buildBackground (): void
-    {
-        this.bgGfx = this.add.graphics().setDepth(0);
-
-        const intensity = Math.min(1, run.level / 26);
-
-        for (let i = 0; i < 3 + Math.floor(intensity * 3); i++)
-        {
-            const orb = this.add.circle(
-                40 + Math.random() * (W - 80),
-                PLAY.top + Math.random() * (PLAY.bottom - PLAY.top),
-                70 + Math.random() * 90,
-                i % 2 === 0 ? this.tier.accent : this.tier.accent2,
-                0.05 + intensity * 0.045
-            ).setDepth(1);
-
-            this.tweens.add({
-                targets: orb,
-                y: orb.y + (Math.random() > 0.5 ? 120 : -120),
-                scale: 1.35,
-                duration: 3000 + Math.random() * 3000,
-                yoyo: true,
-                repeat: -1,
-                ease: 'Sine.inOut'
-            });
-        }
-
-        const dust = this.add.particles(0, 0, 'dust', {
-            x: { min: 0, max: W },
-            y: PLAY.bottom + 40,
-            speedY: { min: -70, max: -20 },
-            speedX: { min: -18, max: 18 },
-            lifespan: { min: 3000, max: 6000 },
-            scale: { start: 0.5, end: 0 },
-            alpha: { start: 0.4, end: 0 },
-            tint: this.tier.dust,
-            blendMode: 'ADD',
-            frequency: Math.max(80, 320 - run.level * 7),
-            quantity: 1
-        });
-        dust.setDepth(2);
-    }
-
     private buildHud (): void
     {
         this.hudGfx = this.add.graphics().setDepth(30);
-
-        this.add.text(HUD.margin, HUD.levelY, `LEVEL ${run.level}`, {
-            fontFamily: FONT, fontSize: 22, color: hex(this.tier.accent)
-        }).setOrigin(0, 0.5).setDepth(31);
 
         this.coinLabel = new IconLabel(this, W - HUD.margin, COIN_HUD.y, 'gem', fmt(meta.coins), {
             align: 'right', fontSize: 24, iconSize: 22
@@ -261,13 +356,23 @@ export class GameScene extends Scene
             fontFamily: FONT, fontSize: 20, color: hex(this.tier.accent)
         }).setOrigin(1, 0.5).setDepth(32);
 
-        this.streakText = this.add.text(CX, HUD.footerY, '', {
-            fontFamily: FONT, fontSize: 15, color: '#7d88b0'
-        }).setOrigin(0.5).setDepth(31);
+        //  On a wide screen the caption sits to the right of the gem track; in
+        //  portrait there is no room beside it, so it stacks underneath.
+        const gemSpan = (STREAKS.length - 1) * HUD.streakGap;
 
-        this.multText = this.add.text(HUD.margin - 2, HUD.footerY, '', {
-            fontFamily: FONT, fontSize: 20, color: '#b388ff'
-        }).setOrigin(0, 0.5).setDepth(31).setAlpha(0);
+        this.streakText = this.add.text(
+            HUD.streakInline ? CX + gemSpan / 2 + 34 : CX,
+            HUD.streakTextY,
+            '',
+            { fontFamily: FONT, fontSize: 15, color: '#7d88b0' }
+        ).setOrigin(HUD.streakInline ? 0 : 0.5, 0.5).setDepth(31);
+
+        this.multText = this.add.text(
+            HUD.streakInline ? CX - gemSpan / 2 - 34 : HUD.margin - 2,
+            HUD.streakTextY,
+            '',
+            { fontFamily: FONT, fontSize: 20, color: '#b388ff' }
+        ).setOrigin(HUD.streakInline ? 1 : 0, 0.5).setDepth(31).setAlpha(0);
 
         this.muteBtn = iconImage(this, W - HUD.margin + 4, HUD.footerY, isMuted() ? 'soundOff' : 'soundOn', {
             size: 20, color: 0xffffff, alpha: 0.45
@@ -283,20 +388,7 @@ export class GameScene extends Scene
             this.muteBtn.setTexture(ic(meta.muted ? 'soundOff' : 'soundOn'));
         });
 
-        this.turret = new Turret(this, this.tier.accent, this.tier.accent2);
-    }
-
-    private showLevelBanner (): void
-    {
-        const t = this.add.text(CX, arenaY(0.29), `LEVEL ${run.level}`, {
-            fontFamily: FONT, fontSize: 76, color: hex(this.tier.accent), stroke: '#000000', strokeThickness: 8
-        }).setOrigin(0.5).setDepth(35).setScale(0.6).setAlpha(0);
-
-        this.tweens.add({ targets: t, scale: 1, alpha: 1, duration: 180, ease: 'Back.out' });
-        this.tweens.add({
-            targets: t, scale: 1.5, alpha: 0, duration: 320, delay: 400, ease: 'Quad.in',
-            onComplete: () => t.destroy()
-        });
+        this.turret = new Turret(this, this.tier, this.look);
     }
 
     //  ------------------------------------------------------------- spawning
@@ -325,19 +417,83 @@ export class GameScene extends Scene
         return best;
     }
 
-    private spawn (): void
+    private spawn (standing = false): void
     {
         const kind = pickKind(this.cfg.weights);
         const def = KINDS[kind];
         const radius = this.cfg.size * def.sizeMult;
-        const spot = this.freeSpot(radius);
-        const moving = Math.random() < this.cfg.moveChance;
+        const power = isPowerup(kind);
+        const falling = !standing && this.hazard.fallChance > 0 && Math.random() < this.hazard.fallChance;
 
-        const t = new Target(this, spot.x, spot.y, kind, this.cfg.size, run.level, this.cfg.speed, moving);
-        t.setLifetime(this.cfg.lifetime * (kind === 'bomb' ? 0.85 : 1));
+        //  A prize is never a sitting duck: power-ups carry their own floor
+        //  speed, so they drift even on a level where nothing else does.
+        const speed = power ? Math.max(this.cfg.speed, POWERUP_SPEED) : this.cfg.speed;
+        const moveChance = power ? Math.max(0.85, this.cfg.moveChance) : this.cfg.moveChance;
+        const moving = !falling && Math.random() < moveChance;
+
+        const spot = falling
+            ? { x: PLAY.left + radius + Math.random() * Math.max(1, (PLAY.right - PLAY.left) - radius * 2), y: PLAY.top + radius }
+            : this.freeSpot(radius);
+
+        const t = new Target(this, spot.x, spot.y, kind, this.cfg.size, run.level, speed, moving, skinFor(this.zone, kind));
+
+        if (falling)
+        {
+            //  The drop *is* the timer: the fall is timed against the lifetime
+            //  this level would have given a standing target, so its life ring
+            //  winds down exactly as it reaches the floor. The ring and the
+            //  floor say the same thing, and the player reads whichever is
+            //  nearer to hand.
+            const drop = (PLAY.bottom + radius) - t.y;
+            const quick = Math.min(1.6, Math.max(0.7, def.speedMult));
+            const ms = Math.max(700, (this.cfg.lifetime * this.hazard.fallTime) / quick);
+            const vy = (drop / ms) * 1000;
+
+            t.falling = true;
+            t.vy = vy;
+            t.vx = (Math.random() - 0.5) * vy * 0.4;
+            t.setLifetime(ms);
+        }
+        else
+        {
+            t.setLifetime(this.cfg.lifetime * (kind === 'bomb' ? 0.85 : 1));
+        }
+
         t.setDepth(10);
 
+        seedTarget(this.zone.gimmick, t, run.level, this.hazard);
+
         this.targets.push(t);
+    }
+
+    /**
+     * The two halves a split leaves behind. They are smaller, briefer and
+     * cannot split again, so the rule reads as a bonus rather than a spiral.
+     */
+    private splitInto (x: number, y: number, radius: number): void
+    {
+        if (this.state !== 'play') return;
+
+        //  Late in the zone a kill comes apart into three, not two.
+        const pieces = this.hazard.splitCount;
+
+        for (let i = 0; i < pieces; i++)
+        {
+            if (this.targets.length >= this.cfg.maxActive + 4) return;
+
+            const side = pieces === 2 ? (i === 0 ? -1 : 1) : i - 1;
+            const size = Math.max(14, radius * (pieces > 2 ? 0.54 : 0.62));
+            const px = Math.max(PLAY.left + size, Math.min(PLAY.right - size, x + side * radius * 0.9));
+            const py = Math.max(PLAY.top + size, Math.min(PLAY.bottom - size, y));
+
+            const t = new Target(this, px, py, 'small', size / KINDS.small.sizeMult, run.level, this.cfg.speed, true, skinFor(this.zone, 'small'));
+            t.setLifetime(this.cfg.lifetime * 0.7);
+            t.setDepth(10);
+            t.noSplit = true;
+            t.progressWorth = 0;
+
+            this.targets.push(t);
+        }
     }
 
     private spawnBoss (): void
@@ -378,11 +534,29 @@ export class GameScene extends Scene
 
         this.nextShot = now + this.stats.fireRate;
 
-        this.turret.fire(px, py);
-        this.fx.tracer(this.turret.tipX, this.turret.tipY, px, py, this.tier.accent, 7, 150);
+        //  Anything standing between the gun and the tap gets the shot first.
+        if (this.hitObstacle(px, py)) return;
 
         const hit = new Set<Target>();
         const primary = this.pickTarget(px, py);
+
+        /**
+         * Everything past the first bolt is a bonus on a hit, not an aimbot.
+         * A tap that lands on empty space fires one barrel into empty space
+         * and that is the whole shot -- no extra guns, no lance, no free kills
+         * off a miss. Aim is still the game.
+         */
+        const volley = primary ? 1 + this.stats.multishot : 1;
+
+        this.turret.fire(px, py, volley);
+
+        const muzzle = this.turret.tipFor(0);
+
+        this.fx.beam(muzzle.x, muzzle.y, px, py, this.beam);
+
+        const kick = kickOf(this.look);
+
+        if (kick > 0) this.cameras.main.shake(50, kick);
 
         if (primary)
         {
@@ -396,6 +570,8 @@ export class GameScene extends Scene
             this.onMiss(px, py);
         }
 
+        if (!primary) return;
+
         if (this.stats.pierce > 0)
         {
             const along = this.targets
@@ -403,6 +579,15 @@ export class GameScene extends Scene
                     distToSegment(t.x, t.y, MUZZLE.x, MUZZLE.y, px, py) < t.radius + 10)
                 .sort((a, b) => a.distanceTo(px, py) - b.distanceTo(px, py))
                 .slice(0, this.stats.pierce);
+
+            //  The lance carries on past the first target: one long bolt out
+            //  to the furthest thing it skewered.
+            const far = along[along.length - 1];
+
+            if (far)
+            {
+                this.fx.beam(muzzle.x, muzzle.y, far.x, far.y, this.beam, 0.9);
+            }
 
             for (const t of along)
             {
@@ -418,13 +603,111 @@ export class GameScene extends Scene
                 .sort((a, b) => a.distanceTo(px, py) - b.distanceTo(px, py))
                 .slice(0, this.stats.multishot);
 
-            for (const t of others)
+            others.forEach((t, i) =>
             {
                 hit.add(t);
-                this.fx.tracer(this.turret.tipX, this.turret.tipY, t.x, t.y, this.tier.accent2, 4, 130);
+
+                //  Each extra shot leaves the barrel that actually flared for
+                //  it -- the fan of tracers is the multi-shot upgrade made
+                //  visible, not a stat hidden behind one line.
+                const m = this.turret.tipFor(i + 1);
+
+                this.fx.beam(m.x, m.y, t.x, t.y, this.beam2, 0.85);
                 this.applyShot(t, t.x, t.y, false);
-            }
+            });
         }
+    }
+
+    /**
+     * The obstacle layer's claim on a shot.
+     *
+     * Glass eats anything that crosses it, whatever was behind it -- that is
+     * the entire point of a pane. A bolt in the open air is shot out of the
+     * sky. Neither counts as a miss: the player aimed at exactly the thing
+     * they hit, and the cost is the shot itself, not their combo.
+     *
+     * True when the shot was spent here and the targets never saw it.
+     */
+    private hitObstacle (px: number, py: number): boolean
+    {
+        const bolt = this.hazards.flakAt(px, py, this.stats.hitRadius);
+        const glass = this.hazards.paneOn(MUZZLE.x, MUZZLE.y, px, py);
+
+        //  Whichever of the two the shot reaches first.
+        const glassFirst = glass && (!bolt ||
+            Math.hypot(glass.x - MUZZLE.x, glass.y - MUZZLE.y) < Math.hypot(bolt.x - MUZZLE.x, bolt.y - MUZZLE.y));
+
+        if (glass && glassFirst)
+        {
+            this.turret.fire(glass.x, glass.y, 1);
+
+            const m = this.turret.tipFor(0);
+
+            this.fx.beam(m.x, m.y, glass.x, glass.y, this.beam);
+
+            if (this.hazards.hitPane(glass.pane, glass.x, glass.y)) this.paneDown(glass.pane.x, glass.pane.y);
+
+            return true;
+        }
+
+        if (bolt)
+        {
+            this.turret.fire(bolt.x, bolt.y, 1);
+
+            const m = this.turret.tipFor(0);
+
+            this.fx.beam(m.x, m.y, bolt.x, bolt.y, this.beam);
+
+            const x = bolt.x;
+            const y = bolt.y;
+
+            this.hazards.killFlak(bolt);
+            this.boltDown(x, y);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /** Breaking the glass pays, so clearing a lane is a play and not a tax. */
+    private paneDown (x: number, y: number): void
+    {
+        const gain = Math.round(400 * (1 + run.level * 0.12) * this.stats.scoreMult * (1 + this.streakBonus()));
+
+        this.levelScore += gain;
+
+        this.fx.popup(x, y - 34, 'SHATTERED', 0xd8e4ff, 26, 52, 620);
+        this.fx.popup(x, y + 8, fmtShort(gain), 0xffffff, 30, 62);
+
+        this.updateScoreText();
+    }
+
+    /** Shooting a bolt down is worth more than the seconds it would have cost. */
+    private boltDown (x: number, y: number): void
+    {
+        const gain = Math.round(320 * (1 + run.level * 0.12) * this.stats.scoreMult * (1 + this.streakBonus()));
+
+        this.levelScore += gain;
+
+        this.fx.popup(x, y - 30, 'INTERCEPT', 0xffb020, 24, 50, 600);
+        this.fx.popup(x, y + 10, fmtShort(gain), 0xffffff, 28, 60);
+
+        this.updateScoreText();
+    }
+
+    /**
+     * A bolt got through to the gun. It costs clock and nothing else: the
+     * combo the player has been building survives, because losing both at once
+     * turns one mistake into the end of the run.
+     */
+    private boltLanded (ms: number): void
+    {
+        if (this.state !== 'play') return;
+
+        this.timeLeft = Math.max(0, this.timeLeft - ms);
+
+        this.fx.popup(MUZZLE.x, PLAY.bottom - 30, `-${(ms / 1000).toFixed(1)}s`, 0xff4d5e, 44, 86, 820);
     }
 
     private pickTarget (px: number, py: number): Target | null
@@ -453,6 +736,24 @@ export class GameScene extends Scene
             return;
         }
 
+        //  Every tracer leaves the muzzle, so "which side was it hit from" is
+        //  always the same question: where the gun is, relative to the target.
+        if (t.shieldArc > 0)
+        {
+            const from = Math.atan2(MUZZLE.y - t.y, MUZZLE.x - t.x);
+
+            if (t.shielded(from))
+            {
+                const p = t.plateAt(from);
+
+                t.clang(from);
+                this.fx.burst(p.x, p.y, 0xd8e4ff, 8, 'hit');
+                this.fx.ring(p.x, p.y, t.radius * 1.9, 0xd8e4ff, 3, 260);
+                Sfx.chip();
+                return;
+            }
+        }
+
         const crit = Math.random() < this.stats.crit;
         const perfect = direct && this.stats.perfect > 0 && t.distanceTo(hx, hy) <= t.radius * 0.4;
         const dmg = this.stats.damage * (crit ? this.stats.critMult : 1);
@@ -478,7 +779,10 @@ export class GameScene extends Scene
 
         const def = t.def;
         const kind = t.kind;
+        const color = t.color;
         const radius = t.radius;
+        const splittable = !t.noSplit;
+        const worth = t.progressWorth;
         const x = t.x;
         const y = t.y;
 
@@ -512,14 +816,14 @@ export class GameScene extends Scene
         this.levelXp += xp;
         bankCoins(coins);
 
-        this.progress += def.progress;
+        this.progress += worth;
         run.kills += 1;
 
         //  --- feedback ---
         const big = crit || def.units > 1 || kind === 'golden' || kind === 'boss';
 
-        this.fx.burst(x, y, def.color, big ? 26 : 14, kind === 'golden' || kind === 'boss' ? 'gold' : (big ? 'big' : 'hit'));
-        this.fx.ring(x, y, radius * (big ? 3.4 : 2.2), def.color, big ? 6 : 3, big ? 420 : 280);
+        this.fx.burst(x, y, color, big ? 26 : 14, kind === 'golden' || kind === 'boss' ? 'gold' : (big ? 'big' : 'hit'));
+        this.fx.ring(x, y, radius * (big ? 3.4 : 2.2), color, big ? 6 : 3, big ? 420 : 280);
 
         const popColor = crit ? 0xffb020 : (kind === 'golden' ? 0xffd23f : 0xffffff);
         const popSize = crit ? 40 : (big ? 34 : 26);
@@ -561,6 +865,12 @@ export class GameScene extends Scene
         {
             this.cameras.main.flash(240, 255, 90, 120);
             this.fx.popup(CX, arenaY(0.21), 'BOSS DOWN', 0xff2d55, 44, 50, 900);
+        }
+
+        //  --- the zone's parting gift ---
+        if (this.zone.gimmick === 'split' && splittable && def.progress > 0 && radius > 20)
+        {
+            this.splitInto(x, y, radius);
         }
 
         //  --- chain reactions ---
@@ -625,7 +935,17 @@ export class GameScene extends Scene
             if (!best) break;
 
             used.add(best);
-            this.fx.tracer(fromX, fromY, best.x, best.y, 0xfff05c, 5, 220);
+            this.fx.beam(fromX, fromY, best.x, best.y, {
+                ...this.beam2,
+                color: 0xfff05c,
+                core: 0xffffff,
+                width: 4 + this.stats.chain,
+                life: 220,
+                wobble: 8 + this.stats.chain * 2,
+                bloom: 1,
+                shock: 0,
+                head: 0
+            });
             this.fx.burst(best.x, best.y, 0xfff05c, 8, 'hit');
 
             fromX = best.x;
@@ -709,8 +1029,12 @@ export class GameScene extends Scene
             this.recalcMilestone();
         }
 
-        this.fx.burst(x, y, 0xff4d5e, 8, 'hit');
-        this.fx.ring(x, y, 40, 0xff4d5e, 3, 240);
+        //  A target that fell through the floor died just below the arena;
+        //  the splash belongs on the floor, where the player was looking.
+        const fy = Math.min(y, PLAY.bottom);
+
+        this.fx.burst(x, fy, 0xff4d5e, 8, 'hit');
+        this.fx.ring(x, fy, 40, 0xff4d5e, 3, 240);
         Sfx.expire();
     }
 
@@ -933,7 +1257,7 @@ export class GameScene extends Scene
      */
     private drawStreak (g: GameObjects.Graphics): void
     {
-        const spacing = 42;
+        const spacing = HUD.streakGap;
         const x0 = CX - ((STREAKS.length - 1) * spacing) / 2;
         const t = this.time.now;
 
@@ -1071,6 +1395,7 @@ export class GameScene extends Scene
         }
 
         this.drawStreak(g);
+        this.drawRoute(g);
 
         //  low-time vignette
         if (low && this.state === 'play')
@@ -1081,6 +1406,60 @@ export class GameScene extends Scene
         }
     }
 
+    /**
+     * The same rail the blast doors carry, shrunk into the top strip: one stop
+     * per level of this zone and a gate at the end in the colour of whatever is
+     * behind it. It is the only thing on screen that answers "how much further"
+     * -- and it answers it without a number.
+     */
+    private drawRoute (g: GameObjects.Graphics): void
+    {
+        const stops = this.zone.to - this.zone.from + 1;
+        const here = run.level - this.zone.from;
+        const y = HUD.levelY;
+        const x0 = HUD.margin + 4;
+        const gap = Math.min(22, (BAR_RIGHT - x0 - 40) / stops);
+
+        g.lineStyle(3, 0x1a2138, 1);
+        g.lineBetween(x0, y, x0 + stops * gap, y);
+
+        g.lineStyle(3, this.tier.accent, 0.9);
+        g.lineBetween(x0, y, x0 + here * gap, y);
+
+        for (let i = 0; i < stops; i++)
+        {
+            const x = x0 + i * gap;
+
+            if (i < here)
+            {
+                g.fillStyle(this.tier.accent, 1);
+                g.fillCircle(x, y, 4);
+            }
+            else if (i === here)
+            {
+                g.fillStyle(this.tier.accent, 1);
+                g.fillCircle(x, y, 3);
+                g.lineStyle(2, this.tier.accent, 0.5 + Math.abs(Math.sin(this.time.now * 0.005)) * 0.5);
+                g.strokeCircle(x, y, 7);
+            }
+            else
+            {
+                g.fillStyle(0x2a3352, 1);
+                g.fillCircle(x, y, 2.5);
+            }
+        }
+
+        //  The gate, tinted with the next zone -- a colour the player has not
+        //  seen yet, sitting a countable number of stops away.
+        const gx = x0 + stops * gap;
+        const gate = aheadAccent(run.level);
+
+        g.lineStyle(2.5, gate, 0.8);
+        g.strokeRect(gx - 5, y - 8, 10, 16);
+        g.fillStyle(gate, 0.25);
+        g.fillRect(gx - 5, y - 8, 10, 16);
+    }
+
     //  --------------------------------------------------------------- loop
 
     update (_time: number, delta: number): void
@@ -1088,7 +1467,8 @@ export class GameScene extends Scene
         const dt = Math.min(50, delta);
 
         this.fx.update(dt);
-        this.drawBackground();
+        this.backdrop.update(dt);
+        this.hazards.update(dt, this.state === 'play');
 
         if (this.state === 'play')
         {
@@ -1153,10 +1533,24 @@ export class GameScene extends Scene
             const t = this.targets[i];
             t.update(dt, this.stats.slow);
 
-            if (t.life <= 0 && this.state === 'play')
+            //  A falling target dies by reaching the floor; a standing one by
+            //  running out of life. Both are the same miss.
+            if ((t.life <= 0 || t.gone) && this.state === 'play')
             {
                 this.expireTarget(t);
             }
+        }
+
+        if (this.state === 'play')
+        {
+            //  The zone's rule, applied to the field. Wind and rotation come
+            //  straight off the art that is already showing them.
+            tickGimmick(this.zone.gimmick, {
+                targets: this.targets,
+                wind: this.backdrop.wind,
+                spin: this.backdrop.spin,
+                freeSpot: (r: number) => this.freeSpot(r)
+            }, dt);
         }
 
         //  HUD text
@@ -1176,31 +1570,6 @@ export class GameScene extends Scene
         }
 
         this.drawHud();
-    }
-
-    private drawBackground (): void
-    {
-        const g = this.bgGfx;
-        const t = this.time.now;
-        const step = 58;
-        const off = (t * 0.022) % step;
-        const alpha = 0.28 + Math.min(0.35, run.level * 0.018);
-
-        g.clear();
-        g.lineStyle(1, this.tier.grid, alpha);
-
-        for (let x = 0; x <= W; x += step)
-        {
-            g.lineBetween(x, PLAY.top - 10, x, H);
-        }
-
-        for (let y = PLAY.top - 10 + off; y <= H; y += step)
-        {
-            g.lineBetween(0, y, W, y);
-        }
-
-        g.lineStyle(2, this.tier.accent, 0.35);
-        g.lineBetween(0, PLAY.top - 10, W, PLAY.top - 10);
     }
 
     //  --------------------------------------------------------------- flow
@@ -1289,6 +1658,8 @@ export class GameScene extends Scene
 
     private endRun (): void
     {
+        this.hazards.clear();
+
         //  A failed attempt does not bank its score into the run -- retrying
         //  replays the same level from the same total.
         run.bestCombo = Math.max(run.bestCombo, this.bestCombo);
@@ -1307,11 +1678,26 @@ export class GameScene extends Scene
         });
     }
 
+    /**
+     * A level ends the way a level should end: the board clears itself, the
+     * winnings fly to the counter that has been on screen the whole time, and
+     * the blast doors come down over it.
+     *
+     * There used to be a panel here that spent two and a half seconds counting
+     * four numbers up from zero, and it was the single most skipped moment in
+     * the game. Everything it said is already visible -- the score in the HUD,
+     * the coins in the top right -- so it says it in flight instead, in about a
+     * quarter of the time, and the player is through the door before the old
+     * version had finished its first row.
+     */
     private levelComplete (): void
     {
         this.state = 'done';
         setGameplayActive(false);
         noteLevelCleared();
+
+        //  Whatever was in the way when the level ended leaves for free.
+        this.hazards.clear();
 
         run.bestCombo = Math.max(run.bestCombo, this.bestCombo);
         Sfx.levelClear();
@@ -1323,9 +1709,9 @@ export class GameScene extends Scene
 
         left.forEach((t, i) =>
         {
-            this.time.delayedCall(i * 45, () =>
+            this.time.delayedCall(i * 28, () =>
             {
-                this.fx.burst(t.x, t.y, t.def.color, 12, 'hit');
+                this.fx.burst(t.x, t.y, t.color, 12, 'hit');
                 t.destroy();
             });
         });
@@ -1347,117 +1733,68 @@ export class GameScene extends Scene
 
         void reportPlatformHappyTime(perfect ? 1 : 0.6);
 
-        this.showRewards(comboBonus, perfectBonus, perfect);
-    }
+        this.payout(comboBonus + perfectBonus, perfect);
 
-    private showRewards (comboBonus: number, perfectBonus: number, perfect: boolean): void
-    {
-        const panel = this.add.container(0, 0).setDepth(40);
-
-        const dim = this.add.rectangle(CX, CY, W, H, 0x05070f, 0.72);
-        panel.add(dim);
-
-        const title = this.add.text(CX, H * 0.312, 'LEVEL COMPLETE!', {
-            fontFamily: FONT, fontSize: 44, color: hex(this.tier.accent), stroke: '#000000', strokeThickness: 8
-        }).setOrigin(0.5).setScale(0.4);
-        panel.add(title);
-
-        this.tweens.add({ targets: title, scale: 1, duration: 260, ease: 'Back.out' });
-
-        const rows: { label: string; value: number; color: number; suffix?: string }[] = [
-            { label: 'COINS', value: this.levelCoins, color: 0xffc857 },
-            { label: 'XP', value: this.levelXp, color: 0x9b6cff },
-            { label: 'COMBO BONUS', value: comboBonus, color: 0xff5ce0 }
-        ];
-
-        if (perfect) rows.push({ label: 'PERFECT!', value: perfectBonus, color: 0x6cf5c8 });
-
-        //  The rows are a fixed-width block on the centre line, not edge to
-        //  edge: a label and a number 1200px apart do not read as one row.
-        const rowY0 = H * 0.402;
-        const rowGap = LANDSCAPE ? 56 : 62;
-        const rowHalf = 180;
-
-        rows.forEach((r, i) =>
+        this.time.delayedCall(380, () =>
         {
-            const y = rowY0 + i * rowGap;
-
-            const label = this.add.text(CX - rowHalf, y, r.label, {
-                fontFamily: FONT_UI, fontSize: 20, color: '#8d97bd'
-            }).setOrigin(0, 0.5).setAlpha(0);
-
-            const value = this.add.text(CX + rowHalf, y, '+0', {
-                fontFamily: FONT, fontSize: 34, color: hex(r.color)
-            }).setOrigin(1, 0.5).setAlpha(0);
-
-            panel.add([ label, value ]);
-
-            this.time.delayedCall(220 + i * 150, () =>
-            {
-                label.setAlpha(1);
-                value.setAlpha(1).setScale(1.3);
-                this.tweens.add({ targets: value, scale: 1, duration: 180, ease: 'Back.out' });
-                this.tweens.addCounter({
-                    from: 0, to: r.value, duration: 340, ease: 'Cubic.out',
-                    onUpdate: (tw: any) => value.setText('+' + fmt(tw.getValue() as number))
-                });
-                Sfx.reward();
-            });
-        });
-
-        const totalY = rowY0 + rows.length * rowGap + 42;
-
-        const totalLabel = this.add.text(CX, totalY, 'SCORE', {
-            fontFamily: FONT_UI, fontSize: 20, color: '#8d97bd'
-        }).setOrigin(0.5).setAlpha(0);
-
-        const total = this.add.text(CX, totalY + 52, '0', {
-            fontFamily: FONT, fontSize: 60, color: '#ffffff', stroke: '#000000', strokeThickness: 8
-        }).setOrigin(0.5).setAlpha(0);
-
-        panel.add([ totalLabel, total ]);
-
-        const revealDelay = 260 + rows.length * 150;
-
-        this.time.delayedCall(revealDelay, () =>
-        {
-            totalLabel.setAlpha(1);
-            total.setAlpha(1).setScale(1.5);
-            this.tweens.add({ targets: total, scale: 1, duration: 240, ease: 'Back.out' });
-            this.tweens.addCounter({
-                from: 0, to: this.levelScore, duration: 420, ease: 'Cubic.out',
-                onUpdate: (tw: any) => total.setText(fmt(tw.getValue() as number))
-            });
-            Sfx.milestone(2);
-        });
-
-        const advance = () =>
-        {
-            this.cameras.main.fadeOut(160, 0, 0, 0);
-            this.time.delayedCall(170, () =>
+            void this.doors.close(260).then(() =>
             {
                 if (run.level >= FINAL_LEVEL)
                 {
                     this.scene.start('Result', { mode: 'victory', levelScore: this.levelScore, bestCombo: this.bestCombo });
+                }
+                else if (isBonusAfter(run.level))
+                {
+                    //  Every fifth level, the doors open onto the vault instead
+                    //  of the upgrade table. The table is still waiting on the
+                    //  far side of it, with more coins on the counter.
+                    this.scene.start('Bonus');
                 }
                 else
                 {
                     this.scene.start('Upgrade');
                 }
             });
-        };
-
-        this.time.delayedCall(revealDelay + 900, advance);
-
-        //  Tap anywhere to skip straight to the upgrade cards.
-        this.time.delayedCall(400, () =>
-        {
-            dim.setInteractive({ useHandCursor: true });
-            dim.once('pointerdown', () =>
-            {
-                this.time.removeAllEvents();
-                advance();
-            });
         });
+    }
+
+    /**
+     * The winnings, paid in flight rather than in a table. A clean level pays
+     * in gold and rings instead of the word PERFECT.
+     */
+    private payout (bonus: number, perfect: boolean): void
+    {
+        //  One clean shockwave over the arena the player just emptied.
+        this.fx.ring(CX, arenaY(0.45), Math.max(W, H) * 0.6, this.tier.accent2, 6, 460);
+
+        const coins = Math.min(14, 5 + Math.round(bonus / 90));
+
+        for (let i = 0; i < coins; i++)
+        {
+            this.time.delayedCall(i * 34, () =>
+            {
+                this.fx.fly(
+                    CX + (Math.random() - 0.5) * 220,
+                    arenaY(0.45) + (Math.random() - 0.5) * 160,
+                    COIN_HUD.x - 14, COIN_HUD.y,
+                    perfect ? 0xffd23f : 0xffc857,
+                    () => this.bumpCoins()
+                );
+            });
+        }
+
+        if (!perfect) return;
+
+        //  A flawless level: three gold rings out of the muzzle, and the whole
+        //  arena washed once in gold. No caption, and none needed.
+        this.cameras.main.flash(260, 255, 214, 90);
+
+        for (let i = 0; i < 3; i++)
+        {
+            this.time.delayedCall(i * 110, () =>
+                this.fx.ring(CX, arenaY(0.45), 200 + i * 130, 0xffd23f, 7 - i * 1.5, 520));
+        }
+
+        Sfx.golden();
     }
 }

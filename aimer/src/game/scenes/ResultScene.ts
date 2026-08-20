@@ -8,7 +8,8 @@ import { rewardButton } from '../core/adButton';
 import { offerInterstitial } from '../core/ads';
 import { setGameplayActive } from '../core/lifecycle';
 import { reportPlatformHappyTime } from '../platform/platform';
-import { CX, FONT, FONT_UI, H, LANDSCAPE, W, fmt, hex, tierFor } from '../core/theme';
+import { zoneFor } from '../data/zones';
+import { CX, FONT, FONT_UI, H, LANDSCAPE, W, fmt, hex } from '../core/theme';
 
 /**
  * One column of card, tightened up when the screen is wide and short. The
@@ -72,7 +73,7 @@ export class ResultScene extends Scene
     create ()
     {
         const win = this.result.mode === 'victory';
-        const tier = tierFor(run.level);
+        const tier = zoneFor(run.level).palette;
 
         this.leaving = false;
 

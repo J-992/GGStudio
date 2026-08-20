@@ -1,7 +1,9 @@
 import { DENSITY } from '../core/theme';
 
 export type TargetKind =
-    'normal' | 'small' | 'fast' | 'armored' | 'golden' | 'bomb' | 'time' | 'coin' | 'multi' | 'boss';
+    'normal' | 'small' | 'fast' | 'armored' | 'golden' | 'bomb' | 'time' | 'coin' | 'multi' | 'boss' |
+    /** Cash-round money. These never appear in a level's spawn table. */
+    'cash' | 'stack' | 'vault';
 
 export interface KindDef
 {
@@ -25,12 +27,17 @@ export const KINDS: Record<TargetKind, KindDef> = {
     small:   { score: 260,  coins: 5,   xp: 20,  units: 1,  sizeMult: 0.60, speedMult: 1.3, progress: 1,  color: 0x7dff6b, icon: '',          ring: 0xffffff },
     fast:    { score: 220,  coins: 4,   xp: 18,  units: 1,  sizeMult: 0.86, speedMult: 2.4, progress: 1,  color: 0xff7ae0, icon: 'chevrons',  ring: 0xffffff },
     armored: { score: 460,  coins: 9,   xp: 34,  units: 3,  sizeMult: 1.16, speedMult: 0.7, progress: 2,  color: 0xa8b4d0, icon: '',          ring: 0xe8f0ff },
-    golden:  { score: 1500, coins: 45,  xp: 90,  units: 1,  sizeMult: 0.92, speedMult: 1.6, progress: 2,  color: 0xffd23f, icon: 'star',      ring: 0xfff3b0 },
+    golden:  { score: 1500, coins: 45,  xp: 90,  units: 1,  sizeMult: 0.78, speedMult: 2.2, progress: 2,  color: 0xffd23f, icon: 'star',      ring: 0xfff3b0 },
     bomb:    { score: 0,    coins: 0,   xp: 0,   units: 1,  sizeMult: 1.00, speedMult: 1.1, progress: 0,  color: 0xff3b45, icon: 'skull',     ring: 0xff9aa0 },
-    time:    { score: 90,   coins: 2,   xp: 12,  units: 1,  sizeMult: 0.94, speedMult: 1.1, progress: 1,  color: 0x62ffb8, icon: 'stopwatch', ring: 0xd6fff0 },
-    coin:    { score: 70,   coins: 30,  xp: 10,  units: 1,  sizeMult: 0.90, speedMult: 1.2, progress: 1,  color: 0xffc857, icon: 'dollar',    ring: 0xfff0c9 },
-    multi:   { score: 180,  coins: 7,   xp: 22,  units: 1,  sizeMult: 0.90, speedMult: 1.2, progress: 1,  color: 0xb388ff, icon: 'mult',      ring: 0xe3d4ff },
-    boss:    { score: 9000, coins: 300, xp: 600, units: 16, sizeMult: 2.60, speedMult: 0.5, progress: 22, color: 0xff2d55, icon: 'trefoil',   ring: 0xffb3c0 }
+    time:    { score: 90,   coins: 2,   xp: 12,  units: 1,  sizeMult: 0.80, speedMult: 1.7, progress: 1,  color: 0x62ffb8, icon: 'stopwatch', ring: 0xd6fff0 },
+    coin:    { score: 70,   coins: 30,  xp: 10,  units: 1,  sizeMult: 0.76, speedMult: 1.8, progress: 1,  color: 0xffc857, icon: 'dollar',    ring: 0xfff0c9 },
+    multi:   { score: 180,  coins: 7,   xp: 22,  units: 1,  sizeMult: 0.76, speedMult: 1.8, progress: 1,  color: 0xb388ff, icon: 'mult',      ring: 0xe3d4ff },
+    boss:    { score: 9000, coins: 300, xp: 600, units: 16, sizeMult: 2.60, speedMult: 0.5, progress: 22, color: 0xff2d55, icon: 'trefoil',   ring: 0xffb3c0 },
+
+    //  --- the cash round. Money only, one tap each, no goal to speak of. ---
+    cash:    { score: 60,   coins: 18,  xp: 4,   units: 1,  sizeMult: 0.84, speedMult: 1.1, progress: 1,  color: 0x5fe08a, icon: 'dollar',    ring: 0xcdffdd },
+    stack:   { score: 140,  coins: 45,  xp: 8,   units: 1,  sizeMult: 1.06, speedMult: 0.8, progress: 1,  color: 0xffc857, icon: 'coins',     ring: 0xfff0c9 },
+    vault:   { score: 520,  coins: 120, xp: 18,  units: 1,  sizeMult: 1.30, speedMult: 0.5, progress: 1,  color: 0xffd23f, icon: 'gem',       ring: 0xfff3b0 }
 };
 
 export interface LevelConfig
@@ -56,6 +63,22 @@ export interface LevelConfig
     /** Boss levels spawn their boss the moment the level starts. */
     boss?: boolean;
 }
+
+/**
+ * The kinds that are a prize rather than a chore. They are smaller and quicker
+ * than the rank and file, and they never stand still even on a level where
+ * nothing else moves -- a bonus you can take at your leisure is not a bonus,
+ * it is a delay.
+ */
+export const POWERUPS: TargetKind[] = [ 'coin', 'golden', 'time', 'multi' ];
+
+export function isPowerup (kind: TargetKind): boolean
+{
+    return POWERUPS.indexOf(kind) !== -1;
+}
+
+/** Floor speed for a power-up, so it drifts even on a static level. */
+export const POWERUP_SPEED = 74;
 
 /** Health of one "unit" at a given level. Normal targets always die to one shot. */
 export function unitHp (level: number): number

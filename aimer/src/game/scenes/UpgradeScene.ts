@@ -7,7 +7,9 @@ import { iconImage } from '../core/icons';
 import { rewardButton } from '../core/adButton';
 import { offerInterstitial } from '../core/ads';
 import { setGameplayActive } from '../core/lifecycle';
-import { CX, CY, FONT, FONT_UI, H, LANDSCAPE, W, hex, tierFor } from '../core/theme';
+import { Doors } from '../objects/Doors';
+import { zoneFor } from '../data/zones';
+import { CX, CY, FONT, FONT_UI, H, LANDSCAPE, W, hex } from '../core/theme';
 
 /**
  * Portrait deals the three offers as a stack of wide rows; a wide screen deals
@@ -49,6 +51,7 @@ const CARD_H = L.cardH;
 export class UpgradeScene extends Scene
 {
     private fx!: Fx;
+    private doors!: Doors;
     private picked = false;
     private cards: GameObjects.Container[] = [];
 
@@ -65,9 +68,13 @@ export class UpgradeScene extends Scene
         //  Reading three cards is not playing, and Poki counts it as such.
         setGameplayActive(false);
 
-        const tier = tierFor(run.level + 1);
+        //  This screen is the corridor between two levels, so it is dressed in
+        //  the colours of the place the player is walking into, not the one
+        //  they just left.
+        const zone = zoneFor(run.level + 1);
+        const tier = zone.palette;
+
         this.cameras.main.setBackgroundColor(tier.bg);
-        this.cameras.main.fadeIn(150, 0, 0, 0);
 
         this.fx = new Fx(this, 20);
 
@@ -110,6 +117,13 @@ export class UpgradeScene extends Scene
         });
 
         this.buildLoadout();
+
+        //  The doors are already shut when this scene builds: they closed over
+        //  the level that just ended, in the scene before this one. The player
+        //  never sees black between the two.
+        this.doors = new Doors(this);
+
+        void this.doors.open(300);
     }
 
     /** Deals a fresh set of three, replacing whatever is on the table. */
@@ -141,8 +155,8 @@ export class UpgradeScene extends Scene
                 x: home.x,
                 y: home.y,
                 alpha: 1,
-                duration: 380,
-                delay: (first ? 90 : 0) + i * 90,
+                duration: 320,
+                delay: (first ? 0 : 40) + i * 70,
                 ease: 'Back.out'
             });
 
@@ -302,27 +316,24 @@ export class UpgradeScene extends Scene
         this.fx.burst(card.x, card.y, up.color, 40, 'big');
         this.fx.ring(card.x, card.y, 300, up.color, 8, 520);
 
-        this.children.each((child: GameObjects.GameObject) =>
+        for (const other of this.cards)
         {
-            if (child === card || !(child instanceof GameObjects.Container)) return;
+            if (other === card) continue;
 
-            this.tweens.add({ targets: child, alpha: 0, x: child.x - 700, duration: 300, ease: 'Quad.in' });
-        });
+            this.tweens.add({ targets: other, alpha: 0, x: other.x - 700, duration: 260, ease: 'Quad.in' });
+        }
 
         this.tweens.add({ targets: card, scale: 1.16, duration: 140, ease: 'Quad.out', yoyo: true });
         this.tweens.add({ targets: card, alpha: 0, scale: 1.6, duration: 260, delay: 200, ease: 'Quad.in' });
 
-        this.time.delayedCall(420, () =>
+        this.time.delayedCall(260, () =>
         {
-            this.cameras.main.fadeOut(150, 0, 0, 0);
-
-            //  Between two levels, on a screen that has already gone black, is
-            //  the only mid-run moment an ad does not interrupt something. The
-            //  pacing rules in core/ads decide whether it is actually taken.
-            this.time.delayedCall(160, () =>
-            {
-                void offerInterstitial().then(() => this.scene.start('Game'));
-            });
+            //  Behind shut doors is the only mid-run moment an ad interrupts
+            //  nothing. The pacing rules in core/ads decide whether it is
+            //  actually taken, and the next level opens the same doors.
+            void this.doors.close(260)
+                .then(() => offerInterstitial())
+                .then(() => this.scene.start('Game'));
         });
     }
 }

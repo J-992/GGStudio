@@ -219,6 +219,40 @@ export const Sfx = {
         tone(1400, 0.05, 'sine', 0.06, 1800);
     },
 
+    /**
+     * A till, climbing. `step` is how deep into the cash round the player is,
+     * so the vault gets more excited about itself the longer it goes on.
+     */
+    cash (step: number)
+    {
+        const f = 900 * Math.pow(1.055, Math.min(16, step));
+
+        tone(f, 0.06, 'square', 0.085, f * 1.7);
+        tone(f * 1.5, 0.05, 'sine', 0.05, f * 2.1, 0.03);
+        noise(0.03, 0.035, 3600);
+    },
+
+    /** Something being fired at the player. Low, rising, and unmistakable. */
+    launch ()
+    {
+        tone(140, 0.34, 'sawtooth', 0.09, 620);
+        noise(0.12, 0.04, 900);
+    },
+
+    /** Armoured glass coming apart. */
+    shatter ()
+    {
+        noise(0.28, 0.13, 3200);
+        [1800, 2400, 3100].forEach((f, i) => tone(f, 0.09, 'square', 0.05, f * 0.6, i * 0.035));
+    },
+
+    /** The vault opening, and the vault emptying. */
+    jackpot ()
+    {
+        [523, 784, 1047, 1319, 1568, 2093].forEach((f, i) => tone(f, 0.26, 'square', 0.085, undefined, i * 0.055));
+        noise(0.3, 0.05, 2400);
+    },
+
     upgrade ()
     {
         tone(660, 0.24, 'sine', 0.12, 990);
@@ -240,6 +274,27 @@ export const Sfx = {
     victory ()
     {
         [523, 659, 784, 1047, 1319, 1568, 2093].forEach((f, i) => tone(f, 0.32, 'square', 0.09, undefined, i * 0.08));
+    },
+
+    /**
+     * The blast doors. They move four times per level cycle, so this is a
+     * servo and a latch rather than an explosion -- an impact that big, that
+     * often, stops reading as weight and starts reading as noise.
+     */
+    door (opening: boolean)
+    {
+        if (opening)
+        {
+            tone(120, 0.3, 'sawtooth', 0.055, 380);
+            noise(0.26, 0.03, 900);
+            tone(660, 0.18, 'sine', 0.05, 990, 0.14);
+        }
+        else
+        {
+            tone(300, 0.24, 'sawtooth', 0.06, 90);
+            noise(0.12, 0.05, 260, 0.2);
+            tone(90, 0.16, 'square', 0.09, 45, 0.22);
+        }
     },
 
     boom ()

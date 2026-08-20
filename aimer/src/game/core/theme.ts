@@ -100,17 +100,32 @@ export const HUD = {
     comboY: LABEL_Y + 72,
     /** Right edge of both bars, and of the stopwatch cap that ends them. */
     barRight: W - (LANDSCAPE ? 68 : 58),
-    /** Streak gem track, just above the turret. */
-    streakY: H - 80,
-    /** The line the streak caption, score multiplier and mute button sit on. */
-    footerY: H - 52
+    /**
+     * Streak gem track. It used to sit just above the turret, which was fine
+     * when the turret was a small socket -- but the gun now grows to most of
+     * the width of the screen, and the bottom centre belongs to it. The whole
+     * streak readout lives in the top strip instead.
+     */
+    streakY: LABEL_Y + (LANDSCAPE ? 118 : 126),
+    /** Spacing between streak gems. Portrait has to fit six in 540px. */
+    streakGap: LANDSCAPE ? 46 : 38,
+    /**
+     * The streak caption and the score multiplier. A wide screen has room to
+     * put them beside the gem track; a portrait one stacks them underneath.
+     */
+    streakTextY: LABEL_Y + (LANDSCAPE ? 118 : 154),
+    /** True when the caption sits beside the gems rather than under them. */
+    streakInline: LANDSCAPE,
+    /** Bottom line -- only the mute button, tucked into the corner. */
+    footerY: H - 46
 };
 
 /** Safe playfield rectangle. Targets never spawn outside of this. */
 export const PLAY = {
     left: LANDSCAPE ? 60 : 46,
     right: W - (LANDSCAPE ? 60 : 46),
-    top: LABEL_Y + 114,
+    /** Clear of the streak readout that now ends the top strip. */
+    top: LABEL_Y + (LANDSCAPE ? 148 : 176),
     bottom: H - 94
 };
 
@@ -125,6 +140,13 @@ export const MUZZLE = { x: W / 2, y: H - 6 };
 export const AIM_LIMIT = LANDSCAPE ? 1.4 : 1.15;
 
 /**
+ * How big the gun is drawn. The weapon is authored in portrait units; the
+ * landscape box is 240 design pixels shorter, so the identical gun would eat a
+ * third more of the arena there.
+ */
+export const GUN_SCALE = LANDSCAPE ? 0.82 : 1;
+
+/**
  * How much more room the arena has than the portrait one it was balanced in.
  * Spawn counts scale by this so a wide screen is not a near-empty field.
  */
@@ -136,6 +158,10 @@ export const DENSITY = Math.min(1.5, Math.max(1,
 export const FONT = '"Arial Black", "Arial Bold", Arial, sans-serif';
 export const FONT_UI = 'Arial, Helvetica, sans-serif';
 
+/**
+ * A world's colour set. The table of them lives in `data/zones`, next to the
+ * rule that ships with each one -- look and law change together or not at all.
+ */
 export interface Tier
 {
     bg: number;
@@ -143,23 +169,6 @@ export interface Tier
     accent: number;
     accent2: number;
     dust: number;
-}
-
-/** Eight visual tiers -- one per five levels. The world gets hotter as the run goes on. */
-export const TIERS: Tier[] = [
-    { bg: 0x080b1c, grid: 0x1b2a5e, accent: 0x3fe0ff, accent2: 0x6cf5c8, dust: 0x3fe0ff },
-    { bg: 0x0c0824, grid: 0x2e2070, accent: 0x9b6cff, accent2: 0x4fd6ff, dust: 0x9b6cff },
-    { bg: 0x15061f, grid: 0x4d1560, accent: 0xff5ce0, accent2: 0xb06cff, dust: 0xff5ce0 },
-    { bg: 0x1c0612, grid: 0x66152f, accent: 0xff5470, accent2: 0xffa23f, dust: 0xff5470 },
-    { bg: 0x1f1203, grid: 0x6b3f08, accent: 0xffb020, accent2: 0xff4d3d, dust: 0xffd166 },
-    { bg: 0x03170f, grid: 0x0c5c37, accent: 0x2fffa0, accent2: 0xd8ff4d, dust: 0x2fffa0 },
-    { bg: 0x1a0007, grid: 0x6e0020, accent: 0xff2d55, accent2: 0xff8a00, dust: 0xff5470 },
-    { bg: 0x0a0014, grid: 0x3c0a78, accent: 0xf2f6ff, accent2: 0xb388ff, dust: 0xd8c8ff }
-];
-
-export function tierFor (level: number): Tier
-{
-    return TIERS[Math.min(TIERS.length - 1, Math.floor((level - 1) / 5))];
 }
 
 /** 0xrrggbb -> '#rrggbb' (Phaser text colours want strings). */

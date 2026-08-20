@@ -5,6 +5,17 @@ import { ic } from '../core/icons';
 
 const TAU = Math.PI * 2;
 
+/**
+ * A target's paint. Zones repaint their own rank and file so the board always
+ * belongs to the place it is standing in; the specials keep the colours that
+ * are the whole reason they are readable at a glance.
+ */
+export interface Skin
+{
+    color: number;
+    ring: number;
+}
+
 export class Target extends GameObjects.Container
 {
     kind: TargetKind;
@@ -19,6 +30,35 @@ export class Target extends GameObjects.Container
     dead = false;
     expired = false;
 
+    //  ---- zone rules. All inert at zero, so a plain target costs nothing. ----
+
+    /** Life remaining, in ms, at which this target warps somewhere else. */
+    warpAt = -1;
+    /** When set, the target keeps warping this often instead of warping once. */
+    warpEvery = 0;
+    /**
+     * Dropped from the ceiling rather than parked. A falling target ignores the
+     * floor -- passing it is how it dies -- and the fall is its whole timer.
+     */
+    falling = false;
+    /** Half-width of the shield plate in radians. Zero means no shield. */
+    shieldArc = 0;
+    /** Where the plate is facing, and how fast it is turning (rad/sec). */
+    shieldAngle = 0;
+    shieldSpin = 0;
+    /** Set on the halves a split leaves behind, so they cannot split again. */
+    noSplit = false;
+    /**
+     * What this kill is worth towards the level goal. Normally the kind's own
+     * value; the halves a split leaves behind are worth nothing, so the rule
+     * pays in score and combo without quietly halving every goal in its zone.
+     */
+    progressWorth: number;
+
+    /** The colours this one is actually painted in. */
+    readonly color: number;
+    readonly ringColor: number;
+
     private core: GameObjects.Arc;
     private glow: GameObjects.Arc;
     private inner: GameObjects.Arc;
@@ -29,22 +69,25 @@ export class Target extends GameObjects.Container
     private phase: number;
     private flashAmount = 0;
 
-    constructor (scene: Scene, x: number, y: number, kind: TargetKind, baseSize: number, level: number, speed: number, moving: boolean)
+    constructor (scene: Scene, x: number, y: number, kind: TargetKind, baseSize: number, level: number, speed: number, moving: boolean, skin?: Skin)
     {
         super(scene, x, y);
 
         this.kind = kind;
         this.def = KINDS[kind];
+        this.color = skin ? skin.color : this.def.color;
+        this.ringColor = skin ? skin.ring : this.def.ring;
         this.radius = baseSize * this.def.sizeMult;
         this.maxHp = unitHp(level) * this.def.units;
         this.hp = this.maxHp;
+        this.progressWorth = this.def.progress;
         this.phase = Math.random() * TAU;
 
         this.maxLife = 0;
         this.life = 0;
 
         const r = this.radius;
-        const c = this.def.color;
+        const c = this.color;
 
         this.glow = scene.add.circle(0, 0, r * 1.55, c, 0.16);
         this.core = scene.add.circle(0, 0, r, c, 1);
@@ -136,8 +179,11 @@ export class Target extends GameObjects.Container
             if (this.x < PLAY.left + r) { this.x = PLAY.left + r; this.vx = Math.abs(this.vx); }
             else if (this.x > PLAY.right - r) { this.x = PLAY.right - r; this.vx = -Math.abs(this.vx); }
 
-            if (this.y < PLAY.top + r) { this.y = PLAY.top + r; this.vy = Math.abs(this.vy); }
-            else if (this.y > PLAY.bottom - r) { this.y = PLAY.bottom - r; this.vy = -Math.abs(this.vy); }
+            if (!this.falling)
+            {
+                if (this.y < PLAY.top + r) { this.y = PLAY.top + r; this.vy = Math.abs(this.vy); }
+                else if (this.y > PLAY.bottom - r) { this.y = PLAY.bottom - r; this.vy = -Math.abs(this.vy); }
+            }
         }
 
         this.life -= dtMs;
@@ -157,15 +203,104 @@ export class Target extends GameObjects.Container
         const urgent = frac < 0.32;
 
         this.ring.clear();
-        this.ring.lineStyle(Math.max(3, this.radius * 0.13), urgent ? 0xff4d5e : this.def.ring, urgent ? 0.95 : 0.55);
+        this.ring.lineStyle(Math.max(3, this.radius * 0.13), urgent ? 0xff4d5e : this.ringColor, urgent ? 0.95 : 0.55);
         this.ring.beginPath();
         this.ring.arc(0, 0, this.radius + Math.max(6, this.radius * 0.22), -Math.PI / 2, -Math.PI / 2 + TAU * frac);
         this.ring.strokePath();
+
+        if (this.shieldArc > 0)
+        {
+            this.shieldAngle += this.shieldSpin * dt;
+            this.drawShield();
+        }
 
         if (urgent)
         {
             this.glow.setAlpha(0.16 + Math.abs(Math.sin(t * 0.02)) * 0.28);
         }
+    }
+
+    /**
+     * The shield plate: a hard steel arc riding round the target. It is drawn
+     * outside the life ring and lit from the inside so it reads as armour
+     * rather than as more progress, and it is the only part of the target that
+     * says "not from that side" -- which is the whole rule of its zone.
+     */
+    private drawShield (): void
+    {
+        const g = this.ring;
+        const r = this.radius + Math.max(11, this.radius * 0.38);
+        const a0 = this.shieldAngle - this.shieldArc;
+        const a1 = this.shieldAngle + this.shieldArc;
+
+        g.lineStyle(Math.max(6, this.radius * 0.26), 0x0a1024, 1);
+        g.beginPath();
+        g.arc(0, 0, r, a0, a1);
+        g.strokePath();
+
+        g.lineStyle(Math.max(4, this.radius * 0.17), 0xd8e4ff, 0.95);
+        g.beginPath();
+        g.arc(0, 0, r, a0, a1);
+        g.strokePath();
+
+        //  Bolts at both ends, so the plate has a start and a finish.
+        for (const a of [ a0, a1 ])
+        {
+            g.fillStyle(0x8fa4c8, 1);
+            g.fillCircle(Math.cos(a) * r, Math.sin(a) * r, Math.max(3, this.radius * 0.1));
+        }
+    }
+
+    /** True when a shot arriving from `angle` (world radians) hits the plate. */
+    shielded (angle: number): boolean
+    {
+        if (this.shieldArc <= 0) return false;
+
+        let d = angle - this.shieldAngle;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+
+        return Math.abs(d) <= this.shieldArc;
+    }
+
+    /** Where a shot arriving from `angle` actually meets the plate. */
+    plateAt (angle: number): { x: number; y: number }
+    {
+        const r = this.radius + Math.max(11, this.radius * 0.38);
+        return { x: this.x + Math.cos(angle) * r, y: this.y + Math.sin(angle) * r };
+    }
+
+    /** The kick a blocked shot puts through the target. */
+    clang (angle: number): void
+    {
+        this.scene.tweens.add({
+            targets: this,
+            x: this.x - Math.cos(angle) * 7,
+            y: this.y - Math.sin(angle) * 7,
+            duration: 70,
+            yoyo: true,
+            ease: 'Quad.out'
+        });
+    }
+
+    /** Blink out here, blink in there. Used by the warp zone. */
+    warp (x: number, y: number): void
+    {
+        //  A cavern deep enough books the next warp on the way out of this one.
+        this.warpAt = this.warpEvery > 0 ? this.life - this.warpEvery : -1;
+
+        this.scene.tweens.add({
+            targets: this,
+            scaleX: 0.05,
+            scaleY: 1.25,
+            duration: 110,
+            ease: 'Quad.in',
+            onComplete: () =>
+            {
+                this.setPosition(x, y);
+                this.scene.tweens.add({ targets: this, scaleX: 1, scaleY: 1, duration: 170, ease: 'Back.out' });
+            }
+        });
     }
 
     /** Squared distance test against a tap, with the player's tap-forgiveness applied. */
@@ -175,6 +310,12 @@ export class Target extends GameObjects.Container
         const dx = px - this.x;
         const dy = py - this.y;
         return dx * dx + dy * dy <= r * r;
+    }
+
+    /** True when a falling target has gone through the floor. */
+    get gone (): boolean
+    {
+        return this.falling && this.y > PLAY.bottom + this.radius;
     }
 
     distanceTo (px: number, py: number): number
