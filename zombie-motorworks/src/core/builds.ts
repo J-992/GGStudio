@@ -516,9 +516,29 @@ export function firstPlayRig(): PlacedPart[] {
   ]);
 }
 
+/**
+ * Blueprint name the First Play demo rig is built under.
+ *
+ * It is the marker that keeps the demo out of persistence. The rig is a loaner
+ * — see {@link firstPlayRig} — so it must never reach a garage save slot or a
+ * resumable run checkpoint, or a player who closes the tab between the
+ * tutorial wave and the Build picker comes back owning six engines and a Heavy
+ * Cannon they were never sold. Storage layers check the name because it is the
+ * one thing that survives serialization; part ids and blueprint ids do not.
+ */
+export const FIRST_PLAY_BLUEPRINT_NAME = 'first-play-rig';
+
 /** The First Play rig as a blueprint, fresh parts every call. */
 export function buildFirstPlayBlueprint(): VehicleBlueprint {
-  return { ...createEmptyBlueprint('first-play-rig'), parts: firstPlayRig() };
+  return {
+    ...createEmptyBlueprint(FIRST_PLAY_BLUEPRINT_NAME),
+    parts: firstPlayRig(),
+  };
+}
+
+/** True for the loaner rig the tutorial wave is played on, and nothing else. */
+export function isFirstPlayBlueprint(bp: { name: string }): boolean {
+  return bp.name === FIRST_PLAY_BLUEPRINT_NAME;
 }
 
 /**
