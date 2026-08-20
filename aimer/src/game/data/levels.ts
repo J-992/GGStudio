@@ -1,3 +1,5 @@
+import { DENSITY } from '../core/theme';
+
 export type TargetKind =
     'normal' | 'small' | 'fast' | 'armored' | 'golden' | 'bomb' | 'time' | 'coin' | 'multi' | 'boss';
 
@@ -108,7 +110,18 @@ export const FINAL_LEVEL = LEVELS.length;
 
 export function levelConfig (level: number): LevelConfig
 {
-    return LEVELS[Math.min(LEVELS.length, Math.max(1, level)) - 1];
+    const cfg = LEVELS[Math.min(LEVELS.length, Math.max(1, level)) - 1];
+
+    if (DENSITY <= 1.001) return cfg;
+
+    //  A wide arena holds proportionally more without feeling busier: the same
+    //  level on a desktop screen would otherwise be a near-empty field with a
+    //  lot of mouse travel between targets.
+    return {
+        ...cfg,
+        maxActive: Math.round(cfg.maxActive * DENSITY),
+        spawnRate: Math.round(cfg.spawnRate / DENSITY)
+    };
 }
 
 /** Weighted pick from a level's spawn table. */

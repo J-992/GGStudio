@@ -5,9 +5,42 @@ import { meta, PERKS, perkCost, run, saveMeta } from '../core/state';
 import { setGameplayActive } from '../core/lifecycle';
 import { FINAL_LEVEL } from '../data/levels';
 import { IconLabel, ic, iconImage } from '../core/icons';
-import { FONT, FONT_UI, H, W, fmt, hex } from '../core/theme';
+import { CX, FONT, FONT_UI, H, LANDSCAPE, W, fmt, hex } from '../core/theme';
 
 const DEMO_COLORS = [ 0x3fe0ff, 0xff5ce0, 0x7dff6b, 0xffd23f, 0x9b6cff ];
+
+/**
+ * Portrait stacks the menu; a wide screen splits it in two -- the game on the
+ * left, the shop on the right -- rather than stretching one narrow column
+ * across a screen three times wider than it needs.
+ */
+const L = LANDSCAPE
+    ? {
+        gameX: W * 0.29,
+        shopX: W * 0.715,
+        titleY: 190,
+        taglineY: 250,
+        playY: 350,
+        statY: 470,
+        shopTitleY: 150,
+        rowY0: 206,
+        coinY: 578,
+        muteX: W - 34,
+        muteY: H - 34
+    }
+    : {
+        gameX: CX,
+        shopX: CX,
+        titleY: 112,
+        taglineY: 170,
+        playY: 268,
+        statY: 348,
+        shopTitleY: 424,
+        rowY0: 476,
+        coinY: 890,
+        muteX: W - 30,
+        muteY: H - 34
+    };
 
 export class MainMenu extends Scene
 {
@@ -39,13 +72,13 @@ export class MainMenu extends Scene
 
         this.spawnDemoTargets();
 
-        const title = this.add.text(W / 2, 112, 'AIMER', {
+        const title = this.add.text(L.gameX, L.titleY, 'AIMER', {
             fontFamily: FONT, fontSize: 92, color: '#ffffff', stroke: '#3fe0ff', strokeThickness: 8
         }).setOrigin(0.5).setDepth(10);
 
         this.tweens.add({ targets: title, scale: 1.04, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
 
-        this.add.text(W / 2, 170, 'TAP TARGETS  ·  BUILD COMBOS  ·  GET STRONG', {
+        this.add.text(L.gameX, L.taglineY, `${LANDSCAPE ? 'CLICK' : 'TAP'} TARGETS  ·  BUILD COMBOS  ·  GET STRONG`, {
             fontFamily: FONT_UI, fontSize: 15, color: '#7d88b0'
         }).setOrigin(0.5).setDepth(10);
 
@@ -60,7 +93,7 @@ export class MainMenu extends Scene
             toggleMute();
         }
 
-        const mute = iconImage(this, W - 30, 926, isMuted() ? 'soundOff' : 'soundOn', {
+        const mute = iconImage(this, L.muteX, L.muteY, isMuted() ? 'soundOff' : 'soundOn', {
             size: 22, color: 0xffffff, alpha: 0.55
         });
 
@@ -126,7 +159,7 @@ export class MainMenu extends Scene
 
     private buildPlayButton (): void
     {
-        const btn = this.add.container(W / 2, 268).setDepth(11);
+        const btn = this.add.container(L.gameX, L.playY).setDepth(11);
 
         const g = this.add.graphics();
         g.fillStyle(0x3fe0ff, 1);
@@ -165,37 +198,39 @@ export class MainMenu extends Scene
 
     private buildStats (): void
     {
-        const stat = (x: number, label: string, value: string, color: number) =>
+        const stat = (slot: number, label: string, value: string, color: number) =>
         {
-            this.add.text(x, 348, value, {
+            const x = L.gameX + slot * 160;
+
+            this.add.text(x, L.statY, value, {
                 fontFamily: FONT, fontSize: 26, color: hex(color)
             }).setOrigin(0.5).setDepth(10);
 
-            this.add.text(x, 374, label, {
+            this.add.text(x, L.statY + 26, label, {
                 fontFamily: FONT_UI, fontSize: 12, color: '#5f6a92'
             }).setOrigin(0.5).setDepth(10);
         };
 
-        stat(110, 'BEST SCORE', fmt(meta.best), 0xffffff);
-        stat(270, 'BEST LEVEL', `${meta.bestLevel}/${FINAL_LEVEL}`, 0x6cf5c8);
-        stat(430, 'RANK XP', fmt(meta.rank), 0x9b6cff);
+        stat(-1, 'BEST SCORE', fmt(meta.best), 0xffffff);
+        stat(0, 'BEST LEVEL', `${meta.bestLevel}/${FINAL_LEVEL}`, 0x6cf5c8);
+        stat(1, 'RANK XP', fmt(meta.rank), 0x9b6cff);
     }
 
     private buildShop (): void
     {
-        this.add.text(W / 2, 424, 'PERMANENT UPGRADES', {
+        this.add.text(L.shopX, L.shopTitleY, 'PERMANENT UPGRADES', {
             fontFamily: FONT, fontSize: 20, color: '#5f6a92'
         }).setOrigin(0.5).setDepth(10);
 
-        this.coinLabel = new IconLabel(this, W / 2, 890, 'gem', fmt(meta.coins), {
+        this.coinLabel = new IconLabel(this, L.shopX, L.coinY, 'gem', fmt(meta.coins), {
             fontSize: 34, iconSize: 30
         });
         this.coinLabel.setDepth(11);
 
         PERKS.forEach((perk, i) =>
         {
-            const y = 476 + i * 74;
-            const row = this.add.container(W / 2, y).setDepth(10);
+            const y = L.rowY0 + i * 74;
+            const row = this.add.container(L.shopX, y).setDepth(10);
 
             const g = this.add.graphics();
             row.add(g);
@@ -267,7 +302,7 @@ export class MainMenu extends Scene
                 if (meta.coins < cost)
                 {
                     Sfx.miss();
-                    this.tweens.add({ targets: row, x: W / 2 + 8, duration: 55, yoyo: true, repeat: 2 });
+                    this.tweens.add({ targets: row, x: L.shopX + 8, duration: 55, yoyo: true, repeat: 2 });
                     return;
                 }
 

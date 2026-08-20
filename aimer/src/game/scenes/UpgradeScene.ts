@@ -7,10 +7,44 @@ import { iconImage } from '../core/icons';
 import { rewardButton } from '../core/adButton';
 import { offerInterstitial } from '../core/ads';
 import { setGameplayActive } from '../core/lifecycle';
-import { FONT, FONT_UI, H, W, hex, tierFor } from '../core/theme';
+import { CX, CY, FONT, FONT_UI, H, LANDSCAPE, W, hex, tierFor } from '../core/theme';
 
-const CARD_W = 462;
-const CARD_H = 168;
+/**
+ * Portrait deals the three offers as a stack of wide rows; a wide screen deals
+ * them as a hand -- three tall cards side by side, which is both the shape the
+ * space wants and the shape the genre reads fastest.
+ */
+const L = LANDSCAPE
+    ? {
+        cardW: 380,
+        cardH: 236,
+        /** Stacked: icon over name over effect, all centred. */
+        stacked: true,
+        headerY: 54,
+        titleY: 104,
+        titleSize: 42,
+        cardsY: 330,
+        rerollY: 512,
+        buildLabelY: 596,
+        buildY: 640,
+        perRow: 12
+    }
+    : {
+        cardW: 462,
+        cardH: 168,
+        stacked: false,
+        headerY: 62,
+        titleY: 108,
+        titleSize: 38,
+        cardsY: 258,
+        rerollY: 788,
+        buildLabelY: 828,
+        buildY: 872,
+        perRow: 8
+    };
+
+const CARD_W = L.cardW;
+const CARD_H = L.cardH;
 
 export class UpgradeScene extends Scene
 {
@@ -42,18 +76,18 @@ export class UpgradeScene extends Scene
         for (let x = 0; x <= W; x += 58) grid.lineBetween(x, 0, x, H);
         for (let y = 0; y <= H; y += 58) grid.lineBetween(0, y, W, y);
 
-        this.add.text(W / 2 - 16, 62, `LEVEL ${run.level}`, {
+        this.add.text(CX - 16, L.headerY, `LEVEL ${run.level}`, {
             fontFamily: FONT_UI, fontSize: 20, color: '#8d97bd'
         }).setOrigin(1, 0.5);
 
-        iconImage(this, W / 2, 62, 'arrowRight', { size: 18, color: 0x8d97bd });
+        iconImage(this, CX, L.headerY, 'arrowRight', { size: 18, color: 0x8d97bd });
 
-        this.add.text(W / 2 + 16, 62, `${run.level + 1}`, {
+        this.add.text(CX + 16, L.headerY, `${run.level + 1}`, {
             fontFamily: FONT_UI, fontSize: 20, color: '#8d97bd'
         }).setOrigin(0, 0.5);
 
-        const title = this.add.text(W / 2, 108, 'CHOOSE UPGRADE', {
-            fontFamily: FONT, fontSize: 38, color: hex(tier.accent), stroke: '#000000', strokeThickness: 6
+        const title = this.add.text(CX, L.titleY, 'CHOOSE UPGRADE', {
+            fontFamily: FONT, fontSize: L.titleSize, color: hex(tier.accent), stroke: '#000000', strokeThickness: 6
         }).setOrigin(0.5).setScale(0.5);
 
         this.tweens.add({ targets: title, scale: 1, duration: 240, ease: 'Back.out' });
@@ -64,7 +98,7 @@ export class UpgradeScene extends Scene
         //  cards on the table only change once a video has actually played, so
         //  declining leaves the choice exactly as it was. Sits in the gap under
         //  the last card, clear of the build strip.
-        rewardButton(this, W / 2, 788, {
+        rewardButton(this, CX, L.rerollY, {
             width: 214,
             height: 58,
             label: 'REROLL',
@@ -83,17 +117,29 @@ export class UpgradeScene extends Scene
     {
         for (const card of this.cards) card.destroy();
 
-        this.cards = rollOffers(run.taken, run.level, 3).map((up, i) =>
-        {
-            const y = 258 + i * (CARD_H + 26);
-            const card = this.buildCard(up, y);
+        const offers = rollOffers(run.taken, run.level, 3);
+        const gap = LANDSCAPE ? 30 : 26;
 
-            card.setX(W / 2 + (i % 2 === 0 ? 620 : -620));
+        this.cards = offers.map((up, i) =>
+        {
+            const home = LANDSCAPE
+                ? { x: CX + (i - (offers.length - 1) / 2) * (CARD_W + gap), y: L.cardsY }
+                : { x: CX, y: L.cardsY + i * (CARD_H + gap) };
+
+            const card = this.buildCard(up, home.x, home.y);
+
+            //  Cards fly in from off screen: sideways in portrait, up from
+            //  under the table in landscape, where sideways would have them
+            //  crossing each other.
+            if (LANDSCAPE) card.setY(home.y + 260);
+            else card.setX(home.x + (i % 2 === 0 ? 620 : -620));
+
             card.setAlpha(0);
 
             this.tweens.add({
                 targets: card,
-                x: W / 2,
+                x: home.x,
+                y: home.y,
                 alpha: 1,
                 duration: 380,
                 delay: (first ? 90 : 0) + i * 90,
@@ -109,16 +155,16 @@ export class UpgradeScene extends Scene
         if (this.picked) return;
 
         this.cameras.main.flash(140, 155, 108, 255);
-        this.fx.ring(W / 2, H / 2, 260, 0x9b6cff, 6, 460);
+        this.fx.ring(CX, CY, 260, 0x9b6cff, 6, 460);
         Sfx.upgrade();
 
         this.dealOffers(false);
     }
 
-    private buildCard (up: Upgrade, y: number): GameObjects.Container
+    private buildCard (up: Upgrade, x: number, y: number): GameObjects.Container
     {
         const owned = run.taken[up.id] || 0;
-        const card = this.add.container(W / 2, y).setDepth(10);
+        const card = this.add.container(x, y).setDepth(10);
 
         const g = this.add.graphics();
         g.fillStyle(0x0b1024, 0.94);
@@ -129,22 +175,32 @@ export class UpgradeScene extends Scene
         g.fillRoundedRect(-CARD_W / 2, -CARD_H / 2, CARD_W, CARD_H, 22);
         card.add(g);
 
-        const glow = this.add.circle(-CARD_W / 2 + 84, 0, 58, up.color, 0.2);
+        const art = L.stacked
+            ? { x: 0, y: -CARD_H / 2 + 74, size: 66, glow: 62 }
+            : { x: -CARD_W / 2 + 84, y: 0, size: 60, glow: 58 };
+
+        const glow = this.add.circle(art.x, art.y, art.glow, up.color, 0.2);
         card.add(glow);
 
         this.tweens.add({ targets: glow, scale: 1.18, alpha: 0.32, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
 
-        const icon = iconImage(this, -CARD_W / 2 + 84, 0, up.icon, { size: 60, color: up.color });
+        const icon = iconImage(this, art.x, art.y, up.icon, { size: art.size, color: up.color });
         card.add(icon);
 
-        const name = this.add.text(-CARD_W / 2 + 154, -26, up.name, {
-            fontFamily: FONT, fontSize: 34, color: '#ffffff'
-        }).setOrigin(0, 0.5);
+        const name = this.add.text(
+            L.stacked ? 0 : -CARD_W / 2 + 154,
+            L.stacked ? CARD_H / 2 - 76 : -26,
+            up.name,
+            { fontFamily: FONT, fontSize: L.stacked ? 30 : 34, color: '#ffffff' }
+        ).setOrigin(L.stacked ? 0.5 : 0, 0.5);
         card.add(name);
 
-        const effect = this.add.text(-CARD_W / 2 + 156, 20, up.effect, {
-            fontFamily: FONT, fontSize: 24, color: hex(up.color)
-        }).setOrigin(0, 0.5);
+        const effect = this.add.text(
+            L.stacked ? 0 : -CARD_W / 2 + 156,
+            L.stacked ? CARD_H / 2 - 40 : 20,
+            up.effect,
+            { fontFamily: FONT, fontSize: L.stacked ? 21 : 24, color: hex(up.color) }
+        ).setOrigin(L.stacked ? 0.5 : 0, 0.5);
         card.add(effect);
 
         const badgeY = -CARD_H / 2 + 26;
@@ -170,12 +226,17 @@ export class UpgradeScene extends Scene
             }).setOrigin(1, 0.5));
         }
 
+        //  Stack pips, tucked under the effect line on a tall card and beside
+        //  it on a wide one.
         const stack = this.add.graphics();
+        const pipY = L.stacked ? CARD_H / 2 - 22 : CARD_H / 2 - 32;
+
         for (let i = 0; i < up.max; i++)
         {
             const px = CARD_W / 2 - 24 - (up.max - 1 - i) * 14;
+
             stack.fillStyle(i < owned ? up.color : 0x2a3352, 1);
-            stack.fillRoundedRect(px - 9, CARD_H / 2 - 32, 9, 14, 3);
+            stack.fillRoundedRect(px - 9, pipY, 9, 14, 3);
         }
         card.add(stack);
 
@@ -201,11 +262,11 @@ export class UpgradeScene extends Scene
 
         if (ids.length === 0) return;
 
-        this.add.text(W / 2, 828, 'YOUR BUILD', {
+        this.add.text(CX, L.buildLabelY, 'YOUR BUILD', {
             fontFamily: FONT_UI, fontSize: 14, color: '#5f6a92'
         }).setOrigin(0.5);
 
-        const perRow = 8;
+        const perRow = L.perRow;
         const spacing = 54;
 
         ids.forEach((id, i) =>
@@ -216,8 +277,8 @@ export class UpgradeScene extends Scene
             const row = Math.floor(i / perRow);
             const inRow = Math.min(perRow, ids.length - row * perRow);
             const col = i % perRow;
-            const x = W / 2 - ((inRow - 1) * spacing) / 2 + col * spacing;
-            const y = 872 + row * 44;
+            const x = CX - ((inRow - 1) * spacing) / 2 + col * spacing;
+            const y = L.buildY + row * 44;
 
             iconImage(this, x, y, up.icon, { size: 26, color: up.color });
             this.add.text(x + 17, y + 12, String(run.taken[id]), {

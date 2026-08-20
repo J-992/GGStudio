@@ -11,7 +11,7 @@ import { rewardButton } from '../core/adButton';
 import { reportPlatformHappyTime } from '../platform/platform';
 import { IconLabel, ic, iconImage } from '../core/icons';
 import { Turret } from '../objects/Turret';
-import { FONT, FONT_UI, H, MUZZLE, PLAY, Tier, W, fmt, fmtShort, hex, tierFor } from '../core/theme';
+import { CX, CY, FONT, FONT_UI, H, HUD, LANDSCAPE, MUZZLE, PLAY, Tier, W, fmt, fmtShort, hex, tierFor } from '../core/theme';
 
 interface Streak { n: number; bonus: number; label: string; }
 
@@ -24,7 +24,8 @@ const STREAKS: Streak[] = [
     { n: 80, bonus: 3.50, label: 'INSANE!!!' }
 ];
 
-const COIN_HUD = { x: 494, y: 30 };
+/** Where flying coins land: the gem readout in the top right. */
+const COIN_HUD = { x: W - HUD.margin - 14, y: HUD.levelY };
 
 /** Seconds an extra life puts back on the clock. */
 const REVIVE_SECONDS = 10;
@@ -39,9 +40,15 @@ const COMBO_RAMP = [
     0x9fe8ff, 0x6cf5c8, 0x62ffb8, 0xb388ff, 0xff7ae0, 0xff5ce0, 0xffb020, 0xff7a3d, 0xff3b45
 ];
 
-const COMBO_Y = 172;
-const STREAK_Y = 880;
-const BAR_RIGHT = W - 58;
+const COMBO_Y = HUD.comboY;
+const STREAK_Y = HUD.streakY;
+const BAR_RIGHT = HUD.barRight;
+
+/** A fraction of the way down the arena, whatever shape the arena is. */
+function arenaY (t: number): number
+{
+    return PLAY.top + (PLAY.bottom - PLAY.top) * t;
+}
 
 interface ComboWing { img: GameObjects.Image; side: number; slot: number; }
 
@@ -220,49 +227,49 @@ export class GameScene extends Scene
     {
         this.hudGfx = this.add.graphics().setDepth(30);
 
-        this.add.text(30, 30, `LEVEL ${run.level}`, {
+        this.add.text(HUD.margin, HUD.levelY, `LEVEL ${run.level}`, {
             fontFamily: FONT, fontSize: 22, color: hex(this.tier.accent)
         }).setOrigin(0, 0.5).setDepth(31);
 
-        this.coinLabel = new IconLabel(this, W - 30, COIN_HUD.y, 'gem', fmt(meta.coins), {
+        this.coinLabel = new IconLabel(this, W - HUD.margin, COIN_HUD.y, 'gem', fmt(meta.coins), {
             align: 'right', fontSize: 24, iconSize: 22
         });
         this.coinLabel.setDepth(31);
 
-        this.scoreText = this.add.text(W / 2, 62, '0', {
-            fontFamily: FONT, fontSize: 54, color: '#ffffff', stroke: '#000000', strokeThickness: 6
+        this.scoreText = this.add.text(CX, HUD.scoreY, '0', {
+            fontFamily: FONT, fontSize: HUD.scoreSize, color: '#ffffff', stroke: '#000000', strokeThickness: 6
         }).setOrigin(0.5).setDepth(31);
 
         this.comboAura = this.add.graphics().setDepth(30);
 
-        this.comboText = this.add.text(W / 2, COMBO_Y, '', {
+        this.comboText = this.add.text(CX, COMBO_Y, '', {
             fontFamily: FONT, fontSize: 28, color: hex(COMBO_RAMP[0])
         }).setOrigin(0.5).setDepth(31);
 
         this.applyComboTier(0);
 
-        this.timeText = this.add.text(30, 100, '0.0', {
+        this.timeText = this.add.text(HUD.margin, HUD.labelY, '0.0', {
             fontFamily: FONT, fontSize: 20, color: '#ffffff'
         }).setOrigin(0, 0.5).setDepth(32);
 
         //  Stopwatch cap on the end of the bar -- makes it read as a countdown.
-        this.timeIcon = iconImage(this, W - 38, 125, 'stopwatch', { size: 20, color: this.tier.accent });
+        this.timeIcon = iconImage(this, BAR_RIGHT + 20, HUD.barY + HUD.barH / 2, 'stopwatch', { size: 20, color: this.tier.accent });
         this.timeIcon.setDepth(32);
         this.timeIconScale = this.timeIcon.scaleX;
 
-        this.goalText = this.add.text(BAR_RIGHT, 100, '0 / 0', {
+        this.goalText = this.add.text(BAR_RIGHT, HUD.labelY, '0 / 0', {
             fontFamily: FONT, fontSize: 20, color: hex(this.tier.accent)
         }).setOrigin(1, 0.5).setDepth(32);
 
-        this.streakText = this.add.text(W / 2, 908, '', {
+        this.streakText = this.add.text(CX, HUD.footerY, '', {
             fontFamily: FONT, fontSize: 15, color: '#7d88b0'
         }).setOrigin(0.5).setDepth(31);
 
-        this.multText = this.add.text(28, 908, '', {
+        this.multText = this.add.text(HUD.margin - 2, HUD.footerY, '', {
             fontFamily: FONT, fontSize: 20, color: '#b388ff'
         }).setOrigin(0, 0.5).setDepth(31).setAlpha(0);
 
-        this.muteBtn = iconImage(this, W - 26, 908, isMuted() ? 'soundOff' : 'soundOn', {
+        this.muteBtn = iconImage(this, W - HUD.margin + 4, HUD.footerY, isMuted() ? 'soundOff' : 'soundOn', {
             size: 20, color: 0xffffff, alpha: 0.45
         });
         this.muteBtn.setDepth(32).setInteractive({ useHandCursor: true });
@@ -281,7 +288,7 @@ export class GameScene extends Scene
 
     private showLevelBanner (): void
     {
-        const t = this.add.text(W / 2, PLAY.top + 190, `LEVEL ${run.level}`, {
+        const t = this.add.text(CX, arenaY(0.29), `LEVEL ${run.level}`, {
             fontFamily: FONT, fontSize: 76, color: hex(this.tier.accent), stroke: '#000000', strokeThickness: 8
         }).setOrigin(0.5).setDepth(35).setScale(0.6).setAlpha(0);
 
@@ -335,14 +342,14 @@ export class GameScene extends Scene
 
     private spawnBoss (): void
     {
-        const t = new Target(this, W / 2, PLAY.top + 180, 'boss', this.cfg.size, run.level, this.cfg.speed, true);
+        const t = new Target(this, CX, arenaY(0.28), 'boss', this.cfg.size, run.level, this.cfg.speed, true);
         t.setLifetime(999999);
         t.setDepth(9);
         this.targets.push(t);
 
         this.time.delayedCall(320, () =>
         {
-            this.fx.popup(W / 2, PLAY.top + 90, 'BOSS', 0xff2d55, 46, 40, 900);
+            this.fx.popup(CX, arenaY(0.14), 'BOSS', 0xff2d55, 46, 40, 900);
             Sfx.bomb();
             this.cameras.main.shake(300, 0.012);
         });
@@ -553,7 +560,7 @@ export class GameScene extends Scene
         else if (kind === 'boss')
         {
             this.cameras.main.flash(240, 255, 90, 120);
-            this.fx.popup(W / 2, PLAY.top + 140, 'BOSS DOWN', 0xff2d55, 44, 50, 900);
+            this.fx.popup(CX, arenaY(0.21), 'BOSS DOWN', 0xff2d55, 44, 50, 900);
         }
 
         //  --- chain reactions ---
@@ -747,7 +754,7 @@ export class GameScene extends Scene
         const s = STREAKS[idx];
         const color = STREAK_COLORS[Math.min(idx, STREAK_COLORS.length - 1)];
 
-        const t = this.add.text(W / 2, PLAY.top + 250, s.label, {
+        const t = this.add.text(CX, arenaY(0.38), s.label, {
             fontFamily: FONT, fontSize: 52 + idx * 5, color: hex(color), stroke: '#000000', strokeThickness: 8
         }).setOrigin(0.5).setDepth(34).setScale(0.3);
 
@@ -757,7 +764,7 @@ export class GameScene extends Scene
             onComplete: () => t.destroy()
         });
 
-        this.fx.ring(W / 2, PLAY.top + 250, 240, color, 6, 520);
+        this.fx.ring(CX, arenaY(0.38), 240, color, 6, 520);
         this.cameras.main.shake(180, 0.008);
         this.cameras.main.flash(120, (color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff);
         Sfx.milestone(idx);
@@ -799,7 +806,7 @@ export class GameScene extends Scene
         {
             for (const side of [ -1, 1 ])
             {
-                const img = iconImage(this, W / 2, COMBO_Y, 'chevrons', {
+                const img = iconImage(this, CX, COMBO_Y, 'chevrons', {
                     size: 18 + tier, color
                 });
 
@@ -823,9 +830,9 @@ export class GameScene extends Scene
         const color = COMBO_RAMP[Math.min(tier, COMBO_RAMP.length - 1)];
 
         this.comboText.setScale(1.55);
-        this.fx.ring(W / 2, COMBO_Y, 90 + tier * 24, color, 3 + tier * 0.5, 420);
+        this.fx.ring(CX, COMBO_Y, 90 + tier * 24, color, 3 + tier * 0.5, 420);
 
-        if (tier >= 3) this.fx.burst(W / 2, COMBO_Y, color, 6 + tier * 3, 'hit');
+        if (tier >= 3) this.fx.burst(CX, COMBO_Y, color, 6 + tier * 3, 'hit');
         if (tier >= 5) this.cameras.main.shake(90, 0.003);
     }
 
@@ -836,7 +843,7 @@ export class GameScene extends Scene
 
         if (this.combo < 2)
         {
-            this.comboText.setText('').setPosition(W / 2, COMBO_Y).setScale(1);
+            this.comboText.setText('').setPosition(CX, COMBO_Y).setScale(1);
             for (const w of this.comboWings) w.img.setVisible(false);
             return;
         }
@@ -853,7 +860,7 @@ export class GameScene extends Scene
         const jitter = tier >= 4 ? (tier - 3) * 1.1 : 0;
 
         this.comboText.setPosition(
-            W / 2 + (Math.random() - 0.5) * jitter,
+            CX + (Math.random() - 0.5) * jitter,
             COMBO_Y + (Math.random() - 0.5) * jitter
         );
 
@@ -865,13 +872,13 @@ export class GameScene extends Scene
         if (tier >= 1)
         {
             g.fillStyle(color, 0.05 + tier * 0.016);
-            g.fillEllipse(W / 2, COMBO_Y, half * 2 + 70 + tier * 10, 36 + tier * 2);
+            g.fillEllipse(CX, COMBO_Y, half * 2 + 70 + tier * 10, 36 + tier * 2);
         }
 
         if (tier >= 3)
         {
             g.lineStyle(1.5 + tier * 0.3, color, 0.2 + Math.abs(beat) * 0.25);
-            g.strokeEllipse(W / 2, COMBO_Y, half * 2 + 56 + tier * 8, 42 + tier * 2);
+            g.strokeEllipse(CX, COMBO_Y, half * 2 + 56 + tier * 8, 42 + tier * 2);
         }
 
         if (tier >= 6)
@@ -881,7 +888,7 @@ export class GameScene extends Scene
                 const a = t * 0.004 + (i * Math.PI * 2) / 3;
                 g.fillStyle(color, 0.75);
                 g.fillCircle(
-                    W / 2 + Math.cos(a) * (half + 44),
+                    CX + Math.cos(a) * (half + 44),
                     COMBO_Y + Math.sin(a) * (18 + tier),
                     3 + tier * 0.4
                 );
@@ -893,14 +900,14 @@ export class GameScene extends Scene
         const under = Math.max(6, (half + 10) * cf);
 
         g.fillStyle(color, 0.75);
-        g.fillRoundedRect(W / 2 - under, COMBO_Y + 26, under * 2, 4, 2);
+        g.fillRoundedRect(CX - under, COMBO_Y + 26, under * 2, 4, 2);
 
         for (const w of this.comboWings)
         {
             const off = half + 26 + w.slot * 24;
 
             w.img.setVisible(true);
-            w.img.setPosition(W / 2 + w.side * off, COMBO_Y);
+            w.img.setPosition(CX + w.side * off, COMBO_Y);
             w.img.setAlpha(0.9 - w.slot * 0.24 + beat * 0.12);
         }
     }
@@ -927,7 +934,7 @@ export class GameScene extends Scene
     private drawStreak (g: GameObjects.Graphics): void
     {
         const spacing = 42;
-        const x0 = W / 2 - ((STREAKS.length - 1) * spacing) / 2;
+        const x0 = CX - ((STREAKS.length - 1) * spacing) / 2;
         const t = this.time.now;
 
         for (let i = 0; i < STREAKS.length; i++)
@@ -1030,19 +1037,25 @@ export class GameScene extends Scene
         const pulse = low ? 0.7 + Math.abs(Math.sin(this.time.now * 0.012)) * 0.3 : 0.95;
         const barColor = low ? 0xff4d5e : this.tier.accent;
 
+        const left = HUD.margin - 4;
+        const span = BAR_RIGHT - left;
+
         g.fillStyle(0x000000, 0.45);
-        g.fillRoundedRect(26, 114, BAR_RIGHT - 26, 22, 11);
+        g.fillRoundedRect(left, HUD.barY, span, HUD.barH, HUD.barH / 2);
         if (tf > 0.001)
         {
             g.fillStyle(barColor, pulse);
-            g.fillRoundedRect(28, 116, Math.max(20, (BAR_RIGHT - 30) * tf), 18, 9);
+            g.fillRoundedRect(left + 2, HUD.barY + 2, Math.max(20, (span - 4) * tf), HUD.barH - 4, 9);
         }
 
         //  stopwatch cap at the end of the countdown
+        const capX = BAR_RIGHT + 20;
+        const capY = HUD.barY + HUD.barH / 2;
+
         g.fillStyle(0x000000, 0.55);
-        g.fillCircle(W - 38, 125, 17);
+        g.fillCircle(capX, capY, 17);
         g.lineStyle(2.5, barColor, low ? 0.95 : 0.7);
-        g.strokeCircle(W - 38, 125, 17);
+        g.strokeCircle(capX, capY, 17);
 
         this.timeIcon.setTint(barColor);
         this.timeIcon.setScale(this.timeIconScale * (low ? 1 + Math.abs(Math.sin(this.time.now * 0.012)) * 0.2 : 1));
@@ -1050,11 +1063,11 @@ export class GameScene extends Scene
         //  goal bar
         const gf = Math.min(1, this.progress / this.cfg.goal);
         g.fillStyle(0x000000, 0.45);
-        g.fillRoundedRect(26, 142, BAR_RIGHT - 26, 9, 4);
+        g.fillRoundedRect(left, HUD.goalY, span, HUD.goalH, 4);
         if (gf > 0.001)
         {
             g.fillStyle(this.tier.accent2, 0.95);
-            g.fillRoundedRect(28, 143, Math.max(8, (BAR_RIGHT - 30) * gf), 7, 3);
+            g.fillRoundedRect(left + 2, HUD.goalY + 1, Math.max(8, (span - 4) * gf), HUD.goalH - 2, 3);
         }
 
         this.drawStreak(g);
@@ -1221,20 +1234,22 @@ export class GameScene extends Scene
     {
         const panel = this.add.container(0, 0).setDepth(45);
 
-        panel.add(this.add.rectangle(W / 2, H / 2, W, H, 0x05070f, 0.78));
+        panel.add(this.add.rectangle(CX, CY, W, H, 0x05070f, 0.78));
 
-        const title = this.add.text(W / 2, 350, "OUT OF TIME", {
+        //  Laid out down the screen rather than at fixed pixels: the same card
+        //  has to sit right in a 960-tall portrait box and a 720-tall wide one.
+        const title = this.add.text(CX, H * 0.365, "OUT OF TIME", {
             fontFamily: FONT, fontSize: 54, color: '#ff4d5e', stroke: '#000000', strokeThickness: 8
         }).setOrigin(0.5).setScale(0.4);
         panel.add(title);
 
         this.tweens.add({ targets: title, scale: 1, duration: 260, ease: 'Back.out' });
 
-        panel.add(this.add.text(W / 2, 404, `KEEP YOUR ${fmt(this.levelScore)} POINTS`, {
+        panel.add(this.add.text(CX, H * 0.42, `KEEP YOUR ${fmt(this.levelScore)} POINTS`, {
             fontFamily: FONT_UI, fontSize: 17, color: '#8d97bd'
         }).setOrigin(0.5));
 
-        const life = rewardButton(this, W / 2, 500, {
+        const life = rewardButton(this, CX, H * 0.52, {
             width: 360,
             height: 84,
             label: `EXTRA LIFE  +${REVIVE_SECONDS}s`,
@@ -1244,7 +1259,7 @@ export class GameScene extends Scene
 
         if (life) panel.add(life);
 
-        const quit = this.add.text(W / 2, 606, 'GIVE UP', {
+        const quit = this.add.text(CX, H * 0.63, 'GIVE UP', {
             fontFamily: FONT, fontSize: 26, color: '#7d88b0'
         }).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
@@ -1339,10 +1354,10 @@ export class GameScene extends Scene
     {
         const panel = this.add.container(0, 0).setDepth(40);
 
-        const dim = this.add.rectangle(W / 2, H / 2, W, H, 0x05070f, 0.72);
+        const dim = this.add.rectangle(CX, CY, W, H, 0x05070f, 0.72);
         panel.add(dim);
 
-        const title = this.add.text(W / 2, 300, 'LEVEL COMPLETE!', {
+        const title = this.add.text(CX, H * 0.312, 'LEVEL COMPLETE!', {
             fontFamily: FONT, fontSize: 44, color: hex(this.tier.accent), stroke: '#000000', strokeThickness: 8
         }).setOrigin(0.5).setScale(0.4);
         panel.add(title);
@@ -1357,15 +1372,21 @@ export class GameScene extends Scene
 
         if (perfect) rows.push({ label: 'PERFECT!', value: perfectBonus, color: 0x6cf5c8 });
 
+        //  The rows are a fixed-width block on the centre line, not edge to
+        //  edge: a label and a number 1200px apart do not read as one row.
+        const rowY0 = H * 0.402;
+        const rowGap = LANDSCAPE ? 56 : 62;
+        const rowHalf = 180;
+
         rows.forEach((r, i) =>
         {
-            const y = 386 + i * 62;
+            const y = rowY0 + i * rowGap;
 
-            const label = this.add.text(90, y, r.label, {
+            const label = this.add.text(CX - rowHalf, y, r.label, {
                 fontFamily: FONT_UI, fontSize: 20, color: '#8d97bd'
             }).setOrigin(0, 0.5).setAlpha(0);
 
-            const value = this.add.text(W - 90, y, '+0', {
+            const value = this.add.text(CX + rowHalf, y, '+0', {
                 fontFamily: FONT, fontSize: 34, color: hex(r.color)
             }).setOrigin(1, 0.5).setAlpha(0);
 
@@ -1384,13 +1405,13 @@ export class GameScene extends Scene
             });
         });
 
-        const totalY = 386 + rows.length * 62 + 42;
+        const totalY = rowY0 + rows.length * rowGap + 42;
 
-        const totalLabel = this.add.text(W / 2, totalY, 'SCORE', {
+        const totalLabel = this.add.text(CX, totalY, 'SCORE', {
             fontFamily: FONT_UI, fontSize: 20, color: '#8d97bd'
         }).setOrigin(0.5).setAlpha(0);
 
-        const total = this.add.text(W / 2, totalY + 52, '0', {
+        const total = this.add.text(CX, totalY + 52, '0', {
             fontFamily: FONT, fontSize: 60, color: '#ffffff', stroke: '#000000', strokeThickness: 8
         }).setOrigin(0.5).setAlpha(0);
 

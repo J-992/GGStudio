@@ -76,10 +76,14 @@ html, body {
 }
 
 /*
-    Rotate prompt. AIMER is a 9:16 game: a phone held sideways can only show it
-    as a sliver, so the prompt covers it and core/lifecycle freezes the clock
-    behind it. The breakpoint is deliberately height-based -- a desktop browser
-    is landscape too, and there is nothing to rotate there.
+    Rotate prompt. On a phone AIMER is a 9:16 game: held sideways it can only
+    show as a sliver, so the prompt covers it and core/lifecycle freezes the
+    clock behind it. A wide screen that is not a phone gets the game's own
+    landscape layout instead (see core/theme), so the prompt is gated on a
+    coarse pointer as well as on the shape of the window -- a 836x470 desktop
+    iframe matches the size test but has nothing to rotate.
+
+    core/lifecycle matches on the same query; the two have to stay in step.
 */
 #rotate-hint {
     display: none;
@@ -113,6 +117,6 @@ html, body {
     65%, 90%      { transform: rotate(0deg); }
 }
 
-@media (orientation: landscape) and (max-height: 520px) {
+@media (orientation: landscape) and (max-height: 520px) and (pointer: coarse) {
     #rotate-hint { display: flex; }
 }

@@ -13,8 +13,10 @@ import {
  * may move or make noise while an ad is on screen, and nothing may move or make
  * noise while the page is hidden -- their iframe can be scrolled out of view
  * without ever firing a blur. A phone turned sideways is the same problem
- * again: this is a 9:16 game, and a landscape phone can only show it as a
- * sliver, so the level timer must not be running behind the rotate prompt.
+ * again: on a phone this is a 9:16 game, and held sideways it can only show as
+ * a sliver, so the level timer must not be running behind the rotate prompt.
+ * (A wide screen that is not a phone lays itself out for landscape instead --
+ * see core/theme -- and never takes this hold.)
  * All three are holds on one gate, and the game stays frozen until every hold
  * is gone.
  *
@@ -130,14 +132,17 @@ export function attachLifecycle (instance: Game): void
     if (typeof window !== 'undefined')
     {
         //  A phone held sideways: CSS puts the rotate prompt up (see
-        //  public/style.css), and this stops the clock behind it.
+        //  public/style.css), and this stops the clock behind it. The pointer
+        //  test is what keeps a short desktop window -- the portal's own
+        //  836x470 desktop iframe is one -- out of it: that window gets the
+        //  landscape layout and plays normally.
         //
         //  Both the first check and the listener wait for the game to be up. A
         //  freeze before boot would put the render loop to sleep with the Boot
         //  scene still unrun, so `gameLoadingFinished` would never fire and a
         //  player who arrived -- or rotated -- during the load would be left
         //  looking at Poki's loading screen forever.
-        const sideways = window.matchMedia('(orientation: landscape) and (max-height: 520px)');
+        const sideways = window.matchMedia('(orientation: landscape) and (max-height: 520px) and (pointer: coarse)');
 
         const applyOrientation = (): void =>
         {

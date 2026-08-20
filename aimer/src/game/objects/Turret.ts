@@ -1,8 +1,7 @@
 import { GameObjects, Scene } from 'phaser';
-import { MUZZLE } from '../core/theme';
+import { AIM_LIMIT, MUZZLE } from '../core/theme';
 
 const BARREL = 30;
-const AIM_LIMIT = 1.15;
 
 /**
  * The player's gun: a socketed emplacement at the bottom of the screen whose
