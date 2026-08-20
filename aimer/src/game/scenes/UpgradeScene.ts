@@ -3,6 +3,7 @@ import { Fx } from '../core/fx';
 import { Sfx, unlockAudio } from '../core/audio';
 import { rollOffers, UPGRADE_BY_ID, Upgrade } from '../data/upgrades';
 import { run } from '../core/state';
+import { iconImage } from '../core/icons';
 import { FONT, FONT_UI, H, W, hex, tierFor } from '../core/theme';
 
 const CARD_W = 462;
@@ -33,9 +34,15 @@ export class UpgradeScene extends Scene
         for (let x = 0; x <= W; x += 58) grid.lineBetween(x, 0, x, H);
         for (let y = 0; y <= H; y += 58) grid.lineBetween(0, y, W, y);
 
-        this.add.text(W / 2, 62, `LEVEL ${run.level}  →  ${run.level + 1}`, {
+        this.add.text(W / 2 - 16, 62, `LEVEL ${run.level}`, {
             fontFamily: FONT_UI, fontSize: 20, color: '#8d97bd'
-        }).setOrigin(0.5);
+        }).setOrigin(1, 0.5);
+
+        iconImage(this, W / 2, 62, 'arrowRight', { size: 18, color: 0x8d97bd });
+
+        this.add.text(W / 2 + 16, 62, `${run.level + 1}`, {
+            fontFamily: FONT_UI, fontSize: 20, color: '#8d97bd'
+        }).setOrigin(0, 0.5);
 
         const title = this.add.text(W / 2, 108, 'CHOOSE UPGRADE', {
             fontFamily: FONT, fontSize: 38, color: hex(tier.accent), stroke: '#000000', strokeThickness: 6
@@ -85,9 +92,7 @@ export class UpgradeScene extends Scene
 
         this.tweens.add({ targets: glow, scale: 1.18, alpha: 0.32, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
 
-        const icon = this.add.text(-CARD_W / 2 + 84, 0, up.icon, {
-            fontFamily: FONT_UI, fontSize: 62
-        }).setOrigin(0.5);
+        const icon = iconImage(this, -CARD_W / 2 + 84, 0, up.icon, { size: 60, color: up.color });
         card.add(icon);
 
         const name = this.add.text(-CARD_W / 2 + 154, -26, up.name, {
@@ -100,10 +105,28 @@ export class UpgradeScene extends Scene
         }).setOrigin(0, 0.5);
         card.add(effect);
 
-        const badge = this.add.text(CARD_W / 2 - 24, -CARD_H / 2 + 26, owned > 0 ? `LV ${owned} → ${owned + 1}` : 'NEW', {
-            fontFamily: FONT_UI, fontSize: 16, color: owned > 0 ? '#8d97bd' : hex(up.color)
-        }).setOrigin(1, 0.5);
-        card.add(badge);
+        const badgeY = -CARD_H / 2 + 26;
+
+        if (owned > 0)
+        {
+            const to = this.add.text(CARD_W / 2 - 24, badgeY, String(owned + 1), {
+                fontFamily: FONT_UI, fontSize: 16, color: '#8d97bd'
+            }).setOrigin(1, 0.5);
+
+            const arrow = iconImage(this, to.x - to.width - 10, badgeY, 'arrowRight', { size: 13, color: 0x8d97bd });
+
+            const from = this.add.text(arrow.x - 10, badgeY, `LV ${owned}`, {
+                fontFamily: FONT_UI, fontSize: 16, color: '#8d97bd'
+            }).setOrigin(1, 0.5);
+
+            card.add([ from, arrow, to ]);
+        }
+        else
+        {
+            card.add(this.add.text(CARD_W / 2 - 24, badgeY, 'NEW', {
+                fontFamily: FONT_UI, fontSize: 16, color: hex(up.color)
+            }).setOrigin(1, 0.5));
+        }
 
         const stack = this.add.graphics();
         for (let i = 0; i < up.max; i++)
@@ -154,7 +177,7 @@ export class UpgradeScene extends Scene
             const x = W / 2 - ((inRow - 1) * spacing) / 2 + col * spacing;
             const y = 872 + row * 46;
 
-            this.add.text(x, y, up.icon, { fontFamily: FONT_UI, fontSize: 26 }).setOrigin(0.5);
+            iconImage(this, x, y, up.icon, { size: 26, color: up.color });
             this.add.text(x + 17, y + 12, String(run.taken[id]), {
                 fontFamily: FONT, fontSize: 15, color: hex(up.color)
             }).setOrigin(0.5);

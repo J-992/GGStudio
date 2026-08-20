@@ -1,10 +1,12 @@
-import { GameObjects, Scene } from 'phaser';
+import { GameObjects, Math as PMath, Scene } from 'phaser';
 import { Target } from '../objects/Target';
 import { Fx } from '../core/fx';
 import { Sfx, unlockAudio, isMuted, toggleMute } from '../core/audio';
 import { FINAL_LEVEL, KINDS, LevelConfig, levelConfig, pickKind } from '../data/levels';
 import { Stats } from '../data/upgrades';
 import { bankCoins, meta, run, saveMeta } from '../core/state';
+import { IconLabel, ic, iconImage } from '../core/icons';
+import { Turret } from '../objects/Turret';
 import { FONT, FONT_UI, H, MUZZLE, PLAY, Tier, W, fmt, fmtShort, hex, tierFor } from '../core/theme';
 
 interface Streak { n: number; bonus: number; label: string; }
@@ -19,6 +21,22 @@ const STREAKS: Streak[] = [
 ];
 
 const COIN_HUD = { x: 494, y: 30 };
+
+/** Streak milestone colours -- shared by the pips, the banner and the combo ramp. */
+const STREAK_COLORS = [ 0x6cf5c8, 0x3fe0ff, 0xb388ff, 0xff5ce0, 0xffb020, 0xff4d3d ];
+
+/** The combo display escalates one step every 5 kills. */
+const COMBO_STEP = 5;
+const COMBO_MAX_TIER = 8;
+const COMBO_RAMP = [
+    0x9fe8ff, 0x6cf5c8, 0x62ffb8, 0xb388ff, 0xff7ae0, 0xff5ce0, 0xffb020, 0xff7a3d, 0xff3b45
+];
+
+const COMBO_Y = 172;
+const STREAK_Y = 880;
+const BAR_RIGHT = W - 58;
+
+interface ComboWing { img: GameObjects.Image; side: number; slot: number; }
 
 function distToSegment (px: number, py: number, x1: number, y1: number, x2: number, y2: number): number
 {
@@ -65,15 +83,21 @@ export class GameScene extends Scene
     //  HUD
     private bgGfx!: GameObjects.Graphics;
     private hudGfx!: GameObjects.Graphics;
-    private coinText!: GameObjects.Text;
+    private coinLabel!: IconLabel;
     private scoreText!: GameObjects.Text;
     private comboText!: GameObjects.Text;
+    private comboAura!: GameObjects.Graphics;
+    private comboWings: ComboWing[] = [];
+    private comboTier = 0;
     private timeText!: GameObjects.Text;
+    private timeIcon!: GameObjects.Image;
+    private timeIconScale = 1;
     private goalText!: GameObjects.Text;
     private streakText!: GameObjects.Text;
+    private streakKey = '';
     private multText!: GameObjects.Text;
-    private muteBtn!: GameObjects.Text;
-    private muzzle!: GameObjects.Arc;
+    private muteBtn!: GameObjects.Image;
+    private turret!: Turret;
 
     constructor ()
     {
@@ -106,6 +130,9 @@ export class GameScene extends Scene
         this.coinsDisplay = meta.coins;
         this.tempMult = 1;
         this.tempMultTimer = 0;
+        this.comboWings = [];
+        this.comboTier = 0;
+        this.streakKey = '';
 
         this.cameras.main.setBackgroundColor(this.tier.bg);
 
@@ -122,7 +149,7 @@ export class GameScene extends Scene
         {
             unlockAudio();
             if (this.state !== 'play') return;
-            if (p.y < PLAY.top - 16 || p.y > PLAY.bottom + 24) return;
+            if (p.y < PLAY.top - 16 || p.y > PLAY.bottom + 6) return;
             this.requestShot(p.x, p.y);
         });
 
@@ -136,7 +163,7 @@ export class GameScene extends Scene
     {
         this.bgGfx = this.add.graphics().setDepth(0);
 
-        const intensity = Math.min(1, run.level / 16);
+        const intensity = Math.min(1, run.level / 26);
 
         for (let i = 0; i < 3 + Math.floor(intensity * 3); i++)
         {
@@ -169,7 +196,7 @@ export class GameScene extends Scene
             alpha: { start: 0.4, end: 0 },
             tint: this.tier.dust,
             blendMode: 'ADD',
-            frequency: Math.max(90, 320 - run.level * 11),
+            frequency: Math.max(80, 320 - run.level * 7),
             quantity: 1
         });
         dust.setDepth(2);
@@ -183,37 +210,48 @@ export class GameScene extends Scene
             fontFamily: FONT, fontSize: 22, color: hex(this.tier.accent)
         }).setOrigin(0, 0.5).setDepth(31);
 
-        this.coinText = this.add.text(W - 30, COIN_HUD.y, '◆ ' + fmt(meta.coins), {
-            fontFamily: FONT, fontSize: 24, color: '#ffc857'
-        }).setOrigin(1, 0.5).setDepth(31);
+        this.coinLabel = new IconLabel(this, W - 30, COIN_HUD.y, 'gem', fmt(meta.coins), {
+            align: 'right', fontSize: 24, iconSize: 22
+        });
+        this.coinLabel.setDepth(31);
 
-        this.scoreText = this.add.text(W / 2, 76, '0', {
+        this.scoreText = this.add.text(W / 2, 62, '0', {
             fontFamily: FONT, fontSize: 54, color: '#ffffff', stroke: '#000000', strokeThickness: 6
         }).setOrigin(0.5).setDepth(31);
 
-        this.comboText = this.add.text(W / 2, 120, '', {
-            fontFamily: FONT, fontSize: 30, color: hex(this.tier.accent2)
+        this.comboAura = this.add.graphics().setDepth(30);
+
+        this.comboText = this.add.text(W / 2, COMBO_Y, '', {
+            fontFamily: FONT, fontSize: 28, color: hex(COMBO_RAMP[0])
         }).setOrigin(0.5).setDepth(31);
 
-        this.timeText = this.add.text(30, 158, '0.0', {
+        this.applyComboTier(0);
+
+        this.timeText = this.add.text(30, 100, '0.0', {
             fontFamily: FONT, fontSize: 20, color: '#ffffff'
         }).setOrigin(0, 0.5).setDepth(32);
 
-        this.goalText = this.add.text(W - 30, 158, '0 / 0', {
+        //  Stopwatch cap on the end of the bar -- makes it read as a countdown.
+        this.timeIcon = iconImage(this, W - 38, 125, 'stopwatch', { size: 20, color: this.tier.accent });
+        this.timeIcon.setDepth(32);
+        this.timeIconScale = this.timeIcon.scaleX;
+
+        this.goalText = this.add.text(BAR_RIGHT, 100, '0 / 0', {
             fontFamily: FONT, fontSize: 20, color: hex(this.tier.accent)
         }).setOrigin(1, 0.5).setDepth(32);
 
-        this.streakText = this.add.text(W / 2, 892, '', {
-            fontFamily: FONT_UI, fontSize: 15, color: '#7d88b0'
+        this.streakText = this.add.text(W / 2, 908, '', {
+            fontFamily: FONT, fontSize: 15, color: '#7d88b0'
         }).setOrigin(0.5).setDepth(31);
 
-        this.multText = this.add.text(W / 2, 936, '', {
-            fontFamily: FONT, fontSize: 26, color: '#b388ff'
-        }).setOrigin(0.5).setDepth(31).setAlpha(0);
+        this.multText = this.add.text(28, 908, '', {
+            fontFamily: FONT, fontSize: 20, color: '#b388ff'
+        }).setOrigin(0, 0.5).setDepth(31).setAlpha(0);
 
-        this.muteBtn = this.add.text(W - 24, 936, isMuted() ? '🔇' : '🔊', {
-            fontFamily: FONT_UI, fontSize: 20
-        }).setOrigin(1, 0.5).setDepth(32).setAlpha(0.4).setInteractive({ useHandCursor: true });
+        this.muteBtn = iconImage(this, W - 26, 908, isMuted() ? 'soundOff' : 'soundOn', {
+            size: 20, color: 0xffffff, alpha: 0.45
+        });
+        this.muteBtn.setDepth(32).setInteractive({ useHandCursor: true });
 
         this.muteBtn.on('pointerdown', (_p: unknown, _x: unknown, _y: unknown, e: any) =>
         {
@@ -221,10 +259,10 @@ export class GameScene extends Scene
             unlockAudio();
             meta.muted = toggleMute();
             saveMeta();
-            this.muteBtn.setText(meta.muted ? '🔇' : '🔊');
+            this.muteBtn.setTexture(ic(meta.muted ? 'soundOff' : 'soundOn'));
         });
 
-        this.muzzle = this.add.circle(MUZZLE.x, H - 6, 26, this.tier.accent, 0.35).setDepth(29);
+        this.turret = new Turret(this, this.tier.accent, this.tier.accent2);
     }
 
     private showLevelBanner (): void
@@ -319,9 +357,8 @@ export class GameScene extends Scene
 
         this.nextShot = now + this.stats.fireRate;
 
-        this.fx.tracer(MUZZLE.x, MUZZLE.y, px, py, this.tier.accent, 7, 150);
-        this.muzzle.setScale(1.6);
-        this.tweens.add({ targets: this.muzzle, scale: 1, duration: 130, ease: 'Quad.out' });
+        this.turret.fire(px, py);
+        this.fx.tracer(this.turret.tipX, this.turret.tipY, px, py, this.tier.accent, 7, 150);
 
         const hit = new Set<Target>();
         const primary = this.pickTarget(px, py);
@@ -363,7 +400,7 @@ export class GameScene extends Scene
             for (const t of others)
             {
                 hit.add(t);
-                this.fx.tracer(MUZZLE.x, MUZZLE.y, t.x, t.y, this.tier.accent2, 4, 130);
+                this.fx.tracer(this.turret.tipX, this.turret.tipY, t.x, t.y, this.tier.accent2, 4, 130);
                 this.applyShot(t, t.x, t.y, false);
             }
         }
@@ -694,8 +731,7 @@ export class GameScene extends Scene
         this.milestoneIdx = idx;
 
         const s = STREAKS[idx];
-        const colors = [ 0x6cf5c8, 0x3fe0ff, 0xb388ff, 0xff5ce0, 0xffb020, 0xff4d3d ];
-        const color = colors[Math.min(idx, colors.length - 1)];
+        const color = STREAK_COLORS[Math.min(idx, STREAK_COLORS.length - 1)];
 
         const t = this.add.text(W / 2, PLAY.top + 250, s.label, {
             fontFamily: FONT, fontSize: 52 + idx * 5, color: hex(color), stroke: '#000000', strokeThickness: 8
@@ -713,6 +749,233 @@ export class GameScene extends Scene
         Sfx.milestone(idx);
     }
 
+    //  ---------------------------------------------------------- combo ramp
+
+    /**
+     * The combo readout gains a whole design step every COMBO_STEP kills:
+     * bigger, hotter, framed by chevrons and finally shaking and orbited by
+     * sparks -- so the ramp is felt, not just counted.
+     */
+    private applyComboTier (tier: number): void
+    {
+        this.comboTier = tier;
+
+        const color = COMBO_RAMP[Math.min(tier, COMBO_RAMP.length - 1)];
+
+        this.comboText.setStyle({
+            fontFamily: FONT,
+            fontSize: Math.min(44, 28 + tier * 2),
+            color: hex(color),
+            stroke: '#000000',
+            strokeThickness: 4 + Math.min(7, tier)
+        });
+
+        for (const w of this.comboWings) w.img.destroy();
+        this.comboWings = [];
+
+        const pairs = Math.max(0, Math.min(3, tier - 1));
+
+        for (let slot = 0; slot < pairs; slot++)
+        {
+            for (const side of [ -1, 1 ])
+            {
+                const img = iconImage(this, W / 2, COMBO_Y, 'chevrons', {
+                    size: 18 + tier, color
+                });
+
+                img.setDepth(31).setFlipX(side < 0);
+                this.comboWings.push({ img, side, slot });
+            }
+        }
+    }
+
+    private checkComboTier (): void
+    {
+        const tier = this.combo < 2 ? 0 : Math.min(COMBO_MAX_TIER, Math.floor(this.combo / COMBO_STEP));
+
+        if (tier === this.comboTier) return;
+
+        const up = tier > this.comboTier;
+        this.applyComboTier(tier);
+
+        if (!up || tier === 0) return;
+
+        const color = COMBO_RAMP[Math.min(tier, COMBO_RAMP.length - 1)];
+
+        this.comboText.setScale(1.55);
+        this.fx.ring(W / 2, COMBO_Y, 90 + tier * 24, color, 3 + tier * 0.5, 420);
+
+        if (tier >= 3) this.fx.burst(W / 2, COMBO_Y, color, 6 + tier * 3, 'hit');
+        if (tier >= 5) this.cameras.main.shake(90, 0.003);
+    }
+
+    private drawCombo (): void
+    {
+        const g = this.comboAura;
+        g.clear();
+
+        if (this.combo < 2)
+        {
+            this.comboText.setText('').setPosition(W / 2, COMBO_Y).setScale(1);
+            for (const w of this.comboWings) w.img.setVisible(false);
+            return;
+        }
+
+        this.comboText.setText(`COMBO x${this.combo}`);
+
+        const tier = this.comboTier;
+        const color = COMBO_RAMP[Math.min(tier, COMBO_RAMP.length - 1)];
+        const t = this.time.now;
+        const beat = Math.sin(t * (0.008 + tier * 0.0014));
+        const half = this.comboText.displayWidth / 2;
+
+        //  Breathing, then a hard jitter once the ramp gets serious.
+        const jitter = tier >= 4 ? (tier - 3) * 1.1 : 0;
+
+        this.comboText.setPosition(
+            W / 2 + (Math.random() - 0.5) * jitter,
+            COMBO_Y + (Math.random() - 0.5) * jitter
+        );
+
+        if (!this.tweens.isTweening(this.comboText))
+        {
+            this.comboText.setScale(1 + beat * (0.018 + tier * 0.012));
+        }
+
+        if (tier >= 1)
+        {
+            g.fillStyle(color, 0.05 + tier * 0.016);
+            g.fillEllipse(W / 2, COMBO_Y, half * 2 + 70 + tier * 10, 36 + tier * 2);
+        }
+
+        if (tier >= 3)
+        {
+            g.lineStyle(1.5 + tier * 0.3, color, 0.2 + Math.abs(beat) * 0.25);
+            g.strokeEllipse(W / 2, COMBO_Y, half * 2 + 56 + tier * 8, 42 + tier * 2);
+        }
+
+        if (tier >= 6)
+        {
+            for (let i = 0; i < 3; i++)
+            {
+                const a = t * 0.004 + (i * Math.PI * 2) / 3;
+                g.fillStyle(color, 0.75);
+                g.fillCircle(
+                    W / 2 + Math.cos(a) * (half + 44),
+                    COMBO_Y + Math.sin(a) * (18 + tier),
+                    3 + tier * 0.4
+                );
+            }
+        }
+
+        //  Combo window, drawn as an underline that closes in from both ends.
+        const cf = Math.max(0, this.comboTimer / this.stats.comboWindow);
+        const under = Math.max(6, (half + 10) * cf);
+
+        g.fillStyle(color, 0.75);
+        g.fillRoundedRect(W / 2 - under, COMBO_Y + 26, under * 2, 4, 2);
+
+        for (const w of this.comboWings)
+        {
+            const off = half + 26 + w.slot * 24;
+
+            w.img.setVisible(true);
+            w.img.setPosition(W / 2 + w.side * off, COMBO_Y);
+            w.img.setAlpha(0.9 - w.slot * 0.24 + beat * 0.12);
+        }
+    }
+
+    //  -------------------------------------------------------- streak track
+
+    private diamond (g: GameObjects.Graphics, x: number, y: number, r: number, outline = false): void
+    {
+        const pts = [
+            new PMath.Vector2(x, y - r),
+            new PMath.Vector2(x + r, y),
+            new PMath.Vector2(x, y + r),
+            new PMath.Vector2(x - r, y)
+        ];
+
+        if (outline) g.strokePoints(pts, true, true);
+        else g.fillPoints(pts, true);
+    }
+
+    /**
+     * Streak progress as a row of milestone gems rather than another bar --
+     * one gem per tier, lit as it is claimed, the next one pulsing.
+     */
+    private drawStreak (g: GameObjects.Graphics): void
+    {
+        const spacing = 42;
+        const x0 = W / 2 - ((STREAKS.length - 1) * spacing) / 2;
+        const t = this.time.now;
+
+        for (let i = 0; i < STREAKS.length; i++)
+        {
+            const x = x0 + i * spacing;
+            const color = STREAK_COLORS[i];
+            const reached = this.combo >= STREAKS[i].n;
+            const next = !reached && (i === 0 || this.combo >= STREAKS[i - 1].n);
+
+            if (i > 0)
+            {
+                const linked = this.combo >= STREAKS[i - 1].n;
+                g.lineStyle(3, linked ? STREAK_COLORS[i - 1] : 0x232b47, linked ? 0.6 : 0.55);
+                g.lineBetween(x - spacing + 14, STREAK_Y, x - 14, STREAK_Y);
+            }
+
+            if (reached)
+            {
+                g.fillStyle(color, 0.16 + Math.abs(Math.sin(t * 0.004 + i)) * 0.1);
+                this.diamond(g, x, STREAK_Y, 21);
+                g.fillStyle(color, 1);
+                this.diamond(g, x, STREAK_Y, 11);
+            }
+            else if (next)
+            {
+                g.lineStyle(3, color, 0.4 + Math.abs(Math.sin(t * 0.006)) * 0.45);
+                this.diamond(g, x, STREAK_Y, 11, true);
+            }
+            else
+            {
+                g.fillStyle(0x2a3352, 1);
+                this.diamond(g, x, STREAK_Y, 5);
+            }
+        }
+    }
+
+    private updateStreakText (): void
+    {
+        const active = this.milestoneIdx >= 0 ? STREAKS[this.milestoneIdx] : null;
+        const next = STREAKS.find(s => this.combo < s.n);
+        const pct = (s: Streak) => Math.round(s.bonus * this.stats.comboMult * 100);
+
+        let label: string;
+        let color: string;
+
+        if (active)
+        {
+            label = `${active.label}   +${pct(active)}% SCORE`;
+            color = hex(STREAK_COLORS[Math.min(this.milestoneIdx, STREAK_COLORS.length - 1)]);
+        }
+        else if (next)
+        {
+            label = `${next.n - this.combo} MORE FOR +${pct(next)}% SCORE`;
+            color = '#7d88b0';
+        }
+        else
+        {
+            label = 'MAX STREAK';
+            color = hex(STREAK_COLORS[STREAK_COLORS.length - 1]);
+        }
+
+        if (label === this.streakKey) return;
+
+        this.streakKey = label;
+        this.streakText.setText(label);
+        this.streakText.setColor(color);
+    }
+
     private showMult (): void
     {
         this.multText.setText(`SCORE x${this.tempMult}`);
@@ -722,8 +985,8 @@ export class GameScene extends Scene
 
     private bumpCoins (): void
     {
-        this.coinText.setScale(1.28);
-        this.tweens.add({ targets: this.coinText, scale: 1, duration: 160, ease: 'Quad.out' });
+        this.coinLabel.setScale(1.28);
+        this.tweens.add({ targets: this.coinLabel, scale: 1, duration: 160, ease: 'Quad.out' });
         Sfx.reward();
     }
 
@@ -741,49 +1004,40 @@ export class GameScene extends Scene
         const g = this.hudGfx;
         g.clear();
 
-        //  timer bar
+        //  countdown bar
         const tf = Math.max(0, this.timeLeft / this.timeTotal);
         const low = this.timeLeft < 3200;
+        const pulse = low ? 0.7 + Math.abs(Math.sin(this.time.now * 0.012)) * 0.3 : 0.95;
         const barColor = low ? 0xff4d5e : this.tier.accent;
 
         g.fillStyle(0x000000, 0.45);
-        g.fillRoundedRect(26, 172, W - 52, 22, 11);
+        g.fillRoundedRect(26, 114, BAR_RIGHT - 26, 22, 11);
         if (tf > 0.001)
         {
-            g.fillStyle(barColor, low ? 0.7 + Math.abs(Math.sin(this.time.now * 0.012)) * 0.3 : 0.95);
-            g.fillRoundedRect(28, 174, Math.max(20, (W - 56) * tf), 18, 9);
+            g.fillStyle(barColor, pulse);
+            g.fillRoundedRect(28, 116, Math.max(20, (BAR_RIGHT - 30) * tf), 18, 9);
         }
+
+        //  stopwatch cap at the end of the countdown
+        g.fillStyle(0x000000, 0.55);
+        g.fillCircle(W - 38, 125, 17);
+        g.lineStyle(2.5, barColor, low ? 0.95 : 0.7);
+        g.strokeCircle(W - 38, 125, 17);
+
+        this.timeIcon.setTint(barColor);
+        this.timeIcon.setScale(this.timeIconScale * (low ? 1 + Math.abs(Math.sin(this.time.now * 0.012)) * 0.2 : 1));
 
         //  goal bar
         const gf = Math.min(1, this.progress / this.cfg.goal);
         g.fillStyle(0x000000, 0.45);
-        g.fillRoundedRect(26, 200, W - 52, 9, 4);
+        g.fillRoundedRect(26, 142, BAR_RIGHT - 26, 9, 4);
         if (gf > 0.001)
         {
             g.fillStyle(this.tier.accent2, 0.95);
-            g.fillRoundedRect(28, 201, Math.max(8, (W - 56) * gf), 7, 3);
+            g.fillRoundedRect(28, 143, Math.max(8, (BAR_RIGHT - 30) * gf), 7, 3);
         }
 
-        //  streak progress
-        const next = STREAKS.find(s => this.combo < s.n);
-        const prevN = this.milestoneIdx >= 0 ? STREAKS[this.milestoneIdx].n : 0;
-        const sf = next ? Math.max(0, (this.combo - prevN) / (next.n - prevN)) : 1;
-
-        g.fillStyle(0x000000, 0.4);
-        g.fillRoundedRect(90, 908, W - 180, 9, 4);
-        if (sf > 0.001)
-        {
-            g.fillStyle(this.tier.accent, 0.9);
-            g.fillRoundedRect(91, 909, Math.max(8, (W - 182) * sf), 7, 3);
-        }
-
-        //  combo timer
-        if (this.combo > 1)
-        {
-            const cf = Math.max(0, this.comboTimer / this.stats.comboWindow);
-            g.fillStyle(this.tier.accent2, 0.8);
-            g.fillRoundedRect(W / 2 - 60, 140, 120 * cf, 4, 2);
-        }
+        this.drawStreak(g);
 
         //  low-time vignette
         if (low && this.state === 'play')
@@ -876,25 +1130,16 @@ export class GameScene extends Scene
         this.timeText.setText((this.timeLeft / 1000).toFixed(2));
         this.goalText.setText(`${Math.min(this.progress, this.cfg.goal)} / ${this.cfg.goal}`);
 
-        if (this.combo >= 2)
-        {
-            this.comboText.setText(`COMBO x${this.combo}`);
-            const b = this.streakBonus();
-            this.comboText.setColor(hex(b >= 1 ? 0xffb020 : (b >= 0.25 ? 0xff5ce0 : this.tier.accent2)));
-        }
-        else
-        {
-            this.comboText.setText('');
-        }
-
-        const next = STREAKS.find(s => this.combo < s.n);
-        this.streakText.setText(next ? `${next.n} STREAK  →  +${Math.round(next.bonus * this.stats.comboMult * 100)}% SCORE` : 'MAX STREAK');
+        this.checkComboTier();
+        this.drawCombo();
+        this.updateStreakText();
+        this.turret.idle(this.time.now);
 
         if (this.coinsDisplay !== meta.coins)
         {
             this.coinsDisplay += Math.max(1, Math.ceil((meta.coins - this.coinsDisplay) * 0.25));
             if (this.coinsDisplay > meta.coins) this.coinsDisplay = meta.coins;
-            this.coinText.setText('◆ ' + fmt(this.coinsDisplay));
+            this.coinLabel.setValue(fmt(this.coinsDisplay));
         }
 
         this.drawHud();
@@ -913,16 +1158,16 @@ export class GameScene extends Scene
 
         for (let x = 0; x <= W; x += step)
         {
-            g.lineBetween(x, PLAY.top - 30, x, H);
+            g.lineBetween(x, PLAY.top - 10, x, H);
         }
 
-        for (let y = PLAY.top - 30 + off; y <= H; y += step)
+        for (let y = PLAY.top - 10 + off; y <= H; y += step)
         {
             g.lineBetween(0, y, W, y);
         }
 
         g.lineStyle(2, this.tier.accent, 0.35);
-        g.lineBetween(0, PLAY.top - 30, W, PLAY.top - 30);
+        g.lineBetween(0, PLAY.top - 10, W, PLAY.top - 10);
     }
 
     //  --------------------------------------------------------------- flow

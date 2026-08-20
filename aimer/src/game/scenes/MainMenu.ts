@@ -1,7 +1,9 @@
-import { GameObjects, Geom, Scene } from 'phaser';
+import { Geom, Scene } from 'phaser';
 import { Fx } from '../core/fx';
 import { Sfx, isMuted, toggleMute, unlockAudio } from '../core/audio';
 import { meta, PERKS, perkCost, run, saveMeta } from '../core/state';
+import { FINAL_LEVEL } from '../data/levels';
+import { IconLabel, ic, iconImage } from '../core/icons';
 import { FONT, FONT_UI, H, W, fmt, hex } from '../core/theme';
 
 const DEMO_COLORS = [ 0x3fe0ff, 0xff5ce0, 0x7dff6b, 0xffd23f, 0x9b6cff ];
@@ -9,7 +11,7 @@ const DEMO_COLORS = [ 0x3fe0ff, 0xff5ce0, 0x7dff6b, 0xffd23f, 0x9b6cff ];
 export class MainMenu extends Scene
 {
     private fx!: Fx;
-    private coinLabel!: GameObjects.Text;
+    private coinLabel!: IconLabel;
     private perkRows: { redraw: () => void }[] = [];
 
     constructor ()
@@ -53,16 +55,18 @@ export class MainMenu extends Scene
             toggleMute();
         }
 
-        const mute = this.add.text(W - 26, 926, isMuted() ? '🔇' : '🔊', {
-            fontFamily: FONT_UI, fontSize: 22
-        }).setOrigin(1, 0.5).setDepth(12).setAlpha(0.55).setInteractive({ useHandCursor: true });
+        const mute = iconImage(this, W - 30, 926, isMuted() ? 'soundOff' : 'soundOn', {
+            size: 22, color: 0xffffff, alpha: 0.55
+        });
+
+        mute.setDepth(12).setInteractive({ useHandCursor: true });
 
         mute.on('pointerdown', () =>
         {
             unlockAudio();
             meta.muted = toggleMute();
             saveMeta();
-            mute.setText(meta.muted ? '🔇' : '🔊');
+            mute.setTexture(ic(meta.muted ? 'soundOff' : 'soundOn'));
         });
 
     }
@@ -168,7 +172,7 @@ export class MainMenu extends Scene
         };
 
         stat(110, 'BEST SCORE', fmt(meta.best), 0xffffff);
-        stat(270, 'BEST LEVEL', `${meta.bestLevel}/20`, 0x6cf5c8);
+        stat(270, 'BEST LEVEL', `${meta.bestLevel}/${FINAL_LEVEL}`, 0x6cf5c8);
         stat(430, 'RANK XP', fmt(meta.rank), 0x9b6cff);
     }
 
@@ -178,9 +182,10 @@ export class MainMenu extends Scene
             fontFamily: FONT, fontSize: 20, color: '#5f6a92'
         }).setOrigin(0.5).setDepth(10);
 
-        this.coinLabel = this.add.text(W / 2, 890, '◆ ' + fmt(meta.coins), {
-            fontFamily: FONT, fontSize: 34, color: '#ffc857'
-        }).setOrigin(0.5).setDepth(11);
+        this.coinLabel = new IconLabel(this, W / 2, 890, 'gem', fmt(meta.coins), {
+            fontSize: 34, iconSize: 30
+        });
+        this.coinLabel.setDepth(11);
 
         PERKS.forEach((perk, i) =>
         {
@@ -190,7 +195,7 @@ export class MainMenu extends Scene
             const g = this.add.graphics();
             row.add(g);
 
-            const icon = this.add.text(-208, 0, perk.icon, { fontFamily: FONT_UI, fontSize: 28 }).setOrigin(0.5);
+            const icon = iconImage(this, -208, 0, perk.icon, { size: 30, color: 0xffffff, alpha: 0.9 });
             row.add(icon);
 
             const name = this.add.text(-176, -12, perk.name, {
@@ -203,9 +208,9 @@ export class MainMenu extends Scene
             }).setOrigin(0, 0.5);
             row.add(effect);
 
-            const price = this.add.text(196, 0, '', {
-                fontFamily: FONT, fontSize: 20, color: '#ffc857'
-            }).setOrigin(1, 0.5);
+            const price = new IconLabel(this, 196, 0, 'gem', '', {
+                align: 'right', fontSize: 20, iconSize: 18
+            });
             row.add(price);
 
             const redraw = () =>
@@ -227,8 +232,11 @@ export class MainMenu extends Scene
                     g.fillRect(-176 + p * 12, 22, 8, 4);
                 }
 
-                price.setText(maxed ? 'MAX' : '◆ ' + fmt(cost));
-                price.setColor(maxed ? '#6cf5c8' : (afford ? '#ffc857' : '#4c5578'));
+                const tone = maxed ? 0x6cf5c8 : (afford ? 0xffc857 : 0x4c5578);
+
+                price.setValue(maxed ? 'MAX' : fmt(cost), !maxed);
+                price.text.setColor(hex(tone));
+                price.icon.setTint(tone);
             };
 
             redraw();
@@ -273,7 +281,7 @@ export class MainMenu extends Scene
 
     private refreshShop (): void
     {
-        this.coinLabel.setText('◆ ' + fmt(meta.coins));
+        this.coinLabel.setValue(fmt(meta.coins));
         this.coinLabel.setScale(1.2);
         this.tweens.add({ targets: this.coinLabel, scale: 1, duration: 160, ease: 'Quad.out' });
 

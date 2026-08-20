@@ -1,4 +1,5 @@
 import { Scene } from 'phaser';
+import { registerIcons } from '../core/icons';
 
 function canvas (size: number, draw: (ctx: CanvasRenderingContext2D, s: number) => void): HTMLCanvasElement
 {
@@ -42,6 +43,8 @@ export class Boot extends Scene
                 ctx.fillRect(0, 0, s, s);
             }));
         }
+
+        registerIcons(this.textures);
 
         this.scene.start('MainMenu');
     }

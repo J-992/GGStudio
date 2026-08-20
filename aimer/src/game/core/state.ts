@@ -5,6 +5,7 @@ export interface Perk
 {
     id: string;
     name: string;
+    /** Icon texture name (see core/icons). */
     icon: string;
     effect: string;
     max: number;
@@ -15,11 +16,11 @@ export interface Perk
 
 /** Permanent, coin-bought upgrades that persist between runs. */
 export const PERKS: Perk[] = [
-    { id: 'power',    name: 'GUN POWER',   icon: '💪', effect: '+7% DAMAGE',     max: 10, cost: 220, growth: 1.55, apply: (s, l) => { s.damage *= 1 + 0.07 * l; } },
-    { id: 'fortune',  name: 'COIN BONUS',  icon: '💰', effect: '+10% COINS',     max: 10, cost: 200, growth: 1.5,  apply: (s, l) => { s.coinMult += 0.1 * l; } },
-    { id: 'warmup',   name: 'START COMBO', icon: '🚀', effect: '+1 START COMBO', max: 8,  cost: 260, growth: 1.5,  apply: (s, l) => { s.comboStart += l; } },
-    { id: 'overtime', name: 'START TIME',  icon: '⏱️', effect: '+0.5s TIME',     max: 8,  cost: 300, growth: 1.55, apply: (s, l) => { s.timeBonus += 0.5 * l; } },
-    { id: 'reflex',   name: 'TRIGGER',     icon: '🔥', effect: '-5% FIRE DELAY', max: 6,  cost: 340, growth: 1.6,  apply: (s, l) => { s.fireRate *= Math.pow(0.95, l); } }
+    { id: 'power',    name: 'GUN POWER',   icon: 'damage',    effect: '+7% DAMAGE',     max: 10, cost: 220, growth: 1.55, apply: (s, l) => { s.damage *= 1 + 0.07 * l; } },
+    { id: 'fortune',  name: 'COIN BONUS',  icon: 'coins',     effect: '+10% COINS',     max: 10, cost: 200, growth: 1.5,  apply: (s, l) => { s.coinMult += 0.1 * l; } },
+    { id: 'warmup',   name: 'START COMBO', icon: 'rocket',    effect: '+1 START COMBO', max: 8,  cost: 260, growth: 1.5,  apply: (s, l) => { s.comboStart += l; } },
+    { id: 'overtime', name: 'START TIME',  icon: 'stopwatch', effect: '+0.5s TIME',     max: 8,  cost: 300, growth: 1.55, apply: (s, l) => { s.timeBonus += 0.5 * l; } },
+    { id: 'reflex',   name: 'TRIGGER',     icon: 'chevrons',  effect: '-5% FIRE DELAY', max: 6,  cost: 340, growth: 1.6,  apply: (s, l) => { s.fireRate *= Math.pow(0.95, l); } }
 ];
 
 export function perkCost (perk: Perk, level: number): number

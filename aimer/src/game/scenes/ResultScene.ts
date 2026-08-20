@@ -2,6 +2,8 @@ import { GameObjects, Geom, Scene } from 'phaser';
 import { Fx } from '../core/fx';
 import { Sfx, unlockAudio } from '../core/audio';
 import { meta, run } from '../core/state';
+import { FINAL_LEVEL } from '../data/levels';
+import { IconLabel } from '../core/icons';
 import { FONT, FONT_UI, H, W, fmt, hex, tierFor } from '../core/theme';
 
 interface ResultData
@@ -50,7 +52,7 @@ export class ResultScene extends Scene
 
         this.tweens.add({ targets: head, scale: 1, duration: 320, ease: 'Back.out' });
 
-        this.add.text(W / 2, 252, win ? 'ALL 20 LEVELS CLEARED' : `REACHED LEVEL ${run.level}`, {
+        this.add.text(W / 2, 252, win ? `ALL ${FINAL_LEVEL} LEVELS CLEARED` : `REACHED LEVEL ${run.level}`, {
             fontFamily: FONT_UI, fontSize: 17, color: '#8d97bd'
         }).setOrigin(0.5).setDepth(10);
 
@@ -107,9 +109,10 @@ export class ResultScene extends Scene
             this.leave('MainMenu');
         }, '#ffffff');
 
-        this.add.text(W / 2, 880, `◆ ${fmt(meta.coins)}   ·   RANK ${fmt(meta.rank)}`, {
-            fontFamily: FONT_UI, fontSize: 16, color: '#7d88b0'
-        }).setOrigin(0.5).setDepth(10);
+        const footer = new IconLabel(this, W / 2, 880, 'gem', `${fmt(meta.coins)}   ·   RANK ${fmt(meta.rank)}`, {
+            fontFamily: FONT_UI, fontSize: 16, iconSize: 16, color: '#7d88b0'
+        });
+        footer.setDepth(10);
 
         if (win)
         {

@@ -1,6 +1,7 @@
 import { GameObjects, Scene } from 'phaser';
 import { KINDS, KindDef, TargetKind, unitHp } from '../data/levels';
 import { PLAY, FONT } from '../core/theme';
+import { ic } from '../core/icons';
 
 const TAU = Math.PI * 2;
 
@@ -22,7 +23,8 @@ export class Target extends GameObjects.Container
     private glow: GameObjects.Arc;
     private inner: GameObjects.Arc;
     private flash: GameObjects.Arc;
-    private label: GameObjects.Text;
+    private mark: GameObjects.Image | null = null;
+    private label: GameObjects.Text | null = null;
     private ring: GameObjects.Graphics;
     private phase: number;
     private flashAmount = 0;
@@ -52,15 +54,28 @@ export class Target extends GameObjects.Container
         this.flash.setAlpha(0);
         this.ring = scene.add.graphics();
 
-        this.label = scene.add.text(0, 0, this.def.icon, {
-            fontFamily: FONT,
-            fontSize: Math.round(r * 0.9),
-            color: '#0b0f22'
-        }).setOrigin(0.5);
+        this.add([ this.glow, this.core, this.inner, this.flash, this.ring ]);
 
-        this.updateLabel();
+        if (this.def.icon)
+        {
+            this.mark = scene.add.image(0, 0, ic(this.def.icon));
+            this.mark.setDisplaySize(r * 1.05, r * 1.05);
+            this.mark.setTint(0x0a1024);
+            this.mark.setAlpha(0.9);
+            this.add(this.mark);
+        }
 
-        this.add([ this.glow, this.core, this.inner, this.flash, this.label, this.ring ]);
+        if (this.def.units > 1)
+        {
+            this.label = scene.add.text(0, 0, '', {
+                fontFamily: FONT,
+                fontSize: Math.round(r * 0.8),
+                color: '#0b0f22'
+            }).setOrigin(0.5);
+
+            this.add(this.label);
+            this.updateLabel();
+        }
 
         if (moving && speed > 0)
         {
@@ -102,10 +117,9 @@ export class Target extends GameObjects.Container
 
     private updateLabel (): void
     {
-        if (this.def.units > 1)
-        {
-            this.label.setText(String(Math.max(1, Math.ceil(this.hp / (this.maxHp / this.def.units)))));
-        }
+        if (!this.label) return;
+
+        this.label.setText(String(Math.max(1, Math.ceil(this.hp / (this.maxHp / this.def.units)))));
     }
 
     update (dtMs: number, slow: number): void

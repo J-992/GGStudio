@@ -13,21 +13,22 @@ export interface KindDef
     /** How much this kill counts towards the level goal. */
     progress: number;
     color: number;
+    /** Icon texture name (see core/icons), or '' for a plain target. */
     icon: string;
     ring: number;
 }
 
 export const KINDS: Record<TargetKind, KindDef> = {
-    normal:  { score: 100,  coins: 3,   xp: 10,  units: 1,  sizeMult: 1.00, speedMult: 1.0, progress: 1,  color: 0x3fe0ff, icon: '',   ring: 0xffffff },
-    small:   { score: 260,  coins: 5,   xp: 20,  units: 1,  sizeMult: 0.60, speedMult: 1.3, progress: 1,  color: 0x7dff6b, icon: '',   ring: 0xffffff },
-    fast:    { score: 220,  coins: 4,   xp: 18,  units: 1,  sizeMult: 0.86, speedMult: 2.4, progress: 1,  color: 0xff7ae0, icon: '»',  ring: 0xffffff },
-    armored: { score: 460,  coins: 9,   xp: 34,  units: 3,  sizeMult: 1.16, speedMult: 0.7, progress: 2,  color: 0xa8b4d0, icon: '',   ring: 0xe8f0ff },
-    golden:  { score: 1500, coins: 45,  xp: 90,  units: 1,  sizeMult: 0.92, speedMult: 1.6, progress: 2,  color: 0xffd23f, icon: '★',  ring: 0xfff3b0 },
-    bomb:    { score: 0,    coins: 0,   xp: 0,   units: 1,  sizeMult: 1.00, speedMult: 1.1, progress: 0,  color: 0xff3b45, icon: '☠',  ring: 0xff9aa0 },
-    time:    { score: 90,   coins: 2,   xp: 12,  units: 1,  sizeMult: 0.94, speedMult: 1.1, progress: 1,  color: 0x62ffb8, icon: '+',  ring: 0xd6fff0 },
-    coin:    { score: 70,   coins: 30,  xp: 10,  units: 1,  sizeMult: 0.90, speedMult: 1.2, progress: 1,  color: 0xffc857, icon: '$',  ring: 0xfff0c9 },
-    multi:   { score: 180,  coins: 7,   xp: 22,  units: 1,  sizeMult: 0.90, speedMult: 1.2, progress: 1,  color: 0xb388ff, icon: 'x2', ring: 0xe3d4ff },
-    boss:    { score: 9000, coins: 300, xp: 600, units: 16, sizeMult: 2.60, speedMult: 0.5, progress: 22, color: 0xff2d55, icon: '☢',  ring: 0xffb3c0 }
+    normal:  { score: 100,  coins: 3,   xp: 10,  units: 1,  sizeMult: 1.00, speedMult: 1.0, progress: 1,  color: 0x3fe0ff, icon: '',          ring: 0xffffff },
+    small:   { score: 260,  coins: 5,   xp: 20,  units: 1,  sizeMult: 0.60, speedMult: 1.3, progress: 1,  color: 0x7dff6b, icon: '',          ring: 0xffffff },
+    fast:    { score: 220,  coins: 4,   xp: 18,  units: 1,  sizeMult: 0.86, speedMult: 2.4, progress: 1,  color: 0xff7ae0, icon: 'chevrons',  ring: 0xffffff },
+    armored: { score: 460,  coins: 9,   xp: 34,  units: 3,  sizeMult: 1.16, speedMult: 0.7, progress: 2,  color: 0xa8b4d0, icon: '',          ring: 0xe8f0ff },
+    golden:  { score: 1500, coins: 45,  xp: 90,  units: 1,  sizeMult: 0.92, speedMult: 1.6, progress: 2,  color: 0xffd23f, icon: 'star',      ring: 0xfff3b0 },
+    bomb:    { score: 0,    coins: 0,   xp: 0,   units: 1,  sizeMult: 1.00, speedMult: 1.1, progress: 0,  color: 0xff3b45, icon: 'skull',     ring: 0xff9aa0 },
+    time:    { score: 90,   coins: 2,   xp: 12,  units: 1,  sizeMult: 0.94, speedMult: 1.1, progress: 1,  color: 0x62ffb8, icon: 'stopwatch', ring: 0xd6fff0 },
+    coin:    { score: 70,   coins: 30,  xp: 10,  units: 1,  sizeMult: 0.90, speedMult: 1.2, progress: 1,  color: 0xffc857, icon: 'dollar',    ring: 0xfff0c9 },
+    multi:   { score: 180,  coins: 7,   xp: 22,  units: 1,  sizeMult: 0.90, speedMult: 1.2, progress: 1,  color: 0xb388ff, icon: 'mult',      ring: 0xe3d4ff },
+    boss:    { score: 9000, coins: 300, xp: 600, units: 16, sizeMult: 2.60, speedMult: 0.5, progress: 22, color: 0xff2d55, icon: 'trefoil',   ring: 0xffb3c0 }
 };
 
 export interface LevelConfig
@@ -50,7 +51,7 @@ export interface LevelConfig
     /** Chance a spawned target moves at all. */
     moveChance: number;
     weights: Partial<Record<TargetKind, number>>;
-    /** Level 20 spawns a boss the moment the level starts. */
+    /** Boss levels spawn their boss the moment the level starts. */
     boss?: boolean;
 }
 
@@ -80,7 +81,27 @@ export const LEVELS: LevelConfig[] = [
     { level: 17, duration: 17, goal: 50, spawnRate: 302, maxActive: 12, size: 32, lifetime: 1950, speed: 188, moveChance: 0.90, weights: { normal: 6,  small: 9, fast: 7, armored: 5, bomb: 5, coin: 2, multi: 1, time: 1, golden: 2 } },
     { level: 18, duration: 17, goal: 54, spawnRate: 288, maxActive: 12, size: 31, lifetime: 1900, speed: 197, moveChance: 0.95, weights: { normal: 6,  small: 9, fast: 8, armored: 5, bomb: 5, coin: 2, multi: 1, golden: 2 } },
     { level: 19, duration: 18, goal: 58, spawnRate: 274, maxActive: 13, size: 30, lifetime: 1850, speed: 206, moveChance: 1.00, weights: { normal: 5,  small: 10, fast: 8, armored: 6, bomb: 5, coin: 2, multi: 1, time: 1, golden: 2 } },
-    { level: 20, duration: 22, goal: 78, spawnRate: 260, maxActive: 14, size: 30, lifetime: 1800, speed: 215, moveChance: 1.00, weights: { normal: 5,  small: 10, fast: 9, armored: 6, bomb: 6, coin: 2, multi: 1, time: 1, golden: 3 }, boss: true }
+    { level: 20, duration: 22, goal: 78, spawnRate: 260, maxActive: 14, size: 30, lifetime: 1800, speed: 215, moveChance: 1.00, weights: { normal: 5,  small: 10, fast: 9, armored: 6, bomb: 6, coin: 2, multi: 1, time: 1, golden: 3 }, boss: true },
+    { level: 21, duration: 18, goal: 60,  spawnRate: 266, maxActive: 13, size: 30, lifetime: 1800, speed: 220, moveChance: 1.00, weights: { normal: 5,  small: 10, fast: 9,  armored: 6, bomb: 6, coin: 2, multi: 1, golden: 3 } },
+    { level: 22, duration: 18, goal: 63,  spawnRate: 258, maxActive: 14, size: 30, lifetime: 1780, speed: 228, moveChance: 1.00, weights: { normal: 5,  small: 10, fast: 9,  armored: 7, bomb: 6, coin: 2, multi: 1, time: 1, golden: 3 } },
+    { level: 23, duration: 18, goal: 65,  spawnRate: 250, maxActive: 14, size: 29, lifetime: 1750, speed: 236, moveChance: 1.00, weights: { normal: 4,  small: 11, fast: 10, armored: 7, bomb: 7, coin: 2, multi: 1, golden: 3 } },
+    { level: 24, duration: 19, goal: 70,  spawnRate: 242, maxActive: 14, size: 29, lifetime: 1720, speed: 244, moveChance: 1.00, weights: { normal: 4,  small: 11, fast: 10, armored: 8, bomb: 7, coin: 2, multi: 1, time: 1, golden: 3 } },
+    { level: 25, duration: 19, goal: 73,  spawnRate: 234, maxActive: 15, size: 29, lifetime: 1690, speed: 252, moveChance: 1.00, weights: { normal: 4,  small: 12, fast: 11, armored: 8, bomb: 7, coin: 2, multi: 2, golden: 4 } },
+    { level: 26, duration: 19, goal: 75,  spawnRate: 227, maxActive: 15, size: 28, lifetime: 1660, speed: 260, moveChance: 1.00, weights: { normal: 3,  small: 12, fast: 11, armored: 9, bomb: 8, coin: 2, multi: 2, time: 1, golden: 4 } },
+    { level: 27, duration: 20, goal: 81,  spawnRate: 220, maxActive: 15, size: 28, lifetime: 1630, speed: 268, moveChance: 1.00, weights: { normal: 3,  small: 13, fast: 12, armored: 9, bomb: 8, coin: 2, multi: 2, golden: 4 } },
+    { level: 28, duration: 20, goal: 84,  spawnRate: 213, maxActive: 16, size: 28, lifetime: 1600, speed: 276, moveChance: 1.00, weights: { normal: 3,  small: 13, fast: 12, armored: 10, bomb: 8, coin: 2, multi: 2, time: 1, golden: 4 } },
+    { level: 29, duration: 20, goal: 86,  spawnRate: 206, maxActive: 16, size: 27, lifetime: 1570, speed: 284, moveChance: 1.00, weights: { normal: 2,  small: 14, fast: 13, armored: 10, bomb: 9, coin: 2, multi: 2, golden: 4 } },
+    { level: 30, duration: 26, goal: 116, spawnRate: 200, maxActive: 17, size: 27, lifetime: 1540, speed: 292, moveChance: 1.00, weights: { normal: 2,  small: 14, fast: 13, armored: 11, bomb: 9, coin: 3, multi: 2, time: 2, golden: 5 }, boss: true },
+    { level: 31, duration: 20, goal: 91,  spawnRate: 196, maxActive: 16, size: 27, lifetime: 1520, speed: 296, moveChance: 1.00, weights: { normal: 2,  small: 15, fast: 14, armored: 11, bomb: 9, coin: 2, multi: 2, golden: 5 } },
+    { level: 32, duration: 21, goal: 96,  spawnRate: 192, maxActive: 17, size: 26, lifetime: 1500, speed: 302, moveChance: 1.00, weights: { normal: 2,  small: 15, fast: 14, armored: 12, bomb: 10, coin: 2, multi: 2, time: 1, golden: 5 } },
+    { level: 33, duration: 21, goal: 99,  spawnRate: 188, maxActive: 17, size: 26, lifetime: 1480, speed: 308, moveChance: 1.00, weights: { normal: 2,  small: 16, fast: 15, armored: 12, bomb: 10, coin: 2, multi: 2, golden: 5 } },
+    { level: 34, duration: 21, goal: 102, spawnRate: 184, maxActive: 17, size: 26, lifetime: 1460, speed: 314, moveChance: 1.00, weights: { normal: 2,  small: 16, fast: 15, armored: 13, bomb: 10, coin: 2, multi: 2, time: 1, golden: 5 } },
+    { level: 35, duration: 22, goal: 108, spawnRate: 180, maxActive: 18, size: 26, lifetime: 1440, speed: 320, moveChance: 1.00, weights: { normal: 1,  small: 17, fast: 16, armored: 13, bomb: 11, coin: 2, multi: 3, golden: 6 } },
+    { level: 36, duration: 22, goal: 111, spawnRate: 176, maxActive: 18, size: 25, lifetime: 1420, speed: 326, moveChance: 1.00, weights: { normal: 1,  small: 17, fast: 16, armored: 14, bomb: 11, coin: 2, multi: 3, time: 1, golden: 6 } },
+    { level: 37, duration: 22, goal: 114, spawnRate: 172, maxActive: 18, size: 25, lifetime: 1400, speed: 332, moveChance: 1.00, weights: { normal: 1,  small: 18, fast: 17, armored: 14, bomb: 12, coin: 2, multi: 3, golden: 6 } },
+    { level: 38, duration: 23, goal: 121, spawnRate: 168, maxActive: 19, size: 25, lifetime: 1390, speed: 338, moveChance: 1.00, weights: { normal: 1,  small: 18, fast: 17, armored: 15, bomb: 12, coin: 2, multi: 3, time: 1, golden: 6 } },
+    { level: 39, duration: 23, goal: 124, spawnRate: 164, maxActive: 19, size: 25, lifetime: 1380, speed: 344, moveChance: 1.00, weights: { normal: 1,  small: 19, fast: 18, armored: 15, bomb: 13, coin: 2, multi: 3, golden: 7 } },
+    { level: 40, duration: 30, goal: 166, spawnRate: 160, maxActive: 20, size: 25, lifetime: 1370, speed: 350, moveChance: 1.00, weights: { normal: 1,  small: 19, fast: 18, armored: 16, bomb: 13, coin: 3, multi: 3, time: 2, golden: 8 }, boss: true }
 ];
 
 export const FINAL_LEVEL = LEVELS.length;
