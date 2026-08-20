@@ -1,0 +1,25 @@
+{
+  "name": "aimer",
+  "description": "AIMER - a fast-paced portrait aim trainer with roguelite gun progression, built for Poki.",
+  "version": "1.0.0",
+  "author": "GGStudio",
+  "license": "MIT",
+  "scripts": {
+    "dev": "bunx --bun vite --config vite/config.dev.mjs",
+    "build": "bunx --bun vite build --config vite/config.prod.mjs",
+    "build:web": "bunx --bun vite build --config vite/config.web.mjs",
+    "preview": "bunx --bun vite preview --config vite/config.prod.mjs",
+    "typecheck": "bunx tsc --noEmit",
+    "package": "bun run build && bun run scripts/package-poki.mjs",
+    "check": "bun run typecheck && bun run build"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.2",
+    "vite": "^6.3.1",
+    "terser": "^5.39.0"
+  },
+  "dependencies": {
+    "phaser": "4.0.0"
+  },
+  "private": true
+}

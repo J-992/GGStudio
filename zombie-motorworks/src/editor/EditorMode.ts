@@ -77,7 +77,7 @@ import {
   type AbilityCandidate,
 } from '../core/abilities.ts';
 import { deriveAutomaticWheelLayout } from '../core/wheelLayout.ts';
-import type { BuildId } from '../core/builds.ts';
+import { isFirstPlayBlueprint, type BuildId } from '../core/builds.ts';
 import {
   canAfford,
   nextUpgrade,
@@ -2383,6 +2383,15 @@ export class EditorMode {
   }
 
   private writeCurrentSlot(): boolean {
+    // The First Play demo rig is a loaner, and this is the one place that could
+    // quietly make it permanent: the garage opens on it with the Build picker
+    // up, and both the autosave and the wave-damage flush would otherwise write
+    // it into a save slot and point `currentBlueprintName` at it. A player who
+    // closes the tab on that picker would then come back to the demo rig
+    // sitting in their bay. Nothing about it is theirs until they pick a Build,
+    // and picking one replaces the blueprint, so skipping the write loses
+    // nothing.
+    if (isFirstPlayBlueprint(this.bp)) return true;
     try {
       const all = this.slots();
       const previousName = this.profile.currentBlueprintName;

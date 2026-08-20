@@ -4727,24 +4727,27 @@ button:disabled {
 }
 
 /*
- * CrazyGames reviews desktop games in a responsive 821 x 462 iframe as well
- * as the roomier desktop player sizes, and its windowed player runs about
- * 924 x 400.  That is still a mouse-and-keyboard layout, but it cannot afford
- * the full-width garage sidebars and the tall right-hand stack.  Keep the
- * panels available and scrollable; reduce their footprint and give the stats,
- * loadout, and inspector separate vertical lanes instead of letting them cover
- * each other.
+ * Portal review frames.  Poki previews a desktop game in roughly 830 x 465,
+ * CrazyGames in 821 x 462, and the CrazyGames windowed player runs about
+ * 924 x 400.  These are still mouse-and-keyboard layouts, but at full size the
+ * two sidebars claim close to half the frame's width and the right-hand stack
+ * claims most of its height, which leaves the rig the panels exist to describe
+ * squeezed into a letterbox down the middle.
  *
- * Height matters here as much as width: at 400px tall the frame is wide enough
- * to escape the 900px ceiling while having far less room to stack panels in,
- * so either axis running short pulls in the compact layout.
+ * So every panel shrinks rather than disappearing: narrower docks, shorter
+ * rows, smaller chrome, and three separate vertical lanes up the right edge so
+ * the stats, the ability planner and the build bar never cover one another.
+ *
+ * Either axis running short pulls the layout in.  An embed can be wide enough
+ * to clear the width ceiling while having nowhere near the height to stack
+ * panels in, and a short-and-wide player frame is the more crowded of the two.
  */
-@media (min-width: 761px) and (max-width: 900px),
-  (min-width: 761px) and (max-height: 560px) {
+@media (min-width: 761px) and (max-width: 1180px),
+  (min-width: 761px) and (max-height: 700px) {
   .topbar {
     flex-wrap: nowrap;
-    gap: 4px;
-    padding: 5px 6px;
+    gap: 3px;
+    padding: 0;
     overflow-x: auto;
     overscroll-behavior-x: contain;
   }
@@ -4754,94 +4757,184 @@ button:disabled {
   }
 
   .garage-name {
-    width: 118px;
-    min-height: 30px;
+    width: 100px;
+    min-height: 26px;
   }
 
   .topbar button {
-    min-height: 30px;
-    padding: 5px 7px;
-    font-size: var(--ui-text-11);
+    min-height: 26px;
+    padding: 4px 6px;
+    font-size: var(--ui-text-10);
   }
 
   .topbar .icon-btn {
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     padding: 0;
   }
 
   .topbar .icon-btn__glyph {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
   }
 
   .money-readout {
-    min-width: 60px;
-    padding: 6px;
+    min-width: 54px;
+    padding: 4px 7px;
+    font-size: var(--ui-text-11);
   }
 
   .btn-hero {
-    padding: 7px 10px;
-    font-size: var(--ui-text-12);
+    padding: 5px 9px;
+    font-size: var(--ui-text-11);
   }
 
   .btn-hero.btn-hero-fight {
+    gap: 4px;
+    padding: 5px 8px;
+  }
+
+  /*
+   * The run banner hangs off the bar like the docks do, so it tracks the same
+   * measured offset instead of the 64px the full-size bar happens to be tall.
+   */
+  .run-banner {
+    top: var(--garage-panel-top, 52px);
+    padding: 4px 9px;
+    font-size: var(--ui-text-11);
+  }
+
+  .run-banner.run-active {
+    gap: 3px 8px;
+  }
+
+  .run-banner__actions {
     gap: 5px;
-    padding: 7px 9px;
+  }
+
+  .run-banner__button-icon {
+    font-size: var(--ui-text-11);
   }
 
   .garage-dock {
-    width: 210px;
+    bottom: 8px;
+    width: 176px;
+    gap: 4px;
+  }
+
+  .dock-panel__header {
+    min-height: 26px;
+    flex: 0 0 26px;
+    padding-left: 7px;
+  }
+
+  .dock-panel__header h2 {
+    font-size: var(--ui-text-10);
+  }
+
+  .dock-panel__toggle {
+    width: 26px;
+    height: 25px;
+  }
+
+  .dock-panel__body {
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .store-filters button {
+    min-height: 34px;
+    gap: 2px;
+    font-size: 7px;
+  }
+
+  .store-filters__icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  .store-search {
+    min-height: 26px;
+    padding: 4px 7px;
   }
 
   .store-list {
-    grid-auto-rows: 120px;
+    grid-auto-rows: 96px;
+    gap: 4px;
+  }
+
+  .dock-list {
+    gap: 3px;
   }
 
   .selected-panel {
-    width: 224px;
+    bottom: 8px;
+    width: 200px;
   }
 
   /*
    * Three lanes up the right edge, measured off the bottom so they clear one
-   * another whatever the window height: build bar 14 + 62, ability planner
-   * 84 + ~95, stats above that.
+   * another whatever the frame height: build bar 8 + 46, ability planner
+   * 60 + ~78, stats above that.
    */
   .vehicle-stats {
     right: 8px;
-    bottom: 188px;
-    width: 190px;
+    bottom: 146px;
+    width: 158px;
     max-height: none;
   }
 
+  .vehicle-stats__header {
+    min-height: 28px;
+    flex: 0 0 28px;
+    padding-left: 8px;
+  }
+
+  .vehicle-stats__header h2 {
+    font-size: var(--ui-text-11);
+  }
+
+  .vehicle-stats.is-collapsed {
+    max-height: 28px;
+  }
+
+  .vehicle-stats__content {
+    gap: 7px;
+    padding: 8px;
+  }
+
   .garage-ui.has-selection .vehicle-stats {
-    right: 240px;
+    right: 212px;
   }
 
   .ability-loadout {
     right: 8px;
-    bottom: 84px;
-    gap: 6px;
-    padding: 8px;
+    bottom: 60px;
+    gap: 5px;
+    padding: 6px;
   }
 
   .ability-loadout > header {
-    gap: 8px;
+    gap: 6px;
   }
 
   .ability-loadout__boxes {
-    gap: 5px;
+    gap: 4px;
   }
 
   .ability-loadout__slot {
-    width: 64px;
-    height: 62px;
+    width: 54px;
+    height: 52px;
     gap: 2px;
-    padding: 10px 4px 5px;
+    padding: 9px 3px 4px;
   }
 
   .ability-loadout__glyph {
-    font-size: var(--ui-text-16);
+    font-size: var(--ui-text-14);
+  }
+
+  .ability-loadout__name {
+    font-size: 8px;
   }
 
   .ability-loadout__part {
@@ -4854,12 +4947,40 @@ button:disabled {
   .garage-ui.has-selection .ability-loadout {
     display: none;
   }
+
+  /* The bottom lane the other two are measured from. */
+  .hotbar-panel {
+    bottom: 8px;
+    width: min(348px, calc(100% - 24px));
+    gap: 7px;
+  }
+
+  .hotbar-list {
+    grid-template-rows: 46px;
+    gap: 4px;
+  }
+
+  .inventory-toggle {
+    width: 46px;
+    height: 46px;
+    flex: 0 0 46px;
+  }
+
+  .inventory-toggle__icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  .hotbar-panel .cancel-tool {
+    width: 26px;
+    height: 26px;
+  }
 }
 
 /* The store's detail flyout needs horizontal room beside the dock, not
    vertical room, so it survives a short window and only goes when the frame
    is genuinely narrow. */
-@media (min-width: 761px) and (max-width: 900px) {
+@media (min-width: 761px) and (max-width: 1000px) {
   .store-details {
     display: none;
   }

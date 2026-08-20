@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="./favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#080b1c" />
+    <meta name="description" content="Aimer - a fast-paced mobile aim trainer with roguelite gun upgrades." />
+    <link rel="stylesheet" href="./style.css">
+    <title>AIMER</title>
+</head>
+
+<body>
+    <div id="app">
+        <div id="game-container"></div>
+        <!--
+            Shown until the Boot scene has generated its textures, then removed.
+            On Poki this is mostly invisible behind their own loader, but a
+            direct link or a playtest build has nothing else to show.
+        -->
+        <div id="boot-splash">
+            <div id="boot-title">AIMER</div>
+            <div id="boot-bar"><span></span></div>
+        </div>
+        <!-- Shown by CSS on a phone held sideways; see public/style.css. -->
+        <div id="rotate-hint">
+            <svg viewBox="0 0 24 40" fill="none" stroke="#3fe0ff" stroke-width="1.6" aria-hidden="true">
+                <rect x="1" y="1" width="22" height="38" rx="4" />
+                <line x1="9" y1="35" x2="15" y2="35" stroke-width="2.4" stroke-linecap="round" />
+            </svg>
+            <p>ROTATE YOUR DEVICE</p>
+        </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

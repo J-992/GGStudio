@@ -78,6 +78,7 @@ import {
   buildStarterRig,
   buildStarterUnlocks,
   isBuildId,
+  isFirstPlayBlueprint,
   type BuildId,
 } from '../core/builds.ts';
 import type { DebugCameraPose } from '../core/cameraPose.ts';
@@ -95,6 +96,7 @@ import {
   setPlatformGameplayActive,
   submitPlatformScore,
 } from './platform.ts';
+import { purgeFirstPlayLoaner } from './firstPlayLoaner.ts';
 import { PROFILE_STORAGE_KEY, profileStore } from './profileStore.ts';
 import { runSaveStore } from './runSaveStore.ts';
 import { TitleScreen } from './TitleScreen.ts';
@@ -499,6 +501,11 @@ export class App {
   private readonly contextNotice = createContextNotice();
 
   constructor(private readonly root: HTMLElement) {
+    // Before anything reads storage: a browser that already banked the First
+    // Play loaner under an older build is carrying a rig it was never sold, and
+    // `saveExistedAtBoot` a line down must not count that as a game worth
+    // continuing.
+    purgeFirstPlayLoaner();
     // Raw-key detection must happen before profile loading can synthesize an
     // in-memory default. Loading currently does not persist it, but this order
     // keeps title-screen availability independent of that implementation detail.
@@ -788,18 +795,7 @@ export class App {
    */
   saveAndQuitRun(): void {
     if (this.checkpoint === null) return;
-    const savedRun = savedRunFromCheckpoint(
-      this.checkpoint,
-      Date.now(),
-      'wave',
-      this.activeRun?.wave ?? this.checkpoint.wave,
-    );
-    try {
-      runSaveStore.save(savedRun);
-    } catch {
-      this.notifySaveFailure();
-      return;
-    }
+    if (!this.writeRunSave('wave')) return;
 
     this.flushProfile();
     this.survival?.dispose();
@@ -818,19 +814,7 @@ export class App {
     this.bp = this.editor.blueprint();
     this.editor.persistGarage();
     this.flushProfile();
-    try {
-      runSaveStore.save(
-        savedRunFromCheckpoint(
-          this.checkpoint,
-          Date.now(),
-          'build',
-          this.activeRun?.wave ?? this.checkpoint.wave,
-        ),
-      );
-    } catch {
-      this.notifySaveFailure();
-      return;
-    }
+    if (!this.writeRunSave('build')) return;
     this.editor.dispose();
     // `update()` has no disposed guard, so a retained editor would keep
     // rendering its emptied scene over the title screen every frame.
@@ -2076,12 +2060,39 @@ export class App {
 
   private persistRunCheckpoint(phase: 'wave' | 'build'): void {
     if (this.checkpoint === null) return;
-    // A sandbox run leaves no save behind. Without this a Daily or Endless run
-    // would write a resumable checkpoint that the title screen then offers as
-    // "Resume Run", and picking it up would restore a sandbox run as a campaign
-    // one — the save format has no mode field precisely because this cannot
-    // happen.
+    // A sandbox run leaves no autosaved checkpoint. Without this a Daily or
+    // Endless run would write a resumable checkpoint that the title screen then
+    // offers as "Resume Run", and picking it up would restore a sandbox run as
+    // a campaign one — the save format has no mode field precisely because this
+    // cannot happen.
     if (!getGameMode(this.checkpoint.modeId).persistsProgress) return;
+    this.writeRunSave(phase);
+  }
+
+  /**
+   * The single writer for the resumable run save.
+   *
+   * Returns false only when a write was attempted and failed, so a caller on
+   * its way out of the run can stop and tell the player rather than dropping
+   * the wave they just banked. A run that has deliberately nothing to save is
+   * not a failure.
+   */
+  private writeRunSave(phase: 'wave' | 'build'): boolean {
+    if (this.checkpoint === null) return true;
+    // The First Play wave leaves nothing resumable behind. Its rig is a loaner
+    // handed back the moment the wave ends, so a checkpoint describing it would
+    // offer the title screen a "Resume Run" that restores a vehicle the player
+    // was never sold — and the checkpoint the Build picker sits in front of
+    // still describes it. `rebaseCheckpointOnChosenBuild` writes over the top
+    // once a Build is picked, and that is the first checkpoint that is theirs.
+    //
+    // Here rather than in `persistRunCheckpoint` above because both Save & Quit
+    // buttons bypass that method, and the Garage's is on screen behind the
+    // picker.
+    if (isFirstPlayBlueprint(this.checkpoint.blueprint)) {
+      runSaveStore.clear();
+      return true;
+    }
     try {
       runSaveStore.save(
         savedRunFromCheckpoint(
@@ -2093,7 +2104,9 @@ export class App {
       );
     } catch {
       this.notifySaveFailure();
+      return false;
     }
+    return true;
   }
 
   debugSeam(): Record<string, unknown> {
