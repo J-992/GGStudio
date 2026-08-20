@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Drawer Organizer</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #f7dce8; overflow: hidden; }
+  #game { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  canvas { touch-action: none; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<script src="vendor/phaser.min.js"></script>
+<script>
+  // Fallback to CDN if the vendored copy is missing.
+  if (!window.Phaser) document.write('<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"><\/script>');
+</script>
+<script src="src/data/items.js"></script>
+<script src="src/data/decorations.js"></script>
+<script src="src/data/levels.js"></script>
+<script src="src/systems/SaveSystem.js"></script>
+<script src="src/systems/AudioSystem.js"></script>
+<script src="src/systems/TextureFactory.js"></script>
+<script src="src/systems/Effects.js"></script>
+<script src="src/systems/DragSystem.js"></script>
+<script src="src/systems/PlacementSystem.js"></script>
+<script src="src/systems/ProgressionSystem.js"></script>
+<script src="src/scenes/BootScene.js"></script>
+<script src="src/scenes/HomeScene.js"></script>
+<script src="src/scenes/RoomScene.js"></script>
+<script src="src/scenes/LevelScene.js"></script>
+<script src="src/main.js"></script>
+</body>
+</html>
