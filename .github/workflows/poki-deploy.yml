@@ -144,7 +144,7 @@ jobs:
           # @poki/cli reads POKI_UPLOAD_TOKEN. `secrets[...]` is indexed by the
           # name the game asked for, so a game with its own token needs no
           # change here.
-          POKI_UPLOAD_TOKEN: ${{ secrets[matrix.token_secret] }}
+          POKI_UPLOAD_TOKEN: ${{ secrets[matrix.token_git_secret_name] }}
           POKI_MAKE_PUBLIC: ${{ inputs.make_public || matrix.make_public }}
           # Through the environment, never interpolated into the script body:
           # a commit message is text somebody else wrote, and `${{ }}` inside a

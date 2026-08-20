@@ -68,25 +68,32 @@ function requireArray (value, what, file, fallback)
     return value;
 }
 
+/** `aimer` -> `POKI_UPLOAD_TOKEN_AIMER`. One secret per game, named for it. */
+function defaultSecretName (id)
+{
+    return `POKI_UPLOAD_TOKEN_${id.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
+}
+
 /**
- * `token_secret` is the NAME of a GitHub Actions secret, never the token.
+ * The NAME of a GitHub Actions secret, never the token.
  *
- * Getting that backwards puts a live upload token in a committed file and in
- * every job log that mentions it, which has happened. GitHub stores secret
- * names upper-cased, so requiring that here costs nothing and rejects a pasted
- * token on sight.
+ * Almost nobody should set this. It is derived from the game's id -- aimer
+ * gets `POKI_UPLOAD_TOKEN_AIMER` -- precisely so that the common case has no
+ * field to paste a token into. Getting it backwards puts a live upload token
+ * in a committed file and in every job log that mentions it, which has now
+ * happened twice, so the field is gone from the games that do not need it.
  *
  * The bad value is deliberately never echoed: if somebody did paste a token,
  * repeating it in the error would copy it into the CI log all over again.
  */
 function requireSecretName (value, file)
 {
-    const name = requireString(value, '"ggs.token_secret"', file);
+    const name = requireString(value, '"ggs.token_git_secret_name"', file);
 
     if (!/^[A-Z][A-Z0-9_]*$/.test(name))
     {
         throw new ConfigError(
-            `${file}: "ggs.token_secret" must be the NAME of a GitHub Actions secret ` +
+            `${file}: "ggs.token_git_secret_name" must be the NAME of a GitHub Actions secret ` +
             '(upper case, letters digits and underscores -- e.g. POKI_UPLOAD_TOKEN_AIMER), ' +
             'not the token itself. The value is never stored in this repo: put it under ' +
             'Settings -> Secrets and variables -> Actions, and name it here.\n' +
@@ -194,6 +201,8 @@ export function readGame (file)
         //  replaces what players are being served right now, and that should
         //  be a decision somebody makes rather than a side effect of a push.
         makePublic: ggs.make_public === true,
-        tokenSecret: requireSecretName(ggs.token_secret ?? 'POKI_UPLOAD_TOKEN', file)
+        tokenGitSecretName: ggs.token_git_secret_name === undefined
+            ? defaultSecretName(id)
+            : requireSecretName(ggs.token_git_secret_name, file)
     };
 }

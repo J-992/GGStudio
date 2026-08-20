@@ -57,7 +57,7 @@ skipped, rather than failing the run.
 | `require_sdk` | `true` | Fails the build if `index.html` carries no Poki SDK tag. |
 | `max_bytes` | none | Fails the build over a size budget. |
 | `make_public` | `false` | See "Uploading is not publishing". |
-| `token_secret` | `POKI_UPLOAD_TOKEN` | Repository secret to authenticate with. |
+| `token_git_secret_name` | `POKI_UPLOAD_TOKEN_<ID>` | Overrides the derived secret **name**. Never the token itself. |
 
 ## One-time setup
 
@@ -70,10 +70,17 @@ variables → Actions):
 | `POKI_UPLOAD_TOKEN_AIMER` | aimer |
 | `POKI_UPLOAD_TOKEN_ZOMBIE_MOTORWORKS` | zombie-motorworks |
 
-The name is whatever the game's `ggs.token_secret` says; the workflow looks it
-up with `secrets[matrix.token_secret]`, so adding a game with its own token
-changes no workflow code. The value reaches `@poki/cli` as `POKI_UPLOAD_TOKEN`,
-which is the variable it reads.
+The name is derived from the game's id — `aimer` → `POKI_UPLOAD_TOKEN_AIMER` —
+so **`poki.json` has no field to put a token in**, and a new game needs no
+config at all beyond its id. The workflow resolves it with
+`secrets[matrix.token_git_secret_name]` and hands it to `@poki/cli` as
+`POKI_UPLOAD_TOKEN`, the variable it reads.
+
+> **The token value never goes in this repo.** It goes in GitHub Secrets, and
+> only its name is derived here. A token committed to `poki.json` is burned the
+> moment it is pushed — it is in git history and in the job log — and the only
+> fix is to rotate it. `ggs.token_git_secret_name` exists to override the *name* and is
+> validated to reject anything that looks like a pasted token.
 
 Do not share one token across games. The upload request looks the same either
 way — `Authorization: Token <t>` to `/games/{id}/versions` — so a wrong-scoped

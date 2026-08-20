@@ -14,6 +14,6 @@
     ],
     "max_bytes": 20971520,
     "node_version": "22",
-    "token_secret": "POKI_UPLOAD_TOKEN_ZOMBIE_MOTORWORKS"
+    "token_git_secret_name": "POKI_UPLOAD_TOKEN_ZOMBIE_MOTORWORKS"
   }
 }

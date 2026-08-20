@@ -216,7 +216,7 @@ const include = selected.map((g) => ({
     verify: g.verify.join(' && '),
     lfs: g.lfs.join(','),
     make_public: g.makePublic,
-    token_secret: g.tokenSecret
+    token_git_secret_name: g.tokenGitSecretName
 }));
 
 console.log(`\n  ${games.length} game(s) registered, ${include.length} to deploy: ${include.map((g) => g.id).join(', ') || '(none)'}\n`);

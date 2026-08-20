@@ -71,13 +71,13 @@ if (!checks.ok) die(`${game.id} built something Poki would reject; nothing was u
 
 //  ------------------------------------------------------------------ token
 
-const token = process.env[game.tokenSecret] ?? process.env.POKI_UPLOAD_TOKEN;
+const token = process.env[game.tokenGitSecretName] ?? process.env.POKI_UPLOAD_TOKEN;
 
 if (!dryRun && (token === undefined || token.trim() === ''))
 {
     die(
         `no upload token. @poki/cli reads POKI_UPLOAD_TOKEN; this game asks for the secret ` +
-        `${game.tokenSecret}. Add it under Settings -> Secrets and variables -> Actions, ` +
+        `${game.tokenGitSecretName}. Add it under Settings -> Secrets and variables -> Actions, ` +
         'with the token from developers.poki.com.'
     );
 }
