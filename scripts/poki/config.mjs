@@ -69,6 +69,36 @@ function requireArray (value, what, file, fallback)
 }
 
 /**
+ * `token_secret` is the NAME of a GitHub Actions secret, never the token.
+ *
+ * Getting that backwards puts a live upload token in a committed file and in
+ * every job log that mentions it, which has happened. GitHub stores secret
+ * names upper-cased, so requiring that here costs nothing and rejects a pasted
+ * token on sight.
+ *
+ * The bad value is deliberately never echoed: if somebody did paste a token,
+ * repeating it in the error would copy it into the CI log all over again.
+ */
+function requireSecretName (value, file)
+{
+    const name = requireString(value, '"ggs.token_secret"', file);
+
+    if (!/^[A-Z][A-Z0-9_]*$/.test(name))
+    {
+        throw new ConfigError(
+            `${file}: "ggs.token_secret" must be the NAME of a GitHub Actions secret ` +
+            '(upper case, letters digits and underscores -- e.g. POKI_UPLOAD_TOKEN_AIMER), ' +
+            'not the token itself. The value is never stored in this repo: put it under ' +
+            'Settings -> Secrets and variables -> Actions, and name it here.\n' +
+            '        If what you pasted was a real upload token, rotate it at ' +
+            'developers.poki.com -- it is in this file\'s git history now.'
+        );
+    }
+
+    return name;
+}
+
+/**
  * @param {string} file  Path to a `poki.json`.
  * @returns {object} The normalised game descriptor. `id`, `dir` and every
  *   command are safe to hand to the workflow matrix as-is.
@@ -164,6 +194,6 @@ export function readGame (file)
         //  replaces what players are being served right now, and that should
         //  be a decision somebody makes rather than a side effect of a push.
         makePublic: ggs.make_public === true,
-        tokenSecret: requireString(ggs.token_secret ?? 'POKI_UPLOAD_TOKEN', '"ggs.token_secret"', file)
+        tokenSecret: requireSecretName(ggs.token_secret ?? 'POKI_UPLOAD_TOKEN', file)
     };
 }
