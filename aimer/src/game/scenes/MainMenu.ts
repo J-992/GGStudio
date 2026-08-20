@@ -2,6 +2,7 @@ import { Geom, Scene } from 'phaser';
 import { Fx } from '../core/fx';
 import { Sfx, isMuted, toggleMute, unlockAudio } from '../core/audio';
 import { meta, PERKS, perkCost, run, saveMeta } from '../core/state';
+import { setGameplayActive } from '../core/lifecycle';
 import { FINAL_LEVEL } from '../data/levels';
 import { IconLabel, ic, iconImage } from '../core/icons';
 import { FONT, FONT_UI, H, W, fmt, hex } from '../core/theme';
@@ -21,6 +22,10 @@ export class MainMenu extends Scene
 
     create ()
     {
+        //  The menu is where a run ends as often as it starts, so the report is
+        //  made here rather than trusting every exit path to have made it.
+        setGameplayActive(false);
+
         this.perkRows = [];
         this.cameras.main.setBackgroundColor(0x080b1c);
         this.cameras.main.fadeIn(200, 0, 0, 0);

@@ -4,6 +4,9 @@ import { Sfx, unlockAudio } from '../core/audio';
 import { rollOffers, UPGRADE_BY_ID, Upgrade } from '../data/upgrades';
 import { run } from '../core/state';
 import { iconImage } from '../core/icons';
+import { rewardButton } from '../core/adButton';
+import { offerInterstitial } from '../core/ads';
+import { setGameplayActive } from '../core/lifecycle';
 import { FONT, FONT_UI, H, W, hex, tierFor } from '../core/theme';
 
 const CARD_W = 462;
@@ -13,6 +16,7 @@ export class UpgradeScene extends Scene
 {
     private fx!: Fx;
     private picked = false;
+    private cards: GameObjects.Container[] = [];
 
     constructor ()
     {
@@ -22,6 +26,10 @@ export class UpgradeScene extends Scene
     create ()
     {
         this.picked = false;
+        this.cards = [];
+
+        //  Reading three cards is not playing, and Poki counts it as such.
+        setGameplayActive(false);
 
         const tier = tierFor(run.level + 1);
         this.cameras.main.setBackgroundColor(tier.bg);
@@ -50,9 +58,32 @@ export class UpgradeScene extends Scene
 
         this.tweens.add({ targets: title, scale: 1, duration: 240, ease: 'Back.out' });
 
-        const offers = rollOffers(run.taken, run.level, 3);
+        this.dealOffers(true);
 
-        offers.forEach((up, i) =>
+        //  Reroll as often as the player is willing to watch for: the three
+        //  cards on the table only change once a video has actually played, so
+        //  declining leaves the choice exactly as it was. Sits in the gap under
+        //  the last card, clear of the build strip.
+        rewardButton(this, W / 2, 788, {
+            width: 214,
+            height: 58,
+            label: 'REROLL',
+            icon: 'videoDice',
+            compact: true,
+            color: 0x9b6cff,
+            repeat: true,
+            onReward: () => this.reroll()
+        });
+
+        this.buildLoadout();
+    }
+
+    /** Deals a fresh set of three, replacing whatever is on the table. */
+    private dealOffers (first: boolean): void
+    {
+        for (const card of this.cards) card.destroy();
+
+        this.cards = rollOffers(run.taken, run.level, 3).map((up, i) =>
         {
             const y = 258 + i * (CARD_H + 26);
             const card = this.buildCard(up, y);
@@ -65,12 +96,23 @@ export class UpgradeScene extends Scene
                 x: W / 2,
                 alpha: 1,
                 duration: 380,
-                delay: 90 + i * 90,
+                delay: (first ? 90 : 0) + i * 90,
                 ease: 'Back.out'
             });
-        });
 
-        this.buildLoadout();
+            return card;
+        });
+    }
+
+    private reroll (): void
+    {
+        if (this.picked) return;
+
+        this.cameras.main.flash(140, 155, 108, 255);
+        this.fx.ring(W / 2, H / 2, 260, 0x9b6cff, 6, 460);
+        Sfx.upgrade();
+
+        this.dealOffers(false);
     }
 
     private buildCard (up: Upgrade, y: number): GameObjects.Container
@@ -175,7 +217,7 @@ export class UpgradeScene extends Scene
             const inRow = Math.min(perRow, ids.length - row * perRow);
             const col = i % perRow;
             const x = W / 2 - ((inRow - 1) * spacing) / 2 + col * spacing;
-            const y = 872 + row * 46;
+            const y = 872 + row * 44;
 
             iconImage(this, x, y, up.icon, { size: 26, color: up.color });
             this.add.text(x + 17, y + 12, String(run.taken[id]), {
@@ -212,7 +254,14 @@ export class UpgradeScene extends Scene
         this.time.delayedCall(420, () =>
         {
             this.cameras.main.fadeOut(150, 0, 0, 0);
-            this.time.delayedCall(160, () => this.scene.start('Game'));
+
+            //  Between two levels, on a screen that has already gone black, is
+            //  the only mid-run moment an ad does not interrupt something. The
+            //  pacing rules in core/ads decide whether it is actually taken.
+            this.time.delayedCall(160, () =>
+            {
+                void offerInterstitial().then(() => this.scene.start('Game'));
+            });
         });
     }
 }

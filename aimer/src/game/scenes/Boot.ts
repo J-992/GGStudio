@@ -1,5 +1,6 @@
 import { Scene } from 'phaser';
 import { registerIcons } from '../core/icons';
+import { stopPlatformLoading } from '../platform/platform';
 
 function canvas (size: number, draw: (ctx: CanvasRenderingContext2D, s: number) => void): HTMLCanvasElement
 {
@@ -45,6 +46,12 @@ export class Boot extends Scene
         }
 
         registerIcons(this.textures);
+
+        //  Everything the game needs now exists, so close the loading bracket:
+        //  Poki swaps their loader for the game on this call, and the page's own
+        //  placeholder comes down with it.
+        void stopPlatformLoading();
+        document.getElementById('boot-splash')?.remove();
 
         this.scene.start('MainMenu');
     }

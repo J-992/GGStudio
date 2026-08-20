@@ -5,6 +5,10 @@ import { Sfx, unlockAudio, isMuted, toggleMute } from '../core/audio';
 import { FINAL_LEVEL, KINDS, LevelConfig, levelConfig, pickKind } from '../data/levels';
 import { Stats } from '../data/upgrades';
 import { bankCoins, meta, run, saveMeta } from '../core/state';
+import { setGameplayActive } from '../core/lifecycle';
+import { adsAvailable, noteLevelCleared } from '../core/ads';
+import { rewardButton } from '../core/adButton';
+import { reportPlatformHappyTime } from '../platform/platform';
 import { IconLabel, ic, iconImage } from '../core/icons';
 import { Turret } from '../objects/Turret';
 import { FONT, FONT_UI, H, MUZZLE, PLAY, Tier, W, fmt, fmtShort, hex, tierFor } from '../core/theme';
@@ -21,6 +25,9 @@ const STREAKS: Streak[] = [
 ];
 
 const COIN_HUD = { x: 494, y: 30 };
+
+/** Seconds an extra life puts back on the clock. */
+const REVIVE_SECONDS = 10;
 
 /** Streak milestone colours -- shared by the pips, the banner and the combo ramp. */
 const STREAK_COLORS = [ 0x6cf5c8, 0x3fe0ff, 0xb388ff, 0xff5ce0, 0xffb020, 0xff4d3d ];
@@ -57,6 +64,7 @@ export class GameScene extends Scene
 
     private targets: Target[] = [];
     private state: 'play' | 'done' = 'play';
+    private revived = false;
 
     private timeLeft = 0;
     private timeTotal = 0;
@@ -112,6 +120,7 @@ export class GameScene extends Scene
 
         this.targets = [];
         this.state = 'play';
+        this.revived = false;
         this.timeTotal = (this.cfg.duration + this.stats.timeBonus) * 1000;
         this.timeLeft = this.timeTotal;
         this.spawnTimer = 260;
@@ -155,6 +164,11 @@ export class GameScene extends Scene
 
         this.cameras.main.fadeIn(140, 0, 0, 0);
         this.showLevelBanner();
+
+        //  This scene is the only place the player is actually playing; every
+        //  other screen is a menu as far as the portal is concerned.
+        setGameplayActive(true);
+        this.events.once('shutdown', () => setGameplayActive(false));
     }
 
     //  ---------------------------------------------------------------- setup
@@ -747,6 +761,12 @@ export class GameScene extends Scene
         this.cameras.main.shake(180, 0.008);
         this.cameras.main.flash(120, (color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff);
         Sfx.milestone(idx);
+
+        //  The portal wants to know where the good parts are, and a streak
+        //  milestone is the clearest "this is going well" the game has. The
+        //  first one is routine, so the scale starts low and only the late
+        //  streaks read as a genuine high.
+        void reportPlatformHappyTime((idx + 1) / STREAKS.length);
     }
 
     //  ---------------------------------------------------------- combo ramp
@@ -1172,12 +1192,88 @@ export class GameScene extends Scene
 
     //  --------------------------------------------------------------- flow
 
+    /**
+     * The clock ran out. Before the run is written off, the player is offered
+     * one extra life for a video -- the board, the combo and the level score are
+     * all still standing at this point, which is the whole reason the offer is
+     * worth anything. Declining costs nothing: retrying was always free.
+     */
     private fail (): void
     {
         if (this.state === 'done') return;
 
         this.state = 'done';
+        setGameplayActive(false);
 
+        Sfx.fail();
+        this.cameras.main.shake(320, 0.014);
+
+        if (!this.revived && adsAvailable())
+        {
+            this.offerRevive();
+            return;
+        }
+
+        this.endRun();
+    }
+
+    private offerRevive (): void
+    {
+        const panel = this.add.container(0, 0).setDepth(45);
+
+        panel.add(this.add.rectangle(W / 2, H / 2, W, H, 0x05070f, 0.78));
+
+        const title = this.add.text(W / 2, 350, "OUT OF TIME", {
+            fontFamily: FONT, fontSize: 54, color: '#ff4d5e', stroke: '#000000', strokeThickness: 8
+        }).setOrigin(0.5).setScale(0.4);
+        panel.add(title);
+
+        this.tweens.add({ targets: title, scale: 1, duration: 260, ease: 'Back.out' });
+
+        panel.add(this.add.text(W / 2, 404, `KEEP YOUR ${fmt(this.levelScore)} POINTS`, {
+            fontFamily: FONT_UI, fontSize: 17, color: '#8d97bd'
+        }).setOrigin(0.5));
+
+        const life = rewardButton(this, W / 2, 500, {
+            width: 360,
+            height: 84,
+            label: `EXTRA LIFE  +${REVIVE_SECONDS}s`,
+            color: 0x6cf5c8,
+            onReward: () => this.revive(panel)
+        });
+
+        if (life) panel.add(life);
+
+        const quit = this.add.text(W / 2, 606, 'GIVE UP', {
+            fontFamily: FONT, fontSize: 26, color: '#7d88b0'
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+        quit.on('pointerdown', () =>
+        {
+            Sfx.ui();
+            panel.destroy();
+            this.endRun();
+        });
+
+        panel.add(quit);
+    }
+
+    private revive (panel: GameObjects.Container): void
+    {
+        this.revived = true;
+        panel.destroy();
+
+        this.timeLeft = REVIVE_SECONDS * 1000;
+        this.state = 'play';
+        setGameplayActive(true);
+
+        Sfx.upgrade();
+        this.cameras.main.flash(200, 108, 245, 200);
+        this.fx.ring(MUZZLE.x, MUZZLE.y - 60, 340, 0x6cf5c8, 8, 520);
+    }
+
+    private endRun (): void
+    {
         //  A failed attempt does not bank its score into the run -- retrying
         //  replays the same level from the same total.
         run.bestCombo = Math.max(run.bestCombo, this.bestCombo);
@@ -1189,9 +1285,6 @@ export class GameScene extends Scene
         meta.bestLevel = Math.max(meta.bestLevel, run.level - 1);
         saveMeta();
 
-        Sfx.fail();
-        this.cameras.main.shake(320, 0.014);
-
         this.time.delayedCall(340, () =>
         {
             this.cameras.main.fadeOut(180, 0, 0, 0);
@@ -1202,6 +1295,8 @@ export class GameScene extends Scene
     private levelComplete (): void
     {
         this.state = 'done';
+        setGameplayActive(false);
+        noteLevelCleared();
 
         run.bestCombo = Math.max(run.bestCombo, this.bestCombo);
         Sfx.levelClear();
@@ -1234,6 +1329,8 @@ export class GameScene extends Scene
         meta.best = Math.max(meta.best, run.score);
         meta.bestLevel = Math.max(meta.bestLevel, run.level);
         saveMeta();
+
+        void reportPlatformHappyTime(perfect ? 1 : 0.6);
 
         this.showRewards(comboBonus, perfectBonus, perfect);
     }

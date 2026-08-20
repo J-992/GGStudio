@@ -1,9 +1,13 @@
 import { GameObjects, Geom, Scene } from 'phaser';
 import { Fx } from '../core/fx';
 import { Sfx, unlockAudio } from '../core/audio';
-import { meta, run } from '../core/state';
+import { bankCoins, meta, run, saveMeta } from '../core/state';
 import { FINAL_LEVEL } from '../data/levels';
 import { IconLabel } from '../core/icons';
+import { rewardButton } from '../core/adButton';
+import { offerInterstitial } from '../core/ads';
+import { setGameplayActive } from '../core/lifecycle';
+import { reportPlatformHappyTime } from '../platform/platform';
 import { FONT, FONT_UI, H, W, fmt, hex, tierFor } from '../core/theme';
 
 interface ResultData
@@ -17,6 +21,9 @@ export class ResultScene extends Scene
 {
     private result!: ResultData;
     private fx!: Fx;
+    private footer!: IconLabel;
+    private coinsStat!: GameObjects.Text;
+    private leaving = false;
 
     constructor ()
     {
@@ -32,6 +39,11 @@ export class ResultScene extends Scene
     {
         const win = this.result.mode === 'victory';
         const tier = tierFor(run.level);
+
+        this.leaving = false;
+
+        //  Whatever the run did, the player is reading a card now, not playing.
+        setGameplayActive(false);
 
         this.cameras.main.setBackgroundColor(win ? 0x1f1203 : 0x140812);
         this.cameras.main.fadeIn(200, 0, 0, 0);
@@ -71,8 +83,12 @@ export class ResultScene extends Scene
             onUpdate: (tw: any) => scoreText.setText(fmt(tw.getValue() as number))
         });
 
+        if (win) void reportPlatformHappyTime(1);
+
         if (total >= meta.best && total > 0)
         {
+            if (!win) void reportPlatformHappyTime(0.85);
+
             const nb = this.add.text(W / 2, 446, 'NEW BEST!', {
                 fontFamily: FONT, fontSize: 24, color: '#6cf5c8'
             }).setOrigin(0.5).setDepth(10);
@@ -82,37 +98,52 @@ export class ResultScene extends Scene
 
         const stat = (x: number, label: string, value: string, color: number) =>
         {
-            this.add.text(x, 520, value, {
+            const text = this.add.text(x, 520, value, {
                 fontFamily: FONT, fontSize: 30, color: hex(color)
             }).setOrigin(0.5).setDepth(10);
 
             this.add.text(x, 550, label, {
                 fontFamily: FONT_UI, fontSize: 12, color: '#5f6a92'
             }).setOrigin(0.5).setDepth(10);
+
+            return text;
         };
 
         stat(110, 'BEST COMBO', `x${Math.max(run.bestCombo, this.result.bestCombo)}`, 0xff5ce0);
-        stat(270, 'COINS EARNED', fmt(run.coinsEarned), 0xffc857);
+        this.coinsStat = stat(270, 'COINS EARNED', fmt(run.coinsEarned), 0xffc857);
         stat(430, 'UPGRADES', String(run.picks), 0x3fe0ff);
 
+        //  The whole run's coins are the reward, so the offer only exists when
+        //  there is something to double. Everything below it slides down to
+        //  make room, and slides back up on a build with no ads at all.
+        const doubled = Math.round(run.coinsEarned);
+        const offer = doubled > 0
+            ? rewardButton(this, W / 2, 622, {
+                label: `DOUBLE ${fmt(doubled)} COINS`,
+                color: 0xffc857,
+                onReward: () => this.grantDoubleCoins(doubled)
+            })
+            : null;
+
+        const shift = offer ? 66 : 0;
         const primaryLabel = win ? 'PLAY AGAIN' : 'TRY AGAIN';
 
-        this.button(W / 2, 660, 340, 96, primaryLabel, win ? 0xffd23f : 0x6cf5c8, 40, () =>
+        this.button(W / 2, 660 + shift, 340, 96, primaryLabel, win ? 0xffd23f : 0x6cf5c8, 40, () =>
         {
             if (win) run.reset();
             this.leave('Game');
         });
 
-        this.button(W / 2, 786, 240, 68, 'MENU', 0x2a3352, 26, () =>
+        this.button(W / 2, 786 + shift, 240, 62, 'MENU', 0x2a3352, 26, () =>
         {
             run.reset();
             this.leave('MainMenu');
         }, '#ffffff');
 
-        const footer = new IconLabel(this, W / 2, 880, 'gem', `${fmt(meta.coins)}   ·   RANK ${fmt(meta.rank)}`, {
+        this.footer = new IconLabel(this, W / 2, 886 + shift, 'gem', this.footerText(), {
             fontFamily: FONT_UI, fontSize: 16, iconSize: 16, color: '#7d88b0'
         });
-        footer.setDepth(10);
+        this.footer.setDepth(10);
 
         if (win)
         {
@@ -126,6 +157,40 @@ export class ResultScene extends Scene
             if (win) run.reset();
             this.leave('Game');
         });
+    }
+
+    private footerText (): string
+    {
+        return `${fmt(meta.coins)}   ·   RANK ${fmt(meta.rank)}`;
+    }
+
+    /**
+     * Pays the rewarded video out. The run's coins were banked as they were
+     * earned, so doubling means banking the same amount a second time -- the
+     * player keeps everything either way, and declining costs them nothing.
+     */
+    private grantDoubleCoins (amount: number): void
+    {
+        bankCoins(amount);
+        run.coinsEarned += amount;
+        saveMeta();
+
+        this.coinsStat.setText(fmt(run.coinsEarned));
+        this.footer.setValue(this.footerText());
+        this.footer.setScale(1.25);
+        this.tweens.add({ targets: this.footer, scale: 1, duration: 200, ease: 'Back.out' });
+
+        const pop = this.add.text(W / 2, 560, `+${fmt(amount)}`, {
+            fontFamily: FONT, fontSize: 42, color: '#ffc857', stroke: '#000000', strokeThickness: 7
+        }).setOrigin(0.5).setDepth(20);
+
+        this.tweens.add({
+            targets: pop, y: 508, alpha: 0, duration: 900, ease: 'Quad.out',
+            onComplete: () => pop.destroy()
+        });
+
+        this.fx.burst(W / 2, 560, 0xffc857, 26, 'gold');
+        void reportPlatformHappyTime(0.7);
     }
 
     private confetti (color: number): void
@@ -172,10 +237,23 @@ export class ResultScene extends Scene
         return btn;
     }
 
+    /**
+     * The end of a run is the break Poki actually wants: the player has stopped,
+     * the screen is already fading to black and nothing is mid-animation behind
+     * it. `offerInterstitial` resolves immediately when its own pacing rules say
+     * no, so the usual path is still a straight cut to the next scene.
+     */
     private leave (scene: string): void
     {
+        if (this.leaving) return;
+
+        this.leaving = true;
         this.cameras.main.fadeOut(180, 0, 0, 0);
-        this.time.delayedCall(190, () => this.scene.start(scene));
+
+        this.time.delayedCall(190, () =>
+        {
+            void offerInterstitial().then(() => this.scene.start(scene));
+        });
     }
 
     update (_time: number, delta: number): void

@@ -452,6 +452,44 @@ const ICONS: Record<string, Draw> = {
         c.moveTo(16, 16); c.lineTo(48, 48);
         c.moveTo(48, 16); c.lineTo(16, 48);
         c.stroke();
+    },
+
+    //  --- platform ------------------------------------------------------
+    //  The same clip body as `video`, but the play triangle is swapped for a
+    //  die face: one glyph that says "watch a video" and "reroll these cards"
+    //  at once, so the button needs no second line of text.
+    videoDice: c =>
+    {
+        stroke(c, 5);
+        rr(c, 4, 15, 42, 34, 9);
+        c.stroke();
+
+        c.fillStyle = '#fff';
+        c.beginPath();
+        c.moveTo(46, 26); c.lineTo(59, 18); c.lineTo(59, 46); c.lineTo(46, 38);
+        c.closePath(); c.fill();
+
+        for (const [ x, y ] of [ [ 16, 41 ], [ 25, 32 ], [ 34, 23 ] ])
+        {
+            c.beginPath(); c.arc(x, y, 4.2, 0, TAU); c.fill();
+        }
+    },
+
+    //  A screen with a play triangle: the only honest way to say "this button
+    //  starts a video" without words the player has to read.
+    video: c =>
+    {
+        stroke(c, 5);
+        rr(c, 5, 14, 44, 36, 7);
+        c.stroke();
+
+        c.fillStyle = '#fff';
+        poly(c, [ [ 22, 24 ], [ 36, 32 ], [ 22, 40 ] ]);
+        c.fill();
+
+        c.beginPath();
+        c.moveTo(49, 27); c.lineTo(60, 19); c.lineTo(60, 45); c.lineTo(49, 37);
+        c.closePath(); c.fill();
     }
 };
 

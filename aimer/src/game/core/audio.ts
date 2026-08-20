@@ -1,10 +1,22 @@
 //  Tiny procedural sound engine. The project ships with no audio assets, so
 //  every effect is synthesised with WebAudio oscillators / noise bursts.
 
+const MASTER_GAIN = 0.32;
+
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let muted = false;
 let failed = false;
+
+//  Set by the platform layer while an ad is on screen or the page is hidden.
+//  Kept separate from `muted` so restoring it never clobbers the player's own
+//  mute preference.
+let externalMute = false;
+
+function applyGain (): void
+{
+    if (master) master.gain.value = muted || externalMute ? 0 : MASTER_GAIN;
+}
 
 function ac (): AudioContext | null
 {
@@ -20,8 +32,8 @@ function ac (): AudioContext | null
         {
             ctx = new AC();
             master = ctx.createGain();
-            master.gain.value = 0.32;
             master.connect(ctx.destination);
+            applyGain();
         }
         catch
         {
@@ -30,7 +42,10 @@ function ac (): AudioContext | null
         }
     }
 
-    if (ctx.state === 'suspended') void ctx.resume();
+    //  While an ad is playing or the tab is hidden the context stays suspended
+    //  on purpose -- resuming it here would put game audio over an ad, which
+    //  Poki rejects builds for.
+    if (ctx.state === 'suspended' && !externalMute) void ctx.resume();
 
     return ctx;
 }
@@ -49,8 +64,33 @@ export function isMuted (): boolean
 export function toggleMute (): boolean
 {
     muted = !muted;
-    if (master) master.gain.value = muted ? 0 : 0.32;
+    applyGain();
     return muted;
+}
+
+/**
+ * Platform-level silence: an ad is on screen, or the page is hidden. Gain is
+ * dropped and the context suspended, because a gain of zero still leaves
+ * WebAudio scheduling work running behind an ad.
+ */
+export function setExternalMute (value: boolean): void
+{
+    if (externalMute === value) return;
+
+    externalMute = value;
+    applyGain();
+
+    if (!ctx) return;
+
+    try
+    {
+        if (externalMute) void ctx.suspend();
+        else if (ctx.state === 'suspended') void ctx.resume();
+    }
+    catch
+    {
+        //  A context that refuses to change state is still silent via the gain.
+    }
 }
 
 type Wave = 'sine' | 'square' | 'sawtooth' | 'triangle';
@@ -58,7 +98,7 @@ type Wave = 'sine' | 'square' | 'sawtooth' | 'triangle';
 function tone (freq: number, dur: number, wave: Wave, vol: number, to?: number, delay = 0): void
 {
     const c = ac();
-    if (!c || !master || muted) return;
+    if (!c || !master || muted || externalMute) return;
 
     const t0 = c.currentTime + delay;
     const osc = c.createOscillator();
@@ -81,7 +121,7 @@ function tone (freq: number, dur: number, wave: Wave, vol: number, to?: number, 
 function noise (dur: number, vol: number, hp: number, delay = 0): void
 {
     const c = ac();
-    if (!c || !master || muted) return;
+    if (!c || !master || muted || externalMute) return;
 
     const t0 = c.currentTime + delay;
     const frames = Math.max(1, Math.floor(c.sampleRate * dur));
