@@ -3,6 +3,12 @@
 Repo-wide guides. Per-game docs live inside each game folder (for example
 `zombie-motorworks/docs/`).
 
+## Shipping
+
+| Guide | Covers |
+| --- | --- |
+| [poki-deploy.md](poki-deploy.md) | Every push to `main` uploads the games that changed to Poki |
+
 ## 3D character asset pipeline
 
 Raw AI-generated GLB → optimized → voxelized → rigged → animated.

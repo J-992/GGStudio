@@ -1,0 +1,166 @@
+# Uploads a new build to Poki for Developers for every game in this monorepo
+# whose files changed on the push.
+#
+# The list of games is not in this file. Every game that ships to Poki owns a
+# `poki.json`, and `scripts/poki/discover.mjs` finds them; registering a new
+# game is adding one file, never editing this workflow. See docs/poki-deploy.md.
+#
+# An upload creates a *version*. It does not put it in front of players -- that
+# is `make_public`, off by default, because replacing what a live game serves
+# should be a decision somebody makes rather than a side effect of a push.
+
+name: Poki deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      game:
+        description: 'Which game (an id from a poki.json), or "all"'
+        type: string
+        default: all
+      make_public:
+        description: 'Publish the version immediately, replacing what players see'
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Build and preflight only -- upload nothing'
+        type: boolean
+        default: false
+
+# Read-only. Nothing here writes to the repo; the one credential is the Poki
+# upload token, which arrives as a secret on the single step that needs it.
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Work out what changed
+    # Forks have no Poki token and no business uploading to this account's
+    # games. Keyed off the fork flag rather than the repository name, so
+    # renaming the repo does not silently switch deploys off.
+    if: github.event.repository.fork != true
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+      count: ${{ steps.discover.outputs.count }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so `git diff <before>..<sha>` can be computed for a
+          # push of any length, and `filter: blob:none` so that costs commits
+          # and trees rather than the repo's 220 MB of packed objects.
+          fetch-depth: 0
+          filter: blob:none
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Discover games
+        id: discover
+        env:
+          # `inputs.game` is typed by whoever pressed the button. It reaches
+          # bash as a variable, never as text pasted into the script.
+          GAME: ${{ inputs.game }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            node scripts/poki/discover.mjs --only "${GAME}"
+          else
+            node scripts/poki/discover.mjs --base "${BEFORE}" --head "${GITHUB_SHA}"
+          fi
+
+  deploy:
+    name: ${{ matrix.id }}
+    needs: plan
+    # `result == 'success'` matters: when the plan job is skipped its outputs
+    # are empty strings, and `'' != '0'` is true, which would start a matrix
+    # job with no matrix.
+    if: needs.plan.result == 'success' && needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    strategy:
+      # One broken game must not stop the others from shipping.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    # Per game, not per workflow: two games can upload at once, the same game
+    # cannot. `cancel-in-progress` stays false -- cancelling a run mid-upload
+    # leaves a half-created version on Poki's side.
+    concurrency:
+      group: poki-deploy-${{ matrix.id }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch this game's LFS assets
+        if: matrix.lfs != ''
+        # Scoped on purpose. `lfs: true` on checkout would pull all 750-odd LFS
+        # objects in the repo -- Shared/, comfy-zoo/ and saved/ -- none of which
+        # any game build reads, on every deploy, against a bandwidth quota.
+        # A file that stays a pointer ships as a 130-byte text file with a .png
+        # name; scripts/poki/preflight.mjs fails the build rather than let that
+        # reach Poki.
+        run: |
+          git lfs install --local
+          git lfs pull --include="${{ matrix.lfs }}"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node_version }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Bun ${{ matrix.bun_version }}
+        if: matrix.package_manager == 'bun'
+        # From npm rather than a marketplace action: this job holds the Poki
+        # upload token, and the fewer third parties that run code next to it,
+        # the better. The version is pinned per game in its poki.json.
+        run: npm install --global bun@${{ matrix.bun_version }}
+
+      - name: Install @poki/cli
+        # Root package.json pins it, so a deploy uses the version this repo
+        # reviewed rather than whatever npx resolves on the day.
+        run: npm ci
+
+      - name: Install ${{ matrix.id }}
+        working-directory: ${{ matrix.dir }}
+        run: ${{ matrix.install }}
+
+      - name: Verify ${{ matrix.id }}
+        if: matrix.verify != ''
+        working-directory: ${{ matrix.dir }}
+        # Typecheck, lint, unit tests -- whatever the game listed. Deliberately
+        # no Playwright: browser tests are flaky here and gameplay is verified
+        # by playing the game.
+        run: ${{ matrix.verify }}
+
+      - name: Build ${{ matrix.id }} for Poki
+        working-directory: ${{ matrix.dir }}
+        run: ${{ matrix.build }}
+
+      - name: Upload to Poki
+        env:
+          # @poki/cli reads POKI_UPLOAD_TOKEN. `secrets[...]` is indexed by the
+          # name the game asked for, so a game with its own token needs no
+          # change here.
+          POKI_UPLOAD_TOKEN: ${{ secrets[matrix.token_secret] }}
+          POKI_MAKE_PUBLIC: ${{ inputs.make_public || matrix.make_public }}
+          # Through the environment, never interpolated into the script body:
+          # a commit message is text somebody else wrote, and `${{ }}` inside a
+          # `run:` block pastes it in before bash ever sees a quote.
+          POKI_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          POKI_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          subject=$(printf '%s' "${POKI_COMMIT_MESSAGE}" | head -n 1)
+          export POKI_VERSION_NAME="${GITHUB_SHA:0:7}"
+          export POKI_VERSION_NOTES="${subject}
+
+          ${GITHUB_SHA} on ${GITHUB_REF_NAME}
+          ${POKI_RUN_URL}"
+          if [ "${DRY_RUN}" = "true" ]; then
+            node scripts/poki/upload.mjs "${{ matrix.dir }}" --dry-run
+          else
+            node scripts/poki/upload.mjs "${{ matrix.dir }}"
+          fi

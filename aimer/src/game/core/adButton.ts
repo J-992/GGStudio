@@ -11,8 +11,10 @@ import { FONT, FONT_UI } from './theme';
  * a rewarded ad worth having: the player has to choose it, has to know a video
  * is what they are choosing, and has to be no worse off for declining. So the
  * button says what it gives *and* shows a video icon, it never appears on its
- * own timer, and every failure path -- declined, no fill, ad blocker, SDK never
- * loaded -- lands the player exactly where they already were.
+ * own timer, and no failure path -- declined, no fill, ad blocker, SDK never
+ * loaded -- can leave the player worse off than before they pressed it. What
+ * that means in practice is decided in core/ads, which pays the reward out on
+ * every one of those paths rather than on Poki's say-so.
  *
  * Returns null when the build has no ads at all, so a caller can lay its screen
  * out around the absence instead of drawing a button that could never work.
@@ -21,6 +23,9 @@ import { FONT, FONT_UI } from './theme';
 /** Dark ink for text sitting on a bright fill. */
 const INK = '#0b1024';
 const INK_HEX = 0x0b1024;
+
+/** How long 'NOT AVAILABLE' holds before the offer goes back on the table. */
+const RETRY_MS = 1400;
 
 export interface RewardButtonOpts
 {
@@ -42,7 +47,7 @@ export interface RewardButtonOpts
      * reroll, but never an extra life.
      */
     repeat?: boolean;
-    /** Runs only after a video the player actually watched through. */
+    /** Runs once the break is over, whether or not Poki confirmed the view. */
     onReward: () => void;
 }
 
@@ -118,7 +123,10 @@ export function rewardButton (
 
     let spent = false;
 
-    /** Back to the idle offer, for a reward the player may take again. */
+    /**
+     * Back to the idle offer: for a reward the player may take again, and for
+     * any attempt that paid out nothing.
+     */
     const rearm = (): void =>
     {
         spent = false;
@@ -173,7 +181,18 @@ export function rewardButton (
 
             if (!earned)
             {
+                //  Only a build with no ads at all refuses now, so this is a
+                //  net rather than a path the player meets. It still has to
+                //  hand the button back: nothing was given, so nothing has
+                //  been used up, and one refusal must not cost the player the
+                //  reroll -- or the extra life -- for the rest of the screen.
                 settle('NOT AVAILABLE', 0x2a3352, '#7d88b0', 0x7d88b0);
+
+                scene.time.delayedCall(RETRY_MS, () =>
+                {
+                    if (btn.active && scene.scene.isActive()) rearm();
+                });
+
                 return;
             }
 

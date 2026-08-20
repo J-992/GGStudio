@@ -1,0 +1,15 @@
+{
+  "game_id": "fb4f2b38-eff9-490b-840c-b2891e93ebb8",
+  "build_dir": "dist",
+  "ggs": {
+    "package_manager": "bun",
+    "install": "bun install --frozen-lockfile",
+    "build": "bun run build",
+    "verify": ["bun run typecheck"],
+    "lfs": ["aimer/public/**"],
+    "max_bytes": 20971520,
+    "node_version": "22",
+    "bun_version": "1.3.14",
+    "token_secret": "vKMYLaTzcCC71SllMwZPEySdcPV7jtU9"
+  }
+}

@@ -2,12 +2,18 @@
   "name": "ggstudio",
   "version": "0.0.0",
   "private": true,
-  "description": "Monorepo root. Each game owns its own package.json; this one exists so a host that starts at the repo root can find its way into one.",
+  "description": "Monorepo root. Each game owns its own package.json; this one exists so a host that starts at the repo root can find its way into one, and so the Poki deploy pipeline has one pinned copy of @poki/cli to run.",
   "engines": {
     "node": ">=20.19.0"
   },
   "scripts": {
     "install:game": "npm --prefix zombie-motorworks ci",
-    "build": "npm --prefix zombie-motorworks run build"
+    "build": "npm --prefix zombie-motorworks run build",
+    "poki:list": "node scripts/poki/discover.mjs --all",
+    "poki:preflight": "node scripts/poki/preflight.mjs",
+    "poki:upload": "node scripts/poki/upload.mjs"
+  },
+  "devDependencies": {
+    "@poki/cli": "0.1.19"
   }
 }

@@ -21,6 +21,9 @@ const WARMUP_LEVELS = 3;
 /** Floor between two interstitials, on top of whatever Poki enforces. */
 const MIN_GAP_MS = 100000;
 
+/** A rewarded break shorter than this cannot have put a video on screen. */
+const AD_SHOWN_MS = 1500;
+
 let clearedLevels = 0;
 let lastBreakAt = -Infinity;
 
@@ -63,9 +66,20 @@ export async function offerInterstitial (): Promise<boolean>
 }
 
 /**
- * A rewarded video the player asked for. Resolves true only when it ran to
- * completion and the reward is owed; a decline, a failure or a missing SDK all
- * resolve false, and the caller leaves the player exactly as they were.
+ * A rewarded video the player asked for. Resolves true once the break is over,
+ * whatever Poki made of it, so the reward is owed on every path that got this
+ * far.
+ *
+ * Poki's confirmation is not trustworthy enough to gate a reward on. An ad
+ * blocker that only kills the tracking POST to `t.poki.io` still lets the video
+ * play start to finish, and the break then comes back unconfirmed -- a player
+ * who watched the whole thing gets nothing, which is the one outcome a rewarded
+ * ad must never produce. Blocked SDK, no fill and a thrown request land in the
+ * same place. So the reward follows the ask, not the portal's answer.
+ *
+ * The trade is deliberate and it is the cheaper half: a player who cancels the
+ * prompt is also paid out. Rerolls and revives cost nothing to give away, and
+ * paying a few skippers beats charging real viewers for Poki's failures.
  */
 export async function watchRewarded (): Promise<boolean>
 {
@@ -73,11 +87,14 @@ export async function watchRewarded (): Promise<boolean>
 
     setGameplayActive(false);
 
-    const earned = await requestPlatformRewardedBreak();
+    const startedAt = Date.now();
+    const confirmed = await requestPlatformRewardedBreak();
 
     //  A rewarded video counts against the interstitial pacing too: back to
-    //  back ads are the fastest way to lose a player.
-    if (earned) lastBreakAt = Date.now();
+    //  back ads are the fastest way to lose a player. Pacing is the one thing
+    //  that still needs to know whether an ad *ran*, and an unconfirmed break
+    //  that took real time did run, so it is timed rather than trusted.
+    if (confirmed || Date.now() - startedAt > AD_SHOWN_MS) lastBreakAt = Date.now();
 
-    return earned;
+    return true;
 }
