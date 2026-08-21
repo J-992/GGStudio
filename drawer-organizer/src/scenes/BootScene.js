@@ -10,6 +10,7 @@ class BootScene extends Phaser.Scene {
 
     TextureFactory.generateAll(this);
     SaveSystem.load();
+    Poki.loadingFinished();   // everything is procedural — we are ready the moment textures exist
 
     // Unlock audio on the very first interaction anywhere.
     this.input.once('pointerdown', () => AudioSys.ensure());

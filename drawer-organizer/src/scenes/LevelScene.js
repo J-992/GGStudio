@@ -5,6 +5,8 @@ class LevelScene extends Phaser.Scene {
   init(data) {
     this.levelId = (data && data.levelId) || 1;
     this.level = Progression.levelData(this.levelId);
+    this.levelCompleted = false;   // guards a double Progression.complete on the bonus pick
+    this.doubleReward = false;     // set by a watched rewarded ad
   }
 
   create() {
@@ -26,6 +28,11 @@ class LevelScene extends Phaser.Scene {
         this.tweens.add({ targets: pick, angle: pick.angle + 5, duration: 120, yoyo: true, repeat: 1 });
       }
     });
+
+    // Poki: the player is actually playing from here until the drawer is tidy or
+    // they leave — shutdown covers the back button, the restart button and completion.
+    Poki.gameplayStart();
+    this.events.once('shutdown', () => Poki.gameplayStop());
 
     this.cameras.main.fadeIn(300, 253, 238, 244);
   }
@@ -160,49 +167,78 @@ class LevelScene extends Phaser.Scene {
   // ---------- completion & reward ----------
   onComplete() {
     this.idleTimer.remove();
+    Poki.gameplayStop();
+    Poki.happyTime(1);
     AudioSys.play('complete');
     FX.confetti(this);
     this.time.delayedCall(700, () => this.showCompletePanel());
   }
 
+  // Decorations on offer that the player does not already own. rewardOptions() can
+  // fall back to owned keys once everything is collected, and those grant nothing —
+  // so the rewarded ad is only ever offered against this list.
+  freshRewards() {
+    const owned = SaveSystem.decorations;
+    return Progression.rewardOptions(this.levelId).filter(k => !owned.includes(k));
+  }
+
   showCompletePanel() {
     const { width: W, height: H } = this.scale;
+    // The bonus pick only makes sense when there is a second decoration left to win.
+    const offerBonus = Poki.canReward() && this.freshRewards().length > 1;
+    const panelH = offerBonus ? 352 : 300;
+    const top = -panelH / 2;
+
     const blocker = this.add.zone(W / 2, H / 2, W, H).setInteractive().setDepth(4000);
     const panel = this.add.container(W / 2, H / 2).setDepth(4100);
 
     const g = this.add.graphics();
     g.fillStyle(0x5a3c50, 0.35); g.fillRect(-W / 2, -H / 2, W, H);
-    g.fillStyle(0xffffff, 1); g.fillRoundedRect(-230, -150, 460, 300, 26);
-    g.lineStyle(4, 0xf2aac6, 1); g.strokeRoundedRect(-230, -150, 460, 300, 26);
+    g.fillStyle(0xffffff, 1); g.fillRoundedRect(-230, top, 460, panelH, 26);
+    g.lineStyle(4, 0xf2aac6, 1); g.strokeRoundedRect(-230, top, 460, panelH, 26);
     panel.add(g);
 
-    panel.add(this.add.text(0, -100, 'Sparkling!', {
+    panel.add(this.add.text(0, top + 50, 'Sparkling!', {
       fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '44px', fontStyle: 'bold', color: '#f25aa3'
     }).setOrigin(0.5));
 
     // Three stars pop in.
     [-70, 0, 70].forEach((x, i) => {
-      const star = this.add.image(x, -30, 'star').setScale(0);
+      const star = this.add.image(x, top + 120, 'star').setScale(0);
       panel.add(star);
       this.tweens.add({ targets: star, scale: i === 1 ? 1.5 : 1.1, delay: 200 + i * 180, duration: 380, ease: 'Back.easeOut' });
       this.time.delayedCall(220 + i * 180, () => AudioSys.play('sparkle'));
     });
 
-    panel.add(this.add.text(0, 35, 'The drawer is perfectly tidy ♥', {
+    panel.add(this.add.text(0, top + 185, 'The drawer is perfectly tidy ♥', {
       fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '19px', color: '#a06b8a'
     }).setOrigin(0.5));
 
-    const btn = FX.button(this, 0, 100, 260, 60, 'PICK A REWARD', 0x62c48f, () => {
-      panel.destroy(); blocker.destroy();
+    const close = () => { panel.destroy(); blocker.destroy(); };
+    const btn = FX.button(this, 0, top + 250, 260, 60, 'PICK A REWARD', 0x62c48f, () => {
+      close();
       this.showRewardChoice();
     });
     panel.add(btn);
+
+    if (offerBonus) {
+      const adBtn = FX.button(this, 0, top + 312, 320, 50, '▶  WATCH AD: 2 REWARDS', 0xf7b32b, () => {
+        // One tap, one ad: lock both buttons so nothing can start twice.
+        adBtn.disableInteractive(); btn.disableInteractive();
+        Poki.rewardedBreak().then(watched => {
+          this.doubleReward = watched;
+          close();
+          this.showRewardChoice();
+        });
+      }, { fontSize: '19px' });
+      panel.add(adBtn);
+    }
 
     panel.setScale(0.3).setAlpha(0);
     this.tweens.add({ targets: panel, scale: 1, alpha: 1, duration: 380, ease: 'Back.easeOut' });
   }
 
-  showRewardChoice() {
+  showRewardChoice(isBonus) {
     const { width: W, height: H } = this.scale;
     const options = Progression.rewardOptions(this.levelId).slice(0, 3);
     AudioSys.play('reward');
@@ -214,7 +250,10 @@ class LevelScene extends Phaser.Scene {
     g.fillStyle(0x5a3c50, 0.35); g.fillRect(-W / 2, -H / 2, W, H);
     layer.add(g);
 
-    layer.add(this.add.text(0, -190, 'Choose a decoration!', {
+    const heading = isBonus ? 'One more, on the house!'
+      : this.doubleReward ? 'Choose a decoration — then one more!'
+      : 'Choose a decoration!';
+    layer.add(this.add.text(0, -190, heading, {
       fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '36px', fontStyle: 'bold', color: '#ffffff'
     }).setOrigin(0.5).setShadow(0, 3, 'rgba(90,60,80,0.4)', 4));
 
@@ -254,12 +293,31 @@ class LevelScene extends Phaser.Scene {
     FX.sparkle(this, wx, wy - 20);
     this.tweens.add({ targets: card, scale: 1.18, duration: 220, yoyo: true });
 
-    Progression.complete(this.levelId);
+    if (!this.levelCompleted) {
+      Progression.complete(this.levelId);
+      this.levelCompleted = true;
+    }
     Progression.chooseReward(key);
 
-    this.time.delayedCall(650, () => {
-      this.cameras.main.fadeOut(300, 253, 238, 244);
-      this.time.delayedCall(320, () => this.scene.start('Room', { newDeco: key }));
-    });
+    // Rewarded-ad bonus: hand back a second, fresh set of cards.
+    if (this.doubleReward) {
+      this.doubleReward = false;
+      this.time.delayedCall(650, () => {
+        layer.destroy(); blocker.destroy();
+        if (this.freshRewards().length) {
+          this.showRewardChoice(true);
+        } else {
+          this.leaveToRoom(key);   // nothing left to give — just head home
+        }
+      });
+      return;
+    }
+
+    this.time.delayedCall(650, () => this.leaveToRoom(key));
+  }
+
+  leaveToRoom(newDeco) {
+    this.cameras.main.fadeOut(300, 253, 238, 244);
+    this.time.delayedCall(320, () => this.scene.start('Room', { newDeco: newDeco }));
   }
 }

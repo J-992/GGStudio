@@ -158,6 +158,9 @@ class RoomScene extends Phaser.Scene {
 
   startLevel(id) {
     this.cameras.main.fadeOut(250, 253, 238, 244);
-    this.time.delayedCall(260, () => this.scene.start('Level', { levelId: id }));
+    this.time.delayedCall(260, () => {
+      // Interstitial slot: skipped for the session's first level, then rate-limited.
+      Poki.breakBeforeLevel().then(() => this.scene.start('Level', { levelId: id }));
+    });
   }
 }
