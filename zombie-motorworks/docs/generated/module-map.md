@@ -4,9 +4,9 @@
 > edit by hand. Search this file for a path or exported symbol; do not read
 > it end to end as routine task setup.
 
-- Source Modules: 164
-- Source lines: 71,909
-- Test files scanned: 130
+- Source Modules: 162
+- Source lines: 70,812
+- Test files scanned: 127
 
 ## Largest Modules
 
@@ -89,12 +89,12 @@
 - External packages: none
 - Direct tests: `unit/leaderboard-store.test.ts`
 
-### [`src/app/main.ts`](../../src/app/main.ts) (105 LOC)
+### [`src/app/main.ts`](../../src/app/main.ts) (111 LOC)
 
 - Exports: none
 - Imports: `src/app/bootSplash.ts`, `src/mobile.css`, `src/style.css`, `src/ui/ui-system.css`
 - Imported by: none
-- External packages: none
+- External packages: `@vercel/analytics`
 - Direct tests: none
 
 ### [`src/app/physics.ts`](../../src/app/physics.ts) (71 LOC)

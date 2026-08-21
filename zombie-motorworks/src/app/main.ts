@@ -1,7 +1,13 @@
 import '../ui/ui-system.css';
 import '../style.css';
 import '../mobile.css';
+import { inject } from '@vercel/analytics';
 import { dismissBootSplash, reportBootStage } from './bootSplash.ts';
+
+// This game is a Vite/vanilla TypeScript app rather than a React app, so use
+// the package's framework-agnostic entry point. It installs the analytics
+// script as soon as the app module loads, covering every game mode.
+inject({ framework: 'vite' });
 
 async function boot(): Promise<void> {
   const el = document.getElementById('app');
