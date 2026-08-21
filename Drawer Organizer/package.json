@@ -1,0 +1,10 @@
+{
+  "name": "drawer-organizer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cozy drag-and-drop organizing game in Phaser 3. No build step - these scripts just serve the folder statically.",
+  "scripts": {
+    "dev": "npx -y http-server . -p 8080 -c-1 -o",
+    "start": "npx -y http-server . -p 8080 -c-1 -o"
+  }
+}

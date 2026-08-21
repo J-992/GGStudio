@@ -5,15 +5,15 @@ make the room cuter. Kid-friendly: no timers, no fail states, everything is forg
 
 ## Run
 
-Serve the folder with any static server and open it in a browser:
+There is no build step — any static server works. The easiest way:
 
 ```
-python -m http.server 8080
-# then visit http://localhost:8080
+npm run dev
+# starts a local server on port 8080 and opens the game in your browser
 ```
 
-(Or `npx http-server`, or drop the folder on any static host. Phaser is vendored in
-`vendor/phaser.min.js` — no build step, no backend, no external services.)
+(Or `python -m http.server 8080`, or drop the folder on any static host. Phaser is
+vendored in `vendor/phaser.min.js` — no build, no backend, no external services.)
 
 Works with mouse and touch; audio unlocks on first tap; progress saves to localStorage.
 
