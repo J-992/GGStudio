@@ -8,8 +8,9 @@ import { SKINS, TargetSkin } from '../data/skins';
 import { sa } from '../core/skinart';
 import {
     PERKS, Perk, boostCount, buyBoost, buySkin, equipSkin, equippedSkin,
-    meta, ownsSkin, perkCost, saveMeta
+    grantBoost, grantSkin, meta, ownsSkin, perkCost, saveMeta
 } from '../core/state';
+import { offerUnlock, skinUnlocked } from './StoreModal';
 import { FONT, FONT_UI, fmt, hex, mix } from '../core/theme';
 
 /**
@@ -57,6 +58,9 @@ const TABS: { id: TabId; label: string }[] = [
     { id: 'skins',  label: 'SKINS' }
 ];
 
+/** Above the modal scrim in objects/StoreModal, so confetti lands on top. */
+const MODAL_FX_DEPTH = 46;
+
 const PANEL = 0x0b1024;
 const IDLE_EDGE = 0x2a3352;
 const AFFORD_EDGE = 0xffc857;
@@ -69,6 +73,8 @@ export class StorePanel
     private fx: Fx;
     private L: StoreLayout;
     private onChange: () => void;
+    /** Starts a run wearing what was just bought. Handed down by the menu. */
+    private onPlay: () => void;
 
     private tab: TabId = 'perks';
     private coinLabel!: IconLabel;
@@ -78,12 +84,22 @@ export class StorePanel
     private previews: { g: GameObjects.Graphics | null; skin: TargetSkin; rot: number; r: number }[] = [];
     private skinPage = 0;
 
-    constructor (scene: Scene, fx: Fx, layout: StoreLayout, onChange: () => void)
+    /**
+     * A second effects layer, above the modal scrim. The panel's own `fx` sits
+     * at the menu's depth and would fire its confetti *behind* the card that
+     * is celebrating -- so the modals get their own, and it is ticked with the
+     * rest of the panel.
+     */
+    private topFx: Fx;
+
+    constructor (scene: Scene, fx: Fx, layout: StoreLayout, onChange: () => void, onPlay: () => void)
     {
         this.scene = scene;
         this.fx = fx;
         this.L = layout;
         this.onChange = onChange;
+        this.onPlay = onPlay;
+        this.topFx = new Fx(scene, MODAL_FX_DEPTH);
 
         this.buildHeader();
         this.buildTabs();
@@ -274,8 +290,15 @@ export class StorePanel
     private bought (row: GameObjects.Container, color: number): void
     {
         Sfx.upgrade();
-        this.fx.burst(row.x, row.y, color, 18, 'hit');
-        this.scene.tweens.add({ targets: row, scale: 1.05, duration: 110, yoyo: true, ease: 'Quad.out' });
+
+        //  A rewarded video can outlive the row that started it -- the shelf
+        //  may have been re-dealt while the ad was on screen. The purchase
+        //  still stands either way; only its flourish is skipped.
+        if (row.active)
+        {
+            this.fx.burst(row.x, row.y, color, 18, 'hit');
+            this.scene.tweens.add({ targets: row, scale: 1.05, duration: 110, yoyo: true, ease: 'Quad.out' });
+        }
 
         this.refresh();
         this.onChange();
@@ -405,7 +428,31 @@ export class StorePanel
         this.touchable(row, () =>
         {
             if (boostCount(boost.id) >= boost.max) { Sfx.dry(); return; }
-            if (meta.coins < boost.cost) { this.deny(row); return; }
+
+            if (meta.coins < boost.cost)
+            {
+                //  Short of the price. The tap said what they want, so the
+                //  video is offered for that -- and the shake is still what
+                //  happens on a build that has no video to offer.
+                const offered = offerUnlock(this.scene, {
+                    name: boost.name,
+                    blurb: boost.blurb,
+                    cost: boost.cost,
+                    color: boost.color,
+                    look: { color: boost.color, icon: boost.icon },
+                    action: 'GET ONE FREE',
+                    onUnlock: () =>
+                    {
+                        grantBoost(boost.id, 1);
+                        this.bought(row, boost.color);
+                    }
+                });
+
+                if (!offered) this.deny(row);
+
+                return;
+            }
+
             if (!buyBoost(boost)) { this.deny(row); return; }
 
             this.bought(row, boost.color);
@@ -555,18 +602,55 @@ export class StorePanel
                 return;
             }
 
-            if (meta.coins < skin.cost) { this.denyAt(tile, x); return; }
+            if (meta.coins < skin.cost)
+            {
+                const offered = offerUnlock(this.scene, {
+                    name: skin.name,
+                    blurb: skin.blurb,
+                    cost: skin.cost,
+                    color: skin.accent,
+                    look: { color: skin.accent, art: skin.art, shape: skin.shape },
+                    action: 'UNLOCK FREE',
+                    onUnlock: () => { if (grantSkin(skin.id)) this.wonSkin(skin, tile); }
+                });
+
+                if (!offered) this.denyAt(tile, x);
+
+                return;
+            }
+
             if (!buySkin(skin)) { this.denyAt(tile, x); return; }
 
-            Sfx.upgrade();
-            this.fx.burst(tile.x, tile.y, skin.accent, 22, 'hit');
-            this.scene.tweens.add({ targets: tile, scale: 1.12, duration: 120, yoyo: true, ease: 'Quad.out' });
-
-            this.refresh();
-            this.onChange();
+            this.wonSkin(skin, tile);
         });
 
         return tile;
+    }
+
+    /**
+     * What happens the moment a skin becomes theirs, however it was paid for.
+     *
+     * The tile pops first, because that is the thing they tapped, and the card
+     * follows a beat later -- two flourishes on the same frame read as one
+     * glitch. See objects/StoreModal for why the card exists at all.
+     */
+    private wonSkin (skin: TargetSkin, tile: GameObjects.Container): void
+    {
+        Sfx.upgrade();
+
+        if (tile.active)
+        {
+            this.fx.burst(tile.x, tile.y, skin.accent, 22, 'hit');
+            this.scene.tweens.add({ targets: tile, scale: 1.12, duration: 120, yoyo: true, ease: 'Quad.out' });
+        }
+
+        this.refresh();
+        this.onChange();
+
+        this.scene.time.delayedCall(180, () =>
+        {
+            skinUnlocked(this.scene, this.topFx, skin, this.onPlay);
+        });
     }
 
     /** Page back and forth through the wardrobe. */
@@ -643,6 +727,8 @@ export class StorePanel
     /** Turns the skin previews. Called from the scene's own update. */
     tick (dtMs: number): void
     {
+        this.topFx.update(dtMs);
+
         if (this.previews.length === 0) return;
 
         const t = this.scene.time.now;

@@ -6,6 +6,7 @@ import { GameScene } from './scenes/GameScene';
 import { WorldScene } from './scenes/WorldScene';
 import { BonusScene } from './scenes/BonusScene';
 import { ResultScene } from './scenes/ResultScene';
+import { GiftScene } from './scenes/GiftScene';
 import { H, W } from './core/theme';
 
 const config: Types.Core.GameConfig = {
@@ -51,7 +52,7 @@ const config: Types.Core.GameConfig = {
         //  break or a tab switch.
         smoothStep: true
     },
-    scene: [ Boot, MainMenu, GameScene, BonusScene, WorldScene, ResultScene ]
+    scene: [ Boot, MainMenu, GameScene, BonusScene, WorldScene, ResultScene, GiftScene ]
 };
 
 const StartGame = (parent: string) =>

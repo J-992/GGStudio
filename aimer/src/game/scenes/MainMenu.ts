@@ -1,7 +1,9 @@
 import { Geom, Scene } from 'phaser';
 import { Fx } from '../core/fx';
 import { Sfx, isMuted, toggleMute, unlockAudio } from '../core/audio';
-import { armRun, boostCount, equippedSkin, isArmed, meta, run, saveMeta, toggleArmed } from '../core/state';
+import {
+    armRun, boostCount, equippedSkin, giftsPending, isArmed, meta, run, runsToNextGift, saveMeta, toggleArmed
+} from '../core/state';
 import { setGameplayActive } from '../core/lifecycle';
 import { FINAL_LEVEL } from '../data/levels';
 import { RUN_BOOSTS } from '../data/boosts';
@@ -98,6 +100,7 @@ export class MainMenu extends Scene
         this.buildPlayButton();
         this.buildStats();
         this.buildLoadout();
+        this.buildGiftBadge();
 
         this.store = new StorePanel(this, this.fx, {
             x: L.storeX,
@@ -108,7 +111,7 @@ export class MainMenu extends Scene
             rowW: L.rowW,
             rowH: L.rowH,
             listBottom: L.listBottom
-        }, () => this.refreshLoadout());
+        }, () => this.refreshLoadout(), () => this.startRun());
 
         //  Restore the saved mute preference on first boot.
         if (meta.muted && !isMuted())
@@ -234,15 +237,26 @@ export class MainMenu extends Scene
             this.tweens.add({ targets: btn, scale: 0.92, duration: 90, yoyo: true });
             this.fx.ring(btn.x, btn.y, 220, 0x3fe0ff, 6, 420);
 
-            run.reset();
-
-            //  The armed boosts are spent here and nowhere else: a player who
-            //  opens the store and walks away has lost nothing.
-            armRun();
-
-            this.cameras.main.fadeOut(190, 0, 0, 0);
-            this.time.delayedCall(200, () => this.scene.start('Game'));
+            this.startRun();
         });
+    }
+
+    /**
+     * The one way into a run. The PLAY button uses it, and so does the button
+     * on the card a bought skin puts up -- a player who has just been told to
+     * go and try something out must land in exactly the run PLAY would have
+     * given them, loadout and all.
+     */
+    private startRun (): void
+    {
+        run.reset();
+
+        //  The armed boosts are spent here and nowhere else: a player who
+        //  opens the store and walks away has lost nothing.
+        armRun();
+
+        this.cameras.main.fadeOut(190, 0, 0, 0);
+        this.time.delayedCall(200, () => this.scene.start('Game'));
     }
 
     private buildStats (): void
@@ -361,6 +375,87 @@ export class MainMenu extends Scene
     private refreshLoadout (): void
     {
         for (const chip of this.chips) chip.redraw();
+    }
+
+    /**
+     * The present, in the corner, at all times.
+     *
+     * Waiting or not, it is on the menu -- a reward the player cannot see
+     * coming is a reward that does not pull anybody back into a second run.
+     * So when there is nothing to open the badge still says how many runs
+     * away the next one is, and the counter is the hook.
+     */
+    private buildGiftBadge (): void
+    {
+        const x = 60;
+        const y = LANDSCAPE ? 52 : 58;
+        const w = 98;
+        const h = 70;
+        const ready = giftsPending() > 0;
+        const left = runsToNextGift();
+        const tone = ready ? 0xffc857 : 0x2a3352;
+
+        const chip = this.add.container(x, y).setDepth(13);
+
+        const g = this.add.graphics();
+        g.fillStyle(0x0b1024, 0.92);
+        g.fillRoundedRect(-w / 2, -h / 2, w, h, 16);
+
+        if (ready)
+        {
+            g.fillStyle(0xffc857, 0.18);
+            g.fillRoundedRect(-w / 2, -h / 2, w, h, 16);
+        }
+
+        g.lineStyle(2, tone, ready ? 1 : 0.7);
+        g.strokeRoundedRect(-w / 2, -h / 2, w, h, 16);
+        chip.add(g);
+
+        const icon = iconImage(this, 0, -9, 'gift', {
+            size: 30, color: ready ? 0xffc857 : 0x5f6a92, alpha: ready ? 1 : 0.55
+        });
+        chip.add(icon);
+
+        chip.add(this.add.text(0, 20, ready ? 'OPEN!' : `IN ${left}`, {
+            fontFamily: FONT, fontSize: ready ? 15 : 14, color: ready ? '#ffc857' : '#5f6a92'
+        }).setOrigin(0.5));
+
+        chip.setSize(w, h);
+        chip.setInteractive({
+            hitArea: new Geom.Rectangle(0, 0, w, h),
+            hitAreaCallback: Geom.Rectangle.Contains,
+            useHandCursor: true
+        });
+
+        if (ready)
+        {
+            this.tweens.add({ targets: chip, scale: 1.07, duration: 620, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+            this.tweens.add({ targets: icon, angle: 8, duration: 380, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+
+            this.time.addEvent({
+                delay: 1700,
+                loop: true,
+                callback: () => this.fx.ring(chip.x, chip.y, 150, 0xffc857, 4, 460)
+            });
+        }
+
+        chip.on('pointerdown', () =>
+        {
+            unlockAudio();
+
+            if (!ready)
+            {
+                //  Nothing to open, so the tap answers the only question the
+                //  badge raises rather than doing nothing at all.
+                Sfx.dry();
+                this.fx.popup(chip.x, chip.y + 54, `${left} RUN${left === 1 ? '' : 'S'} TO GO`, 0xffc857, 15, 26, 800);
+                return;
+            }
+
+            Sfx.upgrade();
+            this.cameras.main.fadeOut(180, 0, 0, 0);
+            this.time.delayedCall(190, () => this.scene.start('Gift'));
+        });
     }
 
     update (_time: number, delta: number): void

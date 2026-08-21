@@ -40,6 +40,7 @@ PLAN = [
     ('treeman',  'image copy 7.png',    0.50,  0.33,  0.44),
     ('sharky',   'image copy 8.png',    0.29,  0.43,  0.44),
     ('latte',    'image copy 9.png',    0.52,  0.34,  0.62),
+    ('johnPork', 'johnPork.png',        0.40,  0.42,  0.88),
 ]
 
 

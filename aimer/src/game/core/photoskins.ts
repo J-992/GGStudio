@@ -53,7 +53,8 @@ export const PHOTO_SKINS: PhotoSkin[] = [
     { id: 'sticky' },
     { id: 'treeman' },
     { id: 'sharky' },
-    { id: 'latte' }
+    { id: 'latte' },
+    { id: 'johnPork' }
 ];
 
 const RES = 256;

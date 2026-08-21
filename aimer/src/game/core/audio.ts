@@ -239,6 +239,32 @@ export const Sfx = {
         noise(0.12, 0.04, 900);
     },
 
+    /**
+     * A climb, for the seconds before something lands.
+     *
+     * `tone` fades each note out over its own length, so a riser cannot be one
+     * long note -- it is a ladder of overlapping ones, each higher and louder
+     * than the last. `secs` is how long the climb is, so the payoff can be
+     * moved without the sound having to be retuned around it.
+     */
+    riser (secs: number)
+    {
+        const steps = 11;
+        const gap = secs / steps;
+
+        for (let i = 0; i < steps; i++)
+        {
+            const t = i / (steps - 1);
+            const f = 190 * Math.pow(2, t * 2.3);
+
+            tone(f, gap * 2.2, 'sawtooth', 0.018 + t * 0.05, f * 1.3, gap * i);
+        }
+
+        //  A hiss under the last half, so the climb sounds like it is gathering
+        //  something rather than just getting higher.
+        noise(secs * 0.5, 0.045, 1100, secs * 0.5);
+    },
+
     /** Armoured glass coming apart. */
     shatter ()
     {

@@ -366,6 +366,30 @@ const ICONS: Record<string, Draw> = {
         c.fill();
     },
 
+    //  A wrapped box with a bow and a ribbon cut through it. The one glyph
+    //  the game uses to mean "there is something waiting for you".
+    gift: c =>
+    {
+        c.fillStyle = '#fff';
+
+        //  Bow loops first; the lid overlaps their base so they read as tied
+        //  to the box rather than floating above it.
+        c.beginPath(); c.ellipse(23, 15, 10, 7.5, 0, 0, TAU); c.fill();
+        c.beginPath(); c.ellipse(41, 15, 10, 7.5, 0, 0, TAU); c.fill();
+
+        rr(c, 7, 21, 50, 12, 3); c.fill();
+        rr(c, 11, 33, 42, 25, 3); c.fill();
+
+        cut(c, () =>
+        {
+            c.fillStyle = '#000';
+            c.fillRect(28.5, 21, 7, 37);
+            c.beginPath(); c.ellipse(23, 15, 3.4, 2.6, 0, 0, TAU); c.fill();
+            c.beginPath(); c.ellipse(41, 15, 3.4, 2.6, 0, 0, TAU); c.fill();
+            c.fillRect(7, 31.5, 50, 2.4);
+        });
+    },
+
     //  --- chrome --------------------------------------------------------
     soundOn: c =>
     {
