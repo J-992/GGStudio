@@ -1,7 +1,7 @@
 import { GameObjects, Geom, Scene } from 'phaser';
 import { Fx } from '../core/fx';
 import { Sfx, unlockAudio } from '../core/audio';
-import { bankCoins, meta, run, saveMeta } from '../core/state';
+import { armRun, bankCoins, meta, run, saveMeta } from '../core/state';
 import { FINAL_LEVEL } from '../data/levels';
 import { IconLabel } from '../core/icons';
 import { rewardButton } from '../core/adButton';
@@ -9,6 +9,7 @@ import { offerInterstitial } from '../core/ads';
 import { setGameplayActive } from '../core/lifecycle';
 import { reportPlatformHappyTime } from '../platform/platform';
 import { zoneFor } from '../data/zones';
+import { rankTitle } from '../data/rank';
 import { CX, FONT, FONT_UI, H, LANDSCAPE, W, fmt, hex } from '../core/theme';
 
 /**
@@ -146,9 +147,12 @@ export class ResultScene extends Scene
             return text;
         };
 
-        stat(-1, 'BEST COMBO', `x${Math.max(run.bestCombo, this.result.bestCombo)}`, 0xff5ce0);
+        //  Rank first: it is the run's own number now, and the one the player
+        //  watched climb all the way through. Coins keep the middle slot
+        //  because the button underneath them offers to double it.
+        stat(-1, rankTitle(run.rank), `RANK ${run.rank}`, 0xb388ff);
         this.coinsStat = stat(0, 'COINS EARNED', fmt(run.coinsEarned), 0xffc857);
-        stat(1, 'UPGRADES', String(run.picks), 0x3fe0ff);
+        stat(1, 'PARTS FITTED', String(run.picks), 0x3fe0ff);
 
         //  The whole run's coins are the reward, so the offer only exists when
         //  there is something to double. Everything below it slides down to
@@ -165,9 +169,13 @@ export class ResultScene extends Scene
         const shift = offer ? L.shift : 0;
         const primaryLabel = win ? 'PLAY AGAIN' : 'TRY AGAIN';
 
+        //  A fresh run started from here gets the same loadout the menu would
+        //  have given it: whatever is armed is paid for and carried in. Trying
+        //  the failed level again is still the *same* run, so its boosts are
+        //  already spent and still in force -- nothing is charged twice.
         this.button(CX, L.primaryY + shift, 340, 96, primaryLabel, win ? 0xffd23f : 0x6cf5c8, 40, () =>
         {
-            if (win) run.reset();
+            if (win) { run.reset(); armRun(); }
             this.leave('Game');
         });
 
@@ -191,14 +199,14 @@ export class ResultScene extends Scene
         //  Keyboard shortcut so desktop testing stays fast.
         this.input.keyboard?.once('keydown-SPACE', () =>
         {
-            if (win) run.reset();
+            if (win) { run.reset(); armRun(); }
             this.leave('Game');
         });
     }
 
     private footerText (): string
     {
-        return `${fmt(meta.coins)}   ·   RANK ${fmt(meta.rank)}`;
+        return `${fmt(meta.coins)}   ·   ${fmt(meta.rank)} XP`;
     }
 
     /**

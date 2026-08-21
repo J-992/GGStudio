@@ -80,19 +80,30 @@ export interface Upgrade
     apply: (s: Stats) => void;
 }
 
+/**
+ * The cards.
+ *
+ * MULTI SHOT and CHAIN are deliberately the two shortest ladders on the board.
+ * Both of them kill things the player did not aim at, and a stack of five of
+ * either turned a tap into a clear -- at which point the game is no longer an
+ * aim trainer, it is a cursor being dragged over a field of confetti. Three is
+ * enough for the upgrade to be a build; five was enough for it to be the only
+ * build. Neither of them may touch a welded chain at all: see GameScene, where
+ * that rule is enforced.
+ */
 export const UPGRADES: Upgrade[] = [
     { id: 'rapid',   name: 'RAPID FIRE',  icon: 'bullet',    effect: '-15% FIRE DELAY', color: 0xff8a3d, max: 8, weight: 10, apply: s => { s.fireRate *= 0.85; } },
     { id: 'power',   name: 'POWER',       icon: 'damage',    effect: '+30% DAMAGE',     color: 0xff5470, max: 9, weight: 10, apply: s => { s.damage *= 1.30; } },
     { id: 'crit',    name: 'CRIT',        icon: 'crosshair', effect: '+12% CRIT',       color: 0xffd23f, max: 7, weight: 9,  apply: s => { s.crit += 0.12; } },
     { id: 'critdmg', name: 'CRIT DMG',    icon: 'burst',     effect: '+70% CRIT DMG',   color: 0xff7a3d, max: 8, weight: 8,  from: 3, apply: s => { s.critMult += 0.7; } },
-    { id: 'multi',   name: 'MULTI SHOT',  icon: 'trident',   effect: '+1 EXTRA SHOT',   color: 0x3fe0ff, max: 5, weight: 7,  from: 2, apply: s => { s.multishot += 1; } },
+    { id: 'multi',   name: 'MULTI SHOT',  icon: 'trident',   effect: '+1 EXTRA SHOT',   color: 0x3fe0ff, max: 3, weight: 5,  from: 3, apply: s => { s.multishot += 1; } },
     { id: 'pierce',  name: 'PIERCE',      icon: 'arrow',     effect: '+1 PIERCE',       color: 0x7dff6b, max: 5, weight: 6,  from: 4, apply: s => { s.pierce += 1; } },
     { id: 'boom',    name: 'BOOM',        icon: 'bomb',      effect: '+22% EXPLODE',    color: 0xff4d3d, max: 5, weight: 7,  from: 3, apply: s => { s.explodeChance += 0.22; } },
     { id: 'blast',   name: 'BLAST',       icon: 'wave',      effect: '+35 BLAST SIZE',  color: 0x4fd6ff, max: 6, weight: 5,  from: 5, apply: s => { s.explodeRadius += 35; } },
-    { id: 'chain',   name: 'CHAIN',       icon: 'bolt',      effect: '+1 CHAIN JUMP',   color: 0xfff05c, max: 4, weight: 6,  from: 5, apply: s => { s.chain += 1; } },
+    { id: 'chain',   name: 'CHAIN',       icon: 'bolt',      effect: '+1 CHAIN JUMP',   color: 0xfff05c, max: 3, weight: 5,  from: 5, apply: s => { s.chain += 1; } },
     { id: 'greed',   name: 'GREED',       icon: 'coins',     effect: '+35% COINS',      color: 0xffc857, max: 8, weight: 8,  apply: s => { s.coinMult += 0.35; } },
     { id: 'payout',  name: 'PAYOUT',      icon: 'coinplus',  effect: '+3 COINS / KILL', color: 0xffb020, max: 8, weight: 7,  apply: s => { s.flatCoins += 3; } },
-    { id: 'xp',      name: 'XP BOOST',    icon: 'star',      effect: '+40% XP',         color: 0x9b6cff, max: 8, weight: 6,  apply: s => { s.xpMult += 0.4; } },
+    { id: 'xp',      name: 'XP BOOST',    icon: 'star',      effect: '+50% XP',         color: 0x9b6cff, max: 8, weight: 11, apply: s => { s.xpMult += 0.5; } },
     { id: 'score',   name: 'SCORE',       icon: 'chart',     effect: '+25% SCORE',      color: 0x6cf5c8, max: 9, weight: 9,  apply: s => { s.scoreMult += 0.25; } },
     { id: 'window',  name: 'COMBO TIME',  icon: 'hourglass', effect: '+25% COMBO TIME', color: 0x62ffb8, max: 6, weight: 8,  apply: s => { s.comboWindow *= 1.25; } },
     { id: 'combo',   name: 'COMBO POWER', icon: 'link',      effect: '+30% STREAK BONUS', color: 0xff5ce0, max: 8, weight: 9, from: 2, apply: s => { s.comboMult += 0.3; } },
@@ -105,15 +116,14 @@ export const UPGRADES: Upgrade[] = [
     { id: 'steady',  name: 'STEADY',      icon: 'shield',    effect: '-50% COMBO LOSS', color: 0xa8b4d0, max: 2, weight: 5,  from: 3, apply: s => { s.steady = Math.min(1, s.steady + 0.5); } }
 ];
 
-export const UPGRADE_BY_ID: Record<string, Upgrade> = Object.fromEntries(UPGRADES.map(u => [ u.id, u ]));
+export const UPGRADE_BY_ID: Record<string, Upgrade> =
+    Object.fromEntries(UPGRADES.map(u => [ u.id, u ]));
 
-/** Three distinct upgrade offers, weighted, respecting max stacks and unlock levels. */
+/** Three distinct offers, weighted, respecting max stacks and unlock levels. */
 export function rollOffers (taken: Record<string, number>, level: number, count = 3): Upgrade[]
 {
-    const pool = UPGRADES.filter(u => (taken[u.id] || 0) < u.max && level >= (u.from || 1));
     const picks: Upgrade[] = [];
-
-    const bag = pool.slice();
+    const bag = UPGRADES.filter(u => (taken[u.id] || 0) < u.max && level >= (u.from || 1));
 
     while (picks.length < count && bag.length > 0)
     {

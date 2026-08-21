@@ -2,7 +2,7 @@ import { GameObjects, Scene } from 'phaser';
 import { PLAY, Tier, mix } from '../core/theme';
 
 /**
- * A pane of armoured glass, parked across the arena.
+ * A pane of armoured glass, hung across the arena.
  *
  * It is the first thing in the game that is not a target and not scenery: it
  * stands between the gun and whatever is behind it, and the only way through
@@ -10,19 +10,21 @@ import { PLAY, Tier, mix } from '../core/theme';
  * not spent on the clock, which is the whole cost of it -- it never damages
  * the player, it only wastes them.
  *
- * It is drawn above the targets on purpose. A pane that a target could be
- * "in front of" would be a depth puzzle; a pane that covers everything behind
- * it is a wall, and a wall is read instantly.
+ * It covers a slab of the board rather than a line across it, and it is
+ * deliberately see-through: the targets keep moving underneath, in plain
+ * sight, and the player watches the shot they want to take go by while they
+ * are still breaking the window. A pane you cannot see through would be a
+ * wall, and a wall is a lesser thing -- it hides the cost instead of showing
+ * it. It is drawn above the board for the same reason: whatever is behind the
+ * glass is *behind the glass*, with no depth puzzle about which is which.
  */
-
-const HEIGHT = 26;
 
 export class Glass
 {
     x: number;
     y: number;
     readonly w: number;
-    readonly h = HEIGHT;
+    readonly h: number;
 
     hp: number;
     readonly maxHp: number;
@@ -41,9 +43,10 @@ export class Glass
     /** Fixed crack geometry, so the damage does not crawl frame to frame. */
     private cracks: { x: number; y: number; dx: number; dy: number }[] = [];
 
-    constructor (scene: Scene, tier: Tier, y: number, width: number, hp: number, drift: number)
+    constructor (scene: Scene, tier: Tier, y: number, width: number, height: number, hp: number, drift: number)
     {
         this.w = width;
+        this.h = height;
         this.y = y;
         this.hp = hp;
         this.maxHp = hp;
@@ -92,63 +95,91 @@ export class Glass
         return !this.dead && this.born > 0.7;
     }
 
-    /** Where a shot from (x1,y1) to (x2,y2) meets the glass, if it does. */
+    /**
+     * Where a shot from (x1,y1) to (x2,y2) first meets the glass.
+     *
+     * The pane is a solid rectangle, so this is the honest test rather than
+     * the two-edges shortcut a thin rail could get away with: the shot is
+     * clipped against all four sides and the answer is the point where it
+     * enters. Tapping a target that is standing under the pane is the ordinary
+     * case, and it resolves to the top edge above that target -- the shot
+     * stops at the window, not at the thing behind it.
+     */
     crossing (x1: number, y1: number, x2: number, y2: number): { x: number; y: number } | null
     {
         if (!this.live) return null;
 
-        const top = this.y - this.h / 2;
-        const bottom = this.y + this.h / 2;
         const left = this.x - this.w / 2;
         const right = this.x + this.w / 2;
+        const top = this.y - this.h / 2;
+        const bottom = this.y + this.h / 2;
 
-        //  The beam is very nearly vertical in practice, so the honest test is
-        //  the two horizontal edges: whichever the shot reaches first wins.
-        let best: { x: number; y: number } | null = null;
-        let bestT = Infinity;
+        const dx = x2 - x1;
+        const dy = y2 - y1;
 
-        for (const edgeY of [ top, bottom ])
+        let t0 = 0;
+        let t1 = 1;
+
+        const clip = (p: number, q: number): boolean =>
         {
-            if ((y1 - edgeY) * (y2 - edgeY) > 0) continue;
+            if (p === 0) return q >= 0;
 
-            const t = (edgeY - y1) / (y2 - y1 || 0.0001);
+            const r = q / p;
 
-            if (t < 0 || t > 1 || t >= bestT) continue;
+            if (p < 0)
+            {
+                if (r > t1) return false;
+                if (r > t0) t0 = r;
+            }
+            else
+            {
+                if (r < t0) return false;
+                if (r < t1) t1 = r;
+            }
 
-            const x = x1 + (x2 - x1) * t;
+            return true;
+        };
 
-            if (x < left || x > right) continue;
+        if (!clip(-dx, x1 - left)) return null;
+        if (!clip(dx, right - x1)) return null;
+        if (!clip(-dy, y1 - top)) return null;
+        if (!clip(dy, bottom - y1)) return null;
 
-            bestT = t;
-            best = { x, y: edgeY };
-        }
-
-        //  A shot that starts or ends inside the slab still counts as a hit on
-        //  it -- tapping a target standing behind the glass is the common case.
-        if (!best && x2 >= left && x2 <= right && y2 >= top && y2 <= bottom)
-        {
-            best = { x: x2, y: y2 };
-        }
-
-        return best;
+        return { x: x1 + dx * t0, y: y1 + dy * t0 };
     }
 
-    /** True when this hit finished it off. */
-    damage (): boolean
+    /**
+     * True when this hit finished it off.
+     *
+     * `bite` is how many of the pane's shots one hit is worth, and it is the
+     * gun's punch (see data/levels): armoured glass is the most legible place
+     * in the game to feel that a heavier gun is a heavier gun, because the
+     * player watches the same window come apart in two shots instead of five.
+     */
+    damage (bite = 1): boolean
     {
-        this.hp -= 1;
+        const hits = Math.max(1, Math.round(bite));
+
+        this.hp -= hits;
         this.shake = 1;
 
-        //  A fresh crack, spidering out from a new random point.
-        const spread = Math.PI * 2 * Math.random();
-        const px = (Math.random() - 0.5) * this.w * 0.8;
-
-        for (let i = 0; i < 3; i++)
+        //  A fresh crack, spidering out from a new random point -- one cluster
+        //  per shot's worth of damage, so a heavy hit visibly does more. A
+        //  pane this size needs the damage spread over it or the last shot
+        //  lands on a window that still looks untouched.
+        for (let n = 0; n < Math.min(3, hits); n++)
         {
-            const a = spread + i * 2.1 + Math.random();
-            const len = 10 + Math.random() * 26;
+            const spread = Math.PI * 2 * Math.random();
+            const px = (Math.random() - 0.5) * this.w * 0.7;
+            const py = (Math.random() - 0.5) * this.h * 0.7;
 
-            this.cracks.push({ x: px, y: (Math.random() - 0.5) * this.h * 0.5, dx: Math.cos(a) * len, dy: Math.sin(a) * len * 0.35 });
+            for (let i = 0; i < 5; i++)
+            {
+                const a = spread + i * 1.28 + Math.random() * 0.5;
+                const len = 16 + Math.random() * Math.min(this.w, this.h) * 0.4;
+
+                this.cracks.push({ x: px, y: py, dx: Math.cos(a) * len, dy: Math.sin(a) * len });
+            }
         }
 
         if (this.hp <= 0)
@@ -169,35 +200,68 @@ export class Glass
 
         const t = this.born;
         const w = this.w * t;
-        const h = this.h;
-        const jx = this.shake > 0 ? (Math.random() - 0.5) * this.shake * 5 : 0;
+        const h = this.h * t;
+        const jx = this.shake > 0 ? (Math.random() - 0.5) * this.shake * 6 : 0;
         const x = this.x + jx - w / 2;
         const y = this.y - h / 2;
 
-        //  Frosted body, brighter as it takes damage -- stressed glass.
+        //  Frosted body, brighter as it takes damage -- stressed glass. Kept
+        //  faint on purpose: everything under the pane has to stay readable,
+        //  because watching it is the punishment.
         const stress = 1 - this.hp / this.maxHp;
 
-        g.fillStyle(this.tint, (0.13 + stress * 0.1) * t);
-        g.fillRoundedRect(x, y, w, h, 7);
+        g.fillStyle(this.tint, (0.09 + stress * 0.07) * t);
+        g.fillRoundedRect(x, y, w, h, 10);
 
-        g.lineStyle(3, this.edge, (0.55 + stress * 0.35) * t);
-        g.strokeRoundedRect(x, y, w, h, 7);
+        g.lineStyle(4, this.edge, (0.6 + stress * 0.3) * t);
+        g.strokeRoundedRect(x, y, w, h, 10);
 
-        //  A highlight running the length of it, so it reads as a surface
-        //  rather than as an empty box.
-        g.fillStyle(0xffffff, 0.14 * t);
-        g.fillRoundedRect(x + 4, y + 3, Math.max(0, w - 8), 5, 2.5);
+        //  Mullions. Two lines in each direction are enough to say "pane"
+        //  rather than "tinted rectangle", and they read at a glance.
+        g.lineStyle(1.6, this.edge, 0.28 * t);
 
-        //  Bolted into whatever is holding it up.
-        for (const bx of [ x + 7, x + w - 7 ])
+        for (let i = 1; i < 3; i++)
         {
-            g.fillStyle(this.edge, 0.85 * t);
-            g.fillCircle(bx, this.y, 3.4);
+            const mx = x + (w * i) / 3;
+            const my = y + (h * i) / 3;
+
+            g.lineBetween(mx, y + 4, mx, y + h - 4);
+            g.lineBetween(x + 4, my, x + w - 4, my);
+        }
+
+        //  Two sheens running across it, so the surface catches light and the
+        //  player can tell there is something there before they shoot into it.
+        g.fillStyle(0xffffff, 0.07 * t);
+        g.fillRect(x + w * 0.08, y, w * 0.16, h);
+        g.fillRect(x + w * 0.36, y, w * 0.07, h);
+
+        //  Bolted into whatever is holding it up, one at each corner.
+        for (const bx of [ x + 11, x + w - 11 ])
+        {
+            for (const by of [ y + 11, y + h - 11 ])
+            {
+                g.fillStyle(this.edge, 0.85 * t);
+                g.fillCircle(bx, by, 4);
+            }
+        }
+
+        //  How many shots are left in it, along the top edge. The cracks say
+        //  "damaged"; the pips say "one more".
+        const pipW = 12;
+        const pipGap = 6;
+        const total = this.maxHp * pipW + (this.maxHp - 1) * pipGap;
+
+        for (let i = 0; i < this.maxHp; i++)
+        {
+            const px = this.x + jx - total / 2 + i * (pipW + pipGap);
+
+            g.fillStyle(i < this.hp ? this.edge : 0x000000, (i < this.hp ? 0.9 : 0.35) * t);
+            g.fillRoundedRect(px, y - 9, pipW, 5, 2.5);
         }
 
         if (this.cracks.length === 0) return;
 
-        g.lineStyle(1.8, 0xffffff, 0.75 * t);
+        g.lineStyle(1.8, 0xffffff, 0.7 * t);
 
         for (const c of this.cracks)
         {

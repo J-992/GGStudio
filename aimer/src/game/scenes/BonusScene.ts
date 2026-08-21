@@ -7,11 +7,13 @@ import { Sfx, unlockAudio } from '../core/audio';
 import { KINDS, TargetKind } from '../data/levels';
 import { Stats } from '../data/upgrades';
 import { BeamLook, GunLook, beamLook, gunLook, kickOf } from '../data/gunkit';
-import { bankCoins, meta, run, saveMeta } from '../core/state';
+import { bankCoins, equippedSkin, meta, run, saveMeta } from '../core/state';
 import { setGameplayActive } from '../core/lifecycle';
 import { reportPlatformHappyTime } from '../platform/platform';
 import { IconLabel, iconImage } from '../core/icons';
 import { BonusConfig, bonusConfig, cashMult, cashScale, pickMoney } from '../data/bonus';
+import { styleOf } from '../data/skins';
+import { isZoneStart } from '../data/zones';
 import { CX, FONT, FONT_UI, H, HUD, PLAY, Tier, W, fmt, hex } from '../core/theme';
 
 /**
@@ -393,7 +395,10 @@ export class BonusScene extends Scene
         const spot = this.freeSpot(radius);
         const moving = Math.random() < this.cfg.moveChance;
 
-        const t = new Target(this, spot.x, spot.y, kind, this.cfg.size, run.level, this.cfg.speed, moving);
+        //  The money keeps its own colours and its own glyph -- it has to read
+        //  as money -- but it is cut in the shape the player paid for.
+        const t = new Target(this, spot.x, spot.y, kind, this.cfg.size, run.level, this.cfg.speed, moving,
+            undefined, styleOf(equippedSkin(), false));
 
         t.setLifetime(this.cfg.lifetime);
         t.setDepth(10);
@@ -730,7 +735,12 @@ export class BonusScene extends Scene
 
         this.time.delayedCall(1150, () =>
         {
-            void this.doors.close(280).then(() => this.scene.start('Upgrade'));
+            //  The vault used to open onto the upgrade table. There is no
+            //  table any more -- upgrades come off the rank ladder mid-level --
+            //  so it opens onto the next level, or onto the gate when the next
+            //  level happens to start a new world.
+            void this.doors.close(280).then(() =>
+                this.scene.start(isZoneStart(run.level) ? 'World' : 'Game'));
         });
     }
 }

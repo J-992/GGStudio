@@ -1,25 +1,32 @@
-import { GameObjects, Math as PMath, Scene } from 'phaser';
+import { GameObjects, Geom, Scene } from 'phaser';
 import { Target } from '../objects/Target';
 import { Fx } from '../core/fx';
 import { Sfx, unlockAudio, isMuted, toggleMute } from '../core/audio';
-import { FINAL_LEVEL, KINDS, LevelConfig, POWERUP_SPEED, isPowerup, levelConfig, pickKind } from '../data/levels';
-import { Stats, UPGRADE_BY_ID } from '../data/upgrades';
+import { FINAL_LEVEL, KINDS, LevelConfig, POWERUP_SPEED, TargetKind, isPowerup, levelConfig, pickKind, punchOf, unitHp, xpWorth } from '../data/levels';
+import { Stats, Upgrade, rollOffers } from '../data/upgrades';
 import { BeamLook, GunLook, beamLook, gunLook, kickOf, partFor } from '../data/gunkit';
-import { bankCoins, meta, run, saveMeta } from '../core/state';
+import { bankCoins, boostCount, equippedSkin, meta, run, saveMeta, spendBoost } from '../core/state';
 import { setGameplayActive } from '../core/lifecycle';
 import { adsAvailable, noteLevelCleared } from '../core/ads';
 import { rewardButton } from '../core/adButton';
 import { reportPlatformHappyTime } from '../platform/platform';
 import { IconLabel, ic, iconImage } from '../core/icons';
 import { Turret } from '../objects/Turret';
+import { Wingman } from '../objects/Wingman';
 import { Doors } from '../objects/Doors';
 import { Backdrop } from '../core/backdrop';
-import { aheadAccent, isZoneStart, skinFor, Zone, zoneFor } from '../data/zones';
+import { Trails } from '../core/trails';
+import { isZoneStart, skinFor, Zone, zoneFor } from '../data/zones';
+import { LevelUpPanel } from '../objects/LevelUpPanel';
+import { BuildStrip } from '../objects/BuildStrip';
+import { BOOST_BY_ID } from '../data/boosts';
+import { Skin, TargetSkin, TargetStyle, paintOf, styleOf } from '../data/skins';
 import { gimmickIntro, seedTarget, tickGimmick } from '../core/gimmicks';
 import { Hazards, hazardIntro } from '../core/hazards';
 import { HazardSpec, hazardFor, teachesHazard } from '../data/hazards';
+import { Chain } from '../core/chain';
 import { isBonusAfter } from '../data/bonus';
-import { CX, CY, FONT, FONT_UI, H, HUD, MUZZLE, PLAY, Tier, W, fmt, fmtShort, hex } from '../core/theme';
+import { CX, CY, FONT, FONT_UI, H, HUD, MUZZLE, PLAY, Tier, W, fmt, fmtShort, hex, mix } from '../core/theme';
 
 interface Streak { n: number; bonus: number; label: string; }
 
@@ -38,7 +45,75 @@ const COIN_HUD = { x: W - HUD.margin - 14, y: HUD.levelY };
 /** Seconds an extra life puts back on the clock. */
 const REVIVE_SECONDS = 10;
 
-/** Streak milestone colours -- shared by the pips, the banner and the combo ramp. */
+/** Milliseconds between the bought second turret's shots. */
+const WINGMAN_DELAY = 1150;
+
+/**
+ * What POWER buys, in punch (see data/levels).
+ *
+ * Damage used to be the one upgrade on the board that a player could stack all
+ * run and never see: target health is pinned to the level, the gun's base
+ * damage is pinned to target health, and so a plain target died to exactly one
+ * tap whether the player had taken POWER nine times or never. The stat was
+ * real and completely invisible.
+ *
+ * These are the three places the surplus now goes, in the order the player
+ * meets them:
+ *
+ *   PLATE   a shot heavy enough tears the shield plate off its mount instead
+ *           of being eaten by it -- the one hard "no" in the game, answered.
+ *   GLASS   a pane loses a shot's worth of health per *unit of punch*, so a
+ *           heavy gun goes through a window in one or two rather than five.
+ *   BLAST   whatever is left over after the kill comes out the other side as
+ *           a shockwave, and takes the neighbours with it.
+ */
+const PLATE_BREAK = 2.5;
+
+/** Surplus punch below this is a scratch; a shockwave needs a whole spare kill. */
+const BLAST_MIN = 1;
+
+/** Ceiling on how many neighbours one shot's leftovers may take. */
+const BLAST_MAX = 6;
+
+/**
+ * A dead-centre hit, and what it is worth.
+ *
+ * The bullseye used to be a score bonus and nothing else, and it was gated
+ * behind the PERFECT upgrade -- so for most of a run the middle of a target
+ * was worth exactly as much as its edge, and aiming carefully bought nothing
+ * at all. It now doubles the damage of the shot, always, from level 1 and with
+ * no upgrade taken.
+ *
+ * That is the whole reason a two-unit target is interesting: it is one tap for
+ * a player who hits the middle, one tap for a player who bought POWER, and two
+ * taps for everybody else. PERFECT then stacks on top of the doubling rather
+ * than switching it on, which turns it from a score trinket into the other
+ * half of a precision build.
+ */
+const BULLSEYE_SPOT = 0.4;
+const BULLSEYE_DAMAGE = 2;
+const BULLSEYE_SCORE = 1.25;
+
+/**
+ * What the lightning is worth.
+ *
+ * It used to jump 300px for three quarters of a full shot, four times over --
+ * which on a busy board cleared half of it off one tap and asked nothing of
+ * the player's aim. Half damage over a shorter reach makes it a finisher on a
+ * cluster rather than a substitute for shooting.
+ */
+const CHAIN_DAMAGE = 0.5;
+const CHAIN_REACH = 230;
+
+/**
+ * The rank bar's colour. Deliberately not the zone accent: everything else on
+ * screen changes when the world does, and the one readout that is *the
+ * player's own progress* should look the same in all seven places.
+ */
+const RANK_COLOR = 0xb388ff;
+const RANK_GOLD = 0xffd23f;
+
+/** Streak milestone colours -- shared by the caption and the combo ramp. */
 const STREAK_COLORS = [ 0x6cf5c8, 0x3fe0ff, 0xb388ff, 0xff5ce0, 0xffb020, 0xff4d3d ];
 
 /** The combo display escalates one step every 5 kills. */
@@ -49,7 +124,6 @@ const COMBO_RAMP = [
 ];
 
 const COMBO_Y = HUD.comboY;
-const STREAK_Y = HUD.streakY;
 const BAR_RIGHT = HUD.barRight;
 
 /** A fraction of the way down the arena, whatever shape the arena is. */
@@ -57,8 +131,6 @@ function arenaY (t: number): number
 {
     return PLAY.top + (PLAY.bottom - PLAY.top) * t;
 }
-
-interface ComboWing { img: GameObjects.Image; side: number; slot: number; }
 
 function distToSegment (px: number, py: number, x1: number, y1: number, x2: number, y2: number): number
 {
@@ -79,19 +151,31 @@ export class GameScene extends Scene
     private tier!: Tier;
     private zone!: Zone;
     private fx!: Fx;
+    private trails!: Trails;
     private backdrop!: Backdrop;
     private doors!: Doors;
 
     private targets: Target[] = [];
-    /** `intro` is the beat between the doors opening and the clock starting. */
-    private state: 'intro' | 'play' | 'done' = 'intro';
+    /**
+     * `intro` is the beat between the doors opening and the clock starting;
+     * `rank` is the frozen moment a rank-up hand is on the table.
+     */
+    private state: 'intro' | 'play' | 'rank' | 'done' = 'intro';
+    /** The hand currently being dealt, if any. */
+    private levelUp: LevelUpPanel | null = null;
     /** True when this level owes the player a first look at its zone's rule. */
     private teaching = false;
+    private showRule = false;
+    private showHazard = false;
     private revived = false;
+    /** True when the level was bought past rather than cleared. */
+    private skipped = false;
 
     private timeLeft = 0;
     private timeTotal = 0;
     private spawnTimer = 0;
+    /** Ordered runs currently on the board. Emptied as each finishes. */
+    private chains: Chain[] = [];
     private nextShot = 0;
     private pending: { x: number; y: number; at: number } | null = null;
 
@@ -117,17 +201,26 @@ export class GameScene extends Scene
     private scoreText!: GameObjects.Text;
     private comboText!: GameObjects.Text;
     private comboAura!: GameObjects.Graphics;
-    private comboWings: ComboWing[] = [];
     private comboTier = 0;
     private timeText!: GameObjects.Text;
     private timeIcon!: GameObjects.Image;
     private timeIconScale = 1;
     private goalText!: GameObjects.Text;
+    private rankText!: GameObjects.Text;
+    /** Eased fill of the rank bar, so a big kill sweeps rather than snaps. */
+    private xpShown = 0;
+    private xpFlash = 0;
     private streakText!: GameObjects.Text;
     private streakKey = '';
     private multText!: GameObjects.Text;
     private muteBtn!: GameObjects.Image;
+    /** The parts on the gun, as a rail up the left margin. */
+    private build!: BuildStrip;
     private turret!: Turret;
+    /** The bought second gun, when the run paid for one. */
+    private wingmen: Wingman[] = [];
+    private wingTimer = 0;
+    private skin!: TargetSkin;
     private look!: GunLook;
     private beam!: BeamLook;
     private beam2!: BeamLook;
@@ -148,9 +241,15 @@ export class GameScene extends Scene
         this.beam = beamLook(this.look, this.tier);
         this.beam2 = beamLook(this.look, this.tier, true);
 
+        this.skin = equippedSkin();
+
         this.targets = [];
+        this.chains = [];
+        this.wingmen = [];
+        this.wingTimer = WINGMAN_DELAY;
         this.state = 'intro';
         this.revived = false;
+        this.skipped = false;
         this.timeTotal = (this.cfg.duration + this.stats.timeBonus) * 1000;
         this.timeLeft = this.timeTotal;
         this.spawnTimer = 260;
@@ -169,11 +268,19 @@ export class GameScene extends Scene
         this.coinsDisplay = meta.coins;
         this.tempMult = 1;
         this.tempMultTimer = 0;
-        this.comboWings = [];
         this.comboTier = 0;
         this.streakKey = '';
+        this.levelUp = null;
+        this.xpShown = run.xpFrac;
+        this.xpFlash = 0;
 
-        this.teaching = isZoneStart(run.level) && !run.zonesSeen[this.zone.index];
+        //  Two separate debts, and either one buys the level its empty field:
+        //  the zone's rule, owed once per zone, and the level's new threat,
+        //  owed once per threat. Glass arriving mid-zone has to be allowed to
+        //  stop the board just as a zone opening does.
+        this.showRule = isZoneStart(run.level) && !run.zonesSeen[this.zone.index];
+        this.showHazard = teachesHazard(run.level) !== 'none' && !run.hazardsSeen[teachesHazard(run.level)];
+        this.teaching = this.showRule || this.showHazard;
 
         this.cameras.main.setBackgroundColor(this.tier.bg);
 
@@ -185,6 +292,11 @@ export class GameScene extends Scene
         this.backdrop.storm = this.hazard.storm;
 
         this.fx = new Fx(this, 20);
+
+        //  Behind the board, never over it: a wake is allowed to be seen and
+        //  never allowed to hide the thing it is trailing from.
+        this.trails = new Trails(this, 9);
+
         this.hazards = new Hazards(this, this.hazard, this.tier, this.fx, {
             onLanded: (ms: number) => this.boltLanded(ms)
         });
@@ -241,16 +353,30 @@ export class GameScene extends Scene
                 return;
             }
 
-            run.zonesSeen[this.zone.index] = true;
-
-            //  A zone can owe the player two demonstrations: how the world
+            //  A level can owe the player two demonstrations: how the world
             //  behaves, and what is trying to stop them. They play back to
-            //  back, in that order, and only ever the first time in.
-            const rule = Math.max(1, gimmickIntro(this, this.zone, this.fx));
+            //  back, in that order, and each is only ever paid once -- the
+            //  rule per zone, the threat per threat.
             const signature = teachesHazard(run.level);
+
+            let rule = 1;
+
+            if (this.showRule)
+            {
+                run.zonesSeen[this.zone.index] = true;
+                rule = Math.max(1, gimmickIntro(this, this.zone, this.fx));
+            }
 
             this.time.delayedCall(rule, () =>
             {
+                if (!this.showHazard)
+                {
+                    this.beginPlay();
+                    return;
+                }
+
+                run.hazardsSeen[signature] = true;
+
                 const shown = hazardIntro(this, signature, this.tier, this.fx);
 
                 if (shown <= 0)
@@ -290,37 +416,37 @@ export class GameScene extends Scene
         //  The glass goes up and the core arms itself with the clock, not with
         //  the scene -- nothing shoots at a player who is still watching a door.
         this.hazards.start();
-
-        this.installPick();
-    }
-
-    /**
-     * The upgrade chosen on the way in gets bolted onto the gun in front of the
-     * player. It plays over the opening beat of the level rather than before
-     * it, so the payoff costs nobody any clock.
-     */
-    private installPick (): void
-    {
-        const id = run.claimPick();
-
-        if (!id) return;
-
-        const up = UPGRADE_BY_ID[id];
-
-        if (!up) return;
-
-        this.turret.install(partFor(id));
-
-        Sfx.upgrade();
-        this.fx.ring(MUZZLE.x, MUZZLE.y - 40, 170, up.color, 6, 520);
-        this.fx.burst(MUZZLE.x, MUZZLE.y - 40, up.color, 18, 'hit');
-        this.cameras.main.shake(180, 0.006);
-
-        const tag = this.fx.popup(MUZZLE.x, MUZZLE.y - 118, up.name, up.color, 24, 34, 980);
-        tag.setDepth(40);
     }
 
     //  ---------------------------------------------------------------- setup
+
+    /**
+     * The build, as a rail up the left margin.
+     *
+     * It used to be a row along the footer, and the footer turned out to be
+     * the one line of the screen it could not have: the gun swings almost flat
+     * and is most of a screen wide by the end of a run, so a row down there is
+     * a row lying across the barrels. The left margin is the opposite -- the
+     * arena is inset from it, the gun never reaches it, and it is the one band
+     * of the screen with nothing else in it.
+     *
+     * It grows upward off a fixed point rather than centring, so taking a part
+     * adds a chip on the end instead of shifting every chip the player had
+     * already learned the position of.
+     */
+    private buildStrip (): void
+    {
+        const foot = PLAY.bottom - 26;
+
+        this.build = new BuildStrip(this, HUD.margin - 8, foot, {
+            iconSize: 22,
+            spacing: 30,
+            maxWidth: foot - (PLAY.top + 8),
+            vertical: true,
+            plate: true,
+            alpha: 0.9
+        }).setDepth(33);
+    }
 
     private buildHud (): void
     {
@@ -343,6 +469,12 @@ export class GameScene extends Scene
 
         this.applyComboTier(0);
 
+        //  The rank chip: the label for the bar pinned above it, sitting in the
+        //  strip of margin the route rail was moved sideways to leave free.
+        this.rankText = this.add.text(HUD.margin, HUD.rankY, `RANK ${run.rank}`, {
+            fontFamily: FONT, fontSize: 18, color: hex(RANK_COLOR)
+        }).setOrigin(0, 0.5).setDepth(32);
+
         this.timeText = this.add.text(HUD.margin, HUD.labelY, '0.0', {
             fontFamily: FONT, fontSize: 20, color: '#ffffff'
         }).setOrigin(0, 0.5).setDepth(32);
@@ -356,23 +488,15 @@ export class GameScene extends Scene
             fontFamily: FONT, fontSize: 20, color: hex(this.tier.accent)
         }).setOrigin(1, 0.5).setDepth(32);
 
-        //  On a wide screen the caption sits to the right of the gem track; in
-        //  portrait there is no room beside it, so it stacks underneath.
-        const gemSpan = (STREAKS.length - 1) * HUD.streakGap;
+        //  One line under the combo: what the streak is worth next. The
+        //  six-gem track that used to say the same thing is gone.
+        this.streakText = this.add.text(CX, HUD.streakTextY, '', {
+            fontFamily: FONT, fontSize: 15, color: '#7d88b0'
+        }).setOrigin(0.5, 0.5).setDepth(31);
 
-        this.streakText = this.add.text(
-            HUD.streakInline ? CX + gemSpan / 2 + 34 : CX,
-            HUD.streakTextY,
-            '',
-            { fontFamily: FONT, fontSize: 15, color: '#7d88b0' }
-        ).setOrigin(HUD.streakInline ? 0 : 0.5, 0.5).setDepth(31);
-
-        this.multText = this.add.text(
-            HUD.streakInline ? CX - gemSpan / 2 - 34 : HUD.margin - 2,
-            HUD.streakTextY,
-            '',
-            { fontFamily: FONT, fontSize: 20, color: '#b388ff' }
-        ).setOrigin(HUD.streakInline ? 1 : 0, 0.5).setDepth(31).setAlpha(0);
+        this.multText = this.add.text(HUD.margin - 2, HUD.streakTextY, '', {
+            fontFamily: FONT, fontSize: 20, color: '#b388ff'
+        }).setOrigin(0, 0.5).setDepth(31).setAlpha(0);
 
         this.muteBtn = iconImage(this, W - HUD.margin + 4, HUD.footerY, isMuted() ? 'soundOff' : 'soundOn', {
             size: 20, color: 0xffffff, alpha: 0.45
@@ -388,7 +512,111 @@ export class GameScene extends Scene
             this.muteBtn.setTexture(ic(meta.muted ? 'soundOff' : 'soundOn'));
         });
 
+        this.buildSkipPill();
+        this.buildStrip();
+
         this.turret = new Turret(this, this.tier, this.look);
+
+        //  The bought gun stands off to the side of the player's own, low and
+        //  out of the arena, where it can never hide a target.
+        if (run.has('wingman'))
+        {
+            const y = Math.min(H - 34, PLAY.bottom + 52);
+
+            this.wingmen.push(new Wingman(this, PLAY.left - 8, y, this.tier, -1));
+            this.wingmen.push(new Wingman(this, PLAY.right + 8, y, this.tier, 1));
+        }
+    }
+
+    /**
+     * LEVEL SKIP, in the bottom-left corner and only when one is in the bag.
+     *
+     * It used to live on the upgrade screen, which no longer exists. Putting it
+     * in the play HUD is a better home than the one it lost: the player can now
+     * spend it the moment a level turns out to be the one they do not want,
+     * rather than having to have guessed that from the level number on a menu.
+     */
+    private buildSkipPill (): void
+    {
+        const boost = BOOST_BY_ID.skip;
+
+        if (boostCount(boost.id) <= 0 || run.level >= FINAL_LEVEL) return;
+
+        const w = 128;
+        const h = 40;
+        const pill = this.add.container(HUD.margin + w / 2 - 4, HUD.footerY).setDepth(32).setAlpha(0.75);
+
+        const g = this.add.graphics();
+        g.fillStyle(0x0b1024, 0.85);
+        g.fillRoundedRect(-w / 2, -h / 2, w, h, 13);
+        g.lineStyle(2, boost.color, 0.7);
+        g.strokeRoundedRect(-w / 2, -h / 2, w, h, 13);
+        pill.add(g);
+
+        pill.add(iconImage(this, -w / 2 + 22, 0, boost.icon, { size: 18, color: boost.color }));
+
+        const label = this.add.text(-w / 2 + 38, 0, `SKIP x${boostCount(boost.id)}`, {
+            fontFamily: FONT, fontSize: 15, color: hex(boost.color)
+        }).setOrigin(0, 0.5);
+
+        pill.add(label);
+
+        pill.setSize(w, h);
+        pill.setInteractive({
+            hitArea: new Geom.Rectangle(0, 0, w, h),
+            hitAreaCallback: Geom.Rectangle.Contains,
+            useHandCursor: true
+        });
+
+        pill.on('pointerdown', (_p: unknown, _x: unknown, _y: unknown, e: any) =>
+        {
+            if (e && e.stopPropagation) e.stopPropagation();
+            unlockAudio();
+
+            if (this.state !== 'play' || run.level >= FINAL_LEVEL || !spendBoost(boost.id))
+            {
+                Sfx.dry();
+                return;
+            }
+
+            pill.destroy();
+
+            //  A level bought past is cleared, not played: the goal bar fills
+            //  so the exit reads the way every other exit does, and the clean
+            //  sweep bonus is withheld because nothing was swept.
+            this.skipped = true;
+            this.progress = this.cfg.goal;
+
+            this.fx.burst(pill.x, pill.y, boost.color, 22, 'hit');
+            this.levelComplete();
+        });
+    }
+
+    /**
+     * The paint and the silhouette a target is dressed in.
+     *
+     * Colour and shape are two separate permissions. The rank and file get
+     * both: the zone picks their colours and the skin paints over them. A
+     * power-up keeps its own colour -- money has to read as money from the
+     * corner of the eye, in every zone and under every skin -- but still takes
+     * the shape, so a bought skin is visible on the whole board rather than on
+     * two thirds of it.
+     *
+     * The bomb and the boss get neither. Those two are the only targets where
+     * mistaking one for something else costs the player the run, and a skin is
+     * never allowed to make that mistake easier.
+     */
+    private dress (kind: TargetKind): { skin?: Skin; style?: TargetStyle }
+    {
+        if (kind === 'bomb' || kind === 'boss') return {};
+
+        const base = skinFor(this.zone, kind);
+
+        //  Only the rank and file wear the face; a power-up takes the
+        //  silhouette and the wake and keeps its own glyph unobstructed.
+        return base
+            ? { skin: paintOf(this.skin, base), style: styleOf(this.skin) }
+            : { style: styleOf(this.skin, false) };
     }
 
     //  ------------------------------------------------------------- spawning
@@ -419,6 +647,20 @@ export class GameScene extends Scene
 
     private spawn (standing = false): void
     {
+        //  A chain takes several slots at once, so it is decided before the
+        //  kind is rolled and only when there is actually room for the whole
+        //  run. Half a chain would be a chain the player cannot finish.
+        if (!standing && this.hazard.chainChance > 0 && Math.random() < this.hazard.chainChance)
+        {
+            const len = this.hazard.chainLen;
+
+            if (this.targets.length + len <= this.cfg.maxActive + 1)
+            {
+                this.spawnChain(len);
+                return;
+            }
+        }
+
         const kind = pickKind(this.cfg.weights);
         const def = KINDS[kind];
         const radius = this.cfg.size * def.sizeMult;
@@ -435,7 +677,8 @@ export class GameScene extends Scene
             ? { x: PLAY.left + radius + Math.random() * Math.max(1, (PLAY.right - PLAY.left) - radius * 2), y: PLAY.top + radius }
             : this.freeSpot(radius);
 
-        const t = new Target(this, spot.x, spot.y, kind, this.cfg.size, run.level, speed, moving, skinFor(this.zone, kind));
+        const dress = this.dress(kind);
+        const t = new Target(this, spot.x, spot.y, kind, this.cfg.size, run.level, speed, moving, dress.skin, dress.style);
 
         if (falling)
         {
@@ -467,8 +710,137 @@ export class GameScene extends Scene
     }
 
     /**
+     * A kind fit to be welded into a chain.
+     *
+     * Bombs are out: a link the player is *made* to shoot, that costs them
+     * their combo for shooting it, is a trap rather than a puzzle. Power-ups
+     * are out too, for the opposite reason -- a prize locked behind two other
+     * targets stops being a prize and starts being homework.
+     */
+    private chainKind (): TargetKind
+    {
+        for (let i = 0; i < 8; i++)
+        {
+            const kind = pickKind(this.cfg.weights);
+
+            if (kind !== 'bomb' && !isPowerup(kind)) return kind;
+        }
+
+        return 'normal';
+    }
+
+    /**
+     * An ordered run, laid out along a line.
+     *
+     * The links are placed nose to tail with a gap between them and the whole
+     * line is dropped somewhere it fits, so the rope reads as a rope rather
+     * than as three targets that happen to be near each other. They are given
+     * a longer clock than a loose target because they cannot all be taken at
+     * once -- the last link has to wait its turn, and charging it for the wait
+     * would make the rule unfair rather than hard.
+     */
+    private spawnChain (len: number): void
+    {
+        const size = this.cfg.size;
+        const step = size * 2.9;
+        const reach = (step * (len - 1)) / 2;
+
+        //  Kept off the walls by the length of the whole run, so the far links
+        //  never end up clamped on top of each other in a corner.
+        const anchor = this.freeSpot(size + reach * 0.5);
+        const angle = Math.random() * Math.PI * 2;
+        const dx = Math.cos(angle);
+        const dy = Math.sin(angle);
+
+        const members: Target[] = [];
+        const moving = Math.random() < this.cfg.moveChance * 0.6;
+
+        for (let i = 0; i < len; i++)
+        {
+            const kind = this.chainKind();
+            const radius = size * KINDS[kind].sizeMult;
+            const off = (i - (len - 1) / 2) * step;
+
+            const x = Math.max(PLAY.left + radius, Math.min(PLAY.right - radius, anchor.x + dx * off));
+            const y = Math.max(PLAY.top + radius, Math.min(PLAY.bottom - radius, anchor.y + dy * off));
+
+            const dress = this.dress(kind);
+            const t = new Target(this, x, y, kind, size, run.level, this.cfg.speed * 0.7, moving, dress.skin, dress.style);
+
+            t.setLifetime(this.cfg.lifetime * (1 + 0.4 * len));
+            t.setDepth(10);
+
+            seedTarget(this.zone.gimmick, t, run.level, this.hazard);
+
+            members.push(t);
+            this.targets.push(t);
+        }
+
+        this.chains.push(new Chain(this, this.tier, members));
+    }
+
+    /**
+     * A link left the board, however it left. The chain closes up behind it,
+     * and a chain that ran out of links pays for having been finished.
+     *
+     * The bonus is the reason a chain is a play and not a tax: taking one in
+     * order is slower than taking three loose targets, and it has to be worth
+     * more or the correct move would be to ignore chains and let them expire.
+     */
+    private releaseChain (t: Target, killed: boolean): void
+    {
+        const chain = t.chain;
+
+        if (!chain) return;
+
+        const last = chain.members.length === 1;
+
+        chain.release(t);
+
+        if (!chain.done) return;
+
+        const i = this.chains.indexOf(chain);
+
+        if (i !== -1) this.chains.splice(i, 1);
+
+        const len = chain.length;
+
+        chain.destroy();
+
+        //  Only a chain the player actually broke pays. One that fell apart on
+        //  its own timer was never completed.
+        if (!killed || !last) return;
+
+        const gain = Math.round(500 * len * (1 + run.level * 0.12) * this.stats.scoreMult * (1 + this.streakBonus()));
+
+        this.levelScore += gain;
+
+        this.fx.popup(t.x, t.y - 54, `CHAIN x${len}`, 0xffd23f, 30, 58, 720);
+        this.fx.popup(t.x, t.y - 14, fmtShort(gain), 0xffffff, 32, 66);
+        this.fx.ring(t.x, t.y, 170, 0xffd23f, 6, 460);
+
+        Sfx.milestone(Math.min(3, len - 1));
+        this.updateScoreText();
+    }
+
+    /** Every chain torn down at once, when the level stops. */
+    private clearChains (): void
+    {
+        for (const c of this.chains) c.destroy();
+
+        this.chains = [];
+    }
+
+    /**
      * The two halves a split leaves behind. They are smaller, briefer and
      * cannot split again, so the rule reads as a bonus rather than a spiral.
+     *
+     * They are also on a short fuse and a tight cap, and both of those numbers
+     * are load-bearing. A half is worth score and coins but nothing at all
+     * towards the goal, so a board carrying a dozen of them is a board the
+     * player cannot make progress on -- which is exactly what the last world
+     * turned into when they hung around for a full lifetime and were allowed
+     * to overflow the cap by four.
      */
     private splitInto (x: number, y: number, radius: number): void
     {
@@ -479,15 +851,16 @@ export class GameScene extends Scene
 
         for (let i = 0; i < pieces; i++)
         {
-            if (this.targets.length >= this.cfg.maxActive + 4) return;
+            if (this.targets.length >= this.cfg.maxActive + 2) return;
 
             const side = pieces === 2 ? (i === 0 ? -1 : 1) : i - 1;
             const size = Math.max(14, radius * (pieces > 2 ? 0.54 : 0.62));
             const px = Math.max(PLAY.left + size, Math.min(PLAY.right - size, x + side * radius * 0.9));
             const py = Math.max(PLAY.top + size, Math.min(PLAY.bottom - size, y));
 
-            const t = new Target(this, px, py, 'small', size / KINDS.small.sizeMult, run.level, this.cfg.speed, true, skinFor(this.zone, 'small'));
-            t.setLifetime(this.cfg.lifetime * 0.7);
+            const dress = this.dress('small');
+            const t = new Target(this, px, py, 'small', size / KINDS.small.sizeMult, run.level, this.cfg.speed, true, dress.skin, dress.style);
+            t.setLifetime(this.cfg.lifetime * 0.45);
             t.setDepth(10);
             t.noSplit = true;
             t.progressWorth = 0;
@@ -546,6 +919,21 @@ export class GameScene extends Scene
          * and that is the whole shot -- no extra guns, no lance, no free kills
          * off a miss. Aim is still the game.
          */
+        //  A locked link turns the shot away without a scratch. It is not a
+        //  miss -- the player hit exactly what they aimed at -- but it is not
+        //  free either: the shot, and the fire-rate delay behind it, are gone.
+        if (primary && primary.chainLocked)
+        {
+            this.turret.fire(px, py, 1);
+
+            const m = this.turret.tipFor(0);
+
+            this.fx.beam(m.x, m.y, px, py, this.beam);
+            this.lockedShot(primary);
+
+            return;
+        }
+
         const volley = primary ? 1 + this.stats.multishot : 1;
 
         this.turret.fire(px, py, volley);
@@ -575,7 +963,7 @@ export class GameScene extends Scene
         if (this.stats.pierce > 0)
         {
             const along = this.targets
-                .filter(t => !t.dead && !hit.has(t) && t.kind !== 'bomb' &&
+                .filter(t => !t.dead && !hit.has(t) && t.kind !== 'bomb' && !t.chainLocked &&
                     distToSegment(t.x, t.y, MUZZLE.x, MUZZLE.y, px, py) < t.radius + 10)
                 .sort((a, b) => a.distanceTo(px, py) - b.distanceTo(px, py))
                 .slice(0, this.stats.pierce);
@@ -598,8 +986,13 @@ export class GameScene extends Scene
 
         if (this.stats.multishot > 0)
         {
+            //  A welded chain is off limits to the extra barrels entirely --
+            //  not just the links that are still shuttered. Killing the head
+            //  unlocks the next one in the same frame, so a filter that only
+            //  skipped *locked* links let one tap walk the whole rope, which
+            //  is the exact rule the chain exists to impose.
             const others = this.targets
-                .filter(t => !t.dead && !hit.has(t) && t.kind !== 'bomb')
+                .filter(t => !t.dead && !hit.has(t) && t.kind !== 'bomb' && !t.chain)
                 .sort((a, b) => a.distanceTo(px, py) - b.distanceTo(px, py))
                 .slice(0, this.stats.multishot);
 
@@ -632,12 +1025,29 @@ export class GameScene extends Scene
     {
         const bolt = this.hazards.flakAt(px, py, this.stats.hitRadius);
         const glass = this.hazards.paneOn(MUZZLE.x, MUZZLE.y, px, py);
+        const block = this.hazards.blockOn(MUZZLE.x, MUZZLE.y, px, py);
 
-        //  Whichever of the two the shot reaches first.
-        const glassFirst = glass && (!bolt ||
-            Math.hypot(glass.x - MUZZLE.x, glass.y - MUZZLE.y) < Math.hypot(bolt.x - MUZZLE.x, bolt.y - MUZZLE.y));
+        //  Whichever of the three the shot reaches first. Concrete is checked
+        //  the same way as everything else rather than given priority: a slab
+        //  behind a pane is still behind the pane.
+        const far = (o: { x: number; y: number } | null): number =>
+            o ? Math.hypot(o.x - MUZZLE.x, o.y - MUZZLE.y) : Infinity;
 
-        if (glass && glassFirst)
+        const nearest = Math.min(far(block), far(glass), far(bolt));
+
+        if (block && far(block) === nearest)
+        {
+            this.turret.fire(block.x, block.y, 1);
+
+            const m = this.turret.tipFor(0);
+
+            this.fx.beam(m.x, m.y, block.x, block.y, this.beam);
+            this.hazards.hitBlock(block.block, block.x, block.y);
+
+            return true;
+        }
+
+        if (glass && far(glass) === nearest)
         {
             this.turret.fire(glass.x, glass.y, 1);
 
@@ -645,12 +1055,12 @@ export class GameScene extends Scene
 
             this.fx.beam(m.x, m.y, glass.x, glass.y, this.beam);
 
-            if (this.hazards.hitPane(glass.pane, glass.x, glass.y)) this.paneDown(glass.pane.x, glass.pane.y);
+            if (this.hazards.hitPane(glass.pane, glass.x, glass.y, this.punch)) this.paneDown(glass.pane.x, glass.pane.y);
 
             return true;
         }
 
-        if (bolt)
+        if (bolt && far(bolt) === nearest)
         {
             this.turret.fire(bolt.x, bolt.y, 1);
 
@@ -710,6 +1120,16 @@ export class GameScene extends Scene
         this.fx.popup(MUZZLE.x, PLAY.bottom - 30, `-${(ms / 1000).toFixed(1)}s`, 0xff4d5e, 44, 86, 820);
     }
 
+    /**
+     * Whatever is under the tap, nearest first -- but an available target
+     * always beats a locked one, however the distances fall.
+     *
+     * Two targets can easily overlap once the wind is pushing the board
+     * around, and if one of them is a shuttered chain link the player must not
+     * lose the shot to it: they were plainly aiming at the thing they can
+     * actually kill. The lock is a rule about order, not a shield with a
+     * hitbox around it.
+     */
     private pickTarget (px: number, py: number): Target | null
     {
         let best: Target | null = null;
@@ -720,47 +1140,140 @@ export class GameScene extends Scene
             if (t.dead) continue;
             if (!t.contains(px, py, this.stats.hitRadius)) continue;
 
-            const d = t.distanceTo(px, py);
+            if (best && best.chainLocked !== t.chainLocked)
+            {
+                if (t.chainLocked) continue;
+            }
+            else if (t.distanceTo(px, py) >= bestDist)
+            {
+                continue;
+            }
 
-            if (d < bestDist) { bestDist = d; best = t; }
+            bestDist = t.distanceTo(px, py);
+            best = t;
         }
 
         return best;
     }
 
-    private applyShot (t: Target, hx: number, hy: number, direct: boolean): void
+    /**
+     * A shot into a link that is not next.
+     *
+     * The combo survives, because the player did hit what they were aiming at
+     * -- being wrong about the *order* is the mistake the chain is there to
+     * punish, and it punishes it with the one currency the level actually
+     * runs on, which is time.
+     */
+    private lockedShot (t: Target): void
     {
+        const from = Math.atan2(MUZZLE.y - t.y, MUZZLE.x - t.x);
+
+        t.clang(from);
+
+        this.fx.burst(t.x + Math.cos(from) * t.radius, t.y + Math.sin(from) * t.radius, 0x8fa4c8, 9, 'hit');
+        this.fx.ring(t.x, t.y, t.radius * 2.4, 0x8fa4c8, 3, 260);
+        this.fx.popup(t.x, t.y - t.radius - 34, 'LOCKED', 0x9fb0d0, 20, 40, 480);
+        this.cameras.main.shake(60, 0.003);
+
+        Sfx.locked();
+
+        //  And the one that *is* next says so again, wherever it is.
+        const head = t.chain ? t.chain.head : null;
+
+        if (head) this.fx.ring(head.x, head.y, head.radius * 3, 0xffd23f, 4, 340);
+    }
+
+    /**
+     * The gun's worth, in targets per shot. 1.0 is a stock gun: exactly enough
+     * for the thing it is pointed at and nothing to spare.
+     */
+    private get punch (): number
+    {
+        return punchOf(this.stats.damage, run.level);
+    }
+
+    private applyShot (t: Target, hx: number, hy: number, direct: boolean, origin?: { x: number; y: number }): void
+    {
+        //  A locked link refuses everything, not only the player's own tap:
+        //  a lance running through it, a second barrel, a wingman's pot shot.
+        //  The rule would not be a rule if a stray bullet could skip it.
+        if (t.chainLocked) return;
+
         if (t.kind === 'bomb')
         {
             this.hitBomb(t);
             return;
         }
 
-        //  Every tracer leaves the muzzle, so "which side was it hit from" is
-        //  always the same question: where the gun is, relative to the target.
+        //  "Which side was it hit from" is always the same question: where the
+        //  gun that fired is, relative to the target. Normally that is the
+        //  muzzle; a wingman answers it from its own corner.
         if (t.shieldArc > 0)
         {
-            const from = Math.atan2(MUZZLE.y - t.y, MUZZLE.x - t.x);
+            const gun = origin || MUZZLE;
+            const from = Math.atan2(gun.y - t.y, gun.x - t.x);
 
             if (t.shielded(from))
             {
                 const p = t.plateAt(from);
 
-                t.clang(from);
-                this.fx.burst(p.x, p.y, 0xd8e4ff, 8, 'hit');
-                this.fx.ring(p.x, p.y, t.radius * 1.9, 0xd8e4ff, 3, 260);
-                Sfx.chip();
-                return;
+                //  A heavy enough gun does not wait for the plate to turn. It
+                //  is the only rule in the game that raw damage is allowed to
+                //  overrule, and it is deliberately loud when it does: the
+                //  player has to see that the thing they were told they could
+                //  not do is now something they can buy their way out of.
+                if (this.punch >= PLATE_BREAK)
+                {
+                    t.shieldArc = 0;
+
+                    this.fx.burst(p.x, p.y, 0xd8e4ff, 22, 'big');
+                    this.fx.ring(p.x, p.y, t.radius * 3.2, 0xd8e4ff, 5, 340);
+                    this.fx.popup(t.x, t.y - t.radius - 30, 'PLATE BROKEN', 0xd8e4ff, 20, 44, 520);
+                    this.cameras.main.shake(90, 0.006);
+                    Sfx.shatter();
+                }
+                else
+                {
+                    t.clang(from);
+                    this.fx.burst(p.x, p.y, 0xd8e4ff, 8, 'hit');
+                    this.fx.ring(p.x, p.y, t.radius * 1.9, 0xd8e4ff, 3, 260);
+                    Sfx.chip();
+                    return;
+                }
             }
         }
 
         const crit = Math.random() < this.stats.crit;
-        const perfect = direct && this.stats.perfect > 0 && t.distanceTo(hx, hy) <= t.radius * 0.4;
-        const dmg = this.stats.damage * (crit ? this.stats.critMult : 1);
+
+        //  Only the player's own tap can be a bullseye. An auto-aimed second
+        //  barrel is handed the target's exact centre, so letting those count
+        //  would mean the precision bonus was paid out for no precision.
+        const perfect = direct && t.distanceTo(hx, hy) <= t.radius * BULLSEYE_SPOT;
+
+        const dmg = this.stats.damage
+            * (crit ? this.stats.critMult : 1)
+            * (perfect ? BULLSEYE_DAMAGE + this.stats.perfect : 1);
+
+        //  What the shot found, and where -- both read before the kill, which
+        //  takes the target off the board and out of the scene.
+        const spare = dmg - t.hp;
+        const bx = t.x;
+        const by = t.y;
+
+        //  A bullseye is worth shouting about exactly when it is the reason
+        //  the target died -- when the same shot off-centre would have left it
+        //  standing. Announcing every centre hit would put the word on a third
+        //  of all kills, which is how a reward turns into wallpaper.
+        const earned = perfect && this.stats.damage * (crit ? this.stats.critMult : 1) <= t.hp;
 
         if (t.damage(dmg))
         {
-            this.killTarget(t, crit, perfect, 0);
+            this.killTarget(t, crit, perfect, 0, earned);
+
+            //  Only the tap the player actually aimed carries its leftovers
+            //  through. A lance and a second barrel are their own upgrades and
+            //  do not get to compound with this one.
+            if (direct) this.blast(bx, by, spare);
         }
         else
         {
@@ -770,7 +1283,7 @@ export class GameScene extends Scene
         }
     }
 
-    private killTarget (t: Target, crit: boolean, perfect: boolean, depth: number): void
+    private killTarget (t: Target, crit: boolean, perfect: boolean, depth: number, earned = false): void
     {
         const idx = this.targets.indexOf(t);
         if (idx === -1) return;
@@ -786,6 +1299,10 @@ export class GameScene extends Scene
         const x = t.x;
         const y = t.y;
 
+        //  The chain closes up before the target goes, so the next link is
+        //  already lit by the time the pop finishes.
+        if (t.chain) this.releaseChain(t, true);
+
         t.destroy();
 
         //  --- combo ---
@@ -799,7 +1316,7 @@ export class GameScene extends Scene
         const base = def.score * (1 + run.level * 0.12);
         let mult = this.stats.scoreMult * (1 + streak) * this.tempMult;
         if (crit) mult *= this.stats.critMult;
-        if (perfect) mult *= 1 + this.stats.perfect;
+        if (perfect) mult *= BULLSEYE_SCORE + this.stats.perfect;
 
         const gain = Math.round(base * mult);
         this.levelScore += gain;
@@ -810,11 +1327,21 @@ export class GameScene extends Scene
         if (lucky) coins *= 2;
         coins = Math.round(coins);
 
-        const xp = Math.round(def.xp * this.stats.xpMult * (1 + streak * 0.5));
-
         this.levelCoins += coins;
-        this.levelXp += xp;
         bankCoins(coins);
+
+        //  The streak is the XP engine, and the only one that matters.
+        //
+        //  Score already pays for a streak, but score is a number on a screen;
+        //  XP pays in *upgrades*, which is the thing players actually chase. So
+        //  keeping a run of hits alive is now the fastest route to the next
+        //  rank, and it pays twice over: a step every time a milestone lands,
+        //  and a smooth climb on the raw count in between, so hit forty-one
+        //  after forty is worth more than hit two after one. Fifty in a row is
+        //  worth about seven cold kills; breaking the chain costs all of it.
+        const xpStreak = 1 + streak * 1.8 + Math.min(2.5, this.combo * 0.05);
+
+        this.gainXp(Math.round(xpWorth(def.xp, run.level) * this.stats.xpMult * xpStreak), x, y);
 
         this.progress += worth;
         run.kills += 1;
@@ -831,7 +1358,7 @@ export class GameScene extends Scene
         this.fx.popup(x, y - radius * 0.4, fmtShort(gain), popColor, popSize, big ? 84 : 60);
 
         if (crit) this.fx.popup(x, y + radius * 0.55, 'CRIT', 0xff7a3d, 22, 44, 500);
-        if (perfect) this.fx.popup(x - 4, y - radius - 22, 'BULLSEYE', 0xfff3b0, 18, 40, 520);
+        if (earned) this.fx.popup(x - 4, y - radius - 22, 'BULLSEYE', 0xfff3b0, 20, 44, 560);
 
         if (kind === 'coin' || kind === 'golden' || kind === 'boss' || lucky || this.combo % 3 === 0)
         {
@@ -893,6 +1420,163 @@ export class GameScene extends Scene
         }
     }
 
+    /**
+     * Bank the XP a kill was worth, and pay out any ranks it bought.
+     *
+     * This is the whole progression loop in one method: XP goes in on every
+     * single kill, the bar across the top of the frame moves for every one of
+     * them, and when it tops out the run owes the player a card. Nothing waits
+     * for the end of a level any more, which is the point -- the reward is
+     * attached to the shooting rather than to the paperwork after it.
+     */
+    private gainXp (xp: number, x: number, y: number): void
+    {
+        if (xp <= 0) return;
+
+        this.levelXp += xp;
+        meta.rank += xp;
+
+        const ranks = run.addXp(xp);
+
+        if (ranks <= 0) return;
+
+        //  The bar itself does the shouting; the hand is dealt on the next
+        //  frame, from `update`, so a chain reaction that buys three ranks at
+        //  once cannot re-enter this in the middle of its own kill loop.
+        this.xpFlash = 1;
+
+        Sfx.milestone(Math.min(3, ranks));
+        this.fx.popup(x, y - 52, ranks > 1 ? `RANK UP x${ranks}` : 'RANK UP', RANK_GOLD, 26, 66, 760);
+        this.fx.ring(x, y, 210, RANK_COLOR, 6, 460);
+    }
+
+    /**
+     * The run stops, the arena dims, and three cards drop in to be shot. See
+     * `objects/LevelUpPanel` for why this happens here rather than on a screen
+     * of its own.
+     */
+    private openRankUp (): void
+    {
+        if (this.levelUp || this.state !== 'play') return;
+
+        const offers = rollOffers(run.taken, run.level, 3);
+
+        //  A build that has somehow maxed every line has nothing left to be
+        //  offered. It cannot happen at the pick rate the curve deals at, but a
+        //  hand with no cards in it would be a locked game, so the rank is
+        //  simply banked and the level carries on.
+        if (offers.length === 0)
+        {
+            run.owed = 0;
+            run.burst = 0;
+            return;
+        }
+
+        this.state = 'rank';
+        setGameplayActive(false);
+
+        this.cameras.main.flash(200, 179, 108, 255);
+        Sfx.upgrade();
+
+        this.levelUp = new LevelUpPanel(this, this.tier, this.fx, offers, up => this.takePick(up));
+    }
+
+    /**
+     * A card was shot. The part goes on the gun *now*, in front of the player,
+     * which means the weapon is refitted mid-level rather than at the start of
+     * the next one -- the gun is the scoreboard, and a scoreboard that updates
+     * two levels late is not one.
+     */
+    private takePick (up: Upgrade): void
+    {
+        run.take(up.id);
+        run.owed = Math.max(0, run.owed - 1);
+        run.burst = 0;
+
+        //  Anything that buys time buys it on the clock that is running, not
+        //  on the next one. A part that says "+3s" and then does nothing for
+        //  fifteen seconds is a part the player will never take twice.
+        const hadBonus = this.stats.timeBonus;
+
+        this.stats = run.stats();
+
+        const extra = (this.stats.timeBonus - hadBonus) * 1000;
+
+        if (extra > 0)
+        {
+            this.timeTotal += extra;
+            this.timeLeft += extra;
+            this.fx.popup(CX, HUD.barY + 44, `+${(extra / 1000).toFixed(1)}s`, 0x62ffb8, 28, 54, 700);
+        }
+
+        this.look = gunLook(run.taken, meta.perks);
+        this.beam = beamLook(this.look, this.tier);
+        this.beam2 = beamLook(this.look, this.tier, true);
+
+        this.turret.refit(this.look);
+        this.turret.install(partFor(up.id));
+        this.build.refresh();
+
+        const tag = this.fx.popup(MUZZLE.x, MUZZLE.y - 128, up.name, up.color, 26, 36, 900);
+        tag.setDepth(40);
+
+        if (this.levelUp)
+        {
+            this.levelUp.destroy();
+            this.levelUp = null;
+        }
+
+        if (this.state !== 'rank') return;
+
+        //  Back to the level, mid-swing. Another rank still owed simply deals
+        //  again on the next frame, through the same door.
+        this.state = 'play';
+        setGameplayActive(true);
+    }
+
+    /**
+     * Overkill, made physical.
+     *
+     * A shot that kills with damage to spare used to throw the remainder away.
+     * It now comes out the far side of the target as a shockwave, and how far
+     * it reaches and how many it takes is exactly how much gun the player has
+     * bought -- one spare target's worth of health is one neighbour.
+     *
+     * This is deliberately not another BOOM. It ignores shield plates, because
+     * a wave arriving from inside the pack is not a shot from the muzzle; it
+     * only ever fires off the tap the player aimed themselves; and it is
+     * silent when it catches nobody, so a heavy gun on an empty stretch of
+     * board does not fill the screen with rings for free.
+     */
+    private blast (x: number, y: number, spare: number): void
+    {
+        const over = spare / unitHp(run.level);
+
+        if (over < BLAST_MIN) return;
+
+        const reach = Math.min(340, 70 + over * 38);
+        const room = Math.min(BLAST_MAX, Math.floor(over));
+
+        const caught = this.targets
+            .filter(t => !t.dead && t.kind !== 'bomb' && !t.chainLocked && t.distanceTo(x, y) <= reach + t.radius)
+            .sort((a, b) => a.distanceTo(x, y) - b.distanceTo(x, y))
+            .slice(0, room);
+
+        if (caught.length === 0) return;
+
+        this.fx.ring(x, y, reach, 0xfff3b0, 6, 360);
+        this.fx.burst(x, y, 0xffffff, 16, 'big');
+        this.cameras.main.shake(90, 0.007);
+        Sfx.boom();
+
+        if (caught.length > 1) this.fx.popup(x, y - 46, 'OVERKILL', 0xffb020, 22, 52, 560);
+
+        for (const t of caught)
+        {
+            if (t.damage(spare)) this.killTarget(t, false, false, 1);
+        }
+    }
+
     private explode (x: number, y: number, depth: number): void
     {
         const r = this.stats.explodeRadius;
@@ -922,11 +1606,13 @@ export class GameScene extends Scene
         for (let i = 0; i < this.stats.chain; i++)
         {
             let best: Target | null = null;
-            let bestDist = 300;
+            let bestDist = CHAIN_REACH;
 
             for (const t of this.targets)
             {
-                if (t.dead || used.has(t) || t.kind === 'bomb') continue;
+                //  Welded chains are the lightning's business too: it does not
+                //  get to walk a rope the player is supposed to walk by hand.
+                if (t.dead || used.has(t) || t.kind === 'bomb' || t.chain) continue;
 
                 const d = t.distanceTo(fromX, fromY);
                 if (d < bestDist) { bestDist = d; best = t; }
@@ -951,7 +1637,7 @@ export class GameScene extends Scene
             fromX = best.x;
             fromY = best.y;
 
-            if (best.damage(this.stats.damage * 0.75))
+            if (best.damage(this.stats.damage * CHAIN_DAMAGE))
             {
                 this.killTarget(best, false, false, depth + 1);
             }
@@ -1009,6 +1695,8 @@ export class GameScene extends Scene
         const x = t.x;
         const y = t.y;
         const harmless = t.kind === 'bomb';
+
+        if (t.chain) this.releaseChain(t, false);
 
         t.destroy();
 
@@ -1104,8 +1792,7 @@ export class GameScene extends Scene
 
     /**
      * The combo readout gains a whole design step every COMBO_STEP kills:
-     * bigger, hotter, framed by chevrons and finally shaking and orbited by
-     * sparks -- so the ramp is felt, not just counted.
+     * bigger, hotter, and finally shaking -- so the ramp is felt, not counted.
      */
     private applyComboTier (tier: number): void
     {
@@ -1115,29 +1802,12 @@ export class GameScene extends Scene
 
         this.comboText.setStyle({
             fontFamily: FONT,
-            fontSize: Math.min(44, 28 + tier * 2),
+            fontSize: Math.min(40, 28 + tier * 1.8),
             color: hex(color),
             stroke: '#000000',
             strokeThickness: 4 + Math.min(7, tier)
         });
 
-        for (const w of this.comboWings) w.img.destroy();
-        this.comboWings = [];
-
-        const pairs = Math.max(0, Math.min(3, tier - 1));
-
-        for (let slot = 0; slot < pairs; slot++)
-        {
-            for (const side of [ -1, 1 ])
-            {
-                const img = iconImage(this, CX, COMBO_Y, 'chevrons', {
-                    size: 18 + tier, color
-                });
-
-                img.setDepth(31).setFlipX(side < 0);
-                this.comboWings.push({ img, side, slot });
-            }
-        }
     }
 
     private checkComboTier (): void
@@ -1168,7 +1838,6 @@ export class GameScene extends Scene
         if (this.combo < 2)
         {
             this.comboText.setText('').setPosition(CX, COMBO_Y).setScale(1);
-            for (const w of this.comboWings) w.img.setVisible(false);
             return;
         }
 
@@ -1224,94 +1893,39 @@ export class GameScene extends Scene
         const under = Math.max(6, (half + 10) * cf);
 
         g.fillStyle(color, 0.75);
-        g.fillRoundedRect(CX - under, COMBO_Y + 26, under * 2, 4, 2);
-
-        for (const w of this.comboWings)
-        {
-            const off = half + 26 + w.slot * 24;
-
-            w.img.setVisible(true);
-            w.img.setPosition(CX + w.side * off, COMBO_Y);
-            w.img.setAlpha(0.9 - w.slot * 0.24 + beat * 0.12);
-        }
-    }
-
-    //  -------------------------------------------------------- streak track
-
-    private diamond (g: GameObjects.Graphics, x: number, y: number, r: number, outline = false): void
-    {
-        const pts = [
-            new PMath.Vector2(x, y - r),
-            new PMath.Vector2(x + r, y),
-            new PMath.Vector2(x, y + r),
-            new PMath.Vector2(x - r, y)
-        ];
-
-        if (outline) g.strokePoints(pts, true, true);
-        else g.fillPoints(pts, true);
+        g.fillRoundedRect(CX - under, COMBO_Y + 24, under * 2, 4, 2);
     }
 
     /**
-     * Streak progress as a row of milestone gems rather than another bar --
-     * one gem per tier, lit as it is claimed, the next one pulsing.
+     * The one line under the combo, and the only place the streak is spelled
+     * out now that the gem track is gone.
+     *
+     * It reads in XP rather than in score on purpose. Score is a number that
+     * goes up; XP is the next upgrade. Telling the player a streak is worth
+     * "x3.4 XP" is telling them it is worth a card, which is the thing they are
+     * actually playing for.
      */
-    private drawStreak (g: GameObjects.Graphics): void
-    {
-        const spacing = HUD.streakGap;
-        const x0 = CX - ((STREAKS.length - 1) * spacing) / 2;
-        const t = this.time.now;
-
-        for (let i = 0; i < STREAKS.length; i++)
-        {
-            const x = x0 + i * spacing;
-            const color = STREAK_COLORS[i];
-            const reached = this.combo >= STREAKS[i].n;
-            const next = !reached && (i === 0 || this.combo >= STREAKS[i - 1].n);
-
-            if (i > 0)
-            {
-                const linked = this.combo >= STREAKS[i - 1].n;
-                g.lineStyle(3, linked ? STREAK_COLORS[i - 1] : 0x232b47, linked ? 0.6 : 0.55);
-                g.lineBetween(x - spacing + 14, STREAK_Y, x - 14, STREAK_Y);
-            }
-
-            if (reached)
-            {
-                g.fillStyle(color, 0.16 + Math.abs(Math.sin(t * 0.004 + i)) * 0.1);
-                this.diamond(g, x, STREAK_Y, 21);
-                g.fillStyle(color, 1);
-                this.diamond(g, x, STREAK_Y, 11);
-            }
-            else if (next)
-            {
-                g.lineStyle(3, color, 0.4 + Math.abs(Math.sin(t * 0.006)) * 0.45);
-                this.diamond(g, x, STREAK_Y, 11, true);
-            }
-            else
-            {
-                g.fillStyle(0x2a3352, 1);
-                this.diamond(g, x, STREAK_Y, 5);
-            }
-        }
-    }
-
     private updateStreakText (): void
     {
         const active = this.milestoneIdx >= 0 ? STREAKS[this.milestoneIdx] : null;
         const next = STREAKS.find(s => this.combo < s.n);
-        const pct = (s: Streak) => Math.round(s.bonus * this.stats.comboMult * 100);
+
+        //  The same sum `killTarget` pays out with, so the caption can never
+        //  drift away from what the streak is actually worth.
+        const xpAt = (combo: number, s: Streak | null) =>
+            1 + (s ? s.bonus * this.stats.comboMult : 0) * 1.8 + Math.min(2.5, combo * 0.05);
 
         let label: string;
         let color: string;
 
         if (active)
         {
-            label = `${active.label}   +${pct(active)}% SCORE`;
+            label = `${active.label}   x${xpAt(this.combo, active).toFixed(1)} XP`;
             color = hex(STREAK_COLORS[Math.min(this.milestoneIdx, STREAK_COLORS.length - 1)]);
         }
         else if (next)
         {
-            label = `${next.n - this.combo} MORE FOR +${pct(next)}% SCORE`;
+            label = `${next.n - this.combo} MORE FOR x${xpAt(next.n, next).toFixed(1)} XP`;
             color = '#7d88b0';
         }
         else
@@ -1384,18 +1998,7 @@ export class GameScene extends Scene
         this.timeIcon.setTint(barColor);
         this.timeIcon.setScale(this.timeIconScale * (low ? 1 + Math.abs(Math.sin(this.time.now * 0.012)) * 0.2 : 1));
 
-        //  goal bar
-        const gf = Math.min(1, this.progress / this.cfg.goal);
-        g.fillStyle(0x000000, 0.45);
-        g.fillRoundedRect(left, HUD.goalY, span, HUD.goalH, 4);
-        if (gf > 0.001)
-        {
-            g.fillStyle(this.tier.accent2, 0.95);
-            g.fillRoundedRect(left + 2, HUD.goalY + 1, Math.max(8, (span - 4) * gf), HUD.goalH - 2, 3);
-        }
-
-        this.drawStreak(g);
-        this.drawRoute(g);
+        this.drawRank(g);
 
         //  low-time vignette
         if (low && this.state === 'play')
@@ -1407,57 +2010,68 @@ export class GameScene extends Scene
     }
 
     /**
-     * The same rail the blast doors carry, shrunk into the top strip: one stop
-     * per level of this zone and a gate at the end in the colour of whatever is
-     * behind it. It is the only thing on screen that answers "how much further"
-     * -- and it answers it without a number.
+     * The rank bar: full width, hard against the top edge of the frame, and
+     * moving on literally every kill.
+     *
+     * It gets the top edge because it is the one readout that is always doing
+     * something. The countdown only ever empties, the goal bar only fills once
+     * per level and then resets -- this one fills all run, wraps, and each wrap
+     * is a card. A player who never reads a word of it still learns, inside the
+     * first level, that shooting makes the purple line move and the purple line
+     * reaching the end is when they get to choose something.
      */
-    private drawRoute (g: GameObjects.Graphics): void
+    private drawRank (g: GameObjects.Graphics): void
     {
-        const stops = this.zone.to - this.zone.from + 1;
-        const here = run.level - this.zone.from;
-        const y = HUD.levelY;
-        const x0 = HUD.margin + 4;
-        const gap = Math.min(22, (BAR_RIGHT - x0 - 40) / stops);
+        const want = run.xpFrac;
 
-        g.lineStyle(3, 0x1a2138, 1);
-        g.lineBetween(x0, y, x0 + stops * gap, y);
-
-        g.lineStyle(3, this.tier.accent, 0.9);
-        g.lineBetween(x0, y, x0 + here * gap, y);
-
-        for (let i = 0; i < stops; i++)
+        //  A rank-up wraps the bar. Running the fill backwards to the new value
+        //  would read as *losing* progress, so it finishes the lap it was on
+        //  and starts the next one from the left.
+        if (want < this.xpShown - 0.02)
         {
-            const x = x0 + i * gap;
-
-            if (i < here)
-            {
-                g.fillStyle(this.tier.accent, 1);
-                g.fillCircle(x, y, 4);
-            }
-            else if (i === here)
-            {
-                g.fillStyle(this.tier.accent, 1);
-                g.fillCircle(x, y, 3);
-                g.lineStyle(2, this.tier.accent, 0.5 + Math.abs(Math.sin(this.time.now * 0.005)) * 0.5);
-                g.strokeCircle(x, y, 7);
-            }
-            else
-            {
-                g.fillStyle(0x2a3352, 1);
-                g.fillCircle(x, y, 2.5);
-            }
+            this.xpShown += (1.08 - this.xpShown) * 0.4;
+            if (this.xpShown > 0.994) this.xpShown = 0;
+        }
+        else
+        {
+            this.xpShown += (want - this.xpShown) * 0.17;
         }
 
-        //  The gate, tinted with the next zone -- a colour the player has not
-        //  seen yet, sitting a countable number of stops away.
-        const gx = x0 + stops * gap;
-        const gate = aheadAccent(run.level);
+        const h = HUD.xpH;
+        const y = HUD.xpY;
+        const flash = this.xpFlash;
+        const color = flash > 0.01 ? mix(RANK_COLOR, RANK_GOLD, flash) : RANK_COLOR;
 
-        g.lineStyle(2.5, gate, 0.8);
-        g.strokeRect(gx - 5, y - 8, 10, 16);
-        g.fillStyle(gate, 0.25);
-        g.fillRect(gx - 5, y - 8, 10, 16);
+        g.fillStyle(0x0a0e1e, 0.9);
+        g.fillRect(0, y, W, h);
+
+        const fill = Math.max(0, Math.min(1, this.xpShown)) * W;
+
+        if (fill > 0.5)
+        {
+            g.fillStyle(color, 0.9 + flash * 0.1);
+            g.fillRect(0, y, fill, h);
+
+            //  Leading edge: the bit the eye actually tracks.
+            g.fillStyle(mix(color, 0xffffff, 0.6), 0.9);
+            g.fillRect(Math.max(0, fill - 3), y, 3, h);
+            g.fillStyle(color, 0.22 + flash * 0.4);
+            g.fillRect(Math.max(0, fill - 26), y, 26, h);
+        }
+
+        //  Ten notches across, so "nearly there" is readable at a glance
+        //  rather than being a judgement about a bar with no marks on it.
+        g.fillStyle(0x000000, 0.45);
+        for (let i = 1; i < 10; i++) g.fillRect((W / 10) * i, y, 1.5, h);
+
+        if (flash > 0.01)
+        {
+            g.fillStyle(RANK_GOLD, flash * 0.5);
+            g.fillRect(0, y, W, h + 3);
+        }
+
+        this.rankText.setText(`RANK ${run.rank}`);
+        this.rankText.setColor(hex(color));
     }
 
     //  --------------------------------------------------------------- loop
@@ -1469,6 +2083,13 @@ export class GameScene extends Scene
         this.fx.update(dt);
         this.backdrop.update(dt);
         this.hazards.update(dt, this.state === 'play');
+
+        if (this.xpFlash > 0) this.xpFlash = Math.max(0, this.xpFlash - dt / 620);
+
+        //  A rank bought itself a card. Dealt from here rather than from the
+        //  kill that paid for it, so a chain reaction worth three ranks cannot
+        //  re-enter the hand in the middle of its own kill loop.
+        if (this.state === 'play' && run.owed > 0 && !this.levelUp) this.openRankUp();
 
         if (this.state === 'play')
         {
@@ -1495,16 +2116,31 @@ export class GameScene extends Scene
                 }
             }
 
-            //  spawning
+            //  Spawning. `spawnRate` is the level's real pacing dial and it is
+            //  treated as one: a board that has been cleared out refills at
+            //  half the gap rather than instantly, which is the difference
+            //  between a level that breathes and the machine-gun this used to
+            //  be. It used to spawn once *per frame* while the board was under
+            //  half full, which meant a player who shot well was punished with
+            //  a wall of targets and the whole spawnRate column was decoration.
             this.spawnTimer -= dt;
 
             const alive = this.targets.length;
             const floor = Math.max(2, Math.ceil(this.cfg.maxActive * 0.5));
 
-            if ((this.spawnTimer <= 0 || alive < floor) && alive < this.cfg.maxActive)
+            if (this.spawnTimer <= 0 && alive < this.cfg.maxActive)
             {
                 this.spawn();
-                this.spawnTimer = this.cfg.spawnRate;
+
+                //  A chain arrives as three or four targets on one tick, and
+                //  it is charged for all of them: a welded run is a different
+                //  *shape* of work, not a free extra helping of it. Without
+                //  this a chain zone quietly spawns at double the rate its
+                //  table asks for, which is most of where the late-game wall
+                //  of targets was coming from.
+                const added = Math.max(1, this.targets.length - alive);
+
+                this.spawnTimer = this.cfg.spawnRate * added * (alive < floor ? 0.5 : 1);
             }
 
             if (this.pending)
@@ -1528,10 +2164,21 @@ export class GameScene extends Scene
             }
         }
 
+        //  Everything on the board holds still behind the cards. The world
+        //  behind it does not -- the backdrop keeps running, so the pause reads
+        //  as a held breath rather than as a freeze frame.
+        const frozen = this.state === 'rank';
+
         for (let i = this.targets.length - 1; i >= 0; i--)
         {
             const t = this.targets[i];
-            t.update(dt, this.stats.slow);
+
+            if (!frozen) t.update(dt, this.stats.slow);
+
+            if (t.trail && this.state === 'play' && t.takeTrailPuff())
+            {
+                this.trails.puff(t.trail, t.x, t.y);
+            }
 
             //  A falling target dies by reaching the floor; a standing one by
             //  running out of life. Both are the same miss.
@@ -1553,6 +2200,11 @@ export class GameScene extends Scene
             }, dt);
         }
 
+        //  The chains are drawn after the gimmick has moved the board, so the
+        //  ropes are attached to where the links actually are this frame and
+        //  not to where they were before the wind got them.
+        for (const c of this.chains) c.update(dt);
+
         //  HUD text
         this.timeText.setText((this.timeLeft / 1000).toFixed(2));
         this.goalText.setText(`${Math.min(this.progress, this.cfg.goal)} / ${this.cfg.goal}`);
@@ -1561,6 +2213,7 @@ export class GameScene extends Scene
         this.drawCombo();
         this.updateStreakText();
         this.turret.idle(this.time.now);
+        this.tickWingmen(dt);
 
         if (this.coinsDisplay !== meta.coins)
         {
@@ -1570,6 +2223,74 @@ export class GameScene extends Scene
         }
 
         this.drawHud();
+    }
+
+    //  ----------------------------------------------------------- wingman
+
+    /**
+     * The bought guns: they track whatever is nearest to them every frame and
+     * take a shot on their own clock, about once a second.
+     *
+     * They never shoot a bomb. The whole appeal of buying a second gun is that
+     * it helps, and a gun that could break the player's combo for them -- with
+     * no tap of theirs anywhere near it -- would be a punishment they paid for.
+     */
+    private tickWingmen (dt: number): void
+    {
+        if (this.wingmen.length === 0) return;
+
+        for (const w of this.wingmen)
+        {
+            const mark = this.wingTarget(w);
+
+            if (mark) w.aimAt(mark.x, mark.y);
+            else w.stand();
+
+            w.tick(dt, this.time.now);
+        }
+
+        if (this.state !== 'play') return;
+
+        this.wingTimer -= dt;
+
+        if (this.wingTimer > 0) return;
+
+        this.wingTimer = WINGMAN_DELAY;
+
+        for (const w of this.wingmen)
+        {
+            if (this.state !== 'play') return;
+
+            const mark = this.wingTarget(w);
+
+            if (!mark) continue;
+
+            w.aimAt(mark.x, mark.y);
+            w.fire();
+
+            const m = w.muzzle;
+
+            this.fx.beam(m.x, m.y, mark.x, mark.y, this.beam2, 0.8);
+            this.applyShot(mark, mark.x, mark.y, false, m);
+        }
+    }
+
+    /** Whatever that pod can reach soonest, bombs excepted. */
+    private wingTarget (w: Wingman): Target | null
+    {
+        let best: Target | null = null;
+        let bestDist = Infinity;
+
+        for (const t of this.targets)
+        {
+            if (t.dead || t.kind === 'bomb' || t.chainLocked) continue;
+
+            const d = Math.hypot(t.x - w.x, t.y - w.y);
+
+            if (d < bestDist) { bestDist = d; best = t; }
+        }
+
+        return best;
     }
 
     //  --------------------------------------------------------------- flow
@@ -1590,16 +2311,18 @@ export class GameScene extends Scene
         Sfx.fail();
         this.cameras.main.shake(320, 0.014);
 
-        if (!this.revived && adsAvailable())
+        const spare = boostCount('life');
+
+        if (!this.revived && (spare > 0 || adsAvailable()))
         {
-            this.offerRevive();
+            this.offerRevive(spare);
             return;
         }
 
         this.endRun();
     }
 
-    private offerRevive (): void
+    private offerRevive (spare: number): void
     {
         const panel = this.add.container(0, 0).setDepth(45);
 
@@ -1618,7 +2341,18 @@ export class GameScene extends Scene
             fontFamily: FONT_UI, fontSize: 17, color: '#8d97bd'
         }).setOrigin(0.5));
 
-        const life = rewardButton(this, CX, H * 0.52, {
+        //  Two ways back in, and the bought one goes on top: a player holding
+        //  an extra life should never have to read past a video offer to find
+        //  the thing they already paid for.
+        let y = H * (spare > 0 ? 0.485 : 0.52);
+
+        if (spare > 0)
+        {
+            panel.add(this.spareLifeButton(CX, y, spare, panel));
+            y += 104;
+        }
+
+        const life = rewardButton(this, CX, y, {
             width: 360,
             height: 84,
             label: `EXTRA LIFE  +${REVIVE_SECONDS}s`,
@@ -1626,9 +2360,13 @@ export class GameScene extends Scene
             onReward: () => this.revive(panel)
         });
 
-        if (life) panel.add(life);
+        if (life)
+        {
+            panel.add(life);
+            y += 104;
+        }
 
-        const quit = this.add.text(CX, H * 0.63, 'GIVE UP', {
+        const quit = this.add.text(CX, y + 8, 'GIVE UP', {
             fontFamily: FONT, fontSize: 26, color: '#7d88b0'
         }).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
@@ -1640,6 +2378,56 @@ export class GameScene extends Scene
         });
 
         panel.add(quit);
+    }
+
+    /**
+     * The extra life the player bought in the store, on the one screen where
+     * it is worth anything. It says how many are left, because a consumable
+     * that does not is a consumable nobody buys twice.
+     */
+    private spareLifeButton (x: number, y: number, spare: number, panel: GameObjects.Container): GameObjects.Container
+    {
+        const w = 360;
+        const h = 84;
+        const btn = this.add.container(x, y).setDepth(12);
+
+        const g = this.add.graphics();
+        g.fillStyle(0x6cf5c8, 1);
+        g.fillRoundedRect(-w / 2, -h / 2, w, h, 22);
+        g.fillStyle(0xffffff, 0.2);
+        g.fillRoundedRect(-w / 2, -h / 2, w, 34, { tl: 22, tr: 22, bl: 0, br: 0 });
+        btn.add(g);
+
+        const icon = iconImage(this, -w / 2 + 44, 0, 'shield', { size: 32, color: 0x0b1024 });
+        btn.add(icon);
+
+        btn.add(this.add.text(-w / 2 + 74, 0, `USE EXTRA LIFE  x${spare}`, {
+            fontFamily: FONT, fontSize: 25, color: '#0b1024'
+        }).setOrigin(0, 0.5));
+
+        btn.setSize(w, h);
+        btn.setInteractive({
+            hitArea: new Geom.Rectangle(0, 0, w, h),
+            hitAreaCallback: Geom.Rectangle.Contains,
+            useHandCursor: true
+        });
+
+        this.tweens.add({ targets: btn, scale: 1.03, duration: 780, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+
+        btn.on('pointerdown', () =>
+        {
+            unlockAudio();
+
+            if (!spendBoost('life'))
+            {
+                Sfx.dry();
+                return;
+            }
+
+            this.revive(panel);
+        });
+
+        return btn;
     }
 
     private revive (panel: GameObjects.Container): void
@@ -1659,14 +2447,13 @@ export class GameScene extends Scene
     private endRun (): void
     {
         this.hazards.clear();
+        this.clearChains();
 
         //  A failed attempt does not bank its score into the run -- retrying
         //  replays the same level from the same total.
         run.bestCombo = Math.max(run.bestCombo, this.bestCombo);
         run.coinsEarned += this.levelCoins;
-        run.xpEarned += this.levelXp;
 
-        meta.rank += this.levelXp;
         meta.best = Math.max(meta.best, run.score + this.levelScore);
         meta.bestLevel = Math.max(meta.bestLevel, run.level - 1);
         saveMeta();
@@ -1698,6 +2485,7 @@ export class GameScene extends Scene
 
         //  Whatever was in the way when the level ended leaves for free.
         this.hazards.clear();
+        this.clearChains();
 
         run.bestCombo = Math.max(run.bestCombo, this.bestCombo);
         Sfx.levelClear();
@@ -1717,16 +2505,14 @@ export class GameScene extends Scene
         });
 
         const comboBonus = Math.round(this.bestCombo * (12 + run.level * 2));
-        const perfect = this.misses === 0 && this.expiredCount === 0;
+        const perfect = !this.skipped && this.misses === 0 && this.expiredCount === 0;
         const perfectBonus = perfect ? 250 + run.level * 60 : 0;
 
         bankCoins(comboBonus + perfectBonus);
 
         run.score += this.levelScore;
         run.coinsEarned += this.levelCoins + comboBonus + perfectBonus;
-        run.xpEarned += this.levelXp;
 
-        meta.rank += this.levelXp;
         meta.best = Math.max(meta.best, run.score);
         meta.bestLevel = Math.max(meta.bestLevel, run.level);
         saveMeta();
@@ -1742,17 +2528,30 @@ export class GameScene extends Scene
                 if (run.level >= FINAL_LEVEL)
                 {
                     this.scene.start('Result', { mode: 'victory', levelScore: this.levelScore, bestCombo: this.bestCombo });
+                    return;
                 }
-                else if (isBonusAfter(run.level))
+
+                //  The level number used to be advanced by the upgrade screen,
+                //  because there always was one. There is not any more: inside
+                //  a zone the doors shut on one level and open on the next with
+                //  nothing in between, so the level advances here.
+                const cleared = run.level;
+
+                run.level = Math.min(FINAL_LEVEL, cleared + 1);
+
+                if (isBonusAfter(cleared))
                 {
-                    //  Every fifth level, the doors open onto the vault instead
-                    //  of the upgrade table. The table is still waiting on the
-                    //  far side of it, with more coins on the counter.
+                    //  Every fifth level, the doors open onto the vault.
                     this.scene.start('Bonus');
+                }
+                else if (isZoneStart(run.level))
+                {
+                    //  Leaving a world is the one moment worth stopping for.
+                    this.scene.start('World');
                 }
                 else
                 {
-                    this.scene.start('Upgrade');
+                    this.scene.start('Game');
                 }
             });
         });

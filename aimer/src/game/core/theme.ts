@@ -82,41 +82,54 @@ export const CY = H / 2;
  * other band in the top strip is measured off it, so the whole strip moves as
  * one when landscape tightens it up.
  */
-const LABEL_Y = LANDSCAPE ? 86 : 100;
+const LABEL_Y = LANDSCAPE ? 78 : 92;
 
-/** The top strip of the play screen: score, countdown bar, goal bar, combo. */
+/** Gap from the label line down to the top of the arena. */
+const PLAY_GAP = LANDSCAPE ? 124 : 126;
+
+/**
+ * The top strip of the play screen.
+ *
+ * It used to carry five separate progress readouts stacked on top of each
+ * other -- rank bar, zone route rail, countdown bar, goal bar, and a six-gem
+ * streak track with its own caption -- and they ran into each other. Three of
+ * them are gone:
+ *
+ *   the route rail  -- world progress is the whole point of the gate screen
+ *                      between worlds, and it was a 40px stub here.
+ *   the goal bar    -- the goal is a small whole number. "6 / 18" says it
+ *                      better than nine pixels of fill ever did.
+ *   the streak gems -- the combo readout in the middle of the strip was
+ *                      already saying the same thing, louder.
+ *
+ * What is left is two bars that mean two different things: the rank bar on the
+ * very top edge, which fills all run, and the countdown, which empties every
+ * level. Everything else in the strip is a number.
+ */
 export const HUD = {
     margin: LANDSCAPE ? 40 : 30,
+    /**
+     * The rank bar, pinned to the very top edge of the frame and running the
+     * whole width of it. It is the one readout that is filling at all times, so
+     * it gets the one place on screen nothing else wants.
+     */
+    xpY: 0,
+    xpH: LANDSCAPE ? 8 : 9,
+    /** Rank chip, top left. Coins sit opposite it. */
+    rankY: LANDSCAPE ? 26 : 30,
     levelY: LANDSCAPE ? 26 : 30,
     scoreY: LANDSCAPE ? 52 : 62,
     scoreSize: LANDSCAPE ? 46 : 54,
     labelY: LABEL_Y,
-    /** Countdown bar: top edge and height. */
+    /** Countdown bar: top edge and height. The only bar in the strip. */
     barY: LABEL_Y + 14,
     barH: 22,
-    /** Goal bar, directly under it. */
-    goalY: LABEL_Y + 42,
-    goalH: 9,
-    comboY: LABEL_Y + 72,
-    /** Right edge of both bars, and of the stopwatch cap that ends them. */
+    /** The combo readout, and the streak caption under it. */
+    comboY: LABEL_Y + 64,
+    streakTextY: LABEL_Y + 104,
+    /** Right edge of the bar, and of the stopwatch cap that ends it. */
     barRight: W - (LANDSCAPE ? 68 : 58),
-    /**
-     * Streak gem track. It used to sit just above the turret, which was fine
-     * when the turret was a small socket -- but the gun now grows to most of
-     * the width of the screen, and the bottom centre belongs to it. The whole
-     * streak readout lives in the top strip instead.
-     */
-    streakY: LABEL_Y + (LANDSCAPE ? 118 : 126),
-    /** Spacing between streak gems. Portrait has to fit six in 540px. */
-    streakGap: LANDSCAPE ? 46 : 38,
-    /**
-     * The streak caption and the score multiplier. A wide screen has room to
-     * put them beside the gem track; a portrait one stacks them underneath.
-     */
-    streakTextY: LABEL_Y + (LANDSCAPE ? 118 : 154),
-    /** True when the caption sits beside the gems rather than under them. */
-    streakInline: LANDSCAPE,
-    /** Bottom line -- only the mute button, tucked into the corner. */
+    /** Bottom line -- only the mute button and the skip pill. */
     footerY: H - 46
 };
 
@@ -124,8 +137,8 @@ export const HUD = {
 export const PLAY = {
     left: LANDSCAPE ? 60 : 46,
     right: W - (LANDSCAPE ? 60 : 46),
-    /** Clear of the streak readout that now ends the top strip. */
-    top: LABEL_Y + (LANDSCAPE ? 148 : 176),
+    /** Clear of the combo readout that now ends the top strip. */
+    top: LABEL_Y + PLAY_GAP,
     bottom: H - 94
 };
 
@@ -152,7 +165,7 @@ export const GUN_SCALE = LANDSCAPE ? 0.82 : 1;
  */
 export const DENSITY = Math.min(1.5, Math.max(1,
     ((PLAY.right - PLAY.left) * (PLAY.bottom - PLAY.top)) /
-    ((PORTRAIT_W - 92) * (PORTRAIT_H - 94 - 214))
+    ((PORTRAIT_W - 92) * (PORTRAIT_H - 94 - (92 + 126)))
 ));
 
 export const FONT = '"Arial Black", "Arial Bold", Arial, sans-serif';

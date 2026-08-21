@@ -37,6 +37,14 @@ export interface Zone
 {
     /** 0-based, so it can index into arrays of per-zone art. */
     index: number;
+    /** The place, on the gate the player walks through to get into it. */
+    name: string;
+    /** What the place does to you, in two or three words. */
+    rule: string;
+    /** The rule again, as a sentence, under the name on the gate. */
+    ruleText: string;
+    /** Icon texture name (see core/icons) for the rule. */
+    icon: string;
     /** First level of the zone. */
     from: number;
     /** Last level of the zone (filled in below from the next zone's start). */
@@ -52,6 +60,10 @@ const LAST_LEVEL = 40;
 interface ZoneSeed
 {
     from: number;
+    name: string;
+    rule: string;
+    ruleText: string;
+    icon: string;
     palette: Tier;
     backdrop: BackdropId;
     gimmick: GimmickId;
@@ -60,42 +72,70 @@ interface ZoneSeed
 const SEEDS: ZoneSeed[] = [
     {
         from: 1,
+        name: 'THE RANGE',
+        rule: 'CALIBRATION',
+        ruleText: 'NOTHING MOVES. LEARN THE GUN.',
+        icon: 'crosshair',
         backdrop: 'range',
         gimmick: 'none',
         palette: { bg: 0x080b1c, grid: 0x1b2a5e, accent: 0x3fe0ff, accent2: 0x6cf5c8, dust: 0x3fe0ff }
     },
     {
         from: 4,
+        name: 'NEON SKYLINE',
+        rule: 'CROSSWIND',
+        ruleText: 'THE WIND DRAGS EVERY TARGET SIDEWAYS.',
+        icon: 'chevrons',
         backdrop: 'skyline',
         gimmick: 'drift',
         palette: { bg: 0x0c0824, grid: 0x2e2070, accent: 0x9b6cff, accent2: 0x4fd6ff, dust: 0x9b6cff }
     },
     {
         from: 8,
+        name: 'THE STORM',
+        rule: 'BLACKOUT',
+        ruleText: 'THE LIGHTS GO OUT. THE TARGETS DO NOT.',
+        icon: 'bolt',
         backdrop: 'storm',
         gimmick: 'blackout',
         palette: { bg: 0x080d18, grid: 0x24325c, accent: 0x8fb4ff, accent2: 0xe4ecff, dust: 0xb8ccff }
     },
     {
         from: 13,
+        name: 'MAGMA DEEP',
+        rule: 'WARP',
+        ruleText: 'TARGETS JUMP ONCE, WITHOUT WARNING.',
+        icon: 'sparkle',
         backdrop: 'cavern',
         gimmick: 'blink',
         palette: { bg: 0x150a06, grid: 0x5a2a12, accent: 0xff8a3d, accent2: 0xffd166, dust: 0xff9d3d }
     },
     {
         from: 20,
+        name: 'THE REACTOR',
+        rule: 'SPIN',
+        ruleText: 'THE WHOLE FIELD TURNS AROUND THE CORE.',
+        icon: 'trefoil',
         backdrop: 'reactor',
         gimmick: 'orbit',
         palette: { bg: 0x03170f, grid: 0x0c5c37, accent: 0x2fffa0, accent2: 0xd8ff4d, dust: 0x2fffa0 }
     },
     {
         from: 28,
+        name: 'HIGH ORBIT',
+        rule: 'SHIELD',
+        ruleText: 'A SPINNING PLATE EATS SHOTS FROM ITS SIDE.',
+        icon: 'shield',
         backdrop: 'orbitfield',
         gimmick: 'shield',
         palette: { bg: 0x0a0014, grid: 0x3c0a78, accent: 0xd08cff, accent2: 0x4fd6ff, dust: 0xd8c8ff }
     },
     {
         from: 34,
+        name: 'CRIMSON END',
+        rule: 'SPLIT',
+        ruleText: 'EVERY KILL BREAKS INTO TWO SMALLER ONES.',
+        icon: 'trident',
         backdrop: 'crimson',
         gimmick: 'split',
         palette: { bg: 0x1a0007, grid: 0x6e0020, accent: 0xff2d55, accent2: 0xff8a00, dust: 0xff5470 }
@@ -104,6 +144,10 @@ const SEEDS: ZoneSeed[] = [
 
 export const ZONES: Zone[] = SEEDS.map((s, i) => ({
     index: i,
+    name: s.name,
+    rule: s.rule,
+    ruleText: s.ruleText,
+    icon: s.icon,
     from: s.from,
     to: (i + 1 < SEEDS.length ? SEEDS[i + 1].from - 1 : LAST_LEVEL),
     palette: s.palette,
@@ -163,6 +207,11 @@ export function skinFor (zone: Zone, kind: TargetKind): { color: number; ring: n
     switch (kind)
     {
         case 'normal':  color = p.accent; break;
+        //  Full strength, and deliberately so: a two-shot target that was
+        //  darkened to mark it out read as one the player could not shoot.
+        //  The plating ring drawn inside its edge (see objects/Target) and the
+        //  number on its face are what say "this one takes two".
+        case 'tough':   color = mix(p.accent, 0xffffff, 0.15); break;
         case 'small':   color = p.accent2; break;
         case 'fast':    color = mix(p.accent2, 0xffffff, 0.42); break;
         case 'armored': color = mix(p.accent, 0xa8b4d0, 0.62); break;

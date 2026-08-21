@@ -1,20 +1,16 @@
-import { GameObjects, Scene } from 'phaser';
+import { GameObjects, Scene, Tweens } from 'phaser';
 import { KINDS, KindDef, TargetKind, unitHp } from '../data/levels';
 import { PLAY, FONT } from '../core/theme';
 import { ic } from '../core/icons';
+import { BodyShape, MARK_FIT, fillBody, strokeBody } from '../core/shapes';
+import { sa } from '../core/skinart';
+import { TrailId, trailInterval } from '../core/trails';
+import type { Skin, TargetStyle } from '../data/skins';
+import type { Chain } from '../core/chain';
 
 const TAU = Math.PI * 2;
 
-/**
- * A target's paint. Zones repaint their own rank and file so the board always
- * belongs to the place it is standing in; the specials keep the colours that
- * are the whole reason they are readable at a glance.
- */
-export interface Skin
-{
-    color: number;
-    ring: number;
-}
+export type { Skin, TargetStyle };
 
 export class Target extends GameObjects.Container
 {
@@ -49,6 +45,17 @@ export class Target extends GameObjects.Container
     /** Set on the halves a split leaves behind, so they cannot split again. */
     noSplit = false;
     /**
+     * The ordered chain this target is welded into, and where in it it sits.
+     *
+     * A locked link refuses every shot -- the player's, a wingman's, a lance
+     * running through it -- until the link in front of it is gone. The flag is
+     * held here rather than asked of the chain every frame because the shot
+     * path checks it on every target it touches, several times a tap.
+     */
+    chain: Chain | null = null;
+    chainIndex = 0;
+    chainLocked = false;
+    /**
      * What this kill is worth towards the level goal. Normally the kind's own
      * value; the halves a split leaves behind are worth nothing, so the rule
      * pays in score and combo without quietly halving every goal in its zone.
@@ -59,17 +66,49 @@ export class Target extends GameObjects.Container
     readonly color: number;
     readonly ringColor: number;
 
-    private core: GameObjects.Arc;
-    private glow: GameObjects.Arc;
-    private inner: GameObjects.Arc;
-    private flash: GameObjects.Arc;
+    /**
+     * The body is drawn with graphics rather than a stack of arcs, because a
+     * skin is allowed to change the silhouette and not only the colour -- and
+     * a hexagon is a path, not a circle with a different radius.
+     *
+     * Each piece is pathed once, at construction, and animated after that by
+     * scale, rotation and alpha alone. A target that re-pathed its outline
+     * every frame would put the whole skin system on the per-frame budget, and
+     * a late level has thirty of these on screen at once.
+     */
+    private halo: GameObjects.Graphics;
+    private art: GameObjects.Graphics;
+    private flash: GameObjects.Graphics;
     private mark: GameObjects.Image | null = null;
+    /** The plating line on a target that takes more than one shot. */
+    private band: GameObjects.Graphics | null = null;
     private label: GameObjects.Text | null = null;
     private ring: GameObjects.Graphics;
     private phase: number;
     private flashAmount = 0;
 
-    constructor (scene: Scene, x: number, y: number, kind: TargetKind, baseSize: number, level: number, speed: number, moving: boolean, skin?: Skin)
+    /** The blink currently in flight, so a repeat warp can drop it. */
+    private warpTween: Tweens.Tween | null = null;
+
+    private shape: BodyShape;
+    private spin: number;
+    private glowMult: number;
+    private rot = 0;
+
+    /** The face or flag painted over the body, when the skin carries one. */
+    private decal: GameObjects.Image | null = null;
+    /**
+     * The scale that fits the decal's texture to the body. Kept because the
+     * pulse below multiplies it: calling setScale with the pulse alone would
+     * throw away the fit and draw the face at its full texture size.
+     */
+    private decalFit = 1;
+
+    /** The wake this target drags, and the countdown to its next puff. */
+    readonly trail: TrailId | null;
+    private trailTimer = 0;
+
+    constructor (scene: Scene, x: number, y: number, kind: TargetKind, baseSize: number, level: number, speed: number, moving: boolean, skin?: Skin, style?: TargetStyle)
     {
         super(scene, x, y);
 
@@ -87,22 +126,96 @@ export class Target extends GameObjects.Container
         this.life = 0;
 
         const r = this.radius;
-        const c = this.color;
 
-        this.glow = scene.add.circle(0, 0, r * 1.55, c, 0.16);
-        this.core = scene.add.circle(0, 0, r, c, 1);
-        this.core.setStrokeStyle(Math.max(2, r * 0.09), 0xffffff, 0.65);
-        this.inner = scene.add.circle(0, 0, r * 0.46, 0x000000, 0.28);
-        this.flash = scene.add.circle(0, 0, r, 0xffffff, 1);
+        this.shape = style ? style.shape : 'circle';
+        this.spin = style ? style.spin : 0;
+        this.glowMult = style ? style.glow : 1;
+        this.rot = this.spin !== 0 ? Math.random() * TAU : 0;
+        this.trail = style && style.trail ? style.trail : null;
+
+        //  Staggered, so twenty targets sharing a skin do not all puff on the
+        //  same frame and pulse the whole board in time.
+        this.trailTimer = this.trail ? Math.random() * trailInterval(this.trail) : 0;
+
+        this.halo = scene.add.graphics();
+        this.halo.fillStyle(this.color, 1);
+        this.halo.fillCircle(0, 0, r * 1.55);
+        this.halo.setAlpha(0.16 * this.glowMult);
+
+        //  A decal that failed to download is simply not worn: the target
+        //  falls back to a plain painted body rather than to Phaser's missing
+        //  texture, so a 404 on a cosmetic can never cost the player a level.
+        const wanted = style && style.art ? style.art : null;
+        const face = wanted && scene.textures.exists(sa(wanted)) ? wanted : null;
+
+        this.art = scene.add.graphics();
+        this.art.fillStyle(this.color, 1);
+        fillBody(this.art, this.shape, r, 0);
+
+        //  A face covers the body, so the dark core that gives a plain target
+        //  its depth would only be drawn over -- and the edge light has to go
+        //  on last, on top of the decal, or the target loses its outline.
+        if (!face)
+        {
+            this.art.lineStyle(Math.max(2, r * 0.09), 0xffffff, 0.65);
+            strokeBody(this.art, this.shape, r, 0);
+            this.art.fillStyle(0x000000, 0.28);
+            fillBody(this.art, this.shape, r * 0.46, 0);
+        }
+
+        this.art.setRotation(this.rot);
+
+        this.flash = scene.add.graphics();
+        this.flash.fillStyle(0xffffff, 1);
+        fillBody(this.flash, this.shape, r, 0);
         this.flash.setAlpha(0);
+
         this.ring = scene.add.graphics();
 
-        this.add([ this.glow, this.core, this.inner, this.flash, this.ring ]);
+        this.add([ this.halo, this.art ]);
+
+        if (face)
+        {
+            this.decal = scene.add.image(0, 0, sa(face));
+            this.decal.setDisplaySize(r * 2, r * 2);
+            this.decalFit = this.decal.scaleX;
+            this.add(this.decal);
+
+            //  The outline, restored over the top of the face.
+            const edge = scene.add.graphics();
+            edge.lineStyle(Math.max(2, r * 0.09), 0xffffff, 0.65);
+            strokeBody(edge, this.shape, r, 0);
+            this.add(edge);
+        }
+
+        //  Armour, said with one line.
+        //
+        //  A target that takes two shots used to say so by being painted a
+        //  darker, duller version of the ordinary one -- which reads as
+        //  *disabled*, not as *armoured*: the first thing a dimmed object says
+        //  in any game is "you cannot interact with me". So the paint is the
+        //  world's own colour at full strength now, and the plating is a
+        //  single ring set inside the edge instead. It follows whatever
+        //  silhouette the skin is wearing and turns with it.
+        if (this.def.units > 1)
+        {
+            this.band = scene.add.graphics();
+            this.band.lineStyle(Math.max(2, r * 0.075), 0xffffff, 0.5);
+            strokeBody(this.band, this.shape, r * 0.72, 0);
+            this.band.setRotation(this.rot);
+            this.add(this.band);
+        }
+
+        this.add([ this.flash, this.ring ]);
 
         if (this.def.icon)
         {
+            //  Sized to the largest square the silhouette can actually hold,
+            //  so a star's glyph does not hang off its arms.
+            const fit = r * 1.05 * MARK_FIT[this.shape];
+
             this.mark = scene.add.image(0, 0, ic(this.def.icon));
-            this.mark.setDisplaySize(r * 1.05, r * 1.05);
+            this.mark.setDisplaySize(fit, fit);
             this.mark.setTint(0x0a1024);
             this.mark.setAlpha(0.9);
             this.add(this.mark);
@@ -112,7 +225,7 @@ export class Target extends GameObjects.Container
         {
             this.label = scene.add.text(0, 0, '', {
                 fontFamily: FONT,
-                fontSize: Math.round(r * 0.8),
+                fontSize: Math.round(r * 0.8 * MARK_FIT[this.shape]),
                 color: '#0b0f22'
             }).setOrigin(0.5);
 
@@ -188,19 +301,42 @@ export class Target extends GameObjects.Container
 
         this.life -= dtMs;
 
+        if (this.trail) this.trailTimer -= dtMs;
+
         const t = this.scene.time.now;
         const pulse = 1 + Math.sin(t * 0.006 + this.phase) * 0.055;
-        this.core.setScale(pulse);
-        this.glow.setScale(pulse * (1 + Math.sin(t * 0.004 + this.phase) * 0.08));
+        const halo = pulse * (1 + Math.sin(t * 0.004 + this.phase) * 0.08);
+
+        if (this.spin !== 0) this.rot += this.spin * dt;
 
         if (this.flashAmount > 0)
         {
             this.flashAmount = Math.max(0, this.flashAmount - dtMs / 130);
-            this.flash.setAlpha(this.flashAmount * 0.85);
         }
 
         const frac = this.maxLife > 0 ? Math.max(0, this.life / this.maxLife) : 1;
         const urgent = frac < 0.32;
+
+        //  A target on its last third breathes harder -- the same warning the
+        //  life ring gives, in the one part of the target already in the
+        //  player's eye.
+        const glow = (urgent ? 0.16 + Math.abs(Math.sin(t * 0.02)) * 0.28 : 0.16) * this.glowMult;
+
+        this.halo.setScale(halo);
+        this.halo.setAlpha(Math.min(0.62, glow));
+
+        this.art.setScale(pulse);
+        this.flash.setScale(pulse);
+        if (this.decal) this.decal.setScale(this.decalFit * pulse);
+
+        if (this.spin !== 0)
+        {
+            this.art.setRotation(this.rot);
+            this.flash.setRotation(this.rot);
+            this.band?.setRotation(this.rot);
+        }
+
+        this.flash.setAlpha(this.flashAmount * 0.85);
 
         this.ring.clear();
         this.ring.lineStyle(Math.max(3, this.radius * 0.13), urgent ? 0xff4d5e : this.ringColor, urgent ? 0.95 : 0.55);
@@ -212,11 +348,6 @@ export class Target extends GameObjects.Container
         {
             this.shieldAngle += this.shieldSpin * dt;
             this.drawShield();
-        }
-
-        if (urgent)
-        {
-            this.glow.setAlpha(0.16 + Math.abs(Math.sin(t * 0.02)) * 0.28);
         }
     }
 
@@ -289,7 +420,12 @@ export class Target extends GameObjects.Container
         //  A cavern deep enough books the next warp on the way out of this one.
         this.warpAt = this.warpEvery > 0 ? this.life - this.warpEvery : -1;
 
-        this.scene.tweens.add({
+        //  Repeat warps can be booked faster than one blink takes to land. The
+        //  older blink is abandoned rather than allowed to finish, so it cannot
+        //  drop the target back at a spot the newer one has already left.
+        this.warpTween?.remove();
+
+        this.warpTween = this.scene.tweens.add({
             targets: this,
             scaleX: 0.05,
             scaleY: 1.25,
@@ -297,6 +433,11 @@ export class Target extends GameObjects.Container
             ease: 'Quad.in',
             onComplete: () =>
             {
+                //  Shot down mid-blink: the target is already gone by the time
+                //  the squash lands, and there is nothing left to blink back in.
+                if (!this.scene) return;
+
+                this.warpTween = null;
                 this.setPosition(x, y);
                 this.scene.tweens.add({ targets: this, scaleX: 1, scaleY: 1, duration: 170, ease: 'Back.out' });
             }
@@ -312,6 +453,18 @@ export class Target extends GameObjects.Container
         return dx * dx + dy * dy <= r * r;
     }
 
+    /**
+     * True once per trail interval -- the scene asks, and the answer rearms
+     * the clock. Keeps the emitter pool in the scene and the pacing here.
+     */
+    takeTrailPuff (): boolean
+    {
+        if (!this.trail || this.trailTimer > 0) return false;
+
+        this.trailTimer += trailInterval(this.trail);
+        return true;
+    }
+
     /** True when a falling target has gone through the floor. */
     get gone (): boolean
     {
@@ -321,5 +474,18 @@ export class Target extends GameObjects.Container
     distanceTo (px: number, py: number): number
     {
         return Math.hypot(px - this.x, py - this.y);
+    }
+
+    /**
+     * A tween outlives the thing it animates. A popped target still holding a
+     * blink, a clang or a hit-squash would otherwise keep being written to --
+     * and the blink's callback would reach through a scene the destroy has
+     * already cleared. Everything in flight leaves with the target.
+     */
+    destroy (fromScene?: boolean): void
+    {
+        this.warpTween = null;
+        this.scene?.tweens?.killTweensOf(this);
+        super.destroy(fromScene);
     }
 }

@@ -297,6 +297,31 @@ export const Sfx = {
         }
     },
 
+    /**
+     * A shot into solid concrete. Dead, dull and short -- nothing about it
+     * should suggest the block is going to give if the player keeps hitting
+     * it, because it never will.
+     */
+    clank ()
+    {
+        tone(96, 0.09, 'square', 0.1, 62);
+        noise(0.06, 0.09, 520);
+    },
+
+    /** A link in a chain coming loose, and the next one arming itself. */
+    unlock ()
+    {
+        tone(520, 0.05, 'square', 0.08, 880);
+        tone(880, 0.09, 'sine', 0.06, 1320, 0.04);
+    },
+
+    /** A shot into a link that is not next. It is refused, not absorbed. */
+    locked ()
+    {
+        tone(150, 0.07, 'square', 0.09, 96);
+        noise(0.04, 0.05, 1400);
+    },
+
     boom ()
     {
         noise(0.2, 0.14, 500);

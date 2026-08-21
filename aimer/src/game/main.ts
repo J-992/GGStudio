@@ -3,7 +3,7 @@ import type { Types } from 'phaser';
 import { Boot } from './scenes/Boot';
 import { MainMenu } from './scenes/MainMenu';
 import { GameScene } from './scenes/GameScene';
-import { UpgradeScene } from './scenes/UpgradeScene';
+import { WorldScene } from './scenes/WorldScene';
 import { BonusScene } from './scenes/BonusScene';
 import { ResultScene } from './scenes/ResultScene';
 import { H, W } from './core/theme';
@@ -51,7 +51,7 @@ const config: Types.Core.GameConfig = {
         //  break or a tab switch.
         smoothStep: true
     },
-    scene: [ Boot, MainMenu, GameScene, BonusScene, UpgradeScene, ResultScene ]
+    scene: [ Boot, MainMenu, GameScene, BonusScene, WorldScene, ResultScene ]
 };
 
 const StartGame = (parent: string) =>

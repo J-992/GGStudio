@@ -1,43 +1,56 @@
 import { Geom, Scene } from 'phaser';
 import { Fx } from '../core/fx';
 import { Sfx, isMuted, toggleMute, unlockAudio } from '../core/audio';
-import { meta, PERKS, perkCost, run, saveMeta } from '../core/state';
+import { armRun, boostCount, equippedSkin, isArmed, meta, run, saveMeta, toggleArmed } from '../core/state';
 import { setGameplayActive } from '../core/lifecycle';
 import { FINAL_LEVEL } from '../data/levels';
-import { IconLabel, ic, iconImage } from '../core/icons';
-import { CX, FONT, FONT_UI, H, LANDSCAPE, W, fmt, hex } from '../core/theme';
+import { RUN_BOOSTS } from '../data/boosts';
+import { fillBody, strokeBody } from '../core/shapes';
+import { ic, iconImage } from '../core/icons';
+import { StorePanel } from '../objects/StorePanel';
+import { CX, FONT, FONT_UI, H, LANDSCAPE, W, fmt, hex, mix } from '../core/theme';
 
 const DEMO_COLORS = [ 0x3fe0ff, 0xff5ce0, 0x7dff6b, 0xffd23f, 0x9b6cff ];
 
 /**
  * Portrait stacks the menu; a wide screen splits it in two -- the game on the
- * left, the shop on the right -- rather than stretching one narrow column
+ * left, the store on the right -- rather than stretching one narrow column
  * across a screen three times wider than it needs.
  */
 const L = LANDSCAPE
     ? {
-        gameX: W * 0.29,
-        shopX: W * 0.715,
-        titleY: 190,
-        taglineY: 250,
-        playY: 350,
-        statY: 470,
-        shopTitleY: 150,
-        rowY0: 206,
-        coinY: 578,
+        gameX: W * 0.28,
+        storeX: W * 0.72,
+        titleY: 168,
+        taglineY: 222,
+        playY: 318,
+        statY: 428,
+        loadoutY: 534,
+        storeHeaderY: 92,
+        tabsY: 146,
+        rowY0: 210,
+        rowStep: 74,
+        rowW: 440,
+        rowH: 62,
+        listBottom: H - 62,
         muteX: W - 34,
         muteY: H - 34
     }
     : {
         gameX: CX,
-        shopX: CX,
-        titleY: 112,
-        taglineY: 170,
-        playY: 268,
-        statY: 348,
-        shopTitleY: 424,
-        rowY0: 476,
-        coinY: 890,
+        storeX: CX,
+        titleY: 92,
+        taglineY: 142,
+        playY: 216,
+        statY: 286,
+        loadoutY: 380,
+        storeHeaderY: 432,
+        tabsY: 474,
+        rowY0: 534,
+        rowStep: 70,
+        rowW: 464,
+        rowH: 60,
+        listBottom: H - 34,
         muteX: W - 30,
         muteY: H - 34
     };
@@ -45,8 +58,8 @@ const L = LANDSCAPE
 export class MainMenu extends Scene
 {
     private fx!: Fx;
-    private coinLabel!: IconLabel;
-    private perkRows: { redraw: () => void }[] = [];
+    private store!: StorePanel;
+    private chips: { redraw: () => void }[] = [];
 
     constructor ()
     {
@@ -59,7 +72,7 @@ export class MainMenu extends Scene
         //  made here rather than trusting every exit path to have made it.
         setGameplayActive(false);
 
-        this.perkRows = [];
+        this.chips = [];
         this.cameras.main.setBackgroundColor(0x080b1c);
         this.cameras.main.fadeIn(200, 0, 0, 0);
 
@@ -84,7 +97,18 @@ export class MainMenu extends Scene
 
         this.buildPlayButton();
         this.buildStats();
-        this.buildShop();
+        this.buildLoadout();
+
+        this.store = new StorePanel(this, this.fx, {
+            x: L.storeX,
+            headerY: L.storeHeaderY,
+            tabsY: L.tabsY,
+            rowY0: L.rowY0,
+            rowStep: L.rowStep,
+            rowW: L.rowW,
+            rowH: L.rowH,
+            listBottom: L.listBottom
+        }, () => this.refreshLoadout());
 
         //  Restore the saved mute preference on first boot.
         if (meta.muted && !isMuted())
@@ -106,7 +130,6 @@ export class MainMenu extends Scene
             saveMeta();
             mute.setTexture(ic(meta.muted ? 'soundOff' : 'soundOn'));
         });
-
     }
 
     private spawnDemoTargets (): void
@@ -119,36 +142,58 @@ export class MainMenu extends Scene
         this.time.addEvent({ delay: 900, loop: true, callback: () => this.demoTarget() });
     }
 
+    /**
+     * The drifting targets behind the menu wear whatever skin the player is
+     * wearing -- the shop window for the thing they just bought is the screen
+     * they bought it on.
+     */
     private demoTarget (): void
     {
-        const color = DEMO_COLORS[Math.floor(Math.random() * DEMO_COLORS.length)];
+        const skin = equippedSkin();
+        const base = DEMO_COLORS[Math.floor(Math.random() * DEMO_COLORS.length)];
+        const paint = skin.tint ? skin.tint({ color: base, ring: 0xffffff }) : { color: base, ring: mix(base, 0xffffff, 0.6) };
         const r = 18 + Math.random() * 14;
         const x = 40 + Math.random() * (W - 80);
         const y = 210 + Math.random() * (H - 340);
 
-        const dot = this.add.circle(x, y, r, color, 0.24).setDepth(1);
-        dot.setStrokeStyle(3, color, 0.55);
+        const dot = this.add.container(x, y).setDepth(1);
+        const g = this.add.graphics();
+
+        g.fillStyle(paint.color, 0.24 * skin.glow);
+        fillBody(g, skin.shape, r, 0);
+        g.lineStyle(3, paint.ring, 0.55);
+        strokeBody(g, skin.shape, r, 0);
+
+        dot.add(g);
         dot.setScale(0.1);
+
         dot.setInteractive({
-            hitArea: new Geom.Circle(r, r, r * 1.4),
+            hitArea: new Geom.Circle(0, 0, r * 1.4),
             hitAreaCallback: Geom.Circle.Contains,
             useHandCursor: true
         });
 
         this.tweens.add({ targets: dot, scale: 1, duration: 240, ease: 'Back.out' });
 
-        const kill = () =>
+        if (skin.spin !== 0)
         {
-            if (!dot.active) return;
-            this.fx.burst(dot.x, dot.y, color, 10, 'hit');
-            dot.destroy();
-        };
+            this.tweens.add({
+                targets: dot,
+                rotation: dot.rotation + Math.PI * 2 * Math.sign(skin.spin),
+                duration: Math.max(1200, (Math.PI * 2 / Math.abs(skin.spin)) * 1000),
+                repeat: -1
+            });
+        }
 
         dot.on('pointerdown', () =>
         {
             unlockAudio();
             Sfx.hit(3);
-            kill();
+
+            if (!dot.active) return;
+
+            this.fx.burst(dot.x, dot.y, paint.color, 10, 'hit');
+            dot.destroy();
         });
 
         this.tweens.add({
@@ -191,6 +236,10 @@ export class MainMenu extends Scene
 
             run.reset();
 
+            //  The armed boosts are spent here and nowhere else: a player who
+            //  opens the store and walks away has lost nothing.
+            armRun();
+
             this.cameras.main.fadeOut(190, 0, 0, 0);
             this.time.delayedCall(200, () => this.scene.start('Game'));
         });
@@ -213,123 +262,112 @@ export class MainMenu extends Scene
 
         stat(-1, 'BEST SCORE', fmt(meta.best), 0xffffff);
         stat(0, 'BEST LEVEL', `${meta.bestLevel}/${FINAL_LEVEL}`, 0x6cf5c8);
-        stat(1, 'RANK XP', fmt(meta.rank), 0x9b6cff);
+        stat(1, 'TOTAL XP', fmt(meta.rank), 0x9b6cff);
     }
 
-    private buildShop (): void
+    /**
+     * The loadout: one chip per run boost, sitting directly under PLAY where
+     * the player is already looking. A chip they own is a switch -- armed goes
+     * into the next run and is spent by it; a chip they do not own is still
+     * drawn, dim, because an empty shelf sells nothing.
+     */
+    private buildLoadout (): void
     {
-        this.add.text(L.shopX, L.shopTitleY, 'PERMANENT UPGRADES', {
-            fontFamily: FONT, fontSize: 20, color: '#5f6a92'
+        const y = L.loadoutY;
+        const w = 64;
+        const gap = 10;
+        const total = RUN_BOOSTS.length * w + (RUN_BOOSTS.length - 1) * gap;
+        const x0 = L.gameX - total / 2 + w / 2;
+
+        this.add.text(L.gameX, y - 44, 'RUN BOOSTS', {
+            fontFamily: FONT_UI, fontSize: 12, color: '#5f6a92'
         }).setOrigin(0.5).setDepth(10);
 
-        this.coinLabel = new IconLabel(this, L.shopX, L.coinY, 'gem', fmt(meta.coins), {
-            fontSize: 34, iconSize: 30
-        });
-        this.coinLabel.setDepth(11);
-
-        PERKS.forEach((perk, i) =>
+        RUN_BOOSTS.forEach((boost, i) =>
         {
-            const y = L.rowY0 + i * 74;
-            const row = this.add.container(L.shopX, y).setDepth(10);
+            const cx = x0 + i * (w + gap);
+            const chip = this.add.container(cx, y).setDepth(11);
 
             const g = this.add.graphics();
-            row.add(g);
+            chip.add(g);
 
-            const icon = iconImage(this, -208, 0, perk.icon, { size: 30, color: 0xffffff, alpha: 0.9 });
-            row.add(icon);
+            const icon = iconImage(this, 0, -6, boost.icon, { size: 26, color: boost.color });
+            chip.add(icon);
 
-            const name = this.add.text(-176, -12, perk.name, {
-                fontFamily: FONT, fontSize: 20, color: '#ffffff'
-            }).setOrigin(0, 0.5);
-            row.add(name);
-
-            const effect = this.add.text(-176, 12, perk.effect, {
-                fontFamily: FONT_UI, fontSize: 14, color: '#7d88b0'
-            }).setOrigin(0, 0.5);
-            row.add(effect);
-
-            const price = new IconLabel(this, 196, 0, 'gem', '', {
-                align: 'right', fontSize: 20, iconSize: 18
-            });
-            row.add(price);
+            const count = this.add.text(0, 17, '', {
+                fontFamily: FONT, fontSize: 14, color: '#ffffff'
+            }).setOrigin(0.5);
+            chip.add(count);
 
             const redraw = () =>
             {
-                const lvl = meta.perks[perk.id] || 0;
-                const maxed = lvl >= perk.max;
-                const cost = perkCost(perk, lvl);
-                const afford = !maxed && meta.coins >= cost;
+                const n = boostCount(boost.id);
+                const armed = isArmed(boost.id);
 
                 g.clear();
-                g.fillStyle(0x0b1024, 0.9);
-                g.fillRoundedRect(-232, -32, 464, 64, 16);
-                g.lineStyle(2, maxed ? 0x6cf5c8 : (afford ? 0xffc857 : 0x2a3352), maxed || afford ? 0.9 : 0.7);
-                g.strokeRoundedRect(-232, -32, 464, 64, 16);
+                g.fillStyle(0x0b1024, 0.92);
+                g.fillRoundedRect(-w / 2, -28, w, 56, 14);
 
-                for (let p = 0; p < perk.max; p++)
+                if (armed)
                 {
-                    g.fillStyle(p < lvl ? 0x6cf5c8 : 0x2a3352, 1);
-                    g.fillRect(-176 + p * 12, 22, 8, 4);
+                    g.fillStyle(boost.color, 0.22);
+                    g.fillRoundedRect(-w / 2, -28, w, 56, 14);
                 }
 
-                const tone = maxed ? 0x6cf5c8 : (afford ? 0xffc857 : 0x4c5578);
+                g.lineStyle(2, n > 0 ? boost.color : 0x2a3352, armed ? 1 : 0.6);
+                g.strokeRoundedRect(-w / 2, -28, w, 56, 14);
 
-                price.setValue(maxed ? 'MAX' : fmt(cost), !maxed);
-                price.text.setColor(hex(tone));
-                price.icon.setTint(tone);
+                icon.setAlpha(n > 0 ? 1 : 0.3);
+                count.setText(n > 0 ? (armed ? `ARMED x${n}` : `x${n}`) : 'NONE');
+                count.setFontSize(n > 0 && armed ? 10 : 13);
+                count.setColor(armed ? hex(boost.color) : (n > 0 ? '#8d97bd' : '#3c4569'));
             };
 
             redraw();
-            this.perkRows.push({ redraw });
+            this.chips.push({ redraw });
 
-            row.setSize(464, 64);
-            row.setInteractive({
-                hitArea: new Geom.Rectangle(0, 0, 464, 64),
+            chip.setSize(w, 56);
+            chip.setInteractive({
+                hitArea: new Geom.Rectangle(0, 0, w, 56),
                 hitAreaCallback: Geom.Rectangle.Contains,
                 useHandCursor: true
             });
 
-            row.on('pointerdown', () =>
+            chip.on('pointerdown', () =>
             {
                 unlockAudio();
 
-                const lvl = meta.perks[perk.id] || 0;
-
-                if (lvl >= perk.max) { Sfx.dry(); return; }
-
-                const cost = perkCost(perk, lvl);
-
-                if (meta.coins < cost)
+                if (boostCount(boost.id) <= 0)
                 {
-                    Sfx.miss();
-                    this.tweens.add({ targets: row, x: L.shopX + 8, duration: 55, yoyo: true, repeat: 2 });
+                    //  Nothing to arm -- so the tap goes where the player can
+                    //  do something about it, and says which row to look at.
+                    Sfx.dry();
+                    this.fx.popup(chip.x, chip.y - 42, 'BUY IN STORE', boost.color, 15, 30, 700);
                     return;
                 }
 
-                meta.coins -= cost;
-                meta.perks[perk.id] = lvl + 1;
-                saveMeta();
+                const on = toggleArmed(boost.id);
 
-                Sfx.upgrade();
-                this.fx.burst(row.x, row.y, 0x6cf5c8, 18, 'hit');
-                this.tweens.add({ targets: row, scale: 1.05, duration: 110, yoyo: true, ease: 'Quad.out' });
+                Sfx.ui();
+                redraw();
 
-                this.refreshShop();
+                this.tweens.add({ targets: chip, scale: on ? 1.12 : 0.94, duration: 110, yoyo: true, ease: 'Quad.out' });
+
+                if (on) this.fx.ring(chip.x, chip.y, 90, boost.color, 4, 340);
             });
         });
     }
 
-    private refreshShop (): void
+    private refreshLoadout (): void
     {
-        this.coinLabel.setValue(fmt(meta.coins));
-        this.coinLabel.setScale(1.2);
-        this.tweens.add({ targets: this.coinLabel, scale: 1, duration: 160, ease: 'Quad.out' });
-
-        for (const r of this.perkRows) r.redraw();
+        for (const chip of this.chips) chip.redraw();
     }
 
     update (_time: number, delta: number): void
     {
-        this.fx.update(Math.min(50, delta));
+        const dt = Math.min(50, delta);
+
+        this.fx.update(dt);
+        this.store.tick(dt);
     }
 }
