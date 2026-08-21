@@ -246,6 +246,23 @@ export class Target extends GameObjects.Container
         scene.add.existing(this);
     }
 
+    /**
+     * Re-scales this target's health after construction, keeping it full.
+     *
+     * Only the boss uses it: how much a boss is carrying is a property of the
+     * *level* rather than of the kind (see `bossUnits`), and the kind table has
+     * nowhere to say "more on level 40 than on level 20".
+     */
+    setUnits (units: number, level: number): this
+    {
+        this.def = { ...this.def, units };
+        this.maxHp = unitHp(level) * units;
+        this.hp = this.maxHp;
+        this.updateLabel();
+
+        return this;
+    }
+
     setLifetime (ms: number): this
     {
         this.maxLife = ms;

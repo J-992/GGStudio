@@ -36,7 +36,6 @@ export class Flak
     private color: number;
     private hot: number;
     private trail: { x: number; y: number }[] = [];
-    private spin = 0;
 
     constructor (scene: Scene, accent: number, speed: number)
     {
@@ -70,8 +69,6 @@ export class Flak
     update (dtMs: number): boolean
     {
         const dt = dtMs / 1000;
-
-        this.spin += dt * 9;
 
         if (!this.live)
         {
@@ -113,6 +110,46 @@ export class Flak
         return dx * dx + dy * dy <= r * r;
     }
 
+    /**
+     * The bolt's silhouette: a dart, nose forward along its own flight path.
+     *
+     * It used to be a disc with three blades turning around it, and a disc is
+     * the one shape this game already uses for everything the player is
+     * supposed to *shoot* -- so the thing shooting back read as one more
+     * target. A dart cannot be mistaken for one: it is all point, it is the
+     * only thing on screen with a direction, and the direction it has is the
+     * answer to the only question the player is asking about it.
+     *
+     * The back edge is notched rather than flat, which is what stops it
+     * reading as a plain triangle and starts it reading as an arrowhead.
+     */
+    private dart (fwd: number): { x: number; y: number }[]
+    {
+        const a = Math.atan2(this.vy, this.vx);
+        const cos = Math.cos(a);
+        const sin = Math.sin(a);
+
+        const at = (along: number, across: number) => ({
+            x: this.x + cos * along - sin * across,
+            y: this.y + sin * along + cos * across
+        });
+
+        return [
+            at(FLAK_RADIUS * 2.0 * fwd, 0),                             // nose
+            at(-FLAK_RADIUS * 0.95 * fwd, FLAK_RADIUS * 0.92 * fwd),    // barb
+            at(-FLAK_RADIUS * 0.28 * fwd, 0),                           // notch
+            at(-FLAK_RADIUS * 0.95 * fwd, -FLAK_RADIUS * 0.92 * fwd)    // barb
+        ];
+    }
+
+    /** Two triangles rather than one concave path, so the fill never folds. */
+    private fillDart (g: GameObjects.Graphics, p: { x: number; y: number }[], color: number, alpha: number): void
+    {
+        g.fillStyle(color, alpha);
+        g.fillTriangle(p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y);
+        g.fillTriangle(p[0].x, p[0].y, p[2].x, p[2].y, p[3].x, p[3].y);
+    }
+
     private draw (): void
     {
         const g = this.gfx;
@@ -122,8 +159,9 @@ export class Flak
 
         if (!this.live)
         {
-            //  The warning: a ring closing in on the muzzle it is aimed at,
-            //  plus a shrinking bracket around the launch point.
+            //  The warning: a ring closing on the launch point, a line along
+            //  the path the bolt is about to take, and the dart itself already
+            //  sitting there, small, growing into the real one.
             const t = 1 - Math.max(0, this.wait) / TELEGRAPH;
             const r = 34 - t * 18;
 
@@ -133,8 +171,11 @@ export class Flak
             g.lineStyle(2, this.color, 0.25 + t * 0.4);
             g.lineBetween(this.x, this.y, this.x + this.vx * 0.28, this.y + this.vy * 0.28);
 
-            g.fillStyle(this.hot, 0.3 + t * 0.7);
-            g.fillCircle(this.x, this.y, 4 + t * 4);
+            //  The warning already points where the bolt is going to go: the
+            //  same dart, small and hollow, growing into the real one.
+            const p = this.dart(0.35 + t * 0.3);
+
+            this.fillDart(g, p, this.hot, 0.3 + t * 0.7);
 
             return;
         }
@@ -148,30 +189,23 @@ export class Flak
             g.lineBetween(this.trail[i].x, this.trail[i].y, this.trail[i - 1].x, this.trail[i - 1].y);
         }
 
-        g.fillStyle(this.color, 0.28);
-        g.fillCircle(this.x, this.y, FLAK_RADIUS + 7);
+        const body = this.dart(1);
 
-        g.fillStyle(this.color, 1);
-        g.fillCircle(this.x, this.y, FLAK_RADIUS * 0.7);
+        //  A soft wash the shape of the dart itself, so the glow has the same
+        //  point the bolt does rather than blurring it back into a blob.
+        this.fillDart(g, this.dart(1.22), this.color, 0.26);
+        this.fillDart(g, body, this.color, 1);
 
-        g.fillStyle(this.hot, 1);
-        g.fillCircle(this.x, this.y, FLAK_RADIUS * 0.36);
+        //  The hot inner blade, set back from the nose so the point stays the
+        //  darker, harder colour and reads as an edge.
+        this.fillDart(g, this.dart(0.62), this.hot, 1);
 
-        //  Three blades turning round the core -- the shape says "incoming"
-        //  from any distance, which a plain dot never manages.
-        g.lineStyle(3, this.hot, 0.9);
-
-        for (let i = 0; i < 3; i++)
-        {
-            const a = this.spin + (i * Math.PI * 2) / 3;
-            const r0 = FLAK_RADIUS * 0.75;
-            const r1 = FLAK_RADIUS * 1.35;
-
-            g.lineBetween(
-                this.x + Math.cos(a) * r0, this.y + Math.sin(a) * r0,
-                this.x + Math.cos(a) * r1, this.y + Math.sin(a) * r1
-            );
-        }
+        g.lineStyle(2.5, this.hot, 0.95);
+        g.beginPath();
+        g.moveTo(body[0].x, body[0].y);
+        for (let i = 1; i < body.length; i++) g.lineTo(body[i].x, body[i].y);
+        g.closePath();
+        g.strokePath();
     }
 
     destroy (): void

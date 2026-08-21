@@ -59,7 +59,7 @@ export const KINDS: Record<TargetKind, KindDef> = {
     time:    { score: 90,   coins: 2,   xp: 12,  units: 1,  sizeMult: 0.80, speedMult: 1.7, progress: 1,  color: 0x62ffb8, icon: 'stopwatch', ring: 0xd6fff0 },
     coin:    { score: 70,   coins: 30,  xp: 10,  units: 1,  sizeMult: 0.76, speedMult: 1.8, progress: 1,  color: 0xffc857, icon: 'dollar',    ring: 0xfff0c9 },
     multi:   { score: 180,  coins: 7,   xp: 22,  units: 1,  sizeMult: 0.76, speedMult: 1.8, progress: 1,  color: 0xb388ff, icon: 'mult',      ring: 0xe3d4ff },
-    boss:    { score: 9000, coins: 300, xp: 600, units: 18, sizeMult: 2.60, speedMult: 0.5, progress: 22, color: 0xff2d55, icon: 'trefoil',   ring: 0xffb3c0 },
+    boss:    { score: 16000, coins: 480, xp: 950, units: 48, sizeMult: 2.60, speedMult: 0.5, progress: 34, color: 0xff2d55, icon: 'trefoil',   ring: 0xffb3c0 },
 
     //  --- the cash round. Money only, one tap each, no goal to speak of. ---
     cash:    { score: 60,   coins: 18,  xp: 4,   units: 1,  sizeMult: 0.84, speedMult: 1.1, progress: 1,  color: 0x5fe08a, icon: 'dollar',    ring: 0xcdffdd },
@@ -132,6 +132,29 @@ export function punchOf (damage: number, level: number): number
 }
 
 /**
+ * How much health the boss on a boss level is carrying, in units.
+ *
+ * A boss used to be a flat eighteen units wherever it turned up, and because
+ * the gun's damage is pinned to the level (see `punchOf`) that made every boss
+ * in the run exactly the same twelve taps -- about three seconds. The reactor
+ * boss in particular was a cutscene with a health bar: it arrived, it was
+ * announced, and it was gone before the announcement finished.
+ *
+ * These are a real fight: about a third of the level spent on the boss alone,
+ * ten seconds or so of sustained fire, and it is worth a third of the level's
+ * goal when it finally comes apart. They also get bigger down the run rather
+ * than staying still, because the player's punch is growing the whole time --
+ * a boss that did not grow with it would be *easier* on level 40 than on
+ * level 20.
+ */
+const BOSS_UNITS: Record<number, number> = { 20: 64, 30: 74, 40: 120 };
+
+export function bossUnits (level: number): number
+{
+    return BOSS_UNITS[level] || KINDS.boss.units;
+}
+
+/**
  * XP for a kill, at the level it happened on.
  *
  * XP used to be flat: a plain target was worth ten of it on level 1 and ten of
@@ -198,7 +221,7 @@ export const LEVELS: LevelConfig[] = [
     { level: 17, duration: 27, goal: 38,  spawnRate: 496, maxActive: 8,  size: 40, lifetime: 2400, speed: 152, moveChance: 0.74, weights: { tough: 9, small: 9, fast: 5, armored: 7, bomb: 4, coin: 2, multi: 1 } },
     { level: 18, duration: 28, goal: 42,  spawnRate: 480, maxActive: 9,  size: 39, lifetime: 2350, speed: 162, moveChance: 0.80, weights: { tough: 9, small: 10, fast: 5, armored: 8, bomb: 4, coin: 2, golden: 2 } },
     { level: 19, duration: 29, goal: 42,  spawnRate: 466, maxActive: 9,  size: 38, lifetime: 2300, speed: 172, moveChance: 0.86, weights: { tough: 9, small: 10, fast: 6, armored: 9, bomb: 4, coin: 2, time: 1 } },
-    { level: 20, duration: 33, goal: 72,  spawnRate: 500, maxActive: 8,  size: 39, lifetime: 2400, speed: 168, moveChance: 0.90, weights: { tough: 9, small: 8, fast: 5, armored: 7, coin: 2, golden: 2 }, boss: true },
+    { level: 20, duration: 33, goal: 69,  spawnRate: 500, maxActive: 8,  size: 39, lifetime: 2400, speed: 168, moveChance: 0.90, weights: { tough: 9, small: 8, fast: 5, armored: 7, coin: 2, golden: 2 }, boss: true },
     { level: 21, duration: 27, goal: 56,  spawnRate: 455, maxActive: 9,  size: 38, lifetime: 2300, speed: 178, moveChance: 0.92, weights: { tough: 9, small: 9, fast: 6, armored: 8, coin: 2, golden: 2 } },
     { level: 22, duration: 28, goal: 77,  spawnRate: 444, maxActive: 9,  size: 37, lifetime: 2250, speed: 186, moveChance: 0.96, weights: { tough: 8, small: 10, fast: 7, armored: 9, coin: 2, time: 1, golden: 3 } },
     { level: 23, duration: 29, goal: 77,  spawnRate: 434, maxActive: 10, size: 37, lifetime: 2200, speed: 194, moveChance: 1.00, weights: { tough: 8, small: 10, fast: 7, armored: 10, bomb: 4, coin: 2, golden: 3 } },
@@ -208,7 +231,7 @@ export const LEVELS: LevelConfig[] = [
     { level: 27, duration: 33, goal: 92,  spawnRate: 396, maxActive: 11, size: 35, lifetime: 2000, speed: 226, moveChance: 1.00, weights: { tough: 6, small: 12, fast: 9, armored: 14, bomb: 5, coin: 2, time: 1, golden: 4 } },
     { level: 28, duration: 30, goal: 76,  spawnRate: 430, maxActive: 9,  size: 37, lifetime: 2200, speed: 204, moveChance: 1.00, weights: { tough: 9, small: 10, fast: 6, armored: 9, coin: 2, golden: 3 } },
     { level: 29, duration: 32, goal: 91,  spawnRate: 415, maxActive: 10, size: 36, lifetime: 2150, speed: 212, moveChance: 1.00, weights: { tough: 8, small: 11, fast: 8, armored: 11, coin: 2, golden: 3 } },
-    { level: 30, duration: 39, goal: 105, spawnRate: 430, maxActive: 10, size: 36, lifetime: 2100, speed: 220, moveChance: 1.00, weights: { tough: 7, small: 11, fast: 8, armored: 13, bomb: 5, coin: 2, time: 1, golden: 4 }, boss: true },
+    { level: 30, duration: 39, goal: 93,  spawnRate: 430, maxActive: 10, size: 36, lifetime: 2100, speed: 220, moveChance: 1.00, weights: { tough: 7, small: 11, fast: 8, armored: 13, bomb: 5, coin: 2, time: 1, golden: 4 }, boss: true },
     { level: 31, duration: 33, goal: 74,  spawnRate: 400, maxActive: 11, size: 35, lifetime: 2050, speed: 228, moveChance: 1.00, weights: { tough: 7, small: 12, fast: 9, armored: 13, bomb: 5, coin: 2, golden: 4 } },
     { level: 32, duration: 34, goal: 75,  spawnRate: 392, maxActive: 11, size: 34, lifetime: 2000, speed: 236, moveChance: 1.00, weights: { tough: 6, small: 12, fast: 10, armored: 15, bomb: 6, coin: 2, multi: 1, golden: 4 } },
     { level: 33, duration: 35, goal: 79,  spawnRate: 384, maxActive: 12, size: 34, lifetime: 1950, speed: 244, moveChance: 1.00, weights: { tough: 6, small: 13, fast: 10, armored: 16, bomb: 6, coin: 2, time: 1, golden: 5 } },
@@ -218,7 +241,7 @@ export const LEVELS: LevelConfig[] = [
     { level: 37, duration: 36, goal: 91,  spawnRate: 384, maxActive: 11, size: 34, lifetime: 1950, speed: 256, moveChance: 1.00, weights: { tough: 5, small: 14, fast: 11, armored: 17, bomb: 6, coin: 2, time: 1, golden: 5 } },
     { level: 38, duration: 37, goal: 96,  spawnRate: 376, maxActive: 12, size: 33, lifetime: 1900, speed: 264, moveChance: 1.00, weights: { tough: 5, small: 14, fast: 11, armored: 18, bomb: 7, coin: 2, multi: 1, golden: 5 } },
     { level: 39, duration: 38, goal: 100, spawnRate: 368, maxActive: 12, size: 33, lifetime: 1880, speed: 272, moveChance: 1.00, weights: { tough: 4, small: 15, fast: 12, armored: 19, bomb: 7, coin: 2, time: 1, golden: 6 } },
-    { level: 40, duration: 48, goal: 143, spawnRate: 380, maxActive: 13, size: 33, lifetime: 1850, speed: 280, moveChance: 1.00, weights: { tough: 4, small: 15, fast: 12, armored: 20, bomb: 7, coin: 3, multi: 1, time: 1, golden: 6 }, boss: true }
+    { level: 40, duration: 48, goal: 119, spawnRate: 380, maxActive: 13, size: 33, lifetime: 1850, speed: 280, moveChance: 1.00, weights: { tough: 4, small: 15, fast: 12, armored: 20, bomb: 7, coin: 3, multi: 1, time: 1, golden: 6 }, boss: true }
 ];
 
 export const FINAL_LEVEL = LEVELS.length;

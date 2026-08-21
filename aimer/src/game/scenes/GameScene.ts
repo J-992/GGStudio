@@ -2,7 +2,7 @@ import { GameObjects, Geom, Scene } from 'phaser';
 import { Target } from '../objects/Target';
 import { Fx } from '../core/fx';
 import { Sfx, unlockAudio, isMuted, toggleMute } from '../core/audio';
-import { FINAL_LEVEL, KINDS, LevelConfig, POWERUP_SPEED, TargetKind, isPowerup, levelConfig, pickKind, punchOf, unitHp, xpWorth } from '../data/levels';
+import { FINAL_LEVEL, KINDS, LevelConfig, POWERUP_SPEED, TargetKind, isPowerup, levelConfig, pickKind, punchOf, unitHp, xpWorth, bossUnits } from '../data/levels';
 import { Stats, Upgrade, rollOffers } from '../data/upgrades';
 import { BeamLook, GunLook, beamLook, gunLook, kickOf, partFor } from '../data/gunkit';
 import { bankCoins, boostCount, equippedSkin, meta, run, saveMeta, spendBoost } from '../core/state';
@@ -872,6 +872,7 @@ export class GameScene extends Scene
     private spawnBoss (): void
     {
         const t = new Target(this, CX, arenaY(0.28), 'boss', this.cfg.size, run.level, this.cfg.speed, true);
+        t.setUnits(bossUnits(run.level), run.level);
         t.setLifetime(999999);
         t.setDepth(9);
         this.targets.push(t);
