@@ -1,9 +1,9 @@
 import { GameObjects, Geom, Scene } from 'phaser';
 import { Fx } from '../core/fx';
 import { Sfx, unlockAudio } from '../core/audio';
-import { armRun, bankCoins, giftsPending, meta, noteRunEnded, run, runsToNextGift, saveMeta } from '../core/state';
+import { armRun, bankCoins, meta, run, runsToNextGift, saveMeta } from '../core/state';
 import { FINAL_LEVEL } from '../data/levels';
-import { IconLabel, iconImage } from '../core/icons';
+import { IconLabel } from '../core/icons';
 import { rewardButton } from '../core/adButton';
 import { offerInterstitial } from '../core/ads';
 import { setGameplayActive } from '../core/lifecycle';
@@ -79,13 +79,10 @@ export class ResultScene extends Scene
         this.leaving = false;
 
         //  Whatever the run did, the player is reading a card now, not playing.
+        //  The run itself was booked on the way in -- see `endOfRun` in the
+        //  gift scene, which is what decides whether the player got here
+        //  straight from the arena or via a present.
         setGameplayActive(false);
-
-        //  Every run ends on this card, so this is where one is booked -- and
-        //  where the present it may have earned is put on the counter.
-        noteRunEnded();
-
-        const gift = giftsPending() > 0;
 
         this.cameras.main.setBackgroundColor(win ? 0x1f1203 : 0x140812);
         this.cameras.main.fadeIn(200, 0, 0, 0);
@@ -191,27 +188,8 @@ export class ResultScene extends Scene
             this.leave('MainMenu');
         };
 
-        if (gift)
-        {
-            //  A present outranks PLAY AGAIN. It is the one thing on this card
-            //  the player does not already know the shape of, and the reason
-            //  the session carries on past the card rather than ending on it.
-            this.presentButton(CX, L.primaryY + shift, () =>
-            {
-                run.reset();
-                this.leave('Gift');
-            });
-
-            //  Both of the usual ways off the card, side by side, in the row
-            //  the MENU button had to itself -- so nothing below moves.
-            this.button(CX - 88, L.menuY + shift, 164, 62, primaryLabel, win ? 0xffd23f : 0x6cf5c8, 20, playAgain);
-            this.button(CX + 88, L.menuY + shift, 164, 62, 'MENU', 0x2a3352, 22, toMenu, '#ffffff');
-        }
-        else
-        {
-            this.button(CX, L.primaryY + shift, 340, 96, primaryLabel, win ? 0xffd23f : 0x6cf5c8, 40, playAgain);
-            this.button(CX, L.menuY + shift, 240, 62, 'MENU', 0x2a3352, 26, toMenu, '#ffffff');
-        }
+        this.button(CX, L.primaryY + shift, 340, 96, primaryLabel, win ? 0xffd23f : 0x6cf5c8, 40, playAgain);
+        this.button(CX, L.menuY + shift, 240, 62, 'MENU', 0x2a3352, 26, toMenu, '#ffffff');
 
         this.footer = new IconLabel(this, CX, L.footerY + shift, 'gem', this.footerText(), {
             fontFamily: FONT_UI, fontSize: 16, iconSize: 16, color: '#7d88b0'
@@ -225,12 +203,7 @@ export class ResultScene extends Scene
         }
 
         //  Keyboard shortcut so desktop testing stays fast.
-        this.input.keyboard?.once('keydown-SPACE', () =>
-        {
-            if (gift) { run.reset(); this.leave('Gift'); return; }
-
-            playAgain();
-        });
+        this.input.keyboard?.once('keydown-SPACE', playAgain);
     }
 
     private footerText (): string
@@ -239,33 +212,6 @@ export class ResultScene extends Scene
         const next = runs > 0 ? `   ·   PRESENT IN ${runs}` : '';
 
         return `${fmt(meta.coins)}   ·   ${fmt(meta.rank)} XP${next}`;
-    }
-
-    /**
-     * The present, as a button. It is drawn rather than labelled because the
-     * box is the promise -- a player who has never opened one still knows what
-     * a wrapped present with a bow on it is going to do.
-     */
-    private presentButton (x: number, y: number, onTap: () => void): void
-    {
-        const btn = this.button(x, y, 340, 96, '', 0xffc857, 40, onTap);
-
-        const icon = iconImage(this, -104, 0, 'gift', { size: 52, color: 0x06101f });
-        btn.add(icon);
-
-        const label = this.add.text(22, 0, 'OPEN\nPRESENT', {
-            fontFamily: FONT, fontSize: 27, color: '#06101f', align: 'center', lineSpacing: -4
-        }).setOrigin(0.5);
-        btn.add(label);
-
-        this.tweens.add({ targets: btn, scale: 1.045, duration: 620, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
-        this.tweens.add({ targets: icon, angle: 7, duration: 420, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
-
-        this.time.addEvent({
-            delay: 1500,
-            loop: true,
-            callback: () => this.fx.ring(btn.x, btn.y, 260, 0xffc857, 4, 460)
-        });
     }
 
     /**
@@ -354,18 +300,9 @@ export class ResultScene extends Scene
         this.leaving = true;
         this.cameras.main.fadeOut(180, 0, 0, 0);
 
-        //  The present is the one exit that never gets an ad in front of it.
-        //  A break between "you have a present" and the present is the exact
-        //  place a player decides the reward was not worth waiting for, and
-        //  `offerInterstitial` has its own pacing -- skipping this one costs
-        //  the next break nothing.
-        const wantsAd = scene !== 'Gift';
-
         this.time.delayedCall(190, () =>
         {
-            const gate = wantsAd ? offerInterstitial() : Promise.resolve(false);
-
-            void gate.then(() => this.scene.start(scene));
+            void offerInterstitial().then(() => this.scene.start(scene));
         });
     }
 

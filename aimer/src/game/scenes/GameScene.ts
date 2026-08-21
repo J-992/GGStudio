@@ -18,6 +18,7 @@ import { Backdrop } from '../core/backdrop';
 import { Trails } from '../core/trails';
 import { isZoneStart, skinFor, Zone, zoneFor } from '../data/zones';
 import { LevelUpPanel } from '../objects/LevelUpPanel';
+import { endOfRun } from './GiftScene';
 import { BuildStrip } from '../objects/BuildStrip';
 import { BOOST_BY_ID } from '../data/boosts';
 import { Skin, TargetSkin, TargetStyle, paintOf, styleOf } from '../data/skins';
@@ -2462,7 +2463,7 @@ export class GameScene extends Scene
         this.time.delayedCall(340, () =>
         {
             this.cameras.main.fadeOut(180, 0, 0, 0);
-            this.time.delayedCall(190, () => this.scene.start('Result', { mode: 'fail', levelScore: this.levelScore, bestCombo: this.bestCombo }));
+            this.time.delayedCall(190, () => endOfRun(this, { mode: 'fail', levelScore: this.levelScore, bestCombo: this.bestCombo }));
         });
     }
 
@@ -2528,7 +2529,7 @@ export class GameScene extends Scene
             {
                 if (run.level >= FINAL_LEVEL)
                 {
-                    this.scene.start('Result', { mode: 'victory', levelScore: this.levelScore, bestCombo: this.bestCombo });
+                    endOfRun(this, { mode: 'victory', levelScore: this.levelScore, bestCombo: this.bestCombo });
                     return;
                 }
 

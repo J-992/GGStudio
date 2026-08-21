@@ -40,10 +40,13 @@ phone.
   along with best score, best level and rank XP.
 - **The mystery present** (`src/game/data/gifts.ts`, `scenes/GiftScene.ts`) — a
   wrapped box after the first run ever finished, and one every 3 runs after
-  that. Tapping it pops the lid and spins a reel of skins, boosts and coin bags
-  that stops on what the player got. The first box is not a roll: it is always
-  a photo skin they do not own, and it is worn the moment it lands. The results
-  card and the menu both say how many runs the next one is away.
+  that. It arrives **before** the results card, not after it -- a card of
+  statistics is where a session ends, and a reward on the far side of it is a
+  reward most players never reach. Tapping the box pops the lid and spins a
+  reel of skins, boosts and coin bags that stops on what they got. The first
+  box is not a roll: it is always a photo skin they do not own, and it is worn
+  the moment it lands. The results card and the menu both say how many runs the
+  next one is away.
 - **Photo skins** (`public/skins`, `core/photoskins.ts`) — the one thing that is
   a file rather than drawing code. `art-src/crop.py` frames the originals and
   writes the 256px files the game ships.

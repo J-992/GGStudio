@@ -1,7 +1,9 @@
 import { GameObjects, Geom, Scene, Tweens } from 'phaser';
 import { Fx } from '../core/fx';
 import { Sfx, unlockAudio } from '../core/audio';
-import { addGift, isFirstGift, meta, runsToNextGift, takeGift } from '../core/state';
+import {
+    addGift, giftsPending, isFirstGift, meta, noteRunEnded, runsToNextGift, takeGift
+} from '../core/state';
 import { Gift, RARITY, grantGift, reelFor, rollGift } from '../data/gifts';
 import { prizeTile, rarityText } from '../objects/PrizeTile';
 import { rewardButton } from '../core/adButton';
@@ -74,16 +76,35 @@ const L = LANDSCAPE
 
 interface GiftData
 {
-    /** Scene to return to when the card is claimed. */
+    /** Scene to go on to when the card is claimed. */
     back?: string;
+    /** What that scene is handed. The results card needs its own payload. */
+    backData?: Record<string, unknown>;
     /** True on a box opened by the rewarded video, so it does not offer again. */
     bonus?: boolean;
+}
+
+/**
+ * The end of a run, routed.
+ *
+ * The present goes *before* the summary, never after it. A card of statistics
+ * is the moment a session ends -- putting a wrapped box on the far side of it
+ * asks the player to sit through the ending to get to the reward. So the box
+ * comes first, and it hands the summary on when it is done.
+ */
+export function endOfRun (scene: Scene, result: Record<string, unknown>): void
+{
+    noteRunEnded();
+
+    if (giftsPending() > 0) scene.scene.start('Gift', { back: 'Result', backData: result });
+    else scene.scene.start('Result', result);
 }
 
 export class GiftScene extends Scene
 {
     private fx!: Fx;
     private back = 'MainMenu';
+    private backData: Record<string, unknown> | undefined;
     private bonus = false;
     private prize!: Gift;
     private leaving = false;
@@ -100,6 +121,7 @@ export class GiftScene extends Scene
     init (data: GiftData)
     {
         this.back = data?.back || 'MainMenu';
+        this.backData = data?.backData;
         this.bonus = data?.bonus === true;
     }
 
@@ -125,7 +147,7 @@ export class GiftScene extends Scene
 
         //  Nothing to open. Only reachable by a hand-typed scene start, but a
         //  dead-end screen with no way off it would be the worse bug.
-        if (!takeGift()) { this.scene.start(this.back); return; }
+        if (!takeGift()) { this.scene.start(this.back, this.backData); return; }
 
         this.prize = grantGift(rollGift(first));
 
@@ -491,7 +513,10 @@ export class GiftScene extends Scene
             {
                 addGift(1);
                 this.cameras.main.fadeOut(160, 0, 0, 0);
-                this.time.delayedCall(180, () => this.scene.restart({ back: this.back, bonus: true }));
+                this.time.delayedCall(180, () =>
+                {
+                    this.scene.restart({ back: this.back, backData: this.backData, bonus: true });
+                });
             }
         });
 
@@ -559,7 +584,7 @@ export class GiftScene extends Scene
 
         this.leaving = true;
         this.cameras.main.fadeOut(180, 0, 0, 0);
-        this.time.delayedCall(190, () => this.scene.start(this.back));
+        this.time.delayedCall(190, () => this.scene.start(this.back, this.backData));
     }
 
     update (_time: number, delta: number): void

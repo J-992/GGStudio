@@ -157,10 +157,10 @@ Run `bun run dev` and open it on a phone on the same network.
       finishes, and closing the video early leaves the total alone.
 - [ ] Tap **REROLL CARDS** twice: three new cards each time, and declining leaves
       whatever three are on the table.
-- [ ] Finish a first run on a fresh save (clear `aimer.save.v1`): the results
-      card leads with **OPEN PRESENT**, no ad plays on the way in, and the reel
-      stops on a photo skin that is on the targets by the time you are back at
-      the menu.
+- [ ] Finish a first run on a fresh save (clear `aimer.save.v1`): the present
+      comes up *before* the results card, no ad plays on the way in, and the
+      reel stops on a photo skin that is on the targets by the time you are
+      back at the menu.
 - [ ] Tap **OPEN ANOTHER** on the reveal: a second box, and no third offer.
 - [ ] Tap a skin you cannot afford: the offer card comes up, taps behind it do
       nothing, and **NO THANKS** leaves your coins alone. Take the video and the
