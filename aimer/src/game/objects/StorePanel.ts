@@ -52,10 +52,18 @@ const PAGER_H = 36;
 
 type TabId = 'perks' | 'boosts' | 'skins';
 
+/**
+ * Skins lead, and the store opens on them.
+ *
+ * The other two shelves are lists of numbers, and a player who has never
+ * bought anything has no way to want a number. The wardrobe is a grid of
+ * faces -- it is the only shelf that sells itself from across the room, and
+ * the only one worth putting in front of somebody who has just arrived.
+ */
 const TABS: { id: TabId; label: string }[] = [
+    { id: 'skins',  label: 'SKINS' },
     { id: 'perks',  label: 'UPGRADES' },
-    { id: 'boosts', label: 'BOOSTS' },
-    { id: 'skins',  label: 'SKINS' }
+    { id: 'boosts', label: 'BOOSTS' }
 ];
 
 /** Above the modal scrim in objects/StoreModal, so confetti lands on top. */
@@ -76,7 +84,7 @@ export class StorePanel
     /** Starts a run wearing what was just bought. Handed down by the menu. */
     private onPlay: () => void;
 
-    private tab: TabId = 'perks';
+    private tab: TabId = 'skins';
     private coinLabel!: IconLabel;
     private tabButtons: { id: TabId; redraw: () => void }[] = [];
     private rows: GameObjects.Container[] = [];
