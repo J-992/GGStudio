@@ -1,0 +1,741 @@
+import Phaser from 'phaser';
+import { GameCore } from '../core/GameCore';
+import { ArenaManager } from '../arena/ArenaManager';
+import { CombatDirector } from '../arena/CombatDirector';
+import { VFXManager } from '../effects/VFXManager';
+import { PowerupAuras } from '../effects/PowerupAuras';
+import { AscensionButton } from '../ui/AscensionButton';
+import { BossHud } from '../ui/BossHud';
+import { PlayerHud } from '../ui/PlayerHud';
+import { BuyButton } from '../ui/BuyButton';
+import { CurrencyDisplay } from '../ui/CurrencyDisplay';
+import { DebugPanel } from '../ui/DebugPanel';
+import { MergeBoard } from '../ui/MergeBoard';
+import { TrashSlot } from '../ui/TrashSlot';
+import { compactNumber, theme } from '../ui/theme';
+import { ATLAS_KEY } from '../render/atlasConfig';
+import { ACHIEVEMENTS_ICON_KEY } from '../render/revealAssets';
+import { Fx } from '../effects/Fx';
+import { Sfx } from '../audio/Sfx';
+import { NinjaReveal } from '../ui/NinjaReveal';
+import { Almanac } from '../ui/Almanac';
+import { AchievementToast } from '../ui/AchievementToast';
+import { AchievementsPanel } from '../ui/AchievementsPanel';
+import { SettingsPanel } from '../ui/SettingsPanel';
+import { TimeClock } from '../ui/TimeClock';
+import { HealthPotion } from '../ui/HealthPotion';
+import { PowerupPickups } from '../ui/PowerupPickups';
+import { LowHealthWarning } from '../ui/LowHealthWarning';
+import { GameOverPanel } from '../ui/GameOverPanel';
+import { StageBanner } from '../ui/StageBanner';
+import { BALANCE } from '../data/balance';
+import { BOSS_COUNT } from '../data/enemies';
+import { previewSeedPlan } from '../data/devPreview';
+import type { PowerupId } from '../data/powerups';
+import { collectionProgress } from '../systems/CollectionProgress';
+import { attachAdHold } from '../platform/adHold';
+import {
+  reportPlatformHappyTime,
+  requestPlatformCommercialBreak,
+  setPlatformGameplayActive,
+} from '../platform/platform';
+
+export class GameScene extends Phaser.Scene {
+  /**
+   * Built in `init` rather than as a field: restarting the scene from the
+   * settings panel has to hand every widget a core reloaded from the wiped
+   * save, and a field initialiser only ever runs once per scene instance.
+   */
+  core!: GameCore;
+
+  private board!: MergeBoard;
+  private buy!: BuyButton;
+  private trash!: TrashSlot;
+  private currency!: CurrencyDisplay;
+  private debug!: DebugPanel;
+  private arena!: ArenaManager;
+  private director!: CombatDirector;
+  private hud!: BossHud;
+  private playerHud!: PlayerHud;
+  private reveal!: NinjaReveal;
+  private almanac!: Almanac;
+  private achievementsPanel!: AchievementsPanel;
+  private achievementToast!: AchievementToast;
+  private settings!: SettingsPanel;
+  private timeClock!: TimeClock;
+  private potion!: HealthPotion;
+  private powerups!: PowerupPickups;
+  private lowHealth!: LowHealthWarning;
+  private gameOver!: GameOverPanel;
+  private stageBanner!: StageBanner;
+  private ascension!: AscensionButton;
+  private almanacButton!: Phaser.GameObjects.Image;
+  private almanacPlate!: Phaser.GameObjects.NineSlice;
+  private almanacBadge!: Phaser.GameObjects.BitmapText;
+  private settingsButton!: Phaser.GameObjects.Image;
+  private settingsPlate!: Phaser.GameObjects.NineSlice;
+  private achievementsButton!: Phaser.GameObjects.Image;
+  private achievementsPlate!: Phaser.GameObjects.NineSlice;
+  private achievementsBadge!: Phaser.GameObjects.BitmapText;
+  private background!: Phaser.GameObjects.Image;
+  private arenaVfx!: VFXManager;
+  private powerAuras!: PowerupAuras;
+  private arenaFrame!: Phaser.GameObjects.NineSlice;
+  private back!: Phaser.GameObjects.Image;
+  private readonly sectionTitles: Phaser.GameObjects.BitmapText[] = [];
+  private readonly gears: Array<{ image: Phaser.GameObjects.Image; speed: number }> = [];
+  private boughtOnce = false;
+  /** Set once per session when the almanac hits 100%, so the fanfare is one-time. */
+  private collectionCelebrated = false;
+  /** True when this create came from Settings' Restart, not from a boot. */
+  private restarted = false;
+  /** Last gameplay state handed to the portal; see syncGameplayReport. */
+  private gameplayReported = false;
+  /** True from the moment a restart is asked for until the scene is rebuilt. */
+  private restarting = false;
+  private detachAdHold: (() => void) | null = null;
+  private fx!: Fx;
+  private readonly sfx = new Sfx();
+
+  constructor() {
+    super('GameScene');
+  }
+
+  init(data?: { restarted?: boolean }): void {
+    this.core = new GameCore({});
+    this.boughtOnce = false;
+    this.restarted = data?.restarted === true;
+  }
+
+  create(): void {
+    // Nothing may move or make a sound behind an ad. The hold is taken and
+    // released by the portal itself, and torn down with the scene so a restart
+    // does not stack a second listener on the same audio bus.
+    this.detachAdHold = attachAdHold(this, this.sfx);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.detachAdHold?.();
+      this.detachAdHold = null;
+      this.gameplayReported = false;
+      setPlatformGameplayActive(false);
+    });
+
+    this.background = this.add.image(theme.layout.width / 2, theme.layout.height / 2, 'dojo_night_backdrop').setDepth(-2);
+    this.layoutScreenBackground();
+    this.makeBackdrop();
+    this.makeSectionTitles();
+
+    this.fx = new Fx(this, this.sfx);
+    this.arena = new ArenaManager(this, this.core);
+    this.arenaVfx = new VFXManager(this);
+    this.powerAuras = new PowerupAuras(this, this.core);
+    this.director = new CombatDirector(this, this.arena, this.arenaVfx, this.fx, this.sfx);
+    // Boss entrances are data-driven per identity; without a presenter they
+    // fall back to the legacy portal fly-in.
+    this.arena.attachBossEntrancePresenter({
+      vfx: this.arenaVfx,
+      shake: (intensity, durationMs) => this.fx.shake(intensity, durationMs),
+      sfx: (name, tier) => this.sfx.play(name, tier),
+    });
+    this.hud = new BossHud(this, this.core);
+    this.playerHud = new PlayerHud(this, this.core);
+    this.makeArenaChrome();
+    this.core.events.onAny((event) => this.director.onEvent(event));
+
+    this.trash = new TrashSlot(this);
+    this.board = new MergeBoard(this, this.core, this.trash, this.fx, this.sfx);
+    this.currency = new CurrencyDisplay(this);
+    this.fx.setCoinTarget(() => new Phaser.Math.Vector2(this.currency.x, this.currency.y));
+    this.buy = new BuyButton(this, () => this.onBuy(), this.fx, this.sfx);
+    this.debug = new DebugPanel(this, this.core, (value) => this.director.setForceHigh(value));
+    this.reveal = new NinjaReveal(this, this.core);
+    this.almanac = new Almanac(this, this.core, this.sfx);
+    this.achievementsPanel = new AchievementsPanel(this, this.core, this.sfx);
+    this.achievementToast = new AchievementToast(this);
+    this.timeClock = new TimeClock(this, this.core, this.fx, this.sfx, () => this.modalOpen);
+    this.potion = new HealthPotion(this, this.core, this.fx, this.sfx, () => this.modalOpen);
+    this.powerups = new PowerupPickups(this, this.core, this.fx, this.sfx, () => this.modalOpen);
+    this.lowHealth = new LowHealthWarning(this);
+    this.stageBanner = new StageBanner(this);
+    this.settings = new SettingsPanel(this, this.sfx, () => this.restartRun());
+    this.gameOver = new GameOverPanel(this, this.sfx, () => this.restartRun());
+    this.ascension = new AscensionButton(this, this.core, this.sfx);
+    this.makeAlmanacButton();
+    this.makeSettingsButton();
+    this.makeAchievementsButton();
+
+    // The welcome-back reward was already credited to the wallet at load; the
+    // banner is announced here so it can never be missed by an event fired
+    // before the scene existed. It yields to stage announcements the same way
+    // they yield to each other: one banner at a time.
+    const offline = this.core.consumeOfflineReward();
+    if (offline !== null) {
+      this.stageBanner.announce('WELCOME BACK!', `+${compactNumber(offline.coins)} COINS WHILE YOU WERE AWAY`, 0xfff6dd);
+    }
+    // The new-day gift, on the same one-at-a-time contract. When a long
+    // absence earns both, they are shown in turn rather than one replacing the
+    // other unseen.
+    const daily = this.core.consumeDailyBonus();
+    if (daily !== null) {
+      const announce = (): void => {
+        this.stageBanner.announce('DAILY BONUS', `+${compactNumber(daily.coins)} COINS - DAY ${daily.daysVisited}`, 0xfff6dd);
+      };
+      if (offline === null) announce();
+      else this.time.delayedCall(1900, announce);
+    }
+
+    this.scale.on('resize', this.onResize, this);
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      this.sfx.unlock();
+      if (this.modalOpen) return;
+      // The clock only swallows presses that actually land on it -- everything
+      // else still reaches the board while it drifts past.
+      if (this.timeClock.tryCollect(pointer)) return;
+      if (this.potion.tryCollect(pointer)) return;
+      if (this.powerups.tryCollect(pointer)) return;
+      if (this.board.beginDrag(pointer)) this.core.notePlayerAction();
+    });
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (!this.modalOpen) this.board.moveDrag(pointer);
+    });
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      if (!this.modalOpen) this.board.endDrag(pointer);
+    });
+    this.input.on('pointerupoutside', (pointer: Phaser.Input.Pointer) => {
+      if (!this.modalOpen) this.board.endDrag(pointer);
+    });
+    this.core.events.on('coinsChanged', (event) => {
+      this.currency.setCoins(event.coins);
+      if (event.delta > 0) this.currency.burst();
+    });
+    // The four moments worth telling the portal about. Poki uses happyTime to
+    // learn where a game is at its best, so it is spent on the things a player
+    // would tell someone else about: a ninja they have never seen, a boss down,
+    // a named goal met, and a prestige.
+    this.core.events.on('newTierDiscovered', (event) => {
+      this.reveal.show(event.tier, this.input.activePointer.id);
+      void reportPlatformHappyTime(0.8);
+    });
+    this.core.events.on('bossDefeated', () => { void reportPlatformHappyTime(0.5); });
+    this.core.events.on('ascended', () => { void reportPlatformHappyTime(1); });
+    // Stage 1 needs no announcement -- it is where every run opens.
+    this.core.events.on('bossSpawned', (event) => { if (event.stage > 1) this.stageBanner.show(event.stage); });
+    // An ascension restarts the run from stage 1, so it deserves the banner
+    // more than the stage-1 spawn that follows it does.
+    // The rank is announced ahead of the percentage on purpose: the bonus
+    // shrinks with every ascension, the title does not, and by the fourth
+    // prestige the title is the part the player can still feel.
+    this.core.events.on('ascended', (event) => {
+      this.stageBanner.announce(`RANK: ${event.rank}`, `ASCENSION ${event.ascensions} - +${event.bonusPct}% COIN INCOME FOREVER`, 0xfff6dd);
+    });
+    this.core.events.on('achievementUnlocked', (event) => {
+      this.achievementToast.show({
+        name: event.name,
+        description: event.description,
+        kind: event.kind,
+        progress: `${event.unlockedCount}/${event.total}`,
+      });
+      this.sfx.play('newTier');
+      void reportPlatformHappyTime(0.6);
+      this.refreshAchievementsBadge(true);
+      // The page does not pause the run, so an unlock can land while it is
+      // open; without this the row it belongs to would stay greyed out.
+      if (this.achievementsPanel.isOpen) this.achievementsPanel.refresh();
+    });
+    this.core.events.on('gameOver', (event) => this.gameOver.show(event));
+    this.core.events.on('boardFull', () => {
+      this.buy.pulse();
+      this.board.pulseMergeable();
+    });
+    // A broke tap used to be completely silent: the click played, nothing
+    // happened, and the button read as broken. Say how much is missing.
+    this.core.events.on('purchaseRejected', (event) => {
+      if (event.reason !== 'coins') return;
+      const shortfall = Math.max(1, this.core.buyCost - this.core.economy.coins);
+      this.buy.reject(compactNumber(shortfall));
+    });
+
+    this.seedFlameShogunPreview();
+    this.currency.setCoins(this.core.economy.coins);
+    this.board.syncFromCore();
+    this.buy.refresh(this.core.buyTier, this.core.buyCost, this.core.canBuy);
+    if (!this.boughtOnce) this.buy.pulse();
+    this.exposeHooks();
+  }
+
+  /**
+   * Dev-only preview seeding, decided by the pure helper in
+   * `src/data/devPreview.ts` (unit-tested there). `?showcaseTier=14` is the
+   * direct visual proof that a tier does not reuse an earlier portrait;
+   * `?showcaseBoss=14` previews the boss at that identity; `?showcaseRoster=1`
+   * fills the board with the curated spread. Explicit params work regardless
+   * of save state; nothing else ever touches the roster -- reloads, HMR,
+   * responsive relayouts and production boots are no-ops, and a fresh run
+   * starts through the real economy instead of an implicit starter ninja.
+   * Also skipped after a Restart, where a free unit would make the wipe look
+   * broken.
+   */
+  private seedFlameShogunPreview(): void {
+    const query = new URLSearchParams(window.location.search);
+    const plan = previewSeedPlan(
+      {
+        showcaseTier: query.get('showcaseTier'),
+        showcaseBoss: query.get('showcaseBoss'),
+        showcaseRoster: query.has('showcaseRoster'),
+      },
+      {
+        devMode: import.meta.env.DEV,
+        restarted: this.restarted,
+        loadedFromSave: this.core.loadedFromSave,
+        tierCount: BALANCE.tiers.count,
+        bossCount: BOSS_COUNT,
+      },
+    );
+    for (const tier of plan.tiers) {
+      if (this.core.board.slots.some((ninja) => ninja?.tier === tier)) continue;
+      if (this.core.spawnTier(tier) === null) break;
+    }
+    if (plan.skipToStage !== null) {
+      while (this.core.boss.stage < plan.skipToStage) this.core.skipEnemy();
+    }
+  }
+
+  private makeSectionTitles(): void {
+    const arenaTitle = this.add
+      .bitmapText(0, 0, 'pixel', '[ARENA COMBAT]', 14)
+      .setOrigin(0.5)
+      .setTint(0xe9ece6)
+      .setDepth(60);
+    const rosterTitle = this.add
+      .bitmapText(0, 0, 'pixel', '[MERGE GRIDS & MANAGEMENT]', 14)
+      .setOrigin(0.5)
+      .setTint(0xe9ece6)
+      .setDepth(60);
+    this.sectionTitles.push(arenaTitle, rosterTitle);
+    this.layoutSectionTitles();
+  }
+
+  private layoutSectionTitles(): void {
+    const [arenaTitle, rosterTitle] = this.sectionTitles;
+    const a = theme.layout.arena;
+    const b = theme.layout.board;
+    const y = Math.max(18, a.y - 37);
+    arenaTitle?.setPosition(a.x + a.w / 2, y);
+    rosterTitle?.setPosition(b.x + b.w / 2, y);
+    // Stacked portrait puts both panels on the same centre line, where the two
+    // captions printed on top of each other. The board carries its own title
+    // plate, so the roster caption only earns its place in landscape.
+    rosterTitle?.setVisible(theme.layout.landscape);
+  }
+
+  /** Reveal, almanac, achievements, settings and game over take the screen; none leak drags. */
+  private get modalOpen(): boolean {
+    return this.reveal.isShowing || this.almanac.isOpen || this.achievementsPanel.isOpen
+      || this.settings.isOpen || this.gameOver.isOpen;
+  }
+
+  /**
+   * Back to a first-ever session: the save slot is deleted, then the scene is
+   * rebuilt so every widget is constructed against a core that found nothing
+   * to load. Coins, roster, boss stage, health and the almanac's discoveries
+   * all start over. Audio settings live in their own slot and are kept.
+   */
+  private restartRun(): void {
+    if (this.restarting) return;
+    this.restarting = true;
+
+    // The only interstitial slot in the game, and the one place an ad
+    // interrupts nothing: the run is already over, the board is frozen behind a
+    // full-screen card, and the next thing the player sees is a new run either
+    // way. Whether an ad actually plays is Poki's call -- they cap the
+    // frequency, so a player who restarts twice in a minute does not pay for it.
+    void (async () => {
+      await requestPlatformCommercialBreak();
+      this.restarting = false;
+      this.core.wipeSave();
+      this.scene.restart({ restarted: true });
+    })();
+  }
+
+  private makeAlmanacButton(): void {
+    const a = theme.layout.almanac;
+    // Same straw nine-slice plate as the gear and the trophy (see
+    // makeSettingsButton), so the book doesn't float bare while its two
+    // neighbours on the rail sit in a frame -- the row reads as one set of
+    // controls instead of two styles.
+    this.almanacPlate = this.add
+      .nineslice(a.x, a.y, ATLAS_KEY, 'banner_name_9', 56, 56, 11, 11, 7, 7)
+      .setTint(theme.colors.matStraw)
+      .setDepth(8);
+    this.almanacButton = this.add
+      .image(a.x, a.y, ATLAS_KEY, 'icon_book')
+      .setScale(1.7)
+      .setDepth(9)
+      .setInteractive(new Phaser.Geom.Rectangle(-6, -6, 38, 38), Phaser.Geom.Rectangle.Contains);
+    this.almanacButton.on('pointerdown', () => {
+      this.sfx.play('click');
+      this.tweens.add({ targets: this.almanacButton, scale: 1.5, yoyo: true, duration: 90 });
+      this.almanac.toggle();
+    });
+    // A quiet progress counter under the book: informational, never urgent --
+    // no red, no pulse, no timer. It only ever grows.
+    this.almanacBadge = this.add
+      .bitmapText(a.x, a.y + 26, 'pixel', '', 14)
+      .setOrigin(0.5, 0)
+      .setTint(0xffe58a)
+      .setDepth(9);
+    this.refreshAlmanacBadge(true);
+  }
+
+  /** Collection totals behind the badge, plus the one-time completion fanfare. */
+  private refreshAlmanacBadge(force = false): void {
+    const ninjas = collectionProgress(this.core.discoveredTiers.size, BALANCE.tiers.count);
+    const bosses = collectionProgress(this.core.seenBosses.size, BOSS_COUNT);
+    const have = ninjas.have + bosses.have;
+    const total = BALANCE.tiers.count + BOSS_COUNT;
+    const text = `${have}/${total}`;
+    if (force || this.almanacBadge.text !== text) this.almanacBadge.setText(text);
+
+    // The whole collection is done: celebrate once per session through the
+    // single banner, and never again -- it is a moment, not a nag.
+    if (have >= total && !this.collectionCelebrated) {
+      this.collectionCelebrated = true;
+      this.stageBanner.announce('COLLECTION COMPLETE!', 'EVERY NINJA AND BOSS DISCOVERED');
+    }
+  }
+
+  private layoutAlmanacButton(): void {
+    const a = theme.layout.almanac;
+    this.almanacPlate.setPosition(a.x, a.y);
+    this.almanacButton.setPosition(a.x, a.y);
+    this.almanacBadge.setPosition(a.x, a.y + 26);
+  }
+
+  /**
+   * Sat beside the book: the atlas has no gear icon, so a prop gear is it.
+   * The dark prop used to sit straight on the near-black deck and read as a
+   * hole, so it gets the AscensionButton treatment -- a straw nine-slice
+   * plate to sit on -- while the gear itself is warmed toward white.
+   */
+  private makeSettingsButton(): void {
+    const s = theme.layout.settings;
+    this.settingsPlate = this.add
+      .nineslice(s.x, s.y, ATLAS_KEY, 'banner_name_9', 56, 56, 11, 11, 7, 7)
+      .setTint(theme.colors.matStraw)
+      .setDepth(8);
+    this.settingsButton = this.add
+      .image(s.x, s.y, ATLAS_KEY, 'prop_gear_small_a')
+      // A near-white warm multiply keeps the cog's dark silhouette but lets
+      // it pop against the light plate instead of sinking into the deck.
+      .setScale(1.25)
+      .setTint(0xfff6dd)
+      .setDepth(9)
+      // Covers the 56px plate with a little margin (scale 1.25 turns this
+      // into a ~60px world-space square).
+      .setInteractive(new Phaser.Geom.Rectangle(-24, -24, 48, 48), Phaser.Geom.Rectangle.Contains);
+    this.settingsButton.on('pointerdown', () => {
+      this.sfx.unlock();
+      this.sfx.play('click');
+      // Only the gear turns; the plate stays axis-aligned like the ascension
+      // star's, so the hit area never swings away from where a finger aims.
+      this.tweens.add({ targets: this.settingsButton, angle: this.settingsButton.angle + 90, duration: 220 });
+      this.settings.toggle();
+    });
+  }
+
+  private layoutSettingsButton(): void {
+    const s = theme.layout.settings;
+    this.settingsPlate.setPosition(s.x, s.y);
+    this.settingsButton.setPosition(s.x, s.y);
+  }
+
+  /**
+   * Third on the rail: a trophy on the same straw plate the gear and the
+   * ascension offer sit on, so the row reads as one set of controls.
+   *
+   * Deliberately not the atlas star. The ascension offer is a star on a plate
+   * and sits on this same rail, so a second star here read as the same button
+   * appearing twice; the trophy is drawn in the shipped icon style but is
+   * unmistakably a different thing.
+   */
+  private makeAchievementsButton(): void {
+    const a = theme.layout.achievements;
+    this.achievementsPlate = this.add
+      .nineslice(a.x, a.y, ATLAS_KEY, 'banner_name_9', 56, 56, 11, 11, 7, 7)
+      .setTint(theme.colors.matStraw)
+      .setDepth(8);
+    this.achievementsButton = this.add
+      .image(a.x, a.y, ACHIEVEMENTS_ICON_KEY)
+      .setScale(1.4)
+      .setDepth(9)
+      .setInteractive(new Phaser.Geom.Rectangle(-24, -24, 48, 48), Phaser.Geom.Rectangle.Contains);
+    this.achievementsButton.on('pointerdown', () => {
+      this.sfx.unlock();
+      this.sfx.play('click');
+      this.tweens.add({ targets: this.achievementsButton, scale: 1.2, yoyo: true, duration: 90 });
+      this.achievementsPanel.toggle();
+    });
+    // The same quiet counter the almanac carries: it only ever grows, and it
+    // is the one place a player can see how much is left to try.
+    this.achievementsBadge = this.add
+      .bitmapText(a.x, a.y + 26, 'pixel', '', 14)
+      .setOrigin(0.5, 0)
+      .setTint(0xffe58a)
+      .setDepth(9);
+    this.refreshAchievementsBadge(true);
+  }
+
+  private refreshAchievementsBadge(force = false): void {
+    const progress = this.core.achievementProgress;
+    const text = `${progress.have}/${progress.total}`;
+    if (force || this.achievementsBadge.text !== text) this.achievementsBadge.setText(text);
+  }
+
+  private layoutAchievementsButton(): void {
+    const a = theme.layout.achievements;
+    this.achievementsPlate.setPosition(a.x, a.y);
+    this.achievementsButton.setPosition(a.x, a.y);
+    this.achievementsBadge.setPosition(a.x, a.y + 26);
+  }
+
+  private makeBackdrop(): void {
+    // The old industrial gears fought the dojo setting. The supplied backdrop
+    // already carries restrained lantern light and architecture, so the panel
+    // chrome can remain the only foreground decoration.
+    this.layoutBackdrop();
+  }
+
+  private layoutBackdrop(): void {
+    if (this.gears.length === 0) return;
+    const l = theme.layout;
+    const b = l.board;
+    const positions: Array<[number, number]> = [
+      [l.width * 0.06, l.height * 0.13],
+      [l.width * 0.53, l.height * 0.07],
+      [l.width * 0.96, l.height * 0.21],
+      [b.x + 64, b.y + b.h - 72],
+      [b.x + b.w * 0.53, b.y + b.h - 74],
+      [b.x + b.w - 64, b.y + b.h - 72],
+    ];
+    this.gears.forEach(({ image }, index) => {
+      image
+        .setPosition(...positions[index]!)
+        .setScale(index === 0 || index === 4 ? 1.8 : 1.35)
+        .setAlpha(index < 3 ? 0.2 : 0.42)
+        .setDepth(index < 3 ? 0 : 4);
+    });
+  }
+
+  private makeArenaChrome(): void {
+    const a = theme.layout.arena;
+    this.arenaFrame = this.add
+      .nineslice(a.x + a.w / 2, a.y + a.h / 2, ATLAS_KEY, 'frame_bezel', a.w, a.h, 20, 20, 20, 20)
+      .setDepth(50);
+    this.back = this.add.image(a.x + a.w - 28, a.y + 34, ATLAS_KEY, 'btn_back').setDepth(51).setInteractive();
+    this.back.on('pointerdown', () => this.sfx.play('click'));
+    this.layoutArenaChrome();
+  }
+
+  private layoutArenaChrome(): void {
+    const a = theme.layout.arena;
+    this.arenaFrame.setPosition(a.x + a.w / 2, a.y + a.h / 2).setSize(a.w, a.h);
+    this.back.setPosition(a.x + a.w - 28, a.y + 34);
+  }
+
+  /**
+   * `configureLayout` is not re-run here: the resize that triggers this
+   * handler is always preceded by main.ts's own listener already calling it
+   * with the real `window.innerWidth/innerHeight` and pushing the result into
+   * `game.scale.resize()`. Re-deriving layout from the resize event's
+   * `gameSize` (the canvas's internal design resolution, not the viewport)
+   * would size everything for the wrong reference frame.
+   */
+  private onResize(): void {
+    this.layoutScreenBackground();
+    this.layoutSectionTitles();
+    this.layoutBackdrop();
+    this.layoutArenaChrome();
+    this.arena.relayout();
+    this.arenaVfx.relayout();
+    this.powerAuras.relayout();
+    this.board.relayout();
+    this.buy.relayout();
+    this.trash.relayout();
+    this.currency.relayout();
+    this.hud.relayout();
+    this.playerHud.relayout();
+    this.reveal.relayout();
+    this.almanac.relayout();
+    this.achievementsPanel.relayout();
+    this.achievementToast.relayout();
+    this.settings.relayout();
+    this.gameOver.relayout();
+    this.timeClock.relayout();
+    this.potion.relayout();
+    this.powerups.relayout();
+    this.lowHealth.relayout();
+    this.stageBanner.relayout();
+    this.ascension.relayout();
+    this.layoutAlmanacButton();
+    this.layoutSettingsButton();
+    this.layoutAchievementsButton();
+    this.exposeHooks();
+  }
+
+  /**
+   * Poki is told the player is playing whenever a live run is on screen with
+   * nothing on top of it. The almanac, the settings page, a tier reveal and the
+   * game-over card are all "not playing" -- their checklist counts a menu as a
+   * menu however good the game behind it is.
+   *
+   * The last reported value is held here rather than pushed every frame: the
+   * SDK wrapper dedupes, but only after building a promise to do it in.
+   */
+  private syncGameplayReport(): void {
+    const active = !this.modalOpen && !this.core.isGameOver;
+    if (active === this.gameplayReported) return;
+    this.gameplayReported = active;
+    setPlatformGameplayActive(active);
+  }
+
+  override update(_time: number, dt: number): void {
+    this.syncGameplayReport();
+    this.core.update(dt);
+    this.timeClock.update(dt);
+    this.potion.update(dt);
+    this.powerups.update(dt);
+    this.powerAuras.update(dt);
+    this.lowHealth.setDanger(this.core.lowHealth);
+    this.arena.update(dt);
+    this.director.update(dt);
+    this.gears.forEach(({ image, speed }) => {
+      image.angle += speed * dt;
+    });
+    this.hud.update();
+    this.playerHud.update();
+    this.board.refreshExternalState();
+    this.buy.refresh(this.core.buyTier, this.core.buyCost, this.core.canBuy);
+    this.ascension.refresh();
+    this.refreshAlmanacBadge();
+    this.refreshAchievementsBadge();
+    if (this.almanac.isOpen) this.almanac.updateProgress();
+    if (this.debug.visible) this.debug.refresh();
+  }
+
+  private onBuy(): void {
+    // The button itself already played the click; a second one here flams
+    // against it. This handler only reacts to the outcome.
+    this.core.notePlayerAction();
+    const ninja = this.core.buy();
+    if (ninja !== null) this.boughtOnce = true;
+    else if (this.core.board.firstEmpty() === null) {
+      this.buy.pulse();
+      this.board.pulseMergeable();
+    }
+  }
+
+  private exposeHooks(): void {
+    const w = window as unknown as Record<string, unknown>;
+    w.__mn = {
+      ready: true,
+      core: this.core,
+      revealing: () => this.reveal.isShowing,
+      almanacOpen: () => this.almanac.isOpen,
+      achievementsOpen: () => this.achievementsPanel.isOpen,
+      toggleAchievements: () => this.achievementsPanel.toggle(),
+      achievementsButtonPos: () => this.toPage(theme.layout.achievements.x, theme.layout.achievements.y),
+      achievementsPage: () => this.achievementsPanel.pageState(),
+      achievementsAnchors: () => {
+        const anchors = this.achievementsPanel.anchors();
+        return { previous: this.toPage(anchors.previous.x, anchors.previous.y), next: this.toPage(anchors.next.x, anchors.next.y) };
+      },
+      toastName: () => this.achievementToast.currentName(),
+      toastPending: () => this.achievementToast.pending,
+      rank: () => this.core.rank,
+      best: () => this.core.best,
+      achievementProgress: () => this.core.achievementProgress,
+      clockLive: () => this.timeClock.isLive,
+      spawnClock: () => this.timeClock.forceSpawn(),
+      clockPos: () => this.toPage(this.timeClock.x, this.timeClock.y),
+      potionLive: () => this.potion.isLive,
+      spawnPotion: () => this.potion.forceSpawn(),
+      potionPos: () => this.toPage(this.potion.x, this.potion.y),
+      powerupSpawn: (id?: PowerupId) => this.powerups.forceSpawn(id),
+      powerupLive: () => this.powerups.liveIds,
+      powerupPos: (id: PowerupId) => {
+        const pos = this.powerups.posOf(id);
+        return pos === null ? null : this.toPage(pos.x, pos.y);
+      },
+      powerupHud: () => ({ active: this.core.powerups.activeEffects(), hud: this.core.powerups.hudState(), charges: this.core.powerups.wardCharges }),
+      powerupActivate: (id: PowerupId) => this.core.collectPowerup(id),
+      coinFrenzyCoins: () => this.powerups.liveRainCoins.map((coin) => this.toPage(coin.x, coin.y)),
+      coinFrenzyState: () => this.core.coinFrenzyState,
+      lowHealthWarning: () => this.lowHealth.isShowing,
+      gameOverOpen: () => this.gameOver.isOpen,
+      tryAgainPos: () => this.toPage(this.gameOver.anchors().tryAgain.x, this.gameOver.anchors().tryAgain.y),
+      openAlmanac: () => this.almanac.show(),
+      toggleAlmanac: () => this.almanac.toggle(),
+      almanacButtonPos: () => this.toPage(theme.layout.almanac.x, theme.layout.almanac.y),
+      almanacPage: () => this.almanac.pageState(),
+      almanacArrows: () => {
+        const a = this.almanac.anchors();
+        return { previous: this.toPage(a.previous.x, a.previous.y), next: this.toPage(a.next.x, a.next.y) };
+      },
+      stageBannerVisible: () => this.stageBanner.visible,
+      settingsOpen: () => this.settings.isOpen,
+      openSettings: () => this.settings.show(),
+      settingsButtonPos: () => this.toPage(theme.layout.settings.x, theme.layout.settings.y),
+      settingsAnchors: () => {
+        const a = this.settings.anchors();
+        const track = (t: { left: number; right: number; y: number }) => ({
+          left: this.toPage(t.left, t.y),
+          right: this.toPage(t.right, t.y),
+        });
+        return {
+          music: track(a.music),
+          sfx: track(a.sfx),
+          restart: this.toPage(a.restart.x, a.restart.y),
+          cancel: this.toPage(a.cancel.x, a.cancel.y),
+          confirm: this.toPage(a.confirm.x, a.confirm.y),
+        };
+      },
+      volumes: () => ({ music: this.sfx.musicVolume, sfx: this.sfx.sfxVolume }),
+      slotPos: (slot: number) => this.toPage(this.board.slotPos(slot).x, this.board.slotPos(slot).y),
+      /** Where the character's body actually renders -- what a finger aims at. */
+      bodyPos: (slot: number) =>
+        this.toPage(this.board.slotPos(slot).x, this.board.slotPos(slot).y - 66 * theme.layout.slots.spriteScale),
+      buyPos: () => this.toPage(theme.layout.buy.x, theme.layout.buy.y),
+      trashPos: () => this.toPage(theme.layout.trash.x, theme.layout.trash.y),
+      almanacBadgeText: () => this.almanacBadge.text,
+      ascensionVisible: () => this.ascension.visible,
+      ascensionAnchors: () => this.ascension.anchors(),
+      bannerVisible: () => this.stageBanner.visible,
+      bannerMainText: () => this.stageBanner.mainText(),
+      /** Direct probe for the reward floater, so verification needs no boss kill timing. */
+      fxGain: (x: number, y: number, message: string) => this.fx.gain(x, y, message),
+      /** Who would actually receive a press right now (topOnly order), and who lost. */
+      inputStack: () =>
+        (this.input.hitTestPointer(this.input.activePointer) as Phaser.GameObjects.GameObject[]).map((obj) => ({
+          kind: obj.constructor.name,
+          depth: (obj as unknown as { depth: number }).depth,
+          visible: (obj as Phaser.GameObjects.Container | Phaser.GameObjects.Image).visible,
+          label: obj instanceof Phaser.GameObjects.BitmapText ? obj.text : '',
+        })),
+    };
+  }
+
+  private toPage(x: number, y: number): { x: number; y: number } {
+    const rect = this.game.canvas.getBoundingClientRect();
+    return {
+      x: rect.left + window.scrollX + (x * rect.width) / theme.layout.width,
+      y: rect.top + window.scrollY + (y * rect.height) / theme.layout.height,
+    };
+  }
+
+  /** Cover, never stretch: the dojo stays coherent in every layout. */
+  private layoutScreenBackground(): void {
+    const width = Math.max(1, this.background.width);
+    const height = Math.max(1, this.background.height);
+    const scale = Math.max(theme.layout.width / width, theme.layout.height / height);
+    this.background.setPosition(theme.layout.width / 2, theme.layout.height / 2).setScale(scale);
+  }
+}

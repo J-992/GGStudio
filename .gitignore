@@ -140,3 +140,10 @@ InitTestScene*.unity*
 /zombie-car/.DS_Store
 /zombie-car/Thumbs.db
 .npm-cache/
+
+# merge-ninja (Vite / TypeScript)
+/merge-ninja/node_modules/
+/merge-ninja/dist/
+/merge-ninja/.vite/
+/merge-ninja/coverage/
+/merge-ninja/.DS_Store
