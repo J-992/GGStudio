@@ -6,6 +6,7 @@ import {
   P1_COLOR, P2_COLOR, TETHER_REST, SCREEN_KILL_GRACE,
 } from "./Constants";
 import { InputManager } from "../input/InputManager";
+import { touchState } from "../input/touchState";
 import { UI } from "../ui/UI";
 import { Effects } from "../effects/Effects";
 import { audio } from "../audio/AudioManager";
@@ -91,10 +92,8 @@ export class Game {
     this.input.onAnyKey = () => this.handleAnyKey();
     this.input.onPauseToggle = () => this.handlePause();
     this.input.onRestart = () => this.handleRestart();
-    this.input.onMuteToggle = () => {
-      const muted = audio.toggleMute();
-      this.ui.hint(muted ? "MUTED" : "SOUND ON", 1.2);
-    };
+    this.input.onMuteToggle = () => this.handleMute();
+    document.addEventListener("pointerdown", () => this.handleAnyKey());
 
     window.addEventListener("resize", () => {
       this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -126,6 +125,19 @@ export class Game {
       this.state = GameState.Playing;
       this.ui.pause(false);
     }
+  }
+
+  private handleMute() {
+    const muted = audio.toggleMute();
+    this.ui.hint(muted ? "MUTED" : "SOUND ON", 1.2);
+  }
+
+  pauseGame() {
+    this.handlePause();
+  }
+
+  muteGame() {
+    this.handleMute();
   }
 
   private handleRestart() {
@@ -509,6 +521,25 @@ export class Game {
         this.coopCam.requestRoll(from, this.orientation);
       },
       musicPlaying: () => audio.musicPlaying,
+      touch: () => ({ ...touchState }),
+      levels: () =>
+        LEVELS.map((d) => {
+          let maxFloorRun = 0;
+          let run = 0;
+          let wallHaz = 0;
+          for (const s of d.slices) {
+            const fEmpty = s.f === E_PATTERN;
+            if (fEmpty) {
+              run++;
+              if (run > maxFloorRun) maxFloorRun = run;
+            } else {
+              run = 0;
+            }
+            const otherGap = [s.l, s.r, s.c].some((x) => x !== undefined && x.includes("."));
+            if (fEmpty && otherGap) wallHaz++;
+          }
+          return { name: d.name, len: d.slices.length, maxFloorRun, wallHaz };
+        }),
       startRun: (idx: number) => {
         this.ui.showTitle(false);
         this.ui.hideFinish();
@@ -527,3 +558,4 @@ const _mid = new THREE.Vector3();
 const _ppos = new THREE.Vector3();
 const _gravDir = new THREE.Vector3();
 const _proj = new THREE.Vector3();
+const E_PATTERN = ".....";

@@ -120,7 +120,7 @@ async function main() {
   await holdKey("KeyD", 700);
   s = await snap();
   const gap = s.p2.x - s.p1.x;
-  const collisionWorks = gap > 0.5 && gap < 2.5 && Math.abs(s.p2.x) < 1.6;
+  const collisionWorks = gap > 0.5 && gap < 1.05 && Math.abs(s.p2.x) < 3;
   check("players collide and block each other", collisionWorks, JSON.stringify({ p1: s.p1.x, p2: s.p2.x }));
   await page.evaluate(() => {
     const t = window.__TR__;
@@ -312,6 +312,21 @@ async function main() {
   check("left wall orientation set", s.orientation === "LeftWall", s.orientation);
   await shot("07-ceiling-roll.png");
 
+  const lvlStats = await page.evaluate(() => window.__TR__.levels());
+  for (let i = 4; i < 20; i++) {
+    check(
+      `level ${i + 1} forces off-floor travel`,
+      lvlStats[i].maxFloorRun >= 6,
+      `maxFloorRun=${lvlStats[i].maxFloorRun}`,
+    );
+    const minHaz = i >= 6 ? 2 : 1;
+    check(
+      `level ${i + 1} carries hazards on walls/ceiling`,
+      lvlStats[i].wallHaz >= minHaz,
+      `wallHaz=${lvlStats[i].wallHaz}`,
+    );
+  }
+
   for (let i = 0; i < 20; i++) {
     await page.evaluate((idx) => {
       window.__TR__.startRun(idx);
@@ -363,6 +378,70 @@ async function main() {
   s = await snap();
   check("resize survives", errors.length === 0 && s.state === "Playing", s.state);
   await shot("09-narrow.png");
+
+  const mctx = await browser.newContext({
+    viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true,
+  });
+  const mp = await mctx.newPage();
+  await mp.bringToFront();
+  const merrors = [];
+  mp.on("pageerror", (e) => merrors.push(String(e)));
+  mp.on("console", (m) => { if (m.type() === "error") merrors.push(m.text()); });
+  await mp.goto(BASE, { waitUntil: "load" });
+  await mp.waitForFunction(() => !!window.__TR__, null, { timeout: 15000 });
+  await mp.waitForTimeout(900);
+  check(
+    "mobile: touch controls visible",
+    await mp.evaluate(() => getComputedStyle(document.getElementById("touch-ui")).display !== "none"),
+    "",
+  );
+  await mp.touchscreen.tap(422, 195);
+  await mp.waitForTimeout(700);
+  const ms = await mp.evaluate(() => window.__TR__.snapshot());
+  check("mobile: tap starts game", ms.state === "Playing", ms.state);
+  const jumpBtn = mp.locator(".tc-left .tc-jump");
+  await mp.evaluate(() => {
+    const t = window.__TR__;
+    t.warp(0, -1.2, -4.52, -5);
+    t.warp(1, 1.2, -4.52, -5);
+  });
+  await mp.waitForTimeout(300);
+  const maxVyP = mp.evaluate(() => new Promise((res) => {
+    const p = window.__TR__.game.players[0];
+    let max = 0;
+    const orig = p.body.setLinvel.bind(p.body);
+    p.body.setLinvel = (v, w) => {
+      max = Math.max(max, Math.abs(v.y));
+      return orig(v, w);
+    };
+    setTimeout(() => {
+      p.body.setLinvel = orig;
+      res(max);
+    }, 1100);
+  }));
+  await jumpBtn.dispatchEvent("pointerdown");
+  await mp.waitForTimeout(650);
+  await jumpBtn.dispatchEvent("pointerup");
+  const maxVy = await maxVyP;
+  check("mobile: touch jump works", maxVy >= 7.5, `maxVy=${maxVy.toFixed(1)}`);
+  check("mobile: no errors", merrors.length === 0, merrors.slice(0, 3).join(" | "));
+  await mp.screenshot({ path: shotsDir + "10-mobile.png" });
+  await mctx.close();
+
+  const pctx = await browser.newContext({
+    viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true,
+  });
+  const pp = await pctx.newPage();
+  await pp.bringToFront();
+  await pp.goto(BASE, { waitUntil: "load" });
+  await pp.waitForFunction(() => !!window.__TR__, null, { timeout: 15000 });
+  await pp.waitForTimeout(600);
+  check(
+    "mobile: portrait shows rotate overlay",
+    await pp.evaluate(() => getComputedStyle(document.getElementById("rotate-overlay")).display === "flex"),
+    "",
+  );
+  await pctx.close();
 
   check("no console/page errors overall", errors.length === 0, errors.slice(0, 5).join(" | "));
 

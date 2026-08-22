@@ -5,20 +5,22 @@ const E = ".....";
 
 export const level10: LevelDef = {
   name: "LEASH",
-  hints: [{ atSlice: 1, text: "FAR APART MEANS HARD PULL" }],
+  hints: [
+    { atSlice: 1, text: "FAR APART MEANS HARD PULL" },
+    { atSlice: 39, text: "LONG STRETCHES SNAP BACK HARDER" },
+  ],
   slices: seq(
     solidRun(10),
-    rep(8, { f: pat("#..#.") }),
-    rep(12, { f: pat("#...#") }),
+    rep(12, { f: E }),
+    rep(4, { f: E, r: pat("#..#.") }),
+    rep(4, { f: E, r: pat(".#..#") }),
+    rep(4, { f: E, r: pat("#..#.") }),
+    rep(2, { f: E, r: E }),
+    rep(8, { f: E, r: pat("#...#") }),
+    rep(10, { r: E }),
+    slice({ f: E }), solidRun(2),
+    slice({ f: E }), solidRun(2),
     slice({ f: E }),
-    solidRun(1),
-    slice({ f: E }),
-    rep(8, { f: pat("#...#") }),
-    rep(6, { f: pat("###.#") }),
-    seq(
-      solidRun(2), slice({ f: E }), solidRun(2), slice({ f: E }),
-      solidRun(2), slice({ f: E }),
-    ),
     solidRun(14),
   ),
 };

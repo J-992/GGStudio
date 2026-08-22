@@ -1,5 +1,6 @@
 import "./style.css";
 import { Game } from "./game/Game";
+import { TouchControls } from "./ui/TouchControls";
 
 const canvas = document.getElementById("game-canvas") as HTMLCanvasElement;
 const game = new Game();
@@ -16,6 +17,15 @@ function loop(now: number) {
 
 requestAnimationFrame(loop);
 
+if (matchMedia("(pointer: coarse)").matches || "ontouchstart" in window) {
+  document.body.classList.add("touch");
+}
+
 game.init(canvas).then(() => {
   booted = true;
+  new TouchControls(
+    document.getElementById("touch-ui"),
+    () => game.pauseGame(),
+    () => game.muteGame(),
+  );
 });

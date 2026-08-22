@@ -10,25 +10,51 @@ await new Promise((resolve) => {
   server.stdout.on("data", (d) => { if (d.toString().includes("Local:")) resolve(); });
 });
 const browser = await chromium.launch({ channel: "chrome", headless: true });
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-await page.goto(`http://localhost:${PORT}`, { waitUntil: "load" });
-await page.waitForFunction(() => !!window.__TR__, null, { timeout: 15000 });
-await page.waitForTimeout(800);
-await page.keyboard.press("KeyW");
-for (let i = 0; i < 10; i++) {
-  await page.waitForTimeout(250);
-  const s = await page.evaluate(() => {
-    const g = window.__TR__.game;
-    const out = [];
-    for (const p of g.players) {
-      const v = p.position(new (Object.getPrototypeOf(g.scene.position).constructor)());
-      v.project(g.coopCam.camera);
-      out.push({ ndcY: +v.y.toFixed(3), ndcX: +v.x.toFixed(3), st: g.state, grounded: p.grounded ? 1 : 0 });
+const mctx = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
+const mp = await mctx.newPage();
+mp.on("pageerror", (e) => console.log("[pageerror]", String(e)));
+await mp.goto(`http://localhost:${PORT}`, { waitUntil: "load" });
+await mp.waitForFunction(() => !!window.__TR__, null, { timeout: 15000 });
+await mp.waitForTimeout(800);
+await mp.touchscreen.tap(422, 195);
+await mp.waitForTimeout(900);
+
+await mp.evaluate(() => {
+  const t = window.__TR__;
+  t.warp(0, -1.2, -4.52, -5);
+  t.warp(1, 1.2, -4.52, -5);
+});
+await mp.waitForTimeout(400);
+
+await mp.evaluate(() => {
+  const g = window.__TR__.game;
+  window.__log = [];
+  const p = g.players[0];
+  const origSet = p.body.setLinvel.bind(p.body);
+  p.body.setLinvel = (v, w) => {
+    if (window.__log.length < 600) {
+      window.__log.push({
+        t: performance.now().toFixed(0),
+        vy: (+v.y).toFixed(1),
+        jh: p.input?.jumpHeld ? 1 : 0,
+        jp: p.input?.jumpPressed ? 1 : 0,
+      });
     }
-    return out;
-  });
-  console.log(JSON.stringify(s));
-}
+    origSet(v, w);
+  };
+});
+
+await mp.locator(".tc-left .tc-jump").dispatchEvent("pointerdown");
+await mp.waitForTimeout(700);
+
+const out = await mp.evaluate(() => {
+  const l = [...window.__log];
+  delete window.__log;
+  return l;
+});
+const maxVy = Math.max(...out.map((r) => +r.vy));
+const sawPressed = out.some((r) => r.jp === 1);
+console.log("maxVy:", maxVy, "sawPressed:", sawPressed, "calls:", out.length);
 await browser.close();
 server.kill();
 process.exit(0);

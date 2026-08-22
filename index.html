@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2305070c'/%3E%3Ccircle cx='4' cy='8' r='2.4' fill='%23ff8a3d'/%3E%3Ccircle cx='12' cy='8' r='2.4' fill='%2335e0ff'/%3E%3Cpath d='M6 8h4' stroke='%239ff5ff' stroke-width='1.2'/%3E%3C/svg%3E" />
   <title>TETHER RUN</title>
 </head>
@@ -38,6 +38,27 @@
     </div>
     <div id="loading">BOOTING CONDUIT&hellip;</div>
   </div>
-  <script type="module" src="/src/main.ts"></script>
+    <div id="rotate-overlay"><p>ROTATE YOUR DEVICE<span>landscape plays best</span></p></div>
+    <div id="sys-buttons">
+      <div id="btn-mute" class="sys-btn">&#9834;</div>
+      <div id="btn-pause" class="sys-btn">II</div>
+    </div>
+    <div id="touch-ui">
+      <div class="tc-cluster tc-left">
+        <div class="tc-btn tc-jump" data-p="0" data-k="j">JUMP</div>
+        <div class="tc-row">
+          <div class="tc-btn tc-arrow" data-p="0" data-k="l">&#9664;</div>
+          <div class="tc-btn tc-arrow" data-p="0" data-k="r">&#9654;</div>
+        </div>
+      </div>
+      <div class="tc-cluster tc-right">
+        <div class="tc-btn tc-jump" data-p="1" data-k="j">JUMP</div>
+        <div class="tc-row">
+          <div class="tc-btn tc-arrow" data-p="1" data-k="l">&#9664;</div>
+          <div class="tc-btn tc-arrow" data-p="1" data-k="r">&#9654;</div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

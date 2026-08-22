@@ -38,6 +38,9 @@ Player 2 (Volta · cyan)
 
 Shared: R restart level · M mute · ESC pause · one gamepad per player (stick + A/Cross).
 
+On phones/tablets the game is fully touch-playable: each player gets an on-screen
+cluster (arrows + jump), with pause/mute buttons top-right. Landscape recommended.
+
 ## The five conduits
 
 1. WARMUP CONDUIT — running, steering, jumping.
@@ -47,9 +50,12 @@ Shared: R restart level · M mute · ESC pause · one gamepad per player (stick 
    dangling partner back in. Hold jump while tethered to climb.
 5. FULL SEND — everything at once, ending at the portal.
 
-The tether is elastic up to a hard length — run too far apart and it yanks you back.
-Robots physically bump and block each other. A death (including falling off-screen)
-sends the run back to conduit 1: arcade rules.
+...twenty conduits total, escalating from solo fundamentals to full four-face
+traversal: wall corridors with their own gaps and bridges, ceiling stretches,
+rotation cascades, and finale gauntlets. The tether is elastic up to a hard
+length — run too far apart and it yanks you back. Robots physically bump and
+block each other. A death (including falling off-screen) sends the run back to
+conduit 1: arcade rules.
 
 ## Notes
 

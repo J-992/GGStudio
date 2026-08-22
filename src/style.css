@@ -4,8 +4,8 @@
   --ink: #dfe9f5;
   --dim: #6b7a8d;
 }
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #05070c; }
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #05070c; touch-action: none; overscroll-behavior: none; }
 body {
   font-family: "SF Mono", "Cascadia Code", Consolas, Menlo, monospace;
   color: var(--ink);
@@ -81,3 +81,39 @@ body {
 }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 #finish-stats { margin: 16px 0 34px; color: var(--dim); letter-spacing: 0.2em; line-height: 2; }
+
+#touch-ui, #sys-buttons, #rotate-overlay { display: none; }
+body.touch #touch-ui { display: block; }
+body.touch #sys-buttons { display: flex; }
+body.touch #hint { top: 14%; bottom: auto; }
+@media (orientation: portrait) {
+  body.touch #rotate-overlay { display: flex; }
+}
+.tc-cluster { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); width: 200px; z-index: 6; }
+.tc-left { left: 16px; }
+.tc-right { right: 16px; }
+.tc-row { display: flex; gap: 14px; margin-top: 10px; }
+.tc-btn {
+  width: 66px; height: 66px; border-radius: 50%;
+  border: 2px solid rgba(120, 200, 255, 0.5);
+  background: rgba(20, 32, 48, 0.35);
+  color: #bfe6ff; display: flex; align-items: center; justify-content: center;
+  font-size: 22px; touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.tc-btn.active { background: rgba(80, 160, 220, 0.45); border-color: rgba(160, 230, 255, 0.9); }
+.tc-jump { width: 100%; height: 46px; border-radius: 26px; font-size: 13px; letter-spacing: 0.3em; }
+#sys-buttons { position: absolute; top: calc(14px + env(safe-area-inset-top)); right: 14px; gap: 10px; z-index: 6; }
+.sys-btn {
+  width: 42px; height: 42px; border-radius: 50%;
+  border: 1px solid rgba(120, 200, 255, 0.4);
+  background: rgba(10, 16, 26, 0.55);
+  color: #9fd8ff; display: flex; align-items: center; justify-content: center;
+  font-size: 15px; letter-spacing: 0.1em; touch-action: none; user-select: none;
+}
+#rotate-overlay {
+  position: absolute; inset: 0; background: #05070c; z-index: 60;
+  display: none; align-items: center; justify-content: center;
+  text-align: center; flex-direction: column;
+  color: #9fd8ff; letter-spacing: 0.3em; font-size: 17px;
+}
+#rotate-overlay span { margin-top: 12px; font-size: 11px; color: var(--dim); }

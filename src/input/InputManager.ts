@@ -1,3 +1,5 @@
+import { touchState } from "./touchState";
+
 export type PlayerIndex = 0 | 1;
 
 export interface PlayerInput {
@@ -38,14 +40,24 @@ export class InputManager {
     if (player === 0) {
       if (this.keys.has("KeyA")) lat -= 1;
       if (this.keys.has("KeyD")) lat += 1;
-      jumpHeld = this.keys.has("KeyW");
-      jumpPressed = this.keys.has("KeyW") && !this.keyPrevW;
+      if (touchState.p1l) lat -= 1;
+      if (touchState.p1r) lat += 1;
+      jumpHeld = this.keys.has("KeyW") || touchState.p1j;
+      const tLatch = touchState.p1jLatch;
+      touchState.p1jLatch = false;
+      jumpPressed =
+        (this.keys.has("KeyW") && !this.keyPrevW) || tLatch;
       this.keyPrevW = this.keys.has("KeyW");
     } else {
       if (this.keys.has("ArrowLeft")) lat -= 1;
       if (this.keys.has("ArrowRight")) lat += 1;
-      jumpHeld = this.keys.has("ArrowUp");
-      jumpPressed = this.keys.has("ArrowUp") && !this.keyPrevUp;
+      if (touchState.p2l) lat -= 1;
+      if (touchState.p2r) lat += 1;
+      jumpHeld = this.keys.has("ArrowUp") || touchState.p2j;
+      const tLatch = touchState.p2jLatch;
+      touchState.p2jLatch = false;
+      jumpPressed =
+        (this.keys.has("ArrowUp") && !this.keyPrevUp) || tLatch;
       this.keyPrevUp = this.keys.has("ArrowUp");
     }
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];

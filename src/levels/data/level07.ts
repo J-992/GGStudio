@@ -5,7 +5,10 @@ const E = ".....";
 
 export const level07: LevelDef = {
   name: "SKYLINE",
-  hints: [{ atSlice: 4, text: "UP THE WALLS — THE CEILING CAN HOLD YOU" }],
+  hints: [
+    { atSlice: 4, text: "UP THE WALLS — THE CEILING CAN HOLD YOU" },
+    { atSlice: 48, text: "CEILING GONE — RIDE A WALL DOWN" },
+  ],
   slices: seq(
     solidRun(10),
     rep(8, { f: pat(E) }),
@@ -15,8 +18,10 @@ export const level07: LevelDef = {
     rep(2, { c: pat(E) }),
     solidRun(8),
     rep(12, { c: pat(E) }),
-    solidRun(8),
-    rep(12, { l: pat(E), r: pat(E) }),
+    solidRun(4),
+    rep(2, { l: pat(E), r: pat(E) }),
+    solidRun(4),
+    rep(10, { l: pat(E), r: pat(E) }),
     solidRun(14),
   ),
 };

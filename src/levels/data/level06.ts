@@ -8,7 +8,9 @@ export const level06: LevelDef = {
   hints: [{ atSlice: 4, text: "ROLL ONTO THE WALL — THEN ROLL BACK" }],
   slices: seq(
     solidRun(10),
-    rep(12, { f: pat(E) }),
+    rep(4, { f: pat(E) }),
+    rep(2, { f: pat(E), l: pat(E), r: pat(E) }),
+    rep(6, { f: pat(E) }),
     solidRun(8),
     rep(2, { l: pat(E) }),
     solidRun(8),
