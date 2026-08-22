@@ -171,16 +171,43 @@ export const CPU_TIERS: CpuTier[] = [
     { level: 5, name: 'ELITE',   react: 340, jitter: 90,  accuracy: 0.93, spread: 0.24, retry: 240 }
 ];
 
+/** Matches a newcomer plays before anything above ROOKIE enters the draw. */
+export const PLACEMENT_MATCHES = 3;
+
+/**
+ * The hardest tier the player is allowed to be handed, as an index into
+ * CPU_TIERS. A first-timer meets ROOKIE and nobody else; for the few matches
+ * after that -- and for as long as they have yet to win one -- the table stops
+ * at CASUAL. Losing your very first match of a mode to an ELITE is how a
+ * player decides the mode is not for them.
+ */
+export function tierCap (wins: number, played: number): number
+{
+    if (played < PLACEMENT_MATCHES) return 0;
+    if (played < PLACEMENT_MATCHES * 2 || wins === 0) return 1;
+    if (played < PLACEMENT_MATCHES * 4) return 2;
+
+    return CPU_TIERS.length - 1;
+}
+
+/** True while the player is still held to the two easiest opponents. */
+export function isPlacement (wins: number, played: number): boolean
+{
+    return tierCap(wins, played) <= 1;
+}
+
 /**
  * Which tier to face. Skewed towards the easy end so the player wins about two
  * in three, and every win slides a little weight up the table -- a player on
- * a streak starts meeting people who can actually shoot.
+ * a streak starts meeting people who can actually shoot. Anything above the
+ * cap is simply not in the draw.
  */
-export function pickTier (wins: number): CpuTier
+export function pickTier (wins: number, played = wins): CpuTier
 {
+    const cap = tierCap(wins, played);
     const base = [ 32, 28, 20, 13, 7 ];
     const shift = Math.min(0.55, wins * 0.045);
-    const w = base.map((b, i) => b * (1 + (i - 2) * shift * 0.5));
+    const w = base.map((b, i) => (i > cap ? 0 : b * (1 + (i - 2) * shift * 0.5)));
     const total = w.reduce((a, b) => a + b, 0);
     let roll = Math.random() * total;
 
@@ -303,6 +330,8 @@ export interface VersusSave
 {
     wins: number;
     losses: number;
+    /** Matches finished, draws included -- what matchmaking counts as experience. */
+    played: number;
     streak: number;
     bestStreak: number;
     best: number;
@@ -346,9 +375,15 @@ function load (): VersusSave
 
             if (p && Array.isArray(p.ladder) && p.ladder.length > 0)
             {
+                const wins = Math.max(0, Number(p.wins) || 0);
+                const losses = Math.max(0, Number(p.losses) || 0);
+
                 return {
-                    wins: Math.max(0, Number(p.wins) || 0),
-                    losses: Math.max(0, Number(p.losses) || 0),
+                    wins,
+                    losses,
+                    //  Saves written before the counter existed still know how
+                    //  many matches they have seen: their record adds up to it.
+                    played: Math.max(wins + losses, Number(p.played) || 0),
                     streak: Math.max(0, Number(p.streak) || 0),
                     bestStreak: Math.max(0, Number(p.bestStreak) || 0),
                     best: Math.max(0, Number(p.best) || 0),
@@ -362,7 +397,7 @@ function load (): VersusSave
     }
     catch { /* fall through */ }
 
-    return { wins: 0, losses: 0, streak: 0, bestStreak: 0, best: 0, rating: 1000, ladder: seedLadder(), lastOpponent: '' };
+    return { wins: 0, losses: 0, played: 0, streak: 0, bestStreak: 0, best: 0, rating: 1000, ladder: seedLadder(), lastOpponent: '' };
 }
 
 export const versus: VersusSave = load();
@@ -394,6 +429,8 @@ export function recordMatch (you: number, cpu: number, cpuName: string, tier: Cp
 {
     const draw = you === cpu;
     const won = you > cpu;
+
+    versus.played += 1;
 
     if (won)
     {

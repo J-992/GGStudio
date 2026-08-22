@@ -5,7 +5,7 @@ import { setGameplayActive } from '../core/lifecycle';
 import { iconImage } from '../core/icons';
 import { CX, CY, FONT, FONT_UI, H, LANDSCAPE, W, hex } from '../core/theme';
 import {
-    CPU_COLOR, CpuTier, YOU_COLOR, generateName, pickTier, randomHint, versus
+    CPU_COLOR, CpuTier, YOU_COLOR, generateName, isPlacement, pickTier, randomHint, versus
 } from '../data/versus';
 
 /**
@@ -21,6 +21,8 @@ export class VersusQueueScene extends Scene
     private fx!: Fx;
     private cpuName = '';
     private tier!: CpuTier;
+    /** True while matchmaking is still holding the player back to easy bots. */
+    private placement = false;
 
     constructor ()
     {
@@ -36,7 +38,8 @@ export class VersusQueueScene extends Scene
         this.fx = new Fx(this, 20);
 
         this.cpuName = generateName();
-        this.tier = pickTier(versus.wins);
+        this.tier = pickTier(versus.wins, versus.played);
+        this.placement = isPlacement(versus.wins, versus.played);
 
         const grid = this.add.graphics().setDepth(0);
         grid.lineStyle(1, 0x1b2a5e, 0.35);
@@ -202,7 +205,9 @@ export class VersusQueueScene extends Scene
             return c;
         };
 
-        const record = `${versus.wins}W  ${versus.losses}L  ·  rating ${versus.rating}`;
+        const record = this.placement
+            ? 'PLACEMENT MATCH'
+            : `${versus.wins}W  ${versus.losses}L  ·  rating ${versus.rating}`;
 
         plate('YOU', record, YOU_COLOR, -off, vertical ? -off : 0, -W);
         plate(this.cpuName, `${this.tier.name}  ·  rating ${this.cpuRating()}`, CPU_COLOR, off, vertical ? off : 0, W);

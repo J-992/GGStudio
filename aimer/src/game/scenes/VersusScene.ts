@@ -2,6 +2,7 @@ import { GameObjects, Scene } from 'phaser';
 import { Fx } from '../core/fx';
 import { Sfx, unlockAudio } from '../core/audio';
 import { setGameplayActive } from '../core/lifecycle';
+import { iconImage } from '../core/icons';
 import { reportPlatformHappyTime } from '../platform/platform';
 import { CX, CY, FONT, FONT_UI, H, LANDSCAPE, W, fmt, hex, mix } from '../core/theme';
 import {
@@ -59,6 +60,23 @@ const HEAD = 64;
 
 /** Gap between one target dying and its replacement. */
 const RESPAWN_GAP = 140;
+
+/** How long the wrong-side warning covers the opponent's half. */
+const WRONG_SIDE_MS = 1000;
+
+/**
+ * Spotting a player who is mashing at the screen: the last few shots, how many
+ * of them missed, and how fast they came. The lesson is only worth teaching
+ * twice a match, and only after a pause long enough that it is not nagging.
+ */
+const SPRAY = {
+    window: 8,
+    misses: 5,
+    /** Mean gap between shots, in ms, under which this is spray and not aim. */
+    gap: 300,
+    cooldown: 14000,
+    max: 2
+};
 
 class Pane
 {
@@ -488,6 +506,16 @@ export class VersusScene extends Scene
     private cpuAim = { x: 0, y: 0 };
     private cpuFocus: Live | null = null;
 
+    /** The cover over the opponent's half, while it is up. */
+    private wrongSide: GameObjects.Container | null = null;
+    private wrongSideTimer: Phaser.Time.TimerEvent | null = null;
+
+    /** The player's last few shots, and the spray lesson they may have earned. */
+    private shots: { at: number; hit: boolean }[] = [];
+    private sprayShown = 0;
+    private sprayAt = 0;
+    private sprayCard: GameObjects.Container | null = null;
+
     constructor ()
     {
         super('Versus');
@@ -502,6 +530,12 @@ export class VersusScene extends Scene
     {
         this.state = 'count';
         this.cpuFocus = null;
+        this.wrongSide = null;
+        this.wrongSideTimer = null;
+        this.shots = [];
+        this.sprayShown = 0;
+        this.sprayAt = 0;
+        this.sprayCard = null;
         this.cameras.main.setBackgroundColor(0x080b1c);
         this.cameras.main.fadeIn(160, 0, 0, 0);
         this.fx = new Fx(this, 20);
@@ -518,13 +552,25 @@ export class VersusScene extends Scene
         {
             unlockAudio();
 
-            if (this.state !== 'play') return;
+            if (this.state === 'over') return;
 
             const r = this.you.rect;
+            const mine = p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y + HEAD && p.y <= r.y + r.h;
 
-            if (p.x < r.x || p.x > r.x + r.w || p.y < r.y + HEAD || p.y > r.y + r.h) return;
+            if (!mine)
+            {
+                //  Shooting at the opponent's half is the first thing a lot of
+                //  players try, and nothing happening is no answer. Say it on
+                //  the half they shot at, where they are already looking.
+                if (this.inPane(this.cpu.rect, p.x, p.y)) this.warnWrongSide(p.x, p.y);
 
-            const { points, reached } = this.you.shoot(p.x, p.y, this.time.now);
+                return;
+            }
+
+            if (this.state !== 'play') return;
+
+            const now = this.time.now;
+            const { points, reached } = this.you.shoot(p.x, p.y, now);
 
             if (points > 0)
             {
@@ -539,11 +585,155 @@ export class VersusScene extends Scene
             {
                 Sfx.miss();
             }
+
+            this.trackShot(points > 0, now);
         });
 
         this.countdown();
 
         this.events.once('shutdown', () => setGameplayActive(false));
+    }
+
+    //  ------------------------------------------------------------ coaching
+
+    private inPane (r: PaneRect, x: number, y: number): boolean
+    {
+        return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+    }
+
+    /**
+     * The player shot at the opponent's half. Black it out for a second with
+     * an arrow pointing at their own -- long enough to read, short enough that
+     * it never costs them a target they could have hit.
+     */
+    private warnWrongSide (x: number, y: number): void
+    {
+        Sfx.dry();
+        this.fx.ring(x, y, 34, CPU_COLOR, 3, 240);
+
+        //  Already up: restart its clock rather than stack a second copy.
+        if (this.wrongSide)
+        {
+            this.wrongSideTimer?.remove();
+            this.wrongSideTimer = this.time.delayedCall(WRONG_SIDE_MS, () => this.hideWrongSide());
+
+            return;
+        }
+
+        const r = this.cpu.rect;
+        const c = this.add.container(r.x + r.w / 2, r.y + r.h / 2).setDepth(18).setAlpha(0);
+
+        const g = this.add.graphics();
+        g.fillStyle(0x1a0410, 0.86);
+        g.fillRect(-r.w / 2, -r.h / 2, r.w, r.h);
+        g.lineStyle(4, CPU_COLOR, 0.95);
+        g.strokeRect(-r.w / 2 + 3, -r.h / 2 + 3, r.w - 6, r.h - 6);
+        c.add(g);
+
+        c.add(this.add.text(0, -52, 'NOT YOUR SIDE', {
+            fontFamily: FONT, fontSize: LANDSCAPE ? 36 : 30, color: hex(CPU_COLOR),
+            stroke: '#000000', strokeThickness: 8
+        }).setOrigin(0.5));
+
+        c.add(this.add.text(0, -14, 'THIS HALF BELONGS TO THE CPU', {
+            fontFamily: FONT_UI, fontSize: 15, color: '#ffb0bb'
+        }).setOrigin(0.5));
+
+        c.add(this.add.text(0, 26, LANDSCAPE ? 'SHOOT THE BLUE HALF ON THE LEFT' : 'SHOOT THE BLUE HALF BELOW', {
+            fontFamily: FONT, fontSize: 18, color: hex(YOU_COLOR), stroke: '#000000', strokeThickness: 5
+        }).setOrigin(0.5));
+
+        const arrow = iconImage(this, 0, 74, 'chevrons', { size: 46, color: YOU_COLOR });
+        arrow.setAngle(LANDSCAPE ? 180 : 90);
+        c.add(arrow);
+
+        this.tweens.add({
+            targets: arrow, ...(LANDSCAPE ? { x: -18 } : { y: 88 }),
+            duration: 400, yoyo: true, repeat: -1, ease: 'Sine.inOut'
+        });
+
+        c.setScale(0.96);
+        this.tweens.add({ targets: c, alpha: 1, scale: 1, duration: 120, ease: 'Quad.out' });
+
+        this.wrongSide = c;
+        this.wrongSideTimer = this.time.delayedCall(WRONG_SIDE_MS, () => this.hideWrongSide());
+    }
+
+    private hideWrongSide (): void
+    {
+        const c = this.wrongSide;
+
+        this.wrongSideTimer?.remove();
+        this.wrongSideTimer = null;
+        this.wrongSide = null;
+
+        if (!c) return;
+
+        this.tweens.add({ targets: c, alpha: 0, duration: 200, onComplete: () => c.destroy() });
+    }
+
+    /**
+     * Watch the player's own shots. A run of fast taps that mostly miss is
+     * somebody mashing at the screen, and the thing they have not noticed is
+     * that the combo -- not the click rate -- is where the points are. Say it
+     * once, plainly, and then leave them alone for a good while.
+     */
+    private trackShot (hit: boolean, now: number): void
+    {
+        this.shots.push({ at: now, hit });
+
+        if (this.shots.length > SPRAY.window) this.shots.shift();
+
+        if (hit || this.shots.length < SPRAY.window) return;
+        if (this.sprayShown >= SPRAY.max || now - this.sprayAt < SPRAY.cooldown) return;
+
+        const misses = this.shots.filter(s => !s.hit).length;
+        const gap = (this.shots[this.shots.length - 1].at - this.shots[0].at) / (this.shots.length - 1);
+
+        if (misses < SPRAY.misses || gap > SPRAY.gap) return;
+
+        this.sprayShown += 1;
+        this.sprayAt = now;
+        this.shots = [];
+        this.sprayTip();
+    }
+
+    /** The tip card itself: high in the player's own half, and out again. */
+    private sprayTip (): void
+    {
+        this.sprayCard?.destroy();
+
+        const r = this.you.play;
+        const w = Math.min(430, r.w - 12);
+        const h = 106;
+        const baseY = r.y + h / 2 + 8;
+
+        const c = this.add.container(r.x + r.w / 2, baseY - 8).setDepth(16).setAlpha(0);
+
+        const g = this.add.graphics();
+        g.fillStyle(0x0b1024, 0.93);
+        g.fillRoundedRect(-w / 2, -h / 2, w, h, 16);
+        g.lineStyle(2, 0xffc857, 0.8);
+        g.strokeRoundedRect(-w / 2, -h / 2, w, h, 16);
+        c.add(g);
+        c.add(iconImage(this, -w / 2 + 32, 0, 'mult', { size: 28, color: 0xffc857 }));
+
+        c.add(this.add.text(-w / 2 + 60, -32, 'SLOW DOWN · STACK YOUR COMBO', {
+            fontFamily: FONT, fontSize: 13, color: '#ffc857'
+        }).setOrigin(0, 0.5).setLetterSpacing(1));
+
+        c.add(this.add.text(-w / 2 + 60, -16, 'Spraying misses and resets your streak. 5 hits in a row is x1.5, 10 is x2 — one aimed shot is worth more than five fast ones.', {
+            fontFamily: FONT_UI, fontSize: 13, color: '#dfe5ff', wordWrap: { width: w - 80 }
+        }).setOrigin(0, 0));
+
+        Sfx.chip();
+        this.tweens.add({ targets: c, alpha: 1, y: baseY, duration: 180, ease: 'Quad.out' });
+        this.tweens.add({
+            targets: c, alpha: 0, duration: 300, delay: 2800,
+            onComplete: () => { if (this.sprayCard === c) this.sprayCard = null; c.destroy(); }
+        });
+
+        this.sprayCard = c;
     }
 
     //  ------------------------------------------------------------ the combo
@@ -831,6 +1021,7 @@ export class VersusScene extends Scene
 
         this.you.clearAll();
         this.cpu.clearAll();
+        this.hideWrongSide();
         this.tweens.killTweensOf(this.cursor);
         this.clock.setText('0:00');
         this.drawClock(0);
