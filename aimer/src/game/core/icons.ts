@@ -357,6 +357,39 @@ const ICONS: Record<string, Draw> = {
         c.lineTo(11, 14); c.closePath();
         c.stroke();
     },
+    //  --- progress --------------------------------------------------------
+    check: c =>
+    {
+        stroke(c, 9);
+        c.beginPath();
+        c.moveTo(12, 33); c.lineTo(26, 47); c.lineTo(52, 16);
+        c.stroke();
+    },
+    lock: c =>
+    {
+        //  Shackle first, then the body over the bottom of it, so the two read
+        //  as one object rather than a hoop resting on a box.
+        stroke(c, 6);
+        c.beginPath();
+        c.arc(32, 27, 12, Math.PI, 0);
+        c.lineTo(44, 34);
+        c.moveTo(20, 27);
+        c.lineTo(20, 34);
+        c.stroke();
+
+        c.fillStyle = '#fff';
+        rr(c, 11, 31, 42, 27, 7);
+        c.fill();
+
+        cut(c, () =>
+        {
+            c.fillStyle = '#000';
+            c.beginPath();
+            c.arc(32, 42, 4.5, 0, TAU);
+            c.fill();
+            c.fillRect(29.5, 42, 5, 9);
+        });
+    },
     flag: c =>
     {
         stroke(c, 6);
@@ -364,6 +397,30 @@ const ICONS: Record<string, Draw> = {
         c.fillStyle = '#fff';
         poly(c, [ [ 20, 10 ], [ 53, 21 ], [ 20, 33 ] ]);
         c.fill();
+    },
+
+    //  A wrapped box with a bow and a ribbon cut through it. The one glyph
+    //  the game uses to mean "there is something waiting for you".
+    gift: c =>
+    {
+        c.fillStyle = '#fff';
+
+        //  Bow loops first; the lid overlaps their base so they read as tied
+        //  to the box rather than floating above it.
+        c.beginPath(); c.ellipse(23, 15, 10, 7.5, 0, 0, TAU); c.fill();
+        c.beginPath(); c.ellipse(41, 15, 10, 7.5, 0, 0, TAU); c.fill();
+
+        rr(c, 7, 21, 50, 12, 3); c.fill();
+        rr(c, 11, 33, 42, 25, 3); c.fill();
+
+        cut(c, () =>
+        {
+            c.fillStyle = '#000';
+            c.fillRect(28.5, 21, 7, 37);
+            c.beginPath(); c.ellipse(23, 15, 3.4, 2.6, 0, 0, TAU); c.fill();
+            c.beginPath(); c.ellipse(41, 15, 3.4, 2.6, 0, 0, TAU); c.fill();
+            c.fillRect(7, 31.5, 50, 2.4);
+        });
     },
 
     //  --- chrome --------------------------------------------------------

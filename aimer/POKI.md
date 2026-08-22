@@ -63,8 +63,8 @@ carry on anyway, so the stubs stay callable and quietly do nothing.
 | `gameLoadingFinished` | `scenes/Boot.ts`, once every texture exists |
 | `gameplayStart` / `gameplayStop` | `core/lifecycle.ts`, driven by `setGameplayActive` from the scenes |
 | `commercialBreak` | `core/ads.ts` → end of a run, and between two levels |
-| `rewardedBreak` | `core/adButton.ts` → extra life, double coins, reroll cards |
-| `happyTime` | streak milestones, level clears, new bests, a finished run |
+| `rewardedBreak` | `core/adButton.ts` → extra life, double coins, reroll cards, one extra present, unlock a store item |
+| `happyTime` | streak milestones, level clears, new bests, a finished run, an opened present |
 | `captureError` | `core/lifecycle.ts`, on `error` and `unhandledrejection` |
 | `setDebug` | dev builds only — the call is tree-shaken out of production |
 
@@ -111,6 +111,18 @@ Rewarded videos are opt-in and labelled with what they give plus a video icon
   the offer appears.
 - **REROLL CARDS** on the upgrade screen, as often as the player is willing to
   watch. The three cards only change once a video has actually played.
+- **OPEN ANOTHER** on the mystery present's reveal, and only ever one per
+  present: a second box is a real reward, an unlimited supply of them would be
+  a better shop than the shop.
+- **UNLOCK FREE / GET ONE FREE** in the store, raised only by the player
+  tapping a skin or a boost they cannot afford (`objects/StoreModal.ts`). The
+  card names the thing, says how many coins short they are, and the way out of
+  it is a plain **NO THANKS**. Perks are not offered this way — a permanent
+  stat is not a cosmetic.
+
+The present itself never has an ad in front of it. `ResultScene.leave` skips the
+interstitial on the way to `Gift` — a break between "you have a present" and the
+present is the exact place a player decides the reward was not worth the wait.
 
 ## Playability
 
@@ -145,6 +157,18 @@ Run `bun run dev` and open it on a phone on the same network.
       finishes, and closing the video early leaves the total alone.
 - [ ] Tap **REROLL CARDS** twice: three new cards each time, and declining leaves
       whatever three are on the table.
+- [ ] Finish a first run on a fresh save (clear `aimer.save.v1`): the present
+      comes up *before* the results card, no ad plays on the way in, and the
+      reel stops on a photo skin that is on the targets by the time you are
+      back at the menu.
+- [ ] Tap **OPEN ANOTHER** on the reveal: a second box, and no third offer.
+- [ ] Tap a skin you cannot afford: the offer card comes up, taps behind it do
+      nothing, and **NO THANKS** leaves your coins alone. Take the video and the
+      skin is yours and worn.
+- [ ] Buy any skin with coins: the screen darkens and winds up for two seconds
+      before the skin lands. Tapping during the wind-up skips straight to it.
+      **TRY IT IN GAME** starts a run with the armed loadout, wearing it.
+- [ ] Close the tab mid-spin, reload: the prize is already owned.
 - [ ] Switch tabs mid-level — the timer does not run down while you are away.
 - [ ] Turn the phone sideways mid-level — rotate prompt, and the timer holds.
 - [ ] The mute button still works after an ad.

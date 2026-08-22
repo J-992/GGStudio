@@ -1,43 +1,83 @@
 import { Geom, Scene } from 'phaser';
 import { Fx } from '../core/fx';
 import { Sfx, isMuted, toggleMute, unlockAudio } from '../core/audio';
-import { meta, PERKS, perkCost, run, saveMeta } from '../core/state';
+import {
+    armRun, boostCount, equippedSkin, giftsPending, isArmed, meta, run, runsToNextGift, saveMeta, toggleArmed
+} from '../core/state';
 import { setGameplayActive } from '../core/lifecycle';
 import { FINAL_LEVEL } from '../data/levels';
-import { IconLabel, ic, iconImage } from '../core/icons';
-import { CX, FONT, FONT_UI, H, LANDSCAPE, W, fmt, hex } from '../core/theme';
+import { RUN_BOOSTS } from '../data/boosts';
+import { fillBody, strokeBody } from '../core/shapes';
+import { ic, iconImage } from '../core/icons';
+import { StorePanel } from '../objects/StorePanel';
+import { buildWorldTrail } from '../objects/WorldMap';
+import { buildDailyButton } from '../objects/DailyGift';
+import { versus } from '../data/versus';
+import { CX, FONT, FONT_UI, H, LANDSCAPE, W, fmt, hex, mix } from '../core/theme';
 
 const DEMO_COLORS = [ 0x3fe0ff, 0xff5ce0, 0x7dff6b, 0xffd23f, 0x9b6cff ];
 
 /**
  * Portrait stacks the menu; a wide screen splits it in two -- the game on the
- * left, the shop on the right -- rather than stretching one narrow column
+ * left, the store on the right -- rather than stretching one narrow column
  * across a screen three times wider than it needs.
  */
 const L = LANDSCAPE
     ? {
-        gameX: W * 0.29,
-        shopX: W * 0.715,
-        titleY: 190,
-        taglineY: 250,
-        playY: 350,
-        statY: 470,
-        shopTitleY: 150,
-        rowY0: 206,
-        coinY: 578,
+        gameX: W * 0.28,
+        storeX: W * 0.72,
+        titleY: 168,
+        taglineY: 222,
+        playY: 318,
+        statY: 428,
+        loadoutY: 534,
+        //  Portrait keeps the route under the stats it illustrates; a wide
+        //  screen puts it at the foot of the game column instead, which is the
+        //  only band down there the store's last row cannot reach across.
+        mapHeadY: 622,
+        mapY: 648,
+        mapNameY: 666,
+        mapW: Math.min(430, 2 * (W * 0.28 - 40)),
+        //  Stop labels under the rail. A wide screen has the room; see the
+        //  portrait block for why a phone does not.
+        mapNames: true,
+        storeHeaderY: 92,
+        tabsY: 146,
+        rowY0: 210,
+        rowStep: 74,
+        rowW: 440,
+        rowH: 62,
+        gridRows: 4,
+        listBottom: H - 62,
         muteX: W - 34,
         muteY: H - 34
     }
     : {
         gameX: CX,
-        shopX: CX,
-        titleY: 112,
-        taglineY: 170,
-        playY: 268,
-        statY: 348,
-        shopTitleY: 424,
-        rowY0: 476,
-        coinY: 890,
+        storeX: CX,
+        titleY: 88,
+        taglineY: 0,
+        playY: 190,
+        statY: 264,
+        mapHeadY: 330,
+        mapY: 358,
+        mapNameY: 0,
+        mapW: Math.min(430, W - 100),
+        //  Seven nine-pixel captions under a seven-dot rail, on a screen that
+        //  already carries the title, two buttons, three stats, four boost
+        //  chips and the whole store. The heading above the rail already names
+        //  the world the player is actually in, which is the one that matters.
+        mapNames: false,
+        loadoutY: 444,
+        storeHeaderY: 512,
+        tabsY: 556,
+        rowY0: 620,
+        rowStep: 56,
+        rowW: 464,
+        rowH: 52,
+        //  Two rows, not four. See StoreLayout.gridRows.
+        gridRows: 2,
+        listBottom: H - 34,
         muteX: W - 30,
         muteY: H - 34
     };
@@ -45,8 +85,8 @@ const L = LANDSCAPE
 export class MainMenu extends Scene
 {
     private fx!: Fx;
-    private coinLabel!: IconLabel;
-    private perkRows: { redraw: () => void }[] = [];
+    private store!: StorePanel;
+    private chips: { redraw: () => void }[] = [];
 
     constructor ()
     {
@@ -59,16 +99,20 @@ export class MainMenu extends Scene
         //  made here rather than trusting every exit path to have made it.
         setGameplayActive(false);
 
-        this.perkRows = [];
+        this.chips = [];
         this.cameras.main.setBackgroundColor(0x080b1c);
         this.cameras.main.fadeIn(200, 0, 0, 0);
 
         this.fx = new Fx(this, 20);
 
+        //  A wider, fainter mesh on a phone: the same grid at 58px is a lot of
+        //  line under a screen that is already full of tiles and chips.
+        const cell = LANDSCAPE ? 58 : 78;
+
         const grid = this.add.graphics().setDepth(0);
-        grid.lineStyle(1, 0x1b2a5e, 0.4);
-        for (let x = 0; x <= W; x += 58) grid.lineBetween(x, 0, x, H);
-        for (let y = 0; y <= H; y += 58) grid.lineBetween(0, y, W, y);
+        grid.lineStyle(1, 0x1b2a5e, LANDSCAPE ? 0.4 : 0.28);
+        for (let x = 0; x <= W; x += cell) grid.lineBetween(x, 0, x, H);
+        for (let y = 0; y <= H; y += cell) grid.lineBetween(0, y, W, y);
 
         this.spawnDemoTargets();
 
@@ -78,13 +122,34 @@ export class MainMenu extends Scene
 
         this.tweens.add({ targets: title, scale: 1.04, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
 
-        this.add.text(L.gameX, L.taglineY, `${LANDSCAPE ? 'CLICK' : 'TAP'} TARGETS  ·  BUILD COMBOS  ·  GET STRONG`, {
-            fontFamily: FONT_UI, fontSize: 15, color: '#7d88b0'
-        }).setOrigin(0.5).setDepth(10);
+        //  The tagline is flavour, and portrait is the layout with no room to
+        //  spare -- on a phone the title and the PLAY button under it say the
+        //  same thing in half the space.
+        if (LANDSCAPE)
+        {
+            this.add.text(L.gameX, L.taglineY, 'CLICK TARGETS  ·  BUILD COMBOS  ·  GET STRONG', {
+                fontFamily: FONT_UI, fontSize: 15, color: '#7d88b0'
+            }).setOrigin(0.5).setDepth(10);
+        }
 
         this.buildPlayButton();
         this.buildStats();
-        this.buildShop();
+        this.buildTrail();
+        this.buildLoadout();
+        this.buildGiftBadge();
+        this.buildDaily();
+
+        this.store = new StorePanel(this, this.fx, {
+            x: L.storeX,
+            headerY: L.storeHeaderY,
+            tabsY: L.tabsY,
+            rowY0: L.rowY0,
+            rowStep: L.rowStep,
+            rowW: L.rowW,
+            rowH: L.rowH,
+            gridRows: L.gridRows,
+            listBottom: L.listBottom
+        }, () => this.refreshLoadout(), () => this.startRun());
 
         //  Restore the saved mute preference on first boot.
         if (meta.muted && !isMuted())
@@ -106,7 +171,6 @@ export class MainMenu extends Scene
             saveMeta();
             mute.setTexture(ic(meta.muted ? 'soundOff' : 'soundOn'));
         });
-
     }
 
     private spawnDemoTargets (): void
@@ -119,36 +183,65 @@ export class MainMenu extends Scene
         this.time.addEvent({ delay: 900, loop: true, callback: () => this.demoTarget() });
     }
 
+    /**
+     * The drifting targets behind the menu wear whatever skin the player is
+     * wearing -- the shop window for the thing they just bought is the screen
+     * they bought it on.
+     */
     private demoTarget (): void
     {
-        const color = DEMO_COLORS[Math.floor(Math.random() * DEMO_COLORS.length)];
+        const skin = equippedSkin();
+        const base = DEMO_COLORS[Math.floor(Math.random() * DEMO_COLORS.length)];
+        const paint = skin.tint ? skin.tint({ color: base, ring: 0xffffff }) : { color: base, ring: mix(base, 0xffffff, 0.6) };
         const r = 18 + Math.random() * 14;
-        const x = 40 + Math.random() * (W - 80);
-        const y = 210 + Math.random() * (H - 340);
 
-        const dot = this.add.circle(x, y, r, color, 0.24).setDepth(1);
-        dot.setStrokeStyle(3, color, 0.55);
+        //  They drift through the empty part of the menu only. Portrait puts
+        //  the store across the bottom half, and targets wandering behind a
+        //  grid of tiles is movement under something the player is reading.
+        const yTop = 200;
+        const yBot = LANDSCAPE ? H - 130 : L.storeHeaderY - 44;
+
+        const x = 40 + Math.random() * (W - 80);
+        const y = yTop + Math.random() * Math.max(60, yBot - yTop);
+
+        const dot = this.add.container(x, y).setDepth(1);
+        const g = this.add.graphics();
+
+        g.fillStyle(paint.color, 0.24 * skin.glow);
+        fillBody(g, skin.shape, r, 0);
+        g.lineStyle(3, paint.ring, 0.55);
+        strokeBody(g, skin.shape, r, 0);
+
+        dot.add(g);
         dot.setScale(0.1);
+
         dot.setInteractive({
-            hitArea: new Geom.Circle(r, r, r * 1.4),
+            hitArea: new Geom.Circle(0, 0, r * 1.4),
             hitAreaCallback: Geom.Circle.Contains,
             useHandCursor: true
         });
 
         this.tweens.add({ targets: dot, scale: 1, duration: 240, ease: 'Back.out' });
 
-        const kill = () =>
+        if (skin.spin !== 0)
         {
-            if (!dot.active) return;
-            this.fx.burst(dot.x, dot.y, color, 10, 'hit');
-            dot.destroy();
-        };
+            this.tweens.add({
+                targets: dot,
+                rotation: dot.rotation + Math.PI * 2 * Math.sign(skin.spin),
+                duration: Math.max(1200, (Math.PI * 2 / Math.abs(skin.spin)) * 1000),
+                repeat: -1
+            });
+        }
 
         dot.on('pointerdown', () =>
         {
             unlockAudio();
             Sfx.hit(3);
-            kill();
+
+            if (!dot.active) return;
+
+            this.fx.burst(dot.x, dot.y, paint.color, 10, 'hit');
+            dot.destroy();
         });
 
         this.tweens.add({
@@ -157,25 +250,39 @@ export class MainMenu extends Scene
         });
     }
 
+    /**
+     * PLAY, and the COMPETITIVE button beside it. PLAY keeps the left and
+     * most of the width -- it is still the game -- and the red button with
+     * the NEW badge takes the rest, so a returning player sees it without a
+     * new thing having shoved the old one around.
+     */
     private buildPlayButton (): void
     {
-        const btn = this.add.container(L.gameX, L.playY).setDepth(11);
+        const playW = 226;
+        const vsW = 122;
+        const gap = 12;
+        const h = 92;
+        const total = playW + gap + vsW;
+        const playX = L.gameX - total / 2 + playW / 2;
+        const vsX = L.gameX + total / 2 - vsW / 2;
+
+        const btn = this.add.container(playX, L.playY).setDepth(11);
 
         const g = this.add.graphics();
         g.fillStyle(0x3fe0ff, 1);
-        g.fillRoundedRect(-160, -46, 320, 92, 26);
+        g.fillRoundedRect(-playW / 2, -h / 2, playW, h, 26);
         g.fillStyle(0xffffff, 0.18);
-        g.fillRoundedRect(-160, -46, 320, 40, { tl: 26, tr: 26, bl: 0, br: 0 });
+        g.fillRoundedRect(-playW / 2, -h / 2, playW, 40, { tl: 26, tr: 26, bl: 0, br: 0 });
         btn.add(g);
 
         const label = this.add.text(0, 0, 'PLAY', {
-            fontFamily: FONT, fontSize: 46, color: '#06101f'
+            fontFamily: FONT, fontSize: 44, color: '#06101f'
         }).setOrigin(0.5);
         btn.add(label);
 
-        btn.setSize(320, 92);
+        btn.setSize(playW, h);
         btn.setInteractive({
-            hitArea: new Geom.Rectangle(0, 0, 320, 92),
+            hitArea: new Geom.Rectangle(0, 0, playW, h),
             hitAreaCallback: Geom.Rectangle.Contains,
             useHandCursor: true
         });
@@ -189,11 +296,107 @@ export class MainMenu extends Scene
             this.tweens.add({ targets: btn, scale: 0.92, duration: 90, yoyo: true });
             this.fx.ring(btn.x, btn.y, 220, 0x3fe0ff, 6, 420);
 
-            run.reset();
+            this.startRun();
+        });
+
+        this.buildVersusButton(vsX, L.playY, vsW, h);
+    }
+
+    /**
+     * The door into competitive: red, because the opponent is red, with a
+     * NEW badge on the corner that stays until the mode has been played once.
+     */
+    private buildVersusButton (x: number, y: number, w: number, h: number): void
+    {
+        const red = 0xff4a5c;
+        const btn = this.add.container(x, y).setDepth(11);
+
+        const g = this.add.graphics();
+        g.fillStyle(red, 1);
+        g.fillRoundedRect(-w / 2, -h / 2, w, h, 26);
+        g.fillStyle(0xffffff, 0.18);
+        g.fillRoundedRect(-w / 2, -h / 2, w, 40, { tl: 26, tr: 26, bl: 0, br: 0 });
+        btn.add(g);
+
+        //  Same recipe as PLAY: dark label on a solid fill, no stroke, same
+        //  corner radius and top highlight -- only the colour says it is a
+        //  different door.
+        btn.add(iconImage(this, 0, -14, 'crosshair', { size: 30, color: 0x06101f }));
+
+        btn.add(this.add.text(0, 20, 'VERSUS', {
+            fontFamily: FONT, fontSize: 18, color: '#06101f'
+        }).setOrigin(0.5));
+
+        const record = versus.wins + versus.losses;
+
+        if (record === 0)
+        {
+            //  The badge hangs off the top-right corner, tilted, the way a
+            //  sticker on a box does.
+            const badge = this.add.container(w / 2 - 6, -h / 2 + 4).setAngle(12);
+            const bg = this.add.graphics();
+            bg.fillStyle(0xffc857, 1);
+            bg.fillRoundedRect(-26, -12, 52, 24, 8);
+            badge.add(bg);
+            badge.add(this.add.text(0, 0, 'NEW', {
+                fontFamily: FONT, fontSize: 13, color: '#06101f'
+            }).setOrigin(0.5));
+            btn.add(badge);
+
+            this.tweens.add({ targets: badge, scale: 1.12, duration: 520, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+        }
+        else
+        {
+            //  The record rides the corner where NEW used to be, in the same
+            //  pill, so the button's silhouette never changes.
+            const pill = this.add.container(w / 2 - 6, -h / 2 + 4).setAngle(12);
+            const pg = this.add.graphics();
+            pg.fillStyle(0x0b1024, 1);
+            pg.fillRoundedRect(-30, -12, 60, 24, 8);
+            pill.add(pg);
+            pill.add(this.add.text(0, 0, `${versus.wins}W ${versus.losses}L`, {
+                fontFamily: FONT, fontSize: 11, color: '#ffffff'
+            }).setOrigin(0.5));
+            btn.add(pill);
+        }
+
+        btn.setSize(w, h);
+        btn.setInteractive({
+            hitArea: new Geom.Rectangle(0, 0, w, h),
+            hitAreaCallback: Geom.Rectangle.Contains,
+            useHandCursor: true
+        });
+
+        this.tweens.add({ targets: btn, scale: 1.035, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.inOut', delay: 450 });
+
+        btn.on('pointerdown', () =>
+        {
+            unlockAudio();
+            Sfx.launch();
+            this.tweens.add({ targets: btn, scale: 0.92, duration: 90, yoyo: true });
+            this.fx.ring(btn.x, btn.y, 160, red, 6, 420);
 
             this.cameras.main.fadeOut(190, 0, 0, 0);
-            this.time.delayedCall(200, () => this.scene.start('Game'));
+            this.time.delayedCall(200, () => this.scene.start('VersusQueue'));
         });
+    }
+
+    /**
+     * The one way into a run. The PLAY button uses it, and so does the button
+     * on the card a bought skin puts up -- a player who has just been told to
+     * go and try something out must land in exactly the run PLAY would have
+     * given them, loadout and all.
+     */
+    private startRun (): void
+    {
+        run.reset();
+
+        //  The armed boosts are spent here and nowhere else: a player who
+        //  opens the store and walks away has lost nothing.
+        armRun();
+
+        this.cameras.main.fadeOut(190, 0, 0, 0);
+        this.time.delayedCall(200, () => this.scene.start('Game'));
     }
 
     private buildStats (): void
@@ -213,123 +416,226 @@ export class MainMenu extends Scene
 
         stat(-1, 'BEST SCORE', fmt(meta.best), 0xffffff);
         stat(0, 'BEST LEVEL', `${meta.bestLevel}/${FINAL_LEVEL}`, 0x6cf5c8);
-        stat(1, 'RANK XP', fmt(meta.rank), 0x9b6cff);
+        stat(1, 'TOTAL XP', fmt(meta.rank), 0x9b6cff);
     }
 
-    private buildShop (): void
+    /**
+     * The route through the seven worlds, under the stats that used to be the
+     * only thing the menu said about progress.
+     *
+     * "BEST LEVEL 24/40" directly above it is the caption; the rail is the
+     * picture. See objects/WorldMap for why the picture is worth the room.
+     */
+    private buildTrail (): void
     {
-        this.add.text(L.shopX, L.shopTitleY, 'PERMANENT UPGRADES', {
-            fontFamily: FONT, fontSize: 20, color: '#5f6a92'
+        buildWorldTrail(this, this.fx, {
+            x: L.gameX,
+            headY: L.mapHeadY,
+            railY: L.mapY,
+            nameY: L.mapNames ? L.mapNameY : null,
+            width: L.mapW
+        });
+    }
+
+    /**
+     * The loadout: one chip per run boost, sitting directly under PLAY where
+     * the player is already looking. A chip they own is a switch -- armed goes
+     * into the next run and is spent by it; a chip they do not own is still
+     * drawn, dim, because an empty shelf sells nothing.
+     */
+    private buildLoadout (): void
+    {
+        const y = L.loadoutY;
+        const w = 64;
+        const gap = 10;
+        const total = RUN_BOOSTS.length * w + (RUN_BOOSTS.length - 1) * gap;
+        const x0 = L.gameX - total / 2 + w / 2;
+
+        this.add.text(L.gameX, y - 44, 'RUN BOOSTS', {
+            fontFamily: FONT_UI, fontSize: 12, color: '#5f6a92'
         }).setOrigin(0.5).setDepth(10);
 
-        this.coinLabel = new IconLabel(this, L.shopX, L.coinY, 'gem', fmt(meta.coins), {
-            fontSize: 34, iconSize: 30
-        });
-        this.coinLabel.setDepth(11);
-
-        PERKS.forEach((perk, i) =>
+        RUN_BOOSTS.forEach((boost, i) =>
         {
-            const y = L.rowY0 + i * 74;
-            const row = this.add.container(L.shopX, y).setDepth(10);
+            const cx = x0 + i * (w + gap);
+            const chip = this.add.container(cx, y).setDepth(11);
 
             const g = this.add.graphics();
-            row.add(g);
+            chip.add(g);
 
-            const icon = iconImage(this, -208, 0, perk.icon, { size: 30, color: 0xffffff, alpha: 0.9 });
-            row.add(icon);
+            const icon = iconImage(this, 0, -6, boost.icon, { size: 26, color: boost.color });
+            chip.add(icon);
 
-            const name = this.add.text(-176, -12, perk.name, {
-                fontFamily: FONT, fontSize: 20, color: '#ffffff'
-            }).setOrigin(0, 0.5);
-            row.add(name);
-
-            const effect = this.add.text(-176, 12, perk.effect, {
-                fontFamily: FONT_UI, fontSize: 14, color: '#7d88b0'
-            }).setOrigin(0, 0.5);
-            row.add(effect);
-
-            const price = new IconLabel(this, 196, 0, 'gem', '', {
-                align: 'right', fontSize: 20, iconSize: 18
-            });
-            row.add(price);
+            const count = this.add.text(0, 17, '', {
+                fontFamily: FONT, fontSize: 14, color: '#ffffff'
+            }).setOrigin(0.5);
+            chip.add(count);
 
             const redraw = () =>
             {
-                const lvl = meta.perks[perk.id] || 0;
-                const maxed = lvl >= perk.max;
-                const cost = perkCost(perk, lvl);
-                const afford = !maxed && meta.coins >= cost;
+                const n = boostCount(boost.id);
+                const armed = isArmed(boost.id);
 
                 g.clear();
-                g.fillStyle(0x0b1024, 0.9);
-                g.fillRoundedRect(-232, -32, 464, 64, 16);
-                g.lineStyle(2, maxed ? 0x6cf5c8 : (afford ? 0xffc857 : 0x2a3352), maxed || afford ? 0.9 : 0.7);
-                g.strokeRoundedRect(-232, -32, 464, 64, 16);
+                g.fillStyle(0x0b1024, 0.92);
+                g.fillRoundedRect(-w / 2, -28, w, 56, 14);
 
-                for (let p = 0; p < perk.max; p++)
+                if (armed)
                 {
-                    g.fillStyle(p < lvl ? 0x6cf5c8 : 0x2a3352, 1);
-                    g.fillRect(-176 + p * 12, 22, 8, 4);
+                    g.fillStyle(boost.color, 0.22);
+                    g.fillRoundedRect(-w / 2, -28, w, 56, 14);
                 }
 
-                const tone = maxed ? 0x6cf5c8 : (afford ? 0xffc857 : 0x4c5578);
+                g.lineStyle(2, n > 0 ? boost.color : 0x2a3352, armed ? 1 : 0.6);
+                g.strokeRoundedRect(-w / 2, -28, w, 56, 14);
 
-                price.setValue(maxed ? 'MAX' : fmt(cost), !maxed);
-                price.text.setColor(hex(tone));
-                price.icon.setTint(tone);
+                icon.setAlpha(n > 0 ? 1 : 0.3);
+                count.setText(n > 0 ? (armed ? `ARMED x${n}` : `x${n}`) : 'NONE');
+                count.setFontSize(n > 0 && armed ? 10 : 13);
+                count.setColor(armed ? hex(boost.color) : (n > 0 ? '#8d97bd' : '#3c4569'));
             };
 
             redraw();
-            this.perkRows.push({ redraw });
+            this.chips.push({ redraw });
 
-            row.setSize(464, 64);
-            row.setInteractive({
-                hitArea: new Geom.Rectangle(0, 0, 464, 64),
+            chip.setSize(w, 56);
+            chip.setInteractive({
+                hitArea: new Geom.Rectangle(0, 0, w, 56),
                 hitAreaCallback: Geom.Rectangle.Contains,
                 useHandCursor: true
             });
 
-            row.on('pointerdown', () =>
+            chip.on('pointerdown', () =>
             {
                 unlockAudio();
 
-                const lvl = meta.perks[perk.id] || 0;
-
-                if (lvl >= perk.max) { Sfx.dry(); return; }
-
-                const cost = perkCost(perk, lvl);
-
-                if (meta.coins < cost)
+                if (boostCount(boost.id) <= 0)
                 {
-                    Sfx.miss();
-                    this.tweens.add({ targets: row, x: L.shopX + 8, duration: 55, yoyo: true, repeat: 2 });
+                    //  Nothing to arm -- so the tap goes where the player can
+                    //  do something about it, and says which row to look at.
+                    Sfx.dry();
+                    this.fx.popup(chip.x, chip.y - 42, 'BUY IN STORE', boost.color, 15, 30, 700);
                     return;
                 }
 
-                meta.coins -= cost;
-                meta.perks[perk.id] = lvl + 1;
-                saveMeta();
+                const on = toggleArmed(boost.id);
 
-                Sfx.upgrade();
-                this.fx.burst(row.x, row.y, 0x6cf5c8, 18, 'hit');
-                this.tweens.add({ targets: row, scale: 1.05, duration: 110, yoyo: true, ease: 'Quad.out' });
+                Sfx.ui();
+                redraw();
 
-                this.refreshShop();
+                this.tweens.add({ targets: chip, scale: on ? 1.12 : 0.94, duration: 110, yoyo: true, ease: 'Quad.out' });
+
+                if (on) this.fx.ring(chip.x, chip.y, 90, boost.color, 4, 340);
             });
         });
     }
 
-    private refreshShop (): void
+    private refreshLoadout (): void
     {
-        this.coinLabel.setValue(fmt(meta.coins));
-        this.coinLabel.setScale(1.2);
-        this.tweens.add({ targets: this.coinLabel, scale: 1, duration: 160, ease: 'Quad.out' });
+        for (const chip of this.chips) chip.redraw();
+    }
 
-        for (const r of this.perkRows) r.redraw();
+    /**
+     * The present, in the corner, at all times.
+     *
+     * Waiting or not, it is on the menu -- a reward the player cannot see
+     * coming is a reward that does not pull anybody back into a second run.
+     * So when there is nothing to open the badge still says how many runs
+     * away the next one is, and the counter is the hook.
+     */
+    private buildGiftBadge (): void
+    {
+        const x = 60;
+        const y = LANDSCAPE ? 52 : 58;
+        const w = 98;
+        const h = 70;
+        const ready = giftsPending() > 0;
+        const left = runsToNextGift();
+        const tone = ready ? 0xffc857 : 0x2a3352;
+
+        const chip = this.add.container(x, y).setDepth(13);
+
+        const g = this.add.graphics();
+        g.fillStyle(0x0b1024, 0.92);
+        g.fillRoundedRect(-w / 2, -h / 2, w, h, 16);
+
+        if (ready)
+        {
+            g.fillStyle(0xffc857, 0.18);
+            g.fillRoundedRect(-w / 2, -h / 2, w, h, 16);
+        }
+
+        g.lineStyle(2, tone, ready ? 1 : 0.7);
+        g.strokeRoundedRect(-w / 2, -h / 2, w, h, 16);
+        chip.add(g);
+
+        const icon = iconImage(this, 0, -9, 'gift', {
+            size: 30, color: ready ? 0xffc857 : 0x5f6a92, alpha: ready ? 1 : 0.55
+        });
+        chip.add(icon);
+
+        chip.add(this.add.text(0, 20, ready ? 'OPEN!' : `IN ${left}`, {
+            fontFamily: FONT, fontSize: ready ? 15 : 14, color: ready ? '#ffc857' : '#5f6a92'
+        }).setOrigin(0.5));
+
+        chip.setSize(w, h);
+        chip.setInteractive({
+            hitArea: new Geom.Rectangle(0, 0, w, h),
+            hitAreaCallback: Geom.Rectangle.Contains,
+            useHandCursor: true
+        });
+
+        if (ready)
+        {
+            this.tweens.add({ targets: chip, scale: 1.07, duration: 620, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+            this.tweens.add({ targets: icon, angle: 8, duration: 380, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+
+            this.time.addEvent({
+                delay: 1700,
+                loop: true,
+                callback: () => this.fx.ring(chip.x, chip.y, 150, 0xffc857, 4, 460)
+            });
+        }
+
+        chip.on('pointerdown', () =>
+        {
+            unlockAudio();
+
+            if (!ready)
+            {
+                //  Nothing to open, so the tap answers the only question the
+                //  badge raises rather than doing nothing at all.
+                Sfx.dry();
+                this.fx.popup(chip.x, chip.y + 54, `${left} RUN${left === 1 ? '' : 'S'} TO GO`, 0xffc857, 15, 26, 800);
+                return;
+            }
+
+            Sfx.upgrade();
+            this.cameras.main.fadeOut(180, 0, 0, 0);
+            this.time.delayedCall(190, () => this.scene.start('Gift'));
+        });
+    }
+
+    /**
+     * The daily present, directly under the mystery box.
+     *
+     * The two belong together -- both are boxes, both are free -- and stacking
+     * them makes one corner of the menu the place rewards come from. The gold
+     * one goes second because it is the one that is ready *now*: the eye lands
+     * on the counter above it, then on the thing it can open today.
+     */
+    private buildDaily (): void
+    {
+        //  Pulled in from the badge's own centre line so the box and the light
+        //  breaking out of the tile still miss the PLAY button beside it.
+        buildDailyButton(this, this.fx, 48, (LANDSCAPE ? 52 : 58) + 88);
     }
 
     update (_time: number, delta: number): void
     {
-        this.fx.update(Math.min(50, delta));
+        const dt = Math.min(50, delta);
+
+        this.fx.update(dt);
+        this.store.tick(dt);
     }
 }

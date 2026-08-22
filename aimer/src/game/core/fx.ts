@@ -1,4 +1,5 @@
 import { GameObjects, Scene } from 'phaser';
+import { BeamLook } from '../data/gunkit';
 import { FONT, hex } from './theme';
 
 type BurstSize = 'hit' | 'big' | 'gold';
@@ -10,9 +11,20 @@ interface Line
     x2: number;
     y2: number;
     color: number;
+    /** Hot inner colour. Defaults to white. */
+    core: number;
     width: number;
     age: number;
     life: number;
+    /** Soft passes drawn either side of the sheath. */
+    glow: number;
+    /**
+     * Pre-baked lightning displacement, as offsets perpendicular to the line.
+     * Empty for a straight bolt -- the common case, and the cheap one.
+     */
+    kinks: number[];
+    /** Spearhead length drawn at the impact end. */
+    head: number;
 }
 
 /**
@@ -82,10 +94,68 @@ export class Fx
         this.emitter(color, size).explode(count, x, y);
     }
 
-    /** A fading laser line, used for every shot the player fires. */
+    /** A plain fading laser line. */
     tracer (x1: number, y1: number, x2: number, y2: number, color: number, width = 4, life = 140): void
     {
-        this.lines.push({ x1, y1, x2, y2, color, width, age: 0, life });
+        this.lines.push({
+            x1, y1, x2, y2, color, core: 0xffffff, width, age: 0, life, glow: 0, kinks: [], head: 0
+        });
+    }
+
+    /**
+     * The player's shot. Everything about how it looks comes off the build --
+     * width, colour, how many soft passes bloom around it, whether it forks
+     * like lightning, whether it ends in a spearhead. A late-run bolt should
+     * not be mistakable for a level-one one.
+     */
+    beam (x1: number, y1: number, x2: number, y2: number, look: BeamLook, scale = 1): void
+    {
+        const kinks: number[] = [];
+
+        if (look.wobble > 0.5)
+        {
+            //  Baked once, not per frame: the bolt is on screen for a sixth of
+            //  a second and a re-rolled zigzag every frame just reads as noise.
+            const segs = 6;
+            for (let i = 1; i < segs; i++) kinks.push((Math.random() * 2 - 1) * look.wobble);
+        }
+
+        this.lines.push({
+            x1, y1, x2, y2,
+            color: look.color,
+            core: look.core,
+            width: look.width * scale,
+            age: 0,
+            life: look.life,
+            glow: look.glow,
+            kinks,
+            head: look.head * scale
+        });
+
+        if (look.sparks > 0)
+        {
+            //  Sparks shed off the impact end, along the line of travel.
+            this.burst(x2, y2, look.core, look.sparks, 'hit');
+        }
+
+        if (look.bloom > 1.15)
+        {
+            const flash = this.scene.add.image(x1, y1, 'spark');
+            flash.setDisplaySize(70 * look.bloom, 70 * look.bloom)
+                .setTint(look.color).setBlendMode('ADD').setDepth(this.depth + 1);
+
+            this.scene.tweens.add({
+                targets: flash, alpha: 0, scale: flash.scaleX * 1.5,
+                duration: 140, ease: 'Quad.out', onComplete: () => flash.destroy()
+            });
+        }
+
+        //  Only the main bolt gets a muzzle shockwave; every barrel in a
+        //  six-gun volley throwing one would be a wall of rings.
+        if (look.shock > 0 && scale >= 1)
+        {
+            this.ring(x1, y1, 40 + look.shock * 60, look.color, 2 + look.shock * 3, 260);
+        }
     }
 
     /** Expanding shockwave. */
@@ -161,6 +231,39 @@ export class Fx
         });
     }
 
+    /** A bolt's points -- two for a straight line, more once it forks. */
+    private path (l: Line): number[][]
+    {
+        if (l.kinks.length === 0) return [ [ l.x1, l.y1 ], [ l.x2, l.y2 ] ];
+
+        const dx = l.x2 - l.x1;
+        const dy = l.y2 - l.y1;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len;
+        const ny = dx / len;
+        const segs = l.kinks.length + 1;
+        const pts: number[][] = [ [ l.x1, l.y1 ] ];
+
+        for (let i = 1; i < segs; i++)
+        {
+            const f = i / segs;
+            const k = l.kinks[i - 1];
+            pts.push([ l.x1 + dx * f + nx * k, l.y1 + dy * f + ny * k ]);
+        }
+
+        pts.push([ l.x2, l.y2 ]);
+
+        return pts;
+    }
+
+    private stroke (pts: number[][]): void
+    {
+        this.gfx.beginPath();
+        this.gfx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) this.gfx.lineTo(pts[i][0], pts[i][1]);
+        this.gfx.strokePath();
+    }
+
     update (dtMs: number): void
     {
         this.gfx.clear();
@@ -178,10 +281,37 @@ export class Fx
 
             const t = 1 - l.age / l.life;
 
+            const pts = this.path(l);
+
+            //  Outer bloom first, then the sheath, then the white-hot core --
+            //  three passes is what makes a line read as energy and not ink.
+            for (let g = l.glow; g > 0; g--)
+            {
+                this.gfx.lineStyle(l.width * t * (1 + g * 0.7) + 2, l.color, t * 0.12);
+                this.stroke(pts);
+            }
+
             this.gfx.lineStyle(l.width * t + 1, l.color, t * 0.9);
-            this.gfx.lineBetween(l.x1, l.y1, l.x2, l.y2);
-            this.gfx.lineStyle(Math.max(1, l.width * t * 0.35), 0xffffff, t * 0.85);
-            this.gfx.lineBetween(l.x1, l.y1, l.x2, l.y2);
+            this.stroke(pts);
+            this.gfx.lineStyle(Math.max(1, l.width * t * 0.35), l.core, t * 0.85);
+            this.stroke(pts);
+
+            if (l.head > 0)
+            {
+                const dx = l.x2 - l.x1;
+                const dy = l.y2 - l.y1;
+                const len = Math.hypot(dx, dy) || 1;
+                const ux = dx / len;
+                const uy = dy / len;
+                const w = (l.width * t + 2) * 0.9;
+
+                this.gfx.fillStyle(l.core, t * 0.9);
+                this.gfx.fillTriangle(
+                    l.x2 + ux * l.head * t, l.y2 + uy * l.head * t,
+                    l.x2 - ux * l.head * 0.4 - uy * w, l.y2 - uy * l.head * 0.4 + ux * w,
+                    l.x2 - ux * l.head * 0.4 + uy * w, l.y2 - uy * l.head * 0.4 - ux * w
+                );
+            }
         }
     }
 }

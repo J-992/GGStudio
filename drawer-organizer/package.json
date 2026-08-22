@@ -1,0 +1,17 @@
+{
+  "name": "drawer-organizer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A cozy drag-and-drop organizing game in Phaser 3. No dependencies: Phaser is vendored and every sprite and sound is generated at runtime, so the build is a concatenation, not a bundle.",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "npx -y http-server . -p 8080 -c-1 -o",
+    "start": "npx -y http-server . -p 8080 -c-1 -o",
+    "check": "bun run tools/check.mjs",
+    "build:poki": "bun run tools/build-poki.mjs",
+    "package": "bun run check && bun run build:poki && bun run tools/package-poki.mjs",
+    "preflight": "node ../scripts/poki/preflight.mjs ."
+  }
+}

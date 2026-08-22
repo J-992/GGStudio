@@ -1,5 +1,7 @@
 import { Scene } from 'phaser';
 import { registerIcons } from '../core/icons';
+import { registerSkinArt } from '../core/skinart';
+import { preloadPhotoSkins, registerPhotoSkins } from '../core/photoskins';
 import { stopPlatformLoading } from '../platform/platform';
 
 function canvas (size: number, draw: (ctx: CanvasRenderingContext2D, s: number) => void): HTMLCanvasElement
@@ -19,6 +21,12 @@ export class Boot extends Scene
     constructor ()
     {
         super('Boot');
+    }
+
+    preload ()
+    {
+        //  The only files the game ever downloads. Everything else is drawn.
+        preloadPhotoSkins(this);
     }
 
     create ()
@@ -46,6 +54,8 @@ export class Boot extends Scene
         }
 
         registerIcons(this.textures);
+        registerSkinArt(this.textures);
+        registerPhotoSkins(this.textures);
 
         //  Everything the game needs now exists, so close the loading bracket:
         //  Poki swaps their loader for the game on this call, and the page's own

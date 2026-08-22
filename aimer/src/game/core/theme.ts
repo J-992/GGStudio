@@ -82,35 +82,63 @@ export const CY = H / 2;
  * other band in the top strip is measured off it, so the whole strip moves as
  * one when landscape tightens it up.
  */
-const LABEL_Y = LANDSCAPE ? 86 : 100;
+const LABEL_Y = LANDSCAPE ? 78 : 92;
 
-/** The top strip of the play screen: score, countdown bar, goal bar, combo. */
+/** Gap from the label line down to the top of the arena. */
+const PLAY_GAP = LANDSCAPE ? 124 : 126;
+
+/**
+ * The top strip of the play screen.
+ *
+ * It used to carry five separate progress readouts stacked on top of each
+ * other -- rank bar, zone route rail, countdown bar, goal bar, and a six-gem
+ * streak track with its own caption -- and they ran into each other. Three of
+ * them are gone:
+ *
+ *   the route rail  -- world progress is the whole point of the gate screen
+ *                      between worlds, and it was a 40px stub here.
+ *   the goal bar    -- the goal is a small whole number. "6 / 18" says it
+ *                      better than nine pixels of fill ever did.
+ *   the streak gems -- the combo readout in the middle of the strip was
+ *                      already saying the same thing, louder.
+ *
+ * What is left is two bars that mean two different things: the rank bar on the
+ * very top edge, which fills all run, and the countdown, which empties every
+ * level. Everything else in the strip is a number.
+ */
 export const HUD = {
     margin: LANDSCAPE ? 40 : 30,
+    /**
+     * The rank bar, pinned to the very top edge of the frame and running the
+     * whole width of it. It is the one readout that is filling at all times, so
+     * it gets the one place on screen nothing else wants.
+     */
+    xpY: 0,
+    xpH: LANDSCAPE ? 8 : 9,
+    /** Rank chip, top left. Coins sit opposite it. */
+    rankY: LANDSCAPE ? 26 : 30,
     levelY: LANDSCAPE ? 26 : 30,
     scoreY: LANDSCAPE ? 52 : 62,
     scoreSize: LANDSCAPE ? 46 : 54,
     labelY: LABEL_Y,
-    /** Countdown bar: top edge and height. */
+    /** Countdown bar: top edge and height. The only bar in the strip. */
     barY: LABEL_Y + 14,
     barH: 22,
-    /** Goal bar, directly under it. */
-    goalY: LABEL_Y + 42,
-    goalH: 9,
-    comboY: LABEL_Y + 72,
-    /** Right edge of both bars, and of the stopwatch cap that ends them. */
+    /** The combo readout, and the streak caption under it. */
+    comboY: LABEL_Y + 64,
+    streakTextY: LABEL_Y + 104,
+    /** Right edge of the bar, and of the stopwatch cap that ends it. */
     barRight: W - (LANDSCAPE ? 68 : 58),
-    /** Streak gem track, just above the turret. */
-    streakY: H - 80,
-    /** The line the streak caption, score multiplier and mute button sit on. */
-    footerY: H - 52
+    /** Bottom line -- only the mute button and the skip pill. */
+    footerY: H - 46
 };
 
 /** Safe playfield rectangle. Targets never spawn outside of this. */
 export const PLAY = {
     left: LANDSCAPE ? 60 : 46,
     right: W - (LANDSCAPE ? 60 : 46),
-    top: LABEL_Y + 114,
+    /** Clear of the combo readout that now ends the top strip. */
+    top: LABEL_Y + PLAY_GAP,
     bottom: H - 94
 };
 
@@ -125,17 +153,28 @@ export const MUZZLE = { x: W / 2, y: H - 6 };
 export const AIM_LIMIT = LANDSCAPE ? 1.4 : 1.15;
 
 /**
+ * How big the gun is drawn. The weapon is authored in portrait units; the
+ * landscape box is 240 design pixels shorter, so the identical gun would eat a
+ * third more of the arena there.
+ */
+export const GUN_SCALE = LANDSCAPE ? 0.82 : 1;
+
+/**
  * How much more room the arena has than the portrait one it was balanced in.
  * Spawn counts scale by this so a wide screen is not a near-empty field.
  */
 export const DENSITY = Math.min(1.5, Math.max(1,
     ((PLAY.right - PLAY.left) * (PLAY.bottom - PLAY.top)) /
-    ((PORTRAIT_W - 92) * (PORTRAIT_H - 94 - 214))
+    ((PORTRAIT_W - 92) * (PORTRAIT_H - 94 - (92 + 126)))
 ));
 
 export const FONT = '"Arial Black", "Arial Bold", Arial, sans-serif';
 export const FONT_UI = 'Arial, Helvetica, sans-serif';
 
+/**
+ * A world's colour set. The table of them lives in `data/zones`, next to the
+ * rule that ships with each one -- look and law change together or not at all.
+ */
 export interface Tier
 {
     bg: number;
@@ -143,23 +182,6 @@ export interface Tier
     accent: number;
     accent2: number;
     dust: number;
-}
-
-/** Eight visual tiers -- one per five levels. The world gets hotter as the run goes on. */
-export const TIERS: Tier[] = [
-    { bg: 0x080b1c, grid: 0x1b2a5e, accent: 0x3fe0ff, accent2: 0x6cf5c8, dust: 0x3fe0ff },
-    { bg: 0x0c0824, grid: 0x2e2070, accent: 0x9b6cff, accent2: 0x4fd6ff, dust: 0x9b6cff },
-    { bg: 0x15061f, grid: 0x4d1560, accent: 0xff5ce0, accent2: 0xb06cff, dust: 0xff5ce0 },
-    { bg: 0x1c0612, grid: 0x66152f, accent: 0xff5470, accent2: 0xffa23f, dust: 0xff5470 },
-    { bg: 0x1f1203, grid: 0x6b3f08, accent: 0xffb020, accent2: 0xff4d3d, dust: 0xffd166 },
-    { bg: 0x03170f, grid: 0x0c5c37, accent: 0x2fffa0, accent2: 0xd8ff4d, dust: 0x2fffa0 },
-    { bg: 0x1a0007, grid: 0x6e0020, accent: 0xff2d55, accent2: 0xff8a00, dust: 0xff5470 },
-    { bg: 0x0a0014, grid: 0x3c0a78, accent: 0xf2f6ff, accent2: 0xb388ff, dust: 0xd8c8ff }
-];
-
-export function tierFor (level: number): Tier
-{
-    return TIERS[Math.min(TIERS.length - 1, Math.floor((level - 1) / 5))];
 }
 
 /** 0xrrggbb -> '#rrggbb' (Phaser text colours want strings). */

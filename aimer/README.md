@@ -38,14 +38,33 @@ phone.
   multipliers; the HUD always shows progress toward the next one.
 - **5 permanent upgrades** bought with coins on the menu, saved to localStorage
   along with best score, best level and rank XP.
-- **No external assets.** Every graphic is a Phaser shape or a runtime-generated
-  canvas texture, and every sound effect is synthesised with WebAudio
-  (`src/game/core/audio.ts`). The whole build is ~365 KB gzipped, and the only
-  request that leaves the page is Poki's own SDK.
-- **Three rewarded videos** — an extra life when the clock runs out (once per
+- **The mystery present** (`src/game/data/gifts.ts`, `scenes/GiftScene.ts`) — a
+  wrapped box after the first run ever finished, and one every 3 runs after
+  that. It arrives **before** the results card, not after it -- a card of
+  statistics is where a session ends, and a reward on the far side of it is a
+  reward most players never reach. Tapping the box pops the lid and spins a
+  reel of skins, boosts and coin bags that stops on what they got. The first
+  box is not a roll: it is always a photo skin they do not own, and it is worn
+  the moment it lands. The results card and the menu both say how many runs the
+  next one is away.
+- **Photo skins** (`public/skins`, `core/photoskins.ts`) — the one thing that is
+  a file rather than drawing code. `art-src/crop.py` frames the originals and
+  writes the 256px files the game ships.
+- **Everything else is drawn.** Every other graphic is a Phaser shape or a
+  runtime-generated canvas texture, and every sound effect is synthesised with
+  WebAudio (`src/game/core/audio.ts`). The whole build is ~765 KB gzipped, and
+  the only request that leaves the page is Poki's own SDK.
+- **The store stops you twice** (`src/game/objects/StoreModal.ts`) — tapping a
+  skin or boost you cannot afford raises a card offering it for a video instead
+  of shaking the row, and buying a skin blacks the store out for a two-second
+  wind-up -- yellow spokes spinning up out of a point of light, rings falling
+  inwards, a rising tone -- before the skin lands under two words and a button
+  that starts a run wearing it. Tapping skips the wind-up.
+- **Five rewarded videos** — an extra life when the clock runs out (once per
   level, board and score intact), double the run's coins on the results card,
-  and reroll the three upgrade cards as often as you like — all opt-in, all free
-  to decline.
+  reroll the three upgrade cards as often as you like, one extra present on the
+  reveal, and unlocking a store skin or boost you are short of — all opt-in, all
+  free to decline.
 
 ## Layout
 
@@ -54,10 +73,10 @@ src/game/
   core/      theme (palette, layout), audio, fx (particles/tracers/popups),
              icons, state (run + save), lifecycle (freeze gate + gameplay
              reporting), ads (placement policy), adButton (rewarded video UI)
-  data/      levels.ts, upgrades.ts
-  objects/   Target.ts, Turret.ts
+  data/      levels.ts, upgrades.ts, skins.ts, boosts.ts, gifts.ts
+  objects/   Target.ts, Turret.ts, StorePanel.ts, StoreModal.ts, PrizeTile.ts
   platform/  pokiSdk.ts (the only file that knows Poki exists), platform.ts
-  scenes/    Boot, MainMenu, GameScene, UpgradeScene, ResultScene
+  scenes/    Boot, MainMenu, GameScene, UpgradeScene, ResultScene, GiftScene
 ```
 
 Nothing outside `platform/` names a portal, and every platform verb is safe to
