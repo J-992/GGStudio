@@ -36,7 +36,7 @@ Player 2 (Volta · cyan)
 - ← / → — move left / right
 - ↑ — jump
 
-Shared: R restart level · ESC pause · one gamepad per player (stick + A/Cross).
+Shared: R restart level · M mute · ESC pause · one gamepad per player (stick + A/Cross).
 
 ## The five conduits
 
@@ -47,7 +47,9 @@ Shared: R restart level · ESC pause · one gamepad per player (stick + A/Cross)
    dangling partner back in. Hold jump while tethered to climb.
 5. FULL SEND — everything at once, ending at the portal.
 
-Death is instant but cheap: the level restarts in under a second.
+The tether is elastic up to a hard length — run too far apart and it yanks you back.
+Robots physically bump and block each other. A death (including falling off-screen)
+sends the run back to conduit 1: arcade rules.
 
 ## Notes
 

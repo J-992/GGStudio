@@ -88,23 +88,45 @@ async function main() {
     await page.waitForTimeout(150);
   }
 
-  await warpBoth(-1.2, 1.2, -7);
+  await warpBoth(-1.2, 4.0, -7);
   await holdKey("KeyD", 450);
   s = await snap();
   const xAfterD = s.p1.x;
-  await warpBoth(-1.2, 1.2, -7);
+  await warpBoth(4.0, -1.2, -7);
   await holdKey("KeyA", 450);
   s = await snap();
-  check("p1 lateral move", xAfterD > 1 && s.p1.x < -0.5, `D->${xAfterD} A->${s.p1.x}`);
+  await warpBoth(4.0, -1.2, -7);
+  await holdKey("KeyA", 450);
+  s = await snap();
+  check("p1 lateral move", xAfterD > 1 && s.p1.x > 0.2 && s.p1.x < 3, `D->${xAfterD} A->${s.p1.x}`);
 
-  await warpBoth(-1.2, 1.2, -7);
+  await warpBoth(-4.0, -1.2, -7);
   await holdKey("ArrowRight", 450);
   s = await snap();
   const xP2a = s.p2.x;
-  await warpBoth(-1.2, 1.2, -7);
+  await warpBoth(4.0, -1.2, -7);
   await holdKey("ArrowLeft", 450);
   s = await snap();
   check("p2 lateral independent", xP2a > 1 && s.p2.x < -0.5, `R->${xP2a} L->${s.p2.x}`);
+
+  await page.evaluate(() => {
+    const t = window.__TR__;
+    t.setAutoRun(0, false);
+    t.setAutoRun(1, false);
+    t.warp(0, -2, -4.52, -7);
+    t.warp(1, 0, -4.52, -7);
+  });
+  await page.waitForTimeout(300);
+  await holdKey("KeyD", 700);
+  s = await snap();
+  const gap = s.p2.x - s.p1.x;
+  const collisionWorks = gap > 0.5 && gap < 2.5 && Math.abs(s.p2.x) < 1.6;
+  check("players collide and block each other", collisionWorks, JSON.stringify({ p1: s.p1.x, p2: s.p2.x }));
+  await page.evaluate(() => {
+    const t = window.__TR__;
+    t.setAutoRun(0, true);
+    t.setAutoRun(1, true);
+  });
 
   await warpBoth(-1.2, 1.2, -7);
   await page.waitForTimeout(200);
@@ -204,6 +226,14 @@ async function main() {
   s = await snap();
   check("tension pulls players together", s.tetherDist < dStart - 0.2 && s.tetherDist > 4, `${dStart} -> ${s.tetherDist}`);
 
+  await warpBoth(-6, 6, -7);
+  await page.keyboard.down("KeyA");
+  await page.keyboard.down("ArrowRight");
+  await page.waitForTimeout(900);
+  await page.keyboard.up("KeyA");
+  await page.keyboard.up("ArrowRight");
+  s = await snap();
+  check("tether hard-caps separation length", s.tetherDist > 5.5 && s.tetherDist < 8.2, `dist=${s.tetherDist.toFixed(2)}`);
   await page.keyboard.press("KeyR");
   await page.waitForTimeout(300);
 
@@ -213,7 +243,7 @@ async function main() {
     const z = t.snapshot().p1.z;
     t.setAutoRun(1, false);
     t.warp(1, -3, -4.52, z - 1);
-    t.warp(0, -3, -15, z - 6);
+    t.warp(0, -3, -12, z - 6);
   });
   await page.waitForTimeout(700);
   s = await snap();
@@ -232,6 +262,30 @@ async function main() {
   check("winch rescue recovers faller", recovered, JSON.stringify({ p1: s.p1, trace: rescueTrace.join(" ") }));
   check("rescue counted", s.rescues > rescuesBefore, `${rescuesBefore} -> ${s.rescues}`);
   if (recovered) await shot("06-rescue.png");
+
+  await page.evaluate(() => {
+    const t = window.__TR__;
+    t.startRun(2);
+  });
+  await page.waitForTimeout(400);
+  s = await snap();
+  check("level 3 loads", s.level === 3 && s.state === "Playing", `lvl=${s.level} st=${s.state}`);
+  await page.evaluate(() => {
+    const t = window.__TR__;
+    t.setAutoRun(0, false);
+    t.warp(0, 0, -40, -10);
+    t.warp(1, 4, -4.52, -10);
+  });
+  await waitFor(() => snap().then((x) => x.level === 1 && x.state === "Playing"), 4000);
+  s = await snap();
+  check("death resets run to level 1", s.level === 1 && s.deaths > 0, `lvl=${s.level} deaths=${s.deaths}`);
+  await page.evaluate(() => {
+    const t = window.__TR__;
+    t.setAutoRun(0, true);
+    t.setAutoRun(1, true);
+  });
+
+  check("arcade music playing", await page.evaluate(() => window.__TR__.musicPlaying()), "");
 
   await page.evaluate(() => {
     const t = window.__TR__;

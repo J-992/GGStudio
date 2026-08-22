@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import {
   TETHER_REST, TETHER_SPRING_K, TETHER_DAMP,
-  TETHER_MAX_ACCEL, TETHER_HARD_MAX, TETHER_HARD_RELAX, TETHER_VEL_CLAMP,
+  TETHER_MAX_ACCEL, TETHER_HARD_MAX, TETHER_HARD_RELAX,
+  TETHER_REEL_STEP, TETHER_VEL_CLAMP,
 } from "../game/Constants";
 import type { Player } from "../player/Player";
 import type { SurfaceFrame } from "../tunnel/SurfaceOrientation";
@@ -79,13 +80,23 @@ export class TetherState {
       this.applyTo(p2, _raw.negate(), f2);
 
       if (dist > TETHER_HARD_MAX) {
-        const corr = Math.min((dist - TETHER_HARD_MAX) * TETHER_HARD_RELAX * 0.5, 0.06);
+        const overshoot = dist - TETHER_HARD_MAX;
+        const corr = Math.min(overshoot * TETHER_HARD_RELAX * 0.5, TETHER_REEL_STEP);
         p1.body.setTranslation({
           x: _p1.x + _d.x * corr, y: _p1.y + _d.y * corr, z: _p1.z + _d.z * corr,
         }, true);
         p2.body.setTranslation({
           x: _p2.x - _d.x * corr, y: _p2.y - _d.y * corr, z: _p2.z - _d.z * corr,
         }, true);
+        const v1 = p1.body.linvel();
+        const v2 = p2.body.linvel();
+        const relV =
+          (v1.x - v2.x) * _d.x + (v1.y - v2.y) * _d.y + (v1.z - v2.z) * _d.z;
+        if (relV < 0) {
+          const ix = _d.x * relV * 0.5, iy = _d.y * relV * 0.5, iz = _d.z * relV * 0.5;
+          p1.body.setLinvel({ x: v1.x - ix, y: v1.y - iy, z: v1.z - iz }, true);
+          p2.body.setLinvel({ x: v2.x + ix, y: v2.y + iy, z: v2.z + iz }, true);
+        }
         snap = !this.wasHigh;
       }
     } else if (dist < this.restEff) {

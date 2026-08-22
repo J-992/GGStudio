@@ -3,7 +3,7 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import {
   FIXED_DT, MAX_FRAME_DT, KILL_DIST, MAX_AIR_TIME,
   HALF, ROT_COOLDOWN, PLAYER_HALF_H, SLICE_LEN,
-  P1_COLOR, P2_COLOR, TETHER_REST,
+  P1_COLOR, P2_COLOR, TETHER_REST, SCREEN_KILL_GRACE,
 } from "./Constants";
 import { InputManager } from "../input/InputManager";
 import { UI } from "../ui/UI";
@@ -91,6 +91,10 @@ export class Game {
     this.input.onAnyKey = () => this.handleAnyKey();
     this.input.onPauseToggle = () => this.handlePause();
     this.input.onRestart = () => this.handleRestart();
+    this.input.onMuteToggle = () => {
+      const muted = audio.toggleMute();
+      this.ui.hint(muted ? "MUTED" : "SOUND ON", 1.2);
+    };
 
     window.addEventListener("resize", () => {
       this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -278,6 +282,10 @@ export class Game {
       _gravDir.copy(frameUp.up).negate();
       this.effects.update(visDt, _gravDir, this.coopCam.camera.position.z);
       this.coopCam.update(visDt, this.players[0], this.players[1], this.orientation);
+
+      if (this.state === GameState.Playing) {
+        this.checkScreenDeath(dtReal);
+      }
     }
 
     if (this.bannerTimer > 0) {
@@ -289,7 +297,7 @@ export class Game {
     if (this.state === GameState.Dying) {
       this.dyingTimer -= dtReal;
       if (this.dyingTimer <= 0) {
-        this.resetLevel();
+        this.loadLevel(0);
         this.state = GameState.Playing;
       }
     }
@@ -374,6 +382,24 @@ export class Game {
       if (!Number.isFinite(t.x) || !Number.isFinite(t.y) || !Number.isFinite(t.z)) {
         p.stopMotion();
         p.resetToSpawn();
+      }
+    }
+  }
+
+  private checkScreenDeath(dt: number) {
+    for (const p of this.players) {
+      p.position(_proj);
+      _proj.project(this.coopCam.camera);
+      const off =
+        _proj.y < -1.12 || _proj.y > 1.5 || _proj.x < -1.4 || _proj.x > 1.4;
+      if (off) {
+        p.offScreenTime += dt;
+        if (p.offScreenTime > SCREEN_KILL_GRACE) {
+          this.die();
+          return;
+        }
+      } else {
+        p.offScreenTime = 0;
       }
     }
   }
@@ -482,6 +508,7 @@ export class Game {
         this.rotCooldown = ROT_COOLDOWN;
         this.coopCam.requestRoll(from, this.orientation);
       },
+      musicPlaying: () => audio.musicPlaying,
       startRun: (idx: number) => {
         this.ui.showTitle(false);
         this.ui.hideFinish();
@@ -499,3 +526,4 @@ export class Game {
 const _mid = new THREE.Vector3();
 const _ppos = new THREE.Vector3();
 const _gravDir = new THREE.Vector3();
+const _proj = new THREE.Vector3();

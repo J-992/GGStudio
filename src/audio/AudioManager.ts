@@ -1,6 +1,10 @@
+import { MusicEngine } from "./MusicEngine";
+
 class AudioManager {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
+  private music: MusicEngine | null = null;
+  private muted = false;
   private tensionOsc!: OscillatorNode;
   private tensionGain!: GainNode;
   private tensionFilter!: BiquadFilterNode;
@@ -11,8 +15,9 @@ class AudioManager {
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.4;
+    this.master.gain.value = this.muted ? 0 : 0.4;
     this.master.connect(this.ctx.destination);
+    this.music = new MusicEngine(this.ctx, this.master);
 
     this.tensionOsc = this.ctx.createOscillator();
     this.tensionOsc.type = "sawtooth";
@@ -29,6 +34,17 @@ class AudioManager {
   resume() {
     this.init();
     void this.ctx?.resume();
+    this.music?.start();
+  }
+
+  get musicPlaying(): boolean {
+    return this.music?.playing ?? false;
+  }
+
+  toggleMute(): boolean {
+    this.muted = !this.muted;
+    if (this.ctx) this.master.gain.value = this.muted ? 0 : 0.4;
+    return this.muted;
   }
 
   setTension(t: number) {

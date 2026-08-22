@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { CAM_BACK, CAM_UP, LOOK_AHEAD, FOV_BASE, ROT_ANIM_TIME } from "../game/Constants";
+import { CAM_BACK, CAM_UP, LOOK_AHEAD, LOOK_UP_OFFSET, FOV_BASE, ROT_ANIM_TIME } from "../game/Constants";
 import { FORWARD, getFrame, stepOrientation, Orientation } from "../tunnel/SurfaceOrientation";
 import type { Player } from "../player/Player";
 
@@ -70,7 +70,11 @@ export class CoopCamera {
 
     this.camera.position.copy(this.smoothedMid);
     this.camera.up.copy(up);
-    this.camera.lookAt(_look.x + up.x * 1.1, _look.y + up.y * 1.1, _look.z + up.z * 1.1);
+    this.camera.lookAt(
+      _look.x + up.x * LOOK_UP_OFFSET,
+      _look.y + up.y * LOOK_UP_OFFSET,
+      _look.z + up.z * LOOK_UP_OFFSET,
+    );
 
     const targetFov = FOV_BASE + 11 * sepK;
     this.fov += (targetFov - this.fov) * (1 - Math.exp(-4 * dt));

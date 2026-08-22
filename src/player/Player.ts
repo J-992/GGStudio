@@ -80,6 +80,7 @@ export class Player {
   private climbing = false;
   private blockedUpTime = 0;
   private hauling = false;
+  offScreenTime = 0;
   autoRun = true;
   private input: PlayerInputSample = { lateral: 0, jumpHeld: false, jumpPressed: false };
 
@@ -175,7 +176,7 @@ export class Player {
     const colDesc = R.ColliderDesc.cuboid(PLAYER_HALF_W, PLAYER_HALF_H, PLAYER_HALF_W)
       .setFriction(0)
       .setRestitution(0)
-      .setCollisionGroups((PLAYER_GROUP << 16) | STATIC_GROUP);
+      .setCollisionGroups((PLAYER_GROUP << 16) | (STATIC_GROUP | PLAYER_GROUP));
     world.createCollider(colDesc, this.body);
   }
 

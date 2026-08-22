@@ -12,6 +12,7 @@ export class InputManager {
   onAnyKey?: () => void;
   onPauseToggle?: () => void;
   onRestart?: () => void;
+  onMuteToggle?: () => void;
 
   constructor() {
     window.addEventListener("keydown", (e) => {
@@ -23,6 +24,7 @@ export class InputManager {
       if (isGameKey(e.code)) e.preventDefault();
       if (e.code === "Escape") this.onPauseToggle?.();
       if (e.code === "KeyR") this.onRestart?.();
+      if (e.code === "KeyM") this.onMuteToggle?.();
       this.onAnyKey?.();
     });
     window.addEventListener("keyup", (e) => this.keys.delete(e.code));

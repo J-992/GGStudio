@@ -29,12 +29,14 @@ export const TETHER_REST = 4.0;
 export const TETHER_SPRING_K = 26;
 export const TETHER_DAMP = 5.5;
 export const TETHER_MAX_ACCEL = 130;
-export const TETHER_HARD_MAX = 8.4;
-export const TETHER_HARD_RELAX = 0.35;
+export const TETHER_HARD_MAX = 8.0;
+export const TETHER_HARD_RELAX = 0.3;
+export const TETHER_REEL_STEP = 0.06;
 export const TETHER_VEL_CLAMP = 26;
 
-export const KILL_DIST = 26;
+export const KILL_DIST = 30;
 export const MAX_AIR_TIME = 6;
+export const SCREEN_KILL_GRACE = 0.3;
 
 export const ROT_HOLD_TIME = 0.12;
 export const ROT_COOLDOWN = 0.45;
@@ -44,6 +46,7 @@ export const ROT_ANIM_TIME = 0.24;
 export const CAM_BACK = 9.5;
 export const CAM_UP = 4.4;
 export const LOOK_AHEAD = 6.5;
+export const LOOK_UP_OFFSET = -1.1;
 export const FOV_BASE = 55;
 
 export const P1_COLOR = 0xff8a3d;
