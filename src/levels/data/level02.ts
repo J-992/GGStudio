@@ -1,20 +1,21 @@
 import type { LevelDef } from "../types";
-import { pat, rep, seq, slice, solidRun } from "../helpers";
+import { seq, solidRun, slice, pat, rep } from "../helpers";
 
 export const level02: LevelDef = {
-  name: "WALL ROLL",
-  hints: [
-    { atSlice: 3, text: "STEER INTO A WALL AND HOLD — THE WALL BECOMES THE FLOOR" },
-    { atSlice: 40, text: "EVERY SURFACE IS A ROUTE" },
-  ],
+  name: "STEP UP",
   slices: seq(
-    solidRun(12),
-    rep(12, { f: pat(".....") }),
-    rep(2, { f: pat("....."), l: pat(".....") }),
-    rep(10, { f: pat(".....") }),
-    solidRun(17),
-    rep(24, { l: pat(".....") }),
-    solidRun(3),
+    solidRun(10),
+    slice({ f: pat(".....") }),
+    solidRun(8),
+    rep(2, { f: pat(".....") }),
+    solidRun(8),
+    rep(2, { f: pat(".....") }),
+    solidRun(8),
+    slice({ f: pat("#..#.") }),
+    solidRun(5),
+    slice({ f: pat(".#..#") }),
+    solidRun(5),
+    rep(2, { f: pat(".....") }),
+    solidRun(10),
   ),
 };
-void slice;

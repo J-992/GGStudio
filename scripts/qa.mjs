@@ -312,27 +312,35 @@ async function main() {
   check("left wall orientation set", s.orientation === "LeftWall", s.orientation);
   await shot("07-ceiling-roll.png");
 
-  await page.evaluate(() => {
-    const t = window.__TR__;
-    t.startRun(4);
-  });
-  await page.waitForTimeout(400);
-  s = await snap();
-  check("level 5 loads", s.level === 5, s.level);
-  const finZ = s.finishZ;
-  await page.evaluate((fz) => {
-    const t = window.__TR__;
-    t.warp(0, -1, -4.52, fz + 0.5);
-    t.warp(1, 1, -4.52, fz + 0.5);
-  }, finZ);
-  await page.waitForTimeout(400);
-  s = await snap();
-  check("portal triggers complete", s.state === "Complete" || s.state === "Finished", s.state);
-  await shot("08-finish.png");
-  await page.waitForTimeout(1400);
-  s = await snap();
-  check("final screen after level 5", s.state === "Finished", s.state);
-
+  for (let i = 0; i < 20; i++) {
+    await page.evaluate((idx) => {
+      window.__TR__.startRun(idx);
+    }, i);
+    await page.waitForTimeout(300);
+    const st = await snap();
+    check(
+      `level ${i + 1} loads`,
+      st.level === i + 1 && st.state === "Playing",
+      `lvl=${st.level} st=${st.state}`,
+    );
+    const fz = st.finishZ;
+    await page.evaluate((z) => {
+      const t = window.__TR__;
+      t.warp(0, -1, -4.52, z + 0.5);
+      t.warp(1, 1, -4.52, z + 0.5);
+    }, fz);
+    const advanced = await waitFor(
+      () => snap().then((x) => x.level === i + 2 || x.state === "Finished"),
+      3500,
+    );
+    if (i === 19) {
+      const fin = await snap();
+      check("final screen after level 20", fin.state === "Finished", fin.state);
+      await shot("08-finish.png");
+    } else {
+      check(`portal completes level ${i + 1}`, advanced, "");
+    }
+  }
   await page.keyboard.press("KeyR");
   await page.waitForTimeout(400);
   s = await snap();
