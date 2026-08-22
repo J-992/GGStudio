@@ -1,0 +1,15 @@
+﻿{
+  "name": "tether-dash",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fast co-op runner where two toy-factory robots are joined by an elastic bungee cord. Phaser 3, no dependencies, no build step.",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "npx -y http-server . -p 8123 -c-1 -o",
+    "start": "npx -y http-server . -p 8123 -c-1 -o",
+    "check": "node tools/check.mjs"
+  }
+}
+
