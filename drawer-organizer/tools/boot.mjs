@@ -49,6 +49,9 @@ export async function boot (scripts)
         Object,
         Promise,
         location: { hostname: 'example.com' },
+        innerWidth: 960,
+        innerHeight: 640,
+        addEventListener () {},
         localStorage: {
             getItem: (k) => (store.has(k) ? store.get(k) : null),
             setItem: (k, v) => store.set(k, String(v))

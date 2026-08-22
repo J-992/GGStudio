@@ -16,7 +16,7 @@ class HomeScene extends Phaser.Scene {
     // Floating items around the title.
     const floaties = ['lipstick', 'brush', 'polish', 'perfume', 'palette', 'compact', 'hairclip', 'mascara'];
     floaties.forEach((key, i) => {
-      const x = 90 + (i % 4) * 260 + (i > 3 ? 90 : 0);
+      const x = Phaser.Math.Clamp(W * (0.09 + (i % 4) * 0.27) + (i > 3 ? W * 0.09 : 0), 44, W - 44);
       const y = i < 4 ? 100 : H - 110;
       const s = this.add.image(x, y, key).setScale(0.9).setAngle(-14 + (i * 9) % 28).setAlpha(0.95);
       this.tweens.add({

@@ -18,6 +18,11 @@ python -m http.server 8080
 Works with mouse and touch; audio unlocks on first tap; progress saves to localStorage.
 On `localhost` the Poki SDK runs in debug mode, so ad breaks show test ads.
 
+Mobile: the game plays in both orientations — landscape uses the 960x640 canvas, portrait
+switches to 640x960 with reflowed layouts (trays wrap into rows, level dots wrap into rows,
+reward cards stack). Rotating mid-level keeps your progress. On touch, dragged items float
+above your finger and every item has a ≥64px hit area.
+
 ## Build
 
 ```
@@ -69,6 +74,7 @@ src/
     AudioSystem.js    procedural WebAudio sounds
     PokiSDK.js        Poki platform wrapper (ads, gameplay signals) — no-ops off-platform
     Effects.js        sparkles, confetti, buttons, tween juice
+    Layout.js         portrait/landscape base-size swap on rotation
     TextureFactory.js all sprite art, generated at runtime
 ```
 

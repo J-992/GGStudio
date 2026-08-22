@@ -6,15 +6,31 @@ class RoomScene extends Phaser.Scene {
 
   create() {
     const { width: W, height: H } = this.scale;
+
+    // The room art is authored at 960x640. In portrait it lives in a container
+    // scaled to the screen width (a little diorama up top); landscape is 1:1.
+    this.roomScale = Layout.portrait ? W / 960 : 1;
+    this.roomTop = Layout.portrait ? 86 : 0;
+    if (Layout.portrait) {
+      const bg = this.add.graphics().setDepth(0);
+      bg.fillGradientStyle(0xf2e3f5, 0xf2e3f5, 0xf7dcc8, 0xf7dcc8, 1);
+      bg.fillRect(0, 0, W, H);
+      bg.lineStyle(4, 0xe8c5d8, 1);
+      bg.strokeRect(0, this.roomTop, W, 640 * this.roomScale);
+    }
+    this.roomLayer = this.add.container(0, this.roomTop).setScale(this.roomScale).setDepth(1);
+
     this.drawRoom();
     this.drawDecorations();
+    this.roomLayer.sort('depth'); // container children render in list order, not depth
     this.drawUI();
     this.cameras.main.fadeIn(300, 253, 238, 244);
   }
 
   drawRoom() {
-    const { width: W, height: H } = this.scale;
+    const W = 960, H = 640; // native room-art size, independent of the screen
     const g = this.add.graphics().setDepth(0);
+    this.roomLayer.add(g);
 
     // Wall + floor.
     g.fillGradientStyle(0xf2e3f5, 0xf2e3f5, 0xead4ef, 0xead4ef, 1);
@@ -58,11 +74,12 @@ class RoomScene extends Phaser.Scene {
     g.fillStyle(0x9bd4b3, 1); g.fillRect(738, 478, 10, 52); g.fillRect(772, 478, 10, 52);
 
     // Ambient sparkle drifting in the room.
-    this.add.particles(0, 0, 'spark', {
+    const sparkles = this.add.particles(0, 0, 'spark', {
       x: { min: 60, max: W - 60 }, y: { min: 60, max: 380 },
       scale: { start: 0.28, end: 0 }, alpha: { start: 0.7, end: 0 },
       lifespan: 2400, frequency: 900, tint: 0xffffff
     }).setDepth(1);
+    this.roomLayer.add(sparkles);
   }
 
   drawDecorations() {
@@ -72,6 +89,7 @@ class RoomScene extends Phaser.Scene {
       const img = this.add.image(def.x, def.y, 'deco_' + key)
         .setOrigin(0.5, def.origin === 'bottom' ? 1 : 0.5)
         .setDepth(def.depth !== undefined ? def.depth : 10);
+      this.roomLayer.add(img);
       // Gentle idle bob.
       this.tweens.add({
         targets: img, y: img.y - 4, duration: 1800 + (i % 5) * 200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
@@ -79,7 +97,8 @@ class RoomScene extends Phaser.Scene {
       if (key === this.newDeco) {
         FX.pop(this, img);
         this.time.delayedCall(300, () => {
-          FX.sparkle(this, img.x, img.y - img.displayHeight / 2);
+          // Sparkle lives on the scene, so map the deco's container coords to screen.
+          FX.sparkle(this, img.x * this.roomScale, this.roomTop + (img.y - img.displayHeight / 2) * this.roomScale);
           AudioSys.play('sparkle');
         });
       }
@@ -89,36 +108,48 @@ class RoomScene extends Phaser.Scene {
   drawUI() {
     const { width: W, height: H } = this.scale;
 
-    // Level dots.
+    // Level dots. Landscape: one row along the bottom (spacing shrinks so any
+    // count fits). Portrait: bigger tap-friendly dots under the room, wrapped
+    // into at most three rows so they stay clear of the play button.
+    const portrait = Layout.portrait;
     const total = Progression.levelCount;
-    const spacing = 54;
-    const startX = W / 2 - ((total - 1) * spacing) / 2;
+    const perRow = portrait ? Math.ceil(total / Math.min(3, Math.ceil(total / 5))) : total;
+    const spacing = portrait
+      ? Math.min(96, (W - 88) / Math.max(perRow - 1, 1))
+      : Math.min(54, (W - 88) / Math.max(total - 1, 1));
+    const radius = portrait ? (perRow > 5 ? 20 : 24) : (spacing < 50 ? 15 : 17);
+    const rowGap = radius * 2 + 34;
+    const startX = W / 2 - ((Math.min(perRow, total) - 1) * spacing) / 2;
     for (let i = 1; i <= total; i++) {
-      const x = startX + (i - 1) * spacing, y = H - 92;
+      const col = (i - 1) % perRow, row = Math.floor((i - 1) / perRow);
+      const x = startX + col * spacing;
+      const y = portrait ? 660 + row * rowGap : H - 92;
       const done = i <= SaveSystem.completed;
       const unlocked = Progression.isUnlocked(i);
       const g = this.add.graphics().setDepth(20);
       g.fillStyle(done ? 0xf25aa3 : unlocked ? 0xffffff : 0xd9c8d4, 1);
-      g.fillCircle(x, y, 17);
+      g.fillCircle(x, y, radius);
       g.lineStyle(3, done || unlocked ? 0xd9438c : 0xb8a3b0, 1);
-      g.strokeCircle(x, y, 17);
+      g.strokeCircle(x, y, radius);
       const label = this.add.text(x, y, done ? '✓' : String(i), {
-        fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '17px', fontStyle: 'bold',
+        fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: (radius >= 20 ? radius - 2 : radius) + 'px', fontStyle: 'bold',
         color: done ? '#ffffff' : unlocked ? '#d9438c' : '#b8a3b0'
       }).setOrigin(0.5).setDepth(21);
       if (unlocked) {
-        const zone = this.add.zone(x, y, 46, 46).setInteractive({ useHandCursor: true });
+        const tap = radius * 2 + 14;
+        const zone = this.add.zone(x, y, tap, tap).setInteractive({ useHandCursor: true });
         zone.on('pointerdown', () => this.startLevel(i));
       }
       if (i === Progression.currentLevel && !Progression.allDone) {
         const ring = this.add.graphics().setDepth(19);
-        ring.lineStyle(3, 0xf25aa3, 0.7); ring.strokeCircle(x, y, 24);
+        ring.lineStyle(3, 0xf25aa3, 0.7); ring.strokeCircle(x, y, radius + 7);
         this.tweens.add({ targets: ring, alpha: 0.15, duration: 700, yoyo: true, repeat: -1 });
       }
     }
 
     const btnLabel = Progression.allDone ? 'PLAY AGAIN' : 'PLAY  LEVEL ' + Progression.currentLevel;
-    FX.button(this, W / 2, H - 40, 300, 62, btnLabel, 0xf25aa3, () => this.startLevel(Progression.currentLevel));
+    FX.button(this, W / 2, portrait ? H - 90 : H - 40, 300, 62, btnLabel, 0xf25aa3, () => this.startLevel(Progression.currentLevel))
+      .setDepth(30); // above the room layer
 
     // Sound toggle + home.
     this.soundBtn = FX.iconButton(this, W - 42, 42, 24, icon => this.drawSoundIcon(icon), () => {
@@ -135,7 +166,7 @@ class RoomScene extends Phaser.Scene {
     }, () => this.scene.start('Home')).setDepth(30);
 
     if (Progression.allDone) {
-      this.add.text(W / 2, H - 128, 'All tidy! Replay any level ♥', {
+      this.add.text(W / 2, Layout.portrait ? 600 : H - 128, 'All tidy! Replay any level ♥', {
         fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '18px', color: '#a06b8a'
       }).setOrigin(0.5).setDepth(20);
     }

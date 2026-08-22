@@ -6,6 +6,12 @@
 <title>Drawer Organizer</title>
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #f7dce8; overflow: hidden; }
+  body {
+    /* Pin the page so iOS Safari can't rubber-band or scroll the game around. */
+    position: fixed; inset: 0; width: 100%; height: 100dvh;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
   #game { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
   canvas { touch-action: none; }
 </style>
@@ -26,6 +32,7 @@
 <script src="src/systems/PokiSDK.js"></script>
 <script src="src/systems/TextureFactory.js"></script>
 <script src="src/systems/Effects.js"></script>
+<script src="src/systems/Layout.js"></script>
 <script src="src/systems/DragSystem.js"></script>
 <script src="src/systems/PlacementSystem.js"></script>
 <script src="src/systems/ProgressionSystem.js"></script>

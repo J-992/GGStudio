@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Tether Dash</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #1c2a4a; height: 100%; overflow: hidden; }
+  #game { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  canvas { touch-action: none; }
+  #debug-panel {
+    position: fixed; top: 8px; left: 8px; z-index: 10; background: rgba(20,25,40,0.85);
+    color: #cfe0ff; font: 12px monospace; padding: 8px 10px; border-radius: 8px; display: none;
+  }
+  #debug-panel label { display: block; margin: 3px 0; }
+  #debug-panel input { vertical-align: middle; width: 110px; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="debug-panel"></div>
+<script src="https://game-cdn.poki.com/scripts/v2/poki-sdk.js"></script>
+<script src="vendor/phaser.min.js"></script>
+<script>
+  // Fallback to CDN for local checkouts where the vendored file is missing.
+  // The Poki build strips this block: a third-party request fails their review.
+  if (!window.Phaser) document.write('<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"><\/script>');
+</script>
+<script src="src/Config.js"></script>
+<script src="src/data/levels.js"></script>
+<script src="src/systems/SaveSystem.js"></script>
+<script src="src/systems/AudioSystem.js"></script>
+<script src="src/systems/PokiSDK.js"></script>
+<script src="src/systems/TextureFactory.js"></script>
+<script src="src/systems/Projection.js"></script>
+<script src="src/systems/Course.js"></script>
+<script src="src/systems/InputManager.js"></script>
+<script src="src/systems/TetherSystem.js"></script>
+<script src="src/systems/PlayerController.js"></script>
+<script src="src/systems/CompanionAI.js"></script>
+<script src="src/systems/CameraController.js"></script>
+<script src="src/systems/Effects.js"></script>
+<script src="src/scenes/BootScene.js"></script>
+<script src="src/scenes/MenuScene.js"></script>
+<script src="src/scenes/LevelSelectScene.js"></script>
+<script src="src/scenes/GameScene.js"></script>
+<script src="src/main.js"></script>
+</body>
+</html>
