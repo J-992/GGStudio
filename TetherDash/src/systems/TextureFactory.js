@@ -2,8 +2,9 @@
 // replaced 1:1 later by a rendered Meshy model with the same key (see assets/README.md).
 const TextureFactory = {
   generate(scene) {
-    this.runnerA(scene);
-    this.runnerB(scene);
+    // A rendered sheet already under this key wins; these are the fallback.
+    if (!scene.textures.exists('runnerA')) this.runnerA(scene);
+    if (!scene.textures.exists('runnerB')) this.runnerB(scene);
     this.bolt(scene);
     this.gearHaz(scene);
     this.clouds(scene);

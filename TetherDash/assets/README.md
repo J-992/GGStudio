@@ -1,17 +1,30 @@
 # Meshy asset pack
 
-The game ships on procedural placeholder art: every texture is drawn at runtime in
-`src/systems/TextureFactory.js`. Each one can be replaced 1:1 by a rendered image with
-the same key.
+## What is in here now
 
-Meshy makes 3D models; this game draws sprites. So the pipeline is:
+`runnerA.png` and `runnerB.png` are live: 8-frame walk-cycle sheets (200x240 per
+frame) rendered from a Meshy biped and graded to the game palette. `BootScene`
+loads them and falls back to the hand-drawn mascots if they are missing, so the
+game still runs on a checkout without them.
 
-**prompt → Meshy model → render from a fixed camera → tight-cropped transparent PNG →
-`assets/` → loaded under the old texture key.**
+**Both are the same rig.** Meshy produced one character; Volt is it, and Bea is
+that model reproportioned (18% wider, 16% shorter) and hue-shifted to orange.
+That is a stopgap, not the design: it gives two readable silhouettes today, but
+Bea is supposed to have her own boxy body and ear flaps. Generating her properly
+is the Bea prompt below plus one `render.py` run -- nothing in the game changes.
 
-The camera angle is not a taste call — it is derived from the game's own camera (below).
-Get it wrong and the character looks like it is standing on a different floor from the one
-it is running on.
+Still procedural: the bolt, the hazard gear, clouds, the pad glyph, all UI, and
+every course surface.
+
+The conversion pipeline and the reasoning behind its parameters is in
+`tools/meshy/README.md`.
+
+## What Meshy dropped from the prompt
+
+Worth knowing before generating more. The model came back without the antenna
+and bobble that the prompt asked for, and its colour arrived muted enough that
+the grade in `pack.py` exists purely to fix it. Small protruding details and
+saturated colour are the two things to check on every generation.
 
 ---
 
@@ -129,59 +142,37 @@ models sit next to is drawn from them.
 
 ---
 
-## 6. Rendering the sprites — the part that must be right
+## 6. Rendering the sprites
 
-The game's camera is a pinhole looking straight down the run direction, sitting
-`CAM_HEIGHT 4.4` units up and `CAM_BACK 8.5` units behind the runners. So the line of
-sight to a character is **depressed about 27°**:
+`tools/meshy/render.py` does this, and `tools/meshy/README.md` explains why each
+argument is what it is. The short version:
 
-- **Characters:** camera directly **behind** the model, pitched **down ~25°**. You see the
-  back of the head, the backpack, and a little of the top of the shoulders. Never a front
-  or three-quarter view — the players only ever see these robots from behind.
-- **Props (bolt, gear, pad):** same ~25° downward pitch, viewed head-on.
-- Use an **orthographic** camera, or a long focal length (85mm+). A wide lens adds
-  perspective the game's own projection will not agree with.
-- **Flat, even lighting.** No cast shadow and no ground plane — the game draws its own
-  contact shadow under each runner, and a baked one will double up.
-
-Export **PNG with transparency**, cropped tight to the model with **no padding**, at 2x
-the current texture size:
-
-| Key | Current | Render at |
-| --- | --- | --- |
-| `runnerA` | 96 x 116 | 192 x 232 |
-| `runnerB` | 100 x 108 | 200 x 216 |
-| `bolt` | 44 x 44 | 88 x 88 |
-| `gearHaz` | 160 x 160 | 320 x 320 |
-| `padGlyph` | 48 x 56 | 96 x 112 |
-| `cloud0` / `cloud1` / `cloud2` | 110x46 / 80x38 / 140x52 | 2x each |
-
-For the characters, **the feet must sit on the bottom edge of the image** and the model
-must fill the frame vertically. The game scales each runner to a fixed 1.18 world units
-tall by reading the texture height (`GameScene.placePlayer`), so transparent padding at
-the bottom becomes a robot hovering above the floor.
-
----
+- **Camera behind the model** (`yaw=180` for a Meshy biped, which faces -Y), pitched
+  down `27.4°` -- that is `atan(4.4 / 8.5)`, the game camera's own depression angle.
+  Never a front or three-quarter view; players only see these robots from behind.
+- **Orthographic**, and a **fixed** camera box shared by every character, so two models
+  come out with the same pixels-per-world-unit and the same ground line. Per-model
+  auto-fit would normalise a short character back to a tall one's height.
+- **Flat shading** -- base colour piped to emission. The game draws its own contact
+  shadow, so no baked shadow and no ground plane.
+- 200x240 per frame, **feet on the bottom edge**, transparent PNG. Headroom above the
+  head is expected and is what `CFG.SPRITE_H_MESH` accounts for.
 
 ## 7. Wiring a finished render back in
 
-Two of the scale factors hardcode the *current* texture size, so rendering at 2x needs the
-divisor changed to match, in `GameScene.placeSprites()`:
+For the two runners there is nothing to wire: drop the sheets in as `assets/runnerA.png`
+and `assets/runnerB.png`, 8 frames of `CFG.RUNNER_FRAME_W` x `CFG.RUNNER_FRAME_H`, and
+`BootScene` picks them up. Change the frame size and `CFG.RUNNER_FRAME_W/H` must change
+with it, or the sheet slices wrong.
+
+For the still props, two scale factors in `GameScene.placeSprites()` hardcode today's
+texture sizes, so rendering at 2x means changing the divisor to match:
 
 ```js
 b.spr.setScale(pr.s * 0.5 / 44)            // bolt: 44 -> 88
 gear.spr.setScale(pr.s * gear.r * 2 / 160) // gearHaz: 160 -> 320
 ```
 
-The characters need no change — `placePlayer` divides by `spr.height`, so any resolution
-works as long as the aspect ratio and the feet-on-the-bottom rule hold.
-
-Loading them needs a small change to `BootScene`: `preload()` the PNGs that exist, then
-let `TextureFactory.generate()` fill in only the keys that were not loaded, so the game
-still runs with a half-finished asset set. That loader is not written yet — it is one
-short pass once the first real PNG exists.
-
-The course modules in §4 need more: `drawCourse` currently emits colored quads, so using
-them means either rendering each module to a strip image and drawing it as a textured
-quad, or moving the course to real geometry. Worth doing after the characters land, not
-before.
+The course modules in §4 need more than an asset: `drawCourse` emits coloured quads, so
+using them means rendering each module to a strip and drawing it as a textured quad, or
+moving the course to real geometry. Worth doing after the characters are final.
