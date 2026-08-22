@@ -1,0 +1,23 @@
+{
+  "game_id": "REPLACE_WITH_POKI_GAME_ID",
+  "build_dir": "dist",
+  "ggs": {
+    "package_manager": "npm",
+    "install": "npm ci",
+    "build": "npm run build:poki",
+    "verify": [
+      "npm run typecheck",
+      "npm run lint",
+      "npm run test:unit"
+    ],
+    "lfs": [
+      "merge-ninja/public/**"
+    ],
+    "ignore_origins": [
+      "(^|\\.)steffe\\.se$",
+      "(^|\\.)prunegames\\.com$"
+    ],
+    "node_version": "22",
+    "token_git_secret_name": "POKI_UPLOAD_TOKEN_MERGE_NINJA"
+  }
+}

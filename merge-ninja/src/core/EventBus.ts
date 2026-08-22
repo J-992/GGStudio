@@ -1,0 +1,94 @@
+import type { AchievementKind } from '../data/achievements';
+import type { PowerupId } from '../data/powerups';
+import type { Ninja } from '../data/types';
+import type { BestRun, RecordFlags } from '../systems/BestRun';
+
+export type GameEvent =
+  | { type: 'coinsChanged'; coins: number; delta: number }
+  | { type: 'ninjaSpawned'; ninja: Ninja; cost: number }
+  | { type: 'ninjaMoved'; id: number; from: number; to: number }
+  /** Two ninjas traded homes; ids/tiers pair up as [fromSlot's, toSlot's]. */
+  | { type: 'ninjaSwapped'; fromSlot: number; toSlot: number; ids: [number, number]; tiers: [number, number] }
+  | { type: 'ninjaMerged'; fromSlot: number; toSlot: number; consumedIds: [number, number]; result: Ninja }
+  | { type: 'ninjaSold'; id: number; slot: number; refund: number }
+  | { type: 'newTierDiscovered'; tier: number; name: string }
+  | { type: 'championChanged'; tier: number; prevTier: number }
+  | { type: 'bossDamaged'; hp: number; maxHp: number; dps: number }
+  | { type: 'bossDefeated'; stage: number; reward: number }
+  | { type: 'bossSpawned'; stage: number; name: string; maxHp: number }
+  | { type: 'bossAttack'; damage: number; playerHp: number; playerMaxHp: number; defeated: boolean }
+  | { type: 'playerHealthChanged'; hp: number; maxHp: number; delta: number; reason: 'bossStrike' | 'victory' | 'rankUp' | 'potion' | 'defeat' | 'reset' }
+  | { type: 'potionCollected'; healed: number; hp: number; maxHp: number }
+  /** A powerup token entered the arena lane; travelMs is its crossing window. */
+  | { type: 'powerupSpawned'; id: PowerupId; travelMs: number }
+  | { type: 'powerupCollected'; id: PowerupId }
+  | { type: 'powerupExpired'; id: PowerupId }
+  /** A protective ward ate a boss strike that would have dealt this much. */
+  | { type: 'powerupWardBlocked'; damage: number }
+  /**
+   * The line is out of health: the run is over and the sim has stopped.
+   * `records` marks which of the four stats this run just beat, and `best` is
+   * the record board after folding it in.
+   */
+  | {
+      type: 'gameOver';
+      stage: number;
+      highestTier: number;
+      coinsEarned: number;
+      timePlayedMs: number;
+      records: RecordFlags;
+      best: BestRun;
+    }
+  /** A named goal was just met, for the first and only time. */
+  | {
+      type: 'achievementUnlocked';
+      id: string;
+      name: string;
+      description: string;
+      kind: AchievementKind;
+      unlockedCount: number;
+      total: number;
+    }
+  | { type: 'tempoChanged'; id: string; label: string }
+  | { type: 'boardFull' }
+  | { type: 'purchaseRejected'; reason: 'coins' | 'boardFull' }
+  | { type: 'mergeHint'; slots: [number, number] }
+  /**
+   * An optional prestige reset was performed; the run has restarted from stage 1.
+   * `rank` is the title the player now carries, which -- unlike the bonus --
+   * does not shrink with each ascension.
+   */
+  | { type: 'ascended'; ascensions: number; bonusPct: number; rank: string }
+  | { type: 'stateLoaded' };
+
+/** Minimal typed pub/sub channel shared by the simulation and presentation layer. */
+export class EventBus {
+  private readonly listeners = new Map<GameEvent['type'], Set<(e: GameEvent) => void>>();
+  private readonly any = new Set<(e: GameEvent) => void>();
+
+  on<T extends GameEvent['type']>(
+    type: T,
+    fn: (e: Extract<GameEvent, { type: T }>) => void,
+  ): () => void {
+    const set = this.listeners.get(type) ?? new Set();
+    this.listeners.set(type, set);
+    const listener = fn as (e: GameEvent) => void;
+    set.add(listener);
+    return () => set.delete(listener);
+  }
+
+  onAny(fn: (e: GameEvent) => void): () => void {
+    this.any.add(fn);
+    return () => this.any.delete(fn);
+  }
+
+  emit(e: GameEvent): void {
+    this.listeners.get(e.type)?.forEach((fn) => fn(e));
+    this.any.forEach((fn) => fn(e));
+  }
+
+  clear(): void {
+    this.listeners.clear();
+    this.any.clear();
+  }
+}

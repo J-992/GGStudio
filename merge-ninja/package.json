@@ -1,0 +1,34 @@
+{
+  "name": "merge-ninja",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "author": "Reaper8202",
+  "license": "UNLICENSED",
+  "scripts": {
+    "dev": "vite --host --port 5180",
+    "dev:poki": "vite --mode poki --host --port 5180",
+    "build": "tsc --noEmit && vite build",
+    "build:poki": "tsc --noEmit && vite build --mode poki",
+    "preview": "vite preview --port 5181",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "eslint": "^9.39.0",
+    "globals": "^16.5.0",
+    "playwright": "^1.62.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.46.0",
+    "vite": "^6.4.3",
+    "vitest": "^3.2.4"
+  }
+}
