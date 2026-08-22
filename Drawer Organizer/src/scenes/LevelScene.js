@@ -5,6 +5,7 @@ class LevelScene extends Phaser.Scene {
   init(data) {
     this.levelId = (data && data.levelId) || 1;
     this.level = Progression.levelData(this.levelId);
+    this.restore = (data && data.restore) || null; // progress carried across an orientation change
   }
 
   create() {
@@ -14,8 +15,17 @@ class LevelScene extends Phaser.Scene {
     this.spawnItems();
     this.drawHUD();
 
+    // Scene-event listeners survive restarts (e.g. orientation changes), so
+    // clear stale ones or completion would fire once per restart.
+    this.events.off('level:progress');
+    this.events.off('level:complete');
     this.events.on('level:progress', (placed, total) => this.updateProgress(placed, total));
     this.events.once('level:complete', () => this.onComplete());
+
+    // Rotated the device after finishing? Bring the completion panel back.
+    if (this.restore && this.placement.placed >= this.totalItems) {
+      this.time.delayedCall(400, () => this.showCompletePanel());
+    }
 
     // Occasional idle wiggle on a random loose item — keeps the drawer feeling alive.
     this.idleTimer = this.time.addEvent({
@@ -30,6 +40,13 @@ class LevelScene extends Phaser.Scene {
     this.cameras.main.fadeIn(300, 253, 238, 244);
   }
 
+  // The drawer rectangle for the current orientation; the scatter zone derives from it.
+  drawerRect() {
+    return Layout.portrait
+      ? { x: 40, y: 84, w: 560, h: 290 }
+      : { x: 60, y: 64, w: 832, h: 260 };
+  }
+
   drawBackdrop() {
     const { width: W, height: H } = this.scale;
     const g = this.add.graphics().setDepth(0);
@@ -39,51 +56,64 @@ class LevelScene extends Phaser.Scene {
     for (let i = 0; i < 22; i++) g.fillCircle((i * 149 + 30) % W, (i * 83) % H, 5);
 
     // The messy drawer.
-    g.fillStyle(0x5a3c50, 0.12); g.fillRoundedRect(66, 74, 832, 260, 24);
-    g.fillStyle(0xe8c39a, 1); g.fillRoundedRect(60, 64, 832, 260, 24);
-    g.fillStyle(0xd9a86c, 1); g.fillRoundedRect(76, 80, 800, 228, 16);
-    g.fillStyle(0xc79862, 1); g.fillRoundedRect(76, 80, 800, 22, { tl: 16, tr: 16, bl: 0, br: 0 });
+    const d = this.drawerRect();
+    g.fillStyle(0x5a3c50, 0.12); g.fillRoundedRect(d.x + 6, d.y + 10, d.w, d.h, 24);
+    g.fillStyle(0xe8c39a, 1); g.fillRoundedRect(d.x, d.y, d.w, d.h, 24);
+    g.fillStyle(0xd9a86c, 1); g.fillRoundedRect(d.x + 16, d.y + 16, d.w - 32, d.h - 32, 16);
+    g.fillStyle(0xc79862, 1); g.fillRoundedRect(d.x + 16, d.y + 16, d.w - 32, 22, { tl: 16, tr: 16, bl: 0, br: 0 });
     g.lineStyle(3, 0xa8794a, 0.6);
-    g.strokeRoundedRect(76, 80, 800, 228, 16);
+    g.strokeRoundedRect(d.x + 16, d.y + 16, d.w - 32, d.h - 32, 16);
     // Wood grain.
     g.lineStyle(2, 0xc08f58, 0.5);
-    for (let i = 0; i < 4; i++) g.lineBetween(96, 140 + i * 44, 856, 138 + i * 44);
+    const grainGap = (d.h - 90) / 4;
+    for (let i = 0; i < 4; i++) g.lineBetween(d.x + 36, d.y + 76 + i * grainGap, d.x + d.w - 36, d.y + 74 + i * grainGap);
   }
 
   spawnItems() {
     this.items = [];
-    const zone = { x1: 130, y1: 130, x2: 830, y2: 280 };
+    const d = this.drawerRect();
+    const zone = { x1: d.x + 70, y1: d.y + 66, x2: d.x + d.w - 62, y2: d.y + d.h - 44 };
     const placedPts = [];
     let total = 0;
 
-    this.level.items.forEach(entry => {
-      for (let n = 0; n < entry.count; n++) {
-        // Scatter with light overlap avoidance.
-        let x, y, tries = 0;
-        do {
-          x = Phaser.Math.Between(zone.x1, zone.x2);
-          y = Phaser.Math.Between(zone.y1, zone.y2);
-          tries++;
-        } while (tries < 14 && placedPts.some(p => Phaser.Math.Distance.Between(x, y, p.x, p.y) < 72));
-        placedPts.push({ x, y });
+    // Flat spawn list: fresh from level data, or the carried-over state after a rotation.
+    const entries = this.restore
+      ? this.restore
+      : this.level.items.flatMap(e => Array(e.count).fill({ key: e.key, placed: null }));
 
-        const sprite = this.add.image(x, y, entry.key)
-          .setAngle(Phaser.Math.Between(-24, 24))
-          .setDepth(10 + this.items.length);
-        sprite.itemCategory = ITEM_DEFS[entry.key].category;
-        sprite.baseScale = 1;
-        sprite.homeX = x; sprite.homeY = y;
-        sprite.homeAngle = sprite.angle;
-        sprite.homeDepth = sprite.depth;
-        sprite.locked = false;
-        this.drag.enable(sprite);
-        this.items.push(sprite);
-        total++;
-      }
+    entries.forEach(entry => {
+      // Scatter with light overlap avoidance.
+      let x, y, tries = 0;
+      do {
+        x = Phaser.Math.Between(zone.x1, zone.x2);
+        y = Phaser.Math.Between(zone.y1, zone.y2);
+        tries++;
+      } while (tries < 14 && placedPts.some(p => Phaser.Math.Distance.Between(x, y, p.x, p.y) < 72));
+      placedPts.push({ x, y });
+
+      const sprite = this.add.image(x, y, entry.key)
+        .setAngle(Phaser.Math.Between(-24, 24))
+        .setDepth(10 + this.items.length);
+      sprite.itemCategory = ITEM_DEFS[entry.key].category;
+      sprite.baseScale = 1;
+      sprite.homeX = x; sprite.homeY = y;
+      sprite.homeAngle = sprite.angle;
+      sprite.homeDepth = sprite.depth;
+      sprite.locked = false;
+      const restored = entry.placed && this.placement.prePlace(sprite, entry.placed.c, entry.placed.s);
+      if (!restored) this.drag.enable(sprite);
+      this.items.push(sprite);
+      total++;
     });
 
     this.placement.registerItems(total);
     this.totalItems = total;
+  }
+
+  // Snapshot for orientation-change restarts: every item's key plus, if already
+  // sorted, the container/slot it lives in (indices survive the portrait reflow).
+  captureState() {
+    return this.items.map(i => ({ key: i.texture.key, placed: i.placedSlot || null }));
   }
 
   drawHUD() {
@@ -97,15 +127,16 @@ class LevelScene extends Phaser.Scene {
       fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '20px', fontStyle: 'bold', color: '#ffffff'
     }).setOrigin(0.5).setDepth(51);
 
-    // Progress bar.
+    // Progress bar (narrower in portrait so it clears the chip and the icon buttons).
+    this.barW = Layout.portrait ? 190 : 260;
     this.progressBg = this.add.graphics().setDepth(50);
-    this.progressBg.fillStyle(0xffffff, 0.85); this.progressBg.fillRoundedRect(W / 2 - 130, 20, 260, 26, 13);
-    this.progressBg.lineStyle(3, 0xdba8c4, 1); this.progressBg.strokeRoundedRect(W / 2 - 130, 20, 260, 26, 13);
+    this.progressBg.fillStyle(0xffffff, 0.85); this.progressBg.fillRoundedRect(W / 2 - this.barW / 2, 20, this.barW, 26, 13);
+    this.progressBg.lineStyle(3, 0xdba8c4, 1); this.progressBg.strokeRoundedRect(W / 2 - this.barW / 2, 20, this.barW, 26, 13);
     this.progressFill = this.add.graphics().setDepth(51);
     this.progressText = this.add.text(W / 2, 33, '0 / ' + this.totalItems, {
       fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '16px', fontStyle: 'bold', color: '#a06b8a'
     }).setOrigin(0.5).setDepth(52);
-    this.updateProgress(0, this.totalItems);
+    this.updateProgress(this.placement.placed, this.totalItems);
 
     // Sound, restart, back.
     this.soundBtn = FX.iconButton(this, W - 42, 38, 22, icon => this.drawSoundIcon(icon), () => {
@@ -149,9 +180,9 @@ class LevelScene extends Phaser.Scene {
     const { width: W } = this.scale;
     this.progressFill.clear();
     if (placed > 0) {
-      const w = Math.max(26, 254 * (placed / total));
+      const w = Math.max(26, (this.barW - 6) * (placed / total));
       this.progressFill.fillStyle(0xf25aa3, 1);
-      this.progressFill.fillRoundedRect(W / 2 - 127, 23, w, 20, 10);
+      this.progressFill.fillRoundedRect(W / 2 - this.barW / 2 + 3, 23, w, 20, 10);
     }
     this.progressText.setText(placed + ' / ' + total);
     if (placed > 0) FX.pulse(this, this.progressText);
@@ -214,29 +245,33 @@ class LevelScene extends Phaser.Scene {
     g.fillStyle(0x5a3c50, 0.35); g.fillRect(-W / 2, -H / 2, W, H);
     layer.add(g);
 
-    layer.add(this.add.text(0, -190, 'Choose a decoration!', {
+    const portrait = Layout.portrait;
+    layer.add(this.add.text(0, portrait ? -300 : -190, 'Choose a decoration!', {
       fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '36px', fontStyle: 'bold', color: '#ffffff'
     }).setOrigin(0.5).setShadow(0, 3, 'rgba(90,60,80,0.4)', 4));
 
-    const spacing = 250;
-    const startX = -((options.length - 1) * spacing) / 2;
+    // Landscape: three tall cards side by side. Portrait: three wide cards stacked.
+    const spacing = portrait ? 180 : 250;
+    const start = -((options.length - 1) * spacing) / 2;
     options.forEach((key, i) => {
-      const card = this.add.container(startX + i * spacing, 10);
+      const card = this.add.container(portrait ? 0 : start + i * spacing, portrait ? start + i * spacing - 30 : 10);
+      const cw = portrait ? 400 : 200, ch = portrait ? 156 : 260;
       const cg = this.add.graphics();
-      cg.fillStyle(0xffffff, 1); cg.fillRoundedRect(-100, -130, 200, 260, 22);
-      cg.lineStyle(4, 0xf2aac6, 1); cg.strokeRoundedRect(-100, -130, 200, 260, 22);
+      cg.fillStyle(0xffffff, 1); cg.fillRoundedRect(-cw / 2, -ch / 2, cw, ch, 22);
+      cg.lineStyle(4, 0xf2aac6, 1); cg.strokeRoundedRect(-cw / 2, -ch / 2, cw, ch, 22);
       card.add(cg);
 
-      const img = this.add.image(0, -25, 'deco_' + key);
+      const img = this.add.image(portrait ? -115 : 0, portrait ? 0 : -25, 'deco_' + key);
+      const fit = portrait ? 120 : 150;
       const maxDim = Math.max(img.width, img.height);
-      if (maxDim > 150) img.setScale(150 / maxDim);
+      if (maxDim > fit) img.setScale(fit / maxDim);
       card.add(img);
 
-      card.add(this.add.text(0, 85, DECORATIONS[key].label, {
+      card.add(this.add.text(portrait ? 55 : 0, portrait ? 0 : 85, DECORATIONS[key].label, {
         fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '20px', fontStyle: 'bold', color: '#a06b8a'
       }).setOrigin(0.5));
 
-      card.setSize(200, 260).setInteractive({ useHandCursor: true });
+      card.setSize(cw, ch).setInteractive({ useHandCursor: true });
       card.on('pointerover', () => this.tweens.add({ targets: card, scale: 1.07, duration: 130 }));
       card.on('pointerout', () => this.tweens.add({ targets: card, scale: 1, duration: 130 }));
       card.on('pointerdown', () => this.chooseReward(key, card, layer, blocker));

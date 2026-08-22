@@ -1,7 +1,8 @@
 # Drawer Organizer
 
-A cozy drag-and-drop organizing game in Phaser 3. Tidy the messy drawer, earn decorations,
-make the room cuter. Kid-friendly: no timers, no fail states, everything is forgiving.
+A cozy drag-and-drop organizing game in Phaser 3 — 20 levels of tidying the messy drawer,
+earning decorations, making the room cuter. Kid-friendly: no timers, no fail states,
+everything is forgiving.
 
 ## Run
 
@@ -17,6 +18,11 @@ vendored in `vendor/phaser.min.js` — no build, no backend, no external service
 
 Works with mouse and touch; audio unlocks on first tap; progress saves to localStorage.
 
+Mobile: the game plays in both orientations — landscape uses the 960x640 canvas, portrait
+switches to 640x960 with reflowed layouts (trays wrap into rows, level dots wrap into rows,
+reward cards stack). Rotating mid-level keeps your progress. On touch, dragged items float
+above your finger and every item has a ≥64px hit area.
+
 ## File structure
 
 ```
@@ -24,7 +30,7 @@ index.html
 vendor/phaser.min.js
 assets/               empty placeholder folders + Meshy pipeline notes (assets/README.md)
 src/
-  main.js             game config (960x640, FIT scaling)
+  main.js             game config (FIT scaling, orientation-picked base size)
   data/
     items.js          item catalogue (category, label, size)
     levels.js         all level definitions — add levels here
@@ -41,6 +47,7 @@ src/
     SaveSystem.js     localStorage persistence
     AudioSystem.js    procedural WebAudio sounds
     Effects.js        sparkles, confetti, buttons, tween juice
+    Layout.js         portrait/landscape base-size swap on rotation
     TextureFactory.js all sprite art, generated at runtime
 ```
 

@@ -6,7 +6,41 @@ class PlacementSystem {
     this.containers = [];
     this.total = 0;
     this.placed = 0;
-    levelData.containers.forEach(cfg => this.buildContainer(cfg));
+    this.layoutContainers(levelData.containers).forEach(cfg => this.buildContainer(cfg));
+  }
+
+  // Level data positions containers for the 960x640 landscape canvas. In portrait
+  // we ignore those x/y and reflow the trays (same order, same sizes) into
+  // centered rows below the messy drawer. Slot order is unchanged, so a level
+  // restarted on rotation can restore items by container/slot index.
+  layoutContainers(containers) {
+    if (!Layout.portrait) return containers;
+    const W = this.scene.scale.width;
+    const margin = 14, gap = 14, labelRoom = 26;
+    const maxW = W - margin * 2;
+
+    const rows = [];
+    let row = [], rowW = 0;
+    containers.forEach(cfg => {
+      const need = row.length ? rowW + gap + cfg.w : cfg.w;
+      if (row.length && need > maxW) { rows.push(row); row = [cfg]; rowW = cfg.w; }
+      else { row.push(cfg); rowW = need; }
+    });
+    if (row.length) rows.push(row);
+
+    const out = [];
+    let y = 400; // just below the portrait drawer
+    rows.forEach(r => {
+      const rw = r.reduce((a, c) => a + c.w, 0) + gap * (r.length - 1);
+      const rh = Math.max(...r.map(c => c.h));
+      let x = (W - rw) / 2;
+      r.forEach(cfg => {
+        out.push(Object.assign({}, cfg, { x: x + cfg.w / 2, y: y + labelRoom + rh / 2 }));
+        x += cfg.w + gap;
+      });
+      y += rh + labelRoom + 16;
+    });
+    return out;
   }
 
   buildContainer(cfg) {
@@ -97,6 +131,7 @@ class PlacementSystem {
 
     slot.taken = true;
     obj.locked = true;
+    obj.placedSlot = { c: this.containers.indexOf(cont), s: cont.slots.indexOf(slot) };
     obj.disableInteractive();
     obj.setDepth(20 + Math.round(slot.y));
     this.scene.tweens.add({
@@ -116,6 +151,22 @@ class PlacementSystem {
     if (this.placed >= this.total) {
       this.scene.time.delayedCall(550, () => this.scene.events.emit('level:complete'));
     }
+  }
+
+  // Silently re-place an item that was already sorted before an orientation
+  // change (no sounds, tweens, or completion events — create() handles those).
+  prePlace(obj, cIdx, sIdx) {
+    const cont = this.containers[cIdx];
+    const slot = cont && cont.slots[sIdx];
+    if (!slot || slot.taken) return false;
+    slot.taken = true;
+    slot.hint.setAlpha(0);
+    obj.locked = true;
+    obj.placedSlot = { c: cIdx, s: sIdx };
+    obj.disableInteractive();
+    obj.setPosition(slot.x, slot.y).setAngle(0).setDepth(20 + Math.round(slot.y));
+    this.placed++;
+    return true;
   }
 
   bounceBack(obj) {
