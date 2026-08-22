@@ -19,6 +19,7 @@ import { Trails } from '../core/trails';
 import { isZoneStart, skinFor, Zone, zoneFor } from '../data/zones';
 import { LevelUpPanel } from '../objects/LevelUpPanel';
 import { endOfRun } from './GiftScene';
+import { quitButton } from '../objects/QuitToMenu';
 import { BuildStrip } from '../objects/BuildStrip';
 import { BOOST_BY_ID } from '../data/boosts';
 import { Skin, TargetSkin, TargetStyle, paintOf, styleOf } from '../data/skins';
@@ -161,7 +162,7 @@ export class GameScene extends Scene
      * `intro` is the beat between the doors opening and the clock starting;
      * `rank` is the frozen moment a rank-up hand is on the table.
      */
-    private state: 'intro' | 'play' | 'rank' | 'done' = 'intro';
+    private state: 'intro' | 'play' | 'rank' | 'menu' | 'done' = 'intro';
     /** The hand currently being dealt, if any. */
     private levelUp: LevelUpPanel | null = null;
     /** True when this level owes the player a first look at its zone's rule. */
@@ -514,6 +515,7 @@ export class GameScene extends Scene
         });
 
         this.buildSkipPill();
+        this.buildQuitButton();
         this.buildStrip();
 
         this.turret = new Turret(this, this.tier, this.look);
@@ -527,6 +529,31 @@ export class GameScene extends Scene
             this.wingmen.push(new Wingman(this, PLAY.left - 8, y, this.tier, -1));
             this.wingmen.push(new Wingman(this, PLAY.right + 8, y, this.tier, 1));
         }
+    }
+
+    /**
+     * The way out of a run, on the footer line beside the mute icon -- below
+     * the arena, where no target ever spawns and no shot is ever aimed.
+     */
+    private buildQuitButton (): void
+    {
+        quitButton(this, W - HUD.margin - 62, HUD.footerY, {
+            cost: 'Your run ends here. Coins you have already collected are kept.',
+            enabled: () => this.state === 'play',
+            hold: () =>
+            {
+                this.state = 'menu';
+                setGameplayActive(false);
+            },
+            resume: () =>
+            {
+                if (this.state !== 'menu') return;
+
+                this.state = 'play';
+                setGameplayActive(true);
+            },
+            quit: () => this.quitToMenu()
+        }).setDepth(32);
     }
 
     /**
@@ -2169,7 +2196,7 @@ export class GameScene extends Scene
         //  Everything on the board holds still behind the cards. The world
         //  behind it does not -- the backdrop keeps running, so the pause reads
         //  as a held breath rather than as a freeze frame.
-        const frozen = this.state === 'rank';
+        const frozen = this.state === 'rank' || this.state === 'menu';
 
         for (let i = this.targets.length - 1; i >= 0; i--)
         {
@@ -2446,7 +2473,12 @@ export class GameScene extends Scene
         this.fx.ring(MUZZLE.x, MUZZLE.y - 60, 340, 0x6cf5c8, 8, 520);
     }
 
-    private endRun (): void
+    /**
+     * Everything a run that is not going to be finished still owes the save.
+     * Coins were banked to the counter as they were picked up, so the one
+     * thing that would actually lose them is not writing the save.
+     */
+    private bankRun (): void
     {
         this.hazards.clear();
         this.clearChains();
@@ -2459,6 +2491,30 @@ export class GameScene extends Scene
         meta.best = Math.max(meta.best, run.score + this.levelScore);
         meta.bestLevel = Math.max(meta.bestLevel, run.level - 1);
         saveMeta();
+    }
+
+    /**
+     * Walking out mid-run. The run's winnings are kept, but it is not booked
+     * as a finished run: the present counter only pays for runs that were
+     * played to the end, or quitting three times would be the fastest way to
+     * open a box.
+     */
+    private quitToMenu (): void
+    {
+        if (this.state === 'done') return;
+
+        this.state = 'done';
+        setGameplayActive(false);
+
+        this.bankRun();
+
+        this.cameras.main.fadeOut(200, 0, 0, 0);
+        this.time.delayedCall(210, () => this.scene.start('MainMenu'));
+    }
+
+    private endRun (): void
+    {
+        this.bankRun();
 
         this.time.delayedCall(340, () =>
         {

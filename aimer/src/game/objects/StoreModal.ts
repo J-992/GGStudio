@@ -2,12 +2,12 @@ import { GameObjects, Geom, Scene } from 'phaser';
 import { Sfx, unlockAudio } from '../core/audio';
 import { rewardButton } from '../core/adButton';
 import { adsAvailable } from '../core/ads';
-import { IconLabel } from '../core/icons';
+import { IconLabel, iconImage } from '../core/icons';
 import { Fx } from '../core/fx';
 import { PrizeLook, prizeFace } from './PrizeTile';
 import { TargetSkin } from '../data/skins';
 import { meta } from '../core/state';
-import { CX, CY, FONT, FONT_UI, H, W, fmt, hex } from '../core/theme';
+import { CX, CY, FONT, FONT_UI, H, W, fmt, hex, mix } from '../core/theme';
 
 /**
  * The two things the store stops the player for.
@@ -201,69 +201,249 @@ export interface UnlockOffer
     action: string;
     /** Paid out once the break is over, whether or not Poki confirmed it. */
     onUnlock: () => void;
+    /**
+     * The other way in: go and earn the coins. Starts a run. Without it the
+     * card can only offer the video, and a build with no ads has no card.
+     */
+    onPlay?: () => void;
 }
 
-const OFFER_H = 448;
+/** Gold is what every rewarded video in the game is painted; cyan is PLAY. */
+const AD_GOLD = 0xffc857;
+const PLAY_CYAN = 0x3fe0ff;
+
+/** How far the spokes behind the face reach, measured from the stage centre. */
+const STAGE_RAY = 104;
 
 /**
- * "You cannot afford this -- would you like to watch a video for it?"
+ * The lit stage the locked thing stands on: a pool of its own colour, a slow
+ * wheel of spokes, and the face itself. The same light the unlock screen
+ * throws, at card scale -- so the card promises exactly what the unlock pays.
+ */
+function stage (scene: Scene, card: GameObjects.Container, y: number, w: number, h: number, look: PrizeLook, size: number)
+{
+    const root = scene.add.container(0, y);
+    card.add(root);
+
+    const pool = scene.add.graphics();
+    pool.fillStyle(look.color, 0.12);
+    pool.fillRoundedRect(-w / 2, -h / 2, w, h, { tl: 24, tr: 24, bl: 0, br: 0 });
+    root.add(pool);
+
+    //  A wheel of spokes behind the face, kept to a disc that fits inside
+    //  the stage so the light stays on the plate rather than spilling down
+    //  over the buttons -- the same sunburst the unlock screen throws, as a
+    //  medallion.
+    const spokes = scene.add.graphics();
+    spokes.fillStyle(look.color, 0.16);
+
+    const count = 14;
+    for (let i = 0; i < count; i++)
+    {
+        const a = (i / count) * Math.PI * 2;
+        const half = (Math.PI / count) * 0.42;
+
+        spokes.beginPath();
+        spokes.moveTo(0, 0);
+        spokes.lineTo(Math.cos(a - half) * STAGE_RAY, Math.sin(a - half) * STAGE_RAY);
+        spokes.lineTo(Math.cos(a + half) * STAGE_RAY, Math.sin(a + half) * STAGE_RAY);
+        spokes.closePath();
+        spokes.fillPath();
+    }
+    root.add(spokes);
+
+    scene.tweens.add({ targets: spokes, rotation: Math.PI * 2, duration: 30000, repeat: -1 });
+
+    //  The glow: three soft discs, brightest at the face.
+    const glow = scene.add.graphics();
+    glow.fillStyle(look.color, 0.10);
+    glow.fillCircle(0, 0, size * 0.92);
+    glow.fillStyle(look.color, 0.16);
+    glow.fillCircle(0, 0, size * 0.70);
+    glow.fillStyle(mix(look.color, 0xffffff, 0.5), 0.22);
+    glow.fillCircle(0, 0, size * 0.50);
+    root.add(glow);
+
+    scene.tweens.add({ targets: glow, scale: 1.08, alpha: 0.8, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+
+    const face = prizeFace(scene, look, size);
+    root.add(face);
+
+    //  A slow hover, so the thing on the stage reads as alive rather than
+    //  as a picture of it.
+    scene.tweens.add({ targets: face, y: -5, duration: 1600, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+
+    //  The tag: a small lock in the corner, so the state is read before the
+    //  name is.
+    const tag = scene.add.container(-w / 2 + 16, -h / 2 + 16);
+    const tagBg = scene.add.graphics();
+    tagBg.fillStyle(0x06101f, 0.85);
+    tagBg.fillRoundedRect(0, 0, 88, 26, 13);
+    tagBg.lineStyle(1, look.color, 0.6);
+    tagBg.strokeRoundedRect(0, 0, 88, 26, 13);
+    tag.add(tagBg);
+    tag.add(new IconLabel(scene, 44, 13, 'lock', 'LOCKED', {
+        fontSize: 12, iconSize: 12, gap: 5, color: hex(look.color), iconColor: look.color
+    }));
+    root.add(tag);
+
+    return root;
+}
+
+/**
+ * A pill with a glyph, a word, and a smaller word under it -- the shape the
+ * rewarded-video button has, so the two choices on the card are twins.
+ */
+function actionPill (
+    scene: Scene, x: number, y: number, w: number, h: number,
+    icon: string, label: string, note: string, color: number, fontSize: number,
+    onTap: () => void
+): GameObjects.Container
+{
+    const btn = scene.add.container(x, y);
+
+    const g = scene.add.graphics();
+    g.fillStyle(color, 1);
+    g.fillRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+    btn.add(g);
+
+    const iconSize = 24;
+    const gap = 9;
+    const glyph = iconImage(scene, 0, 0, icon, { size: iconSize, color: 0x0b1024 });
+    const text = scene.add.text(0, -7, label, { fontFamily: FONT, fontSize, color: INK }).setOrigin(0, 0.5);
+    const sub = scene.add.text(0, 16, note, { fontFamily: FONT_UI, fontSize: 10, color: INK }).setOrigin(0, 0.5).setAlpha(0.55);
+
+    //  A label that would run past the pill shrinks to fit it, so a long
+    //  skin name or a wide font never pokes out of the rounded end.
+    const room = w - 28 - iconSize - gap;
+    if (text.width > room) text.setFontSize(Math.max(12, fontSize * room / text.width));
+
+    const block = iconSize + gap + Math.max(text.width, sub.width);
+    const left = -block / 2;
+    glyph.setX(left + iconSize / 2);
+    text.setX(left + iconSize + gap);
+    sub.setX(left + iconSize + gap);
+
+    btn.add([ glyph, text, sub ]);
+
+    btn.setSize(w, h);
+    btn.setInteractive({
+        hitArea: new Geom.Rectangle(0, 0, w, h),
+        hitAreaCallback: Geom.Rectangle.Contains,
+        useHandCursor: true
+    });
+
+    scene.tweens.add({ targets: btn, scale: 1.03, duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+
+    btn.on('pointerdown', () =>
+    {
+        unlockAudio();
+        Sfx.ui();
+        scene.tweens.add({ targets: btn, scale: 0.93, duration: 80, yoyo: true, onComplete: onTap });
+    });
+
+    return btn;
+}
+
+const OFFER_H = 520;
+const STAGE_H = 224;
+
+/**
+ * "You cannot afford this yet -- watch a video for it, or go and earn it?"
  *
  * Only ever raised by the player's own tap on the thing itself, which is what
- * makes it an offer rather than an interruption. Returns false on a build with
- * no ads, so the caller can fall back to the plain refusal it always had.
+ * makes it an offer rather than an interruption. The two ways in sit side by
+ * side as equals, and neither is the default. Returns false only when there
+ * is nothing to offer at all -- no ads and no run to start -- so the caller
+ * can fall back to the plain refusal it always had.
  */
 export function offerUnlock (scene: Scene, offer: UnlockOffer): boolean
 {
-    //  Checked before anything is built, so a build with no ads never flashes
-    //  a card on its way to the refusal it was always going to show.
-    if (!adsAvailable()) return false;
+    const ads = adsAvailable();
+
+    //  Checked before anything is built, so a build with neither path never
+    //  flashes a card on its way to the refusal it was always going to show.
+    if (!ads && !offer.onPlay) return false;
 
     const w = Math.min(430, W - 56);
     const h = OFFER_H;
     const top = -h / 2;
 
-    const { card, close } = shell(scene, { w, h, accent: offer.color });
+    //  A tap anywhere off the card is the same answer as NOT NOW. The two
+    //  buttons are well inside the plate, so a thumb aiming at either cannot
+    //  land on the scrim by accident.
+    const { card, close } = shell(scene, { w, h, accent: offer.color }, 0.86, true);
 
-    const face = prizeFace(scene, offer.look, 108);
-    face.setPosition(0, top + 96);
-    card.add(face);
+    //  The stage is drawn inside the plate's own rounding, one pixel in, so
+    //  the plate's stroke stays the outer edge.
+    stage(scene, card, top + STAGE_H / 2 + 1, w - 2, STAGE_H - 1, offer.look, 140);
 
-    card.add(scene.add.text(0, top + 178, offer.name, {
+    //  A hairline where the stage ends, so the words start on their own ground.
+    const rule = scene.add.graphics();
+    rule.fillStyle(offer.color, 0.35);
+    rule.fillRect(-w / 2 + 1, top + STAGE_H, w - 2, 2);
+    card.add(rule);
+
+    card.add(scene.add.text(0, top + STAGE_H + 34, offer.name, {
         fontFamily: FONT, fontSize: 30, color: hex(offer.color), align: 'center',
         wordWrap: { width: w - 40 }
     }).setOrigin(0.5));
 
-    card.add(scene.add.text(0, top + 210, offer.blurb, {
+    card.add(scene.add.text(0, top + STAGE_H + 66, offer.blurb, {
         fontFamily: FONT_UI, fontSize: 13, color: '#8d97bd', align: 'center',
-        wordWrap: { width: w - 40 }
+        wordWrap: { width: w - 48 }
     }).setOrigin(0.5));
 
-    //  The coin path is still the real one, so the card says exactly how far
-    //  off it is rather than pretending the video is the only way in.
+    //  The price, and how far off it is. The coin path is still the real one,
+    //  so the card says so in numbers rather than pretending the video is the
+    //  only way in.
     const short = Math.max(0, offer.cost - meta.coins);
 
-    card.add(new IconLabel(scene, 0, top + 258, 'gem', `${fmt(short)} SHORT`, {
-        fontSize: 18, iconSize: 17, color: '#7d88b0', iconColor: 0x7d88b0
-    }));
-
-    const video = rewardButton(scene, 0, top + 330, {
-        label: offer.action,
-        color: 0xffc857,
-        width: w - 64,
-        onReward: () => close(offer.onUnlock)
+    const price = new IconLabel(scene, 0, top + STAGE_H + 108, 'gem', fmt(offer.cost), {
+        fontSize: 24, iconSize: 22, color: '#ffffff', iconColor: AD_GOLD
     });
+    card.add(price);
 
-    //  No ads in this build at all -- so there was never an offer to make, and
-    //  the caller gets to keep the refusal it would have shown instead.
-    if (!video)
+    card.add(scene.add.text(0, top + STAGE_H + 134, `YOU HAVE ${fmt(meta.coins)}  ·  ${fmt(short)} TO GO`, {
+        fontFamily: FONT_UI, fontSize: 12, color: '#7d88b0'
+    }).setOrigin(0.5));
+
+    //  The two ways in, side by side. With only one of them on this build it
+    //  takes the whole row, so the card never shows a gap where a choice was.
+    const rowY = top + STAGE_H + 200;
+    const rowH = 80;
+    const gap = 10;
+    const both = ads && !!offer.onPlay;
+    const pillW = both ? (w - 40 - gap) / 2 : w - 56;
+    const leftX = both ? -(pillW + gap) / 2 : 0;
+    const rightX = both ? (pillW + gap) / 2 : 0;
+
+    if (ads)
     {
-        close();
-        return false;
+        const video = rewardButton(scene, both ? leftX : 0, rowY, {
+            label: 'WATCH AD',
+            color: AD_GOLD,
+            width: pillW,
+            height: rowH,
+            fontSize: both ? 17 : 26,
+            onReward: () => close(offer.onUnlock)
+        });
+
+        if (video) card.add(video);
     }
 
-    card.add(video);
+    if (offer.onPlay)
+    {
+        const play = offer.onPlay;
 
-    dismiss(scene, card, h / 2 - 32, 'NO THANKS', () => close());
+        card.add(actionPill(
+            scene, both ? rightX : 0, rowY, pillW, rowH,
+            'coins', 'PLAY TO EARN', 'COINS FROM RUNS', PLAY_CYAN, both ? 17 : 26,
+            () => close(play)
+        ));
+    }
+
+    dismiss(scene, card, h / 2 - 30, 'NOT NOW', () => close());
 
     Sfx.locked();
 

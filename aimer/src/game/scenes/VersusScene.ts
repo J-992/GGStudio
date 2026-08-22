@@ -3,6 +3,7 @@ import { Fx } from '../core/fx';
 import { Sfx, unlockAudio } from '../core/audio';
 import { setGameplayActive } from '../core/lifecycle';
 import { iconImage } from '../core/icons';
+import { quitButton } from '../objects/QuitToMenu';
 import { reportPlatformHappyTime } from '../platform/platform';
 import { CX, CY, FONT, FONT_UI, H, LANDSCAPE, W, fmt, hex, mix } from '../core/theme';
 import {
@@ -413,6 +414,17 @@ class Pane
         return n;
     }
 
+    /**
+     * The match was held. Every clock on this pane is absolute, so they all
+     * move forward by however long the hold lasted and no fuse loses time to
+     * a card the player was reading.
+     */
+    shift (ms: number): void
+    {
+        for (const t of this.live) t.at += ms;
+        this.pending = this.pending.map(p => p + ms);
+    }
+
     clearAll (): void
     {
         for (const t of this.live) t.node.destroy();
@@ -491,7 +503,7 @@ export class VersusScene extends Scene
     private you!: Pane;
     private cpu!: Pane;
 
-    private state: 'count' | 'play' | 'over' = 'count';
+    private state: 'count' | 'play' | 'pause' | 'over' = 'count';
     private endAt = 0;
     private lastWhole = MATCH_SECONDS;
 
@@ -516,6 +528,9 @@ export class VersusScene extends Scene
     private sprayAt = 0;
     private sprayCard: GameObjects.Container | null = null;
 
+    /** When the match was held for the quit card, so its clocks can catch up. */
+    private heldAt = 0;
+
     constructor ()
     {
         super('Versus');
@@ -536,6 +551,7 @@ export class VersusScene extends Scene
         this.sprayShown = 0;
         this.sprayAt = 0;
         this.sprayCard = null;
+        this.heldAt = 0;
         this.cameras.main.setBackgroundColor(0x080b1c);
         this.cameras.main.fadeIn(160, 0, 0, 0);
         this.fx = new Fx(this, 20);
@@ -546,13 +562,14 @@ export class VersusScene extends Scene
         this.cpu = new Pane(this, this.fx, PANES.cpu, this.match.cpuName, `${this.match.tier.name} opponent`, CPU_COLOR, CPU_COLOR_DIM, false);
 
         this.buildStrip();
+        this.buildQuit();
         this.buildCursor();
 
         this.input.on('pointerdown', (p: Phaser.Input.Pointer) =>
         {
             unlockAudio();
 
-            if (this.state === 'over') return;
+            if (this.state === 'over' || this.state === 'pause') return;
 
             const r = this.you.rect;
             const mine = p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y + HEAD && p.y <= r.y + r.h;
@@ -592,6 +609,67 @@ export class VersusScene extends Scene
         this.countdown();
 
         this.events.once('shutdown', () => setGameplayActive(false));
+    }
+
+    //  ------------------------------------------------------------ the exit
+
+    /**
+     * The way out of a match. It lives in the clock strip -- the one band of
+     * the screen that belongs to neither player, so it can never be in the way
+     * of a target or be hit by a shot aimed at one.
+     */
+    private buildQuit (): void
+    {
+        const x = LANDSCAPE ? CX : 72;
+        const y = LANDSCAPE ? 26 : CY - 10;
+
+        quitButton(this, x, y, {
+            cost: 'The match ends now. Nothing is recorded: no win, no loss, no rating change.',
+            enabled: () => this.state === 'play',
+            hold: () => this.holdMatch(),
+            resume: () => this.resumeMatch(),
+            quit: () => this.leaveMatch()
+        }).setDepth(20);
+    }
+
+    private holdMatch (): void
+    {
+        if (this.state !== 'play') return;
+
+        this.state = 'pause';
+        this.heldAt = this.time.now;
+        this.hideWrongSide();
+        setGameplayActive(false);
+    }
+
+    /** Back into the match, with every clock owed the time the card was up. */
+    private resumeMatch (): void
+    {
+        if (this.state !== 'pause') return;
+
+        const held = this.time.now - this.heldAt;
+
+        this.endAt += held;
+        this.cpuShotAt += held;
+        this.you.shift(held);
+        this.cpu.shift(held);
+
+        this.state = 'play';
+        setGameplayActive(true);
+    }
+
+    /** Forfeit. A bot match nobody finished is a match that never happened. */
+    private leaveMatch (): void
+    {
+        this.state = 'over';
+        setGameplayActive(false);
+
+        this.you.clearAll();
+        this.cpu.clearAll();
+        this.tweens.killTweensOf(this.cursor);
+
+        this.cameras.main.fadeOut(200, 0, 0, 0);
+        this.time.delayedCall(210, () => this.scene.start('MainMenu'));
     }
 
     //  ------------------------------------------------------------ coaching
@@ -722,7 +800,7 @@ export class VersusScene extends Scene
             fontFamily: FONT, fontSize: 13, color: '#ffc857'
         }).setOrigin(0, 0.5).setLetterSpacing(1));
 
-        c.add(this.add.text(-w / 2 + 60, -16, 'Spraying misses and resets your streak. 5 hits in a row is x1.5, 10 is x2 — one aimed shot is worth more than five fast ones.', {
+        c.add(this.add.text(-w / 2 + 60, -16, 'Spraying misses and resets your streak. 5 hits in a row is x1.5, 10 is x2. One aimed shot is worth more than five fast ones.', {
             fontFamily: FONT_UI, fontSize: 13, color: '#dfe5ff', wordWrap: { width: w - 80 }
         }).setOrigin(0, 0));
 

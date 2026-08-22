@@ -465,7 +465,8 @@ export class StorePanel
                     {
                         grantBoost(boost.id, 1);
                         this.bought(row, boost.color);
-                    }
+                    },
+                    onPlay: this.onPlay
                 });
 
                 if (!offered) this.deny(row);
@@ -636,7 +637,8 @@ export class StorePanel
                     color: skin.accent,
                     look: { color: skin.accent, art: skin.art, shape: skin.shape },
                     action: 'UNLOCK FREE',
-                    onUnlock: () => { if (grantSkin(skin.id)) this.wonSkin(skin, tile); }
+                    onUnlock: () => { if (grantSkin(skin.id)) this.wonSkin(skin, tile); },
+                    onPlay: this.onPlay
                 });
 
                 if (!offered) this.denyAt(tile, x);
