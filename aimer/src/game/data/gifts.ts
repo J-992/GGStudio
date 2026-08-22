@@ -2,7 +2,8 @@ import { BOOSTS, BOOST_BY_ID } from './boosts';
 import { SKIN_BY_ID, TargetSkin } from './skins';
 import type { BodyShape } from '../core/shapes';
 import {
-    bankCoins, boostCount, grantBoost, grantSkin, saveMeta, unownedSkins
+    PERKS, bankCoins, boostCount, grantBoost, grantPerk, grantSkin, perkLevel, saveMeta,
+    unownedSkins
 } from '../core/state';
 import { fmt } from '../core/theme';
 
@@ -30,7 +31,7 @@ export const RARITY: Record<Rarity, { label: string; color: number }> = {
     legendary: { label: 'LEGENDARY', color: 0xffc857 }
 };
 
-export type GiftKind = 'skin' | 'boost' | 'coins';
+export type GiftKind = 'skin' | 'boost' | 'coins' | 'perk';
 
 export interface Gift
 {
@@ -101,6 +102,30 @@ export function boostGift (id: string, amount: number): Gift
         color: boost.color,
         rarity: amount >= 3 ? 'epic' : (amount === 2 ? 'rare' : 'common'),
         icon: boost.icon
+    };
+}
+
+/**
+ * A free level of a permanent upgrade.
+ *
+ * The store sells these for coins that get steeper every level, so one handed
+ * over is worth more the deeper the player already is -- which is exactly the
+ * player a daily present is trying to keep coming back.
+ */
+export function perkGift (id: string, levels = 1): Gift
+{
+    const perk = PERKS.find(p => p.id === id)!;
+    const lvl = perkLevel(id);
+
+    return {
+        kind: 'perk',
+        id,
+        amount: levels,
+        name: levels > 1 ? `${perk.name} +${levels}` : perk.name,
+        sub: `${perk.effect}  ·  LEVEL ${Math.min(perk.max, lvl + levels)}/${perk.max}`,
+        color: 0x7dff6b,
+        rarity: levels > 1 ? 'epic' : 'rare',
+        icon: perk.icon
     };
 }
 
@@ -272,6 +297,19 @@ export function grantGift (gift: Gift): Gift
         if (grantSkin(gift.id)) return gift;
 
         const fallback = coinGift(Math.max(350, Math.round((SKIN_BY_ID[gift.id]?.cost || 700) / 2)));
+        bankCoins(fallback.amount);
+        saveMeta();
+
+        return fallback;
+    }
+
+    if (gift.kind === 'perk')
+    {
+        if (grantPerk(gift.id, gift.amount) > 0) return gift;
+
+        //  Maxed out between the roll and the payout. Coins are the one thing
+        //  that can never be full, so that is what it turns into.
+        const fallback = coinGift(900);
         bankCoins(fallback.amount);
         saveMeta();
 

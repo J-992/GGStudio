@@ -10,6 +10,9 @@ import { RUN_BOOSTS } from '../data/boosts';
 import { fillBody, strokeBody } from '../core/shapes';
 import { ic, iconImage } from '../core/icons';
 import { StorePanel } from '../objects/StorePanel';
+import { buildWorldTrail } from '../objects/WorldMap';
+import { buildDailyButton } from '../objects/DailyGift';
+import { versus } from '../data/versus';
 import { CX, FONT, FONT_UI, H, LANDSCAPE, W, fmt, hex, mix } from '../core/theme';
 
 const DEMO_COLORS = [ 0x3fe0ff, 0xff5ce0, 0x7dff6b, 0xffd23f, 0x9b6cff ];
@@ -28,6 +31,13 @@ const L = LANDSCAPE
         playY: 318,
         statY: 428,
         loadoutY: 534,
+        //  Portrait keeps the route under the stats it illustrates; a wide
+        //  screen puts it at the foot of the game column instead, which is the
+        //  only band down there the store's last row cannot reach across.
+        mapHeadY: 622,
+        mapY: 648,
+        mapNameY: 666,
+        mapW: Math.min(430, 2 * (W * 0.28 - 40)),
         storeHeaderY: 92,
         tabsY: 146,
         rowY0: 210,
@@ -41,10 +51,14 @@ const L = LANDSCAPE
     : {
         gameX: CX,
         storeX: CX,
-        titleY: 92,
-        taglineY: 142,
-        playY: 216,
-        statY: 286,
+        titleY: 72,
+        taglineY: 116,
+        playY: 176,
+        statY: 236,
+        mapHeadY: 274,
+        mapY: 302,
+        mapNameY: 320,
+        mapW: Math.min(430, W - 100),
         loadoutY: 380,
         storeHeaderY: 432,
         tabsY: 474,
@@ -99,8 +113,10 @@ export class MainMenu extends Scene
 
         this.buildPlayButton();
         this.buildStats();
+        this.buildTrail();
         this.buildLoadout();
         this.buildGiftBadge();
+        this.buildDaily();
 
         this.store = new StorePanel(this, this.fx, {
             x: L.storeX,
@@ -205,25 +221,39 @@ export class MainMenu extends Scene
         });
     }
 
+    /**
+     * PLAY, and the COMPETITIVE button beside it. PLAY keeps the left and
+     * most of the width -- it is still the game -- and the red button with
+     * the NEW badge takes the rest, so a returning player sees it without a
+     * new thing having shoved the old one around.
+     */
     private buildPlayButton (): void
     {
-        const btn = this.add.container(L.gameX, L.playY).setDepth(11);
+        const playW = 226;
+        const vsW = 122;
+        const gap = 12;
+        const h = 92;
+        const total = playW + gap + vsW;
+        const playX = L.gameX - total / 2 + playW / 2;
+        const vsX = L.gameX + total / 2 - vsW / 2;
+
+        const btn = this.add.container(playX, L.playY).setDepth(11);
 
         const g = this.add.graphics();
         g.fillStyle(0x3fe0ff, 1);
-        g.fillRoundedRect(-160, -46, 320, 92, 26);
+        g.fillRoundedRect(-playW / 2, -h / 2, playW, h, 26);
         g.fillStyle(0xffffff, 0.18);
-        g.fillRoundedRect(-160, -46, 320, 40, { tl: 26, tr: 26, bl: 0, br: 0 });
+        g.fillRoundedRect(-playW / 2, -h / 2, playW, 40, { tl: 26, tr: 26, bl: 0, br: 0 });
         btn.add(g);
 
         const label = this.add.text(0, 0, 'PLAY', {
-            fontFamily: FONT, fontSize: 46, color: '#06101f'
+            fontFamily: FONT, fontSize: 44, color: '#06101f'
         }).setOrigin(0.5);
         btn.add(label);
 
-        btn.setSize(320, 92);
+        btn.setSize(playW, h);
         btn.setInteractive({
-            hitArea: new Geom.Rectangle(0, 0, 320, 92),
+            hitArea: new Geom.Rectangle(0, 0, playW, h),
             hitAreaCallback: Geom.Rectangle.Contains,
             useHandCursor: true
         });
@@ -238,6 +268,87 @@ export class MainMenu extends Scene
             this.fx.ring(btn.x, btn.y, 220, 0x3fe0ff, 6, 420);
 
             this.startRun();
+        });
+
+        this.buildVersusButton(vsX, L.playY, vsW, h);
+    }
+
+    /**
+     * The door into competitive: red, because the opponent is red, with a
+     * NEW badge on the corner that stays until the mode has been played once.
+     */
+    private buildVersusButton (x: number, y: number, w: number, h: number): void
+    {
+        const red = 0xff4a5c;
+        const btn = this.add.container(x, y).setDepth(11);
+
+        const g = this.add.graphics();
+        g.fillStyle(red, 1);
+        g.fillRoundedRect(-w / 2, -h / 2, w, h, 26);
+        g.fillStyle(0xffffff, 0.18);
+        g.fillRoundedRect(-w / 2, -h / 2, w, 40, { tl: 26, tr: 26, bl: 0, br: 0 });
+        btn.add(g);
+
+        //  Same recipe as PLAY: dark label on a solid fill, no stroke, same
+        //  corner radius and top highlight -- only the colour says it is a
+        //  different door.
+        btn.add(iconImage(this, 0, -14, 'crosshair', { size: 30, color: 0x06101f }));
+
+        btn.add(this.add.text(0, 20, 'VERSUS', {
+            fontFamily: FONT, fontSize: 18, color: '#06101f'
+        }).setOrigin(0.5));
+
+        const record = versus.wins + versus.losses;
+
+        if (record === 0)
+        {
+            //  The badge hangs off the top-right corner, tilted, the way a
+            //  sticker on a box does.
+            const badge = this.add.container(w / 2 - 6, -h / 2 + 4).setAngle(12);
+            const bg = this.add.graphics();
+            bg.fillStyle(0xffc857, 1);
+            bg.fillRoundedRect(-26, -12, 52, 24, 8);
+            badge.add(bg);
+            badge.add(this.add.text(0, 0, 'NEW', {
+                fontFamily: FONT, fontSize: 13, color: '#06101f'
+            }).setOrigin(0.5));
+            btn.add(badge);
+
+            this.tweens.add({ targets: badge, scale: 1.12, duration: 520, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+        }
+        else
+        {
+            //  The record rides the corner where NEW used to be, in the same
+            //  pill, so the button's silhouette never changes.
+            const pill = this.add.container(w / 2 - 6, -h / 2 + 4).setAngle(12);
+            const pg = this.add.graphics();
+            pg.fillStyle(0x0b1024, 1);
+            pg.fillRoundedRect(-30, -12, 60, 24, 8);
+            pill.add(pg);
+            pill.add(this.add.text(0, 0, `${versus.wins}W ${versus.losses}L`, {
+                fontFamily: FONT, fontSize: 11, color: '#ffffff'
+            }).setOrigin(0.5));
+            btn.add(pill);
+        }
+
+        btn.setSize(w, h);
+        btn.setInteractive({
+            hitArea: new Geom.Rectangle(0, 0, w, h),
+            hitAreaCallback: Geom.Rectangle.Contains,
+            useHandCursor: true
+        });
+
+        this.tweens.add({ targets: btn, scale: 1.035, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.inOut', delay: 450 });
+
+        btn.on('pointerdown', () =>
+        {
+            unlockAudio();
+            Sfx.launch();
+            this.tweens.add({ targets: btn, scale: 0.92, duration: 90, yoyo: true });
+            this.fx.ring(btn.x, btn.y, 160, red, 6, 420);
+
+            this.cameras.main.fadeOut(190, 0, 0, 0);
+            this.time.delayedCall(200, () => this.scene.start('VersusQueue'));
         });
     }
 
@@ -277,6 +388,24 @@ export class MainMenu extends Scene
         stat(-1, 'BEST SCORE', fmt(meta.best), 0xffffff);
         stat(0, 'BEST LEVEL', `${meta.bestLevel}/${FINAL_LEVEL}`, 0x6cf5c8);
         stat(1, 'TOTAL XP', fmt(meta.rank), 0x9b6cff);
+    }
+
+    /**
+     * The route through the seven worlds, under the stats that used to be the
+     * only thing the menu said about progress.
+     *
+     * "BEST LEVEL 24/40" directly above it is the caption; the rail is the
+     * picture. See objects/WorldMap for why the picture is worth the room.
+     */
+    private buildTrail (): void
+    {
+        buildWorldTrail(this, this.fx, {
+            x: L.gameX,
+            headY: L.mapHeadY,
+            railY: L.mapY,
+            nameY: L.mapNameY,
+            width: L.mapW
+        });
     }
 
     /**
@@ -456,6 +585,21 @@ export class MainMenu extends Scene
             this.cameras.main.fadeOut(180, 0, 0, 0);
             this.time.delayedCall(190, () => this.scene.start('Gift'));
         });
+    }
+
+    /**
+     * The daily present, directly under the mystery box.
+     *
+     * The two belong together -- both are boxes, both are free -- and stacking
+     * them makes one corner of the menu the place rewards come from. The gold
+     * one goes second because it is the one that is ready *now*: the eye lands
+     * on the counter above it, then on the thing it can open today.
+     */
+    private buildDaily (): void
+    {
+        //  Pulled in from the badge's own centre line so the box and the light
+        //  breaking out of the tile still miss the PLAY button beside it.
+        buildDailyButton(this, this.fx, 48, (LANDSCAPE ? 52 : 58) + 88);
     }
 
     update (_time: number, delta: number): void

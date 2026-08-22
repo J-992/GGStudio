@@ -357,6 +357,39 @@ const ICONS: Record<string, Draw> = {
         c.lineTo(11, 14); c.closePath();
         c.stroke();
     },
+    //  --- progress --------------------------------------------------------
+    check: c =>
+    {
+        stroke(c, 9);
+        c.beginPath();
+        c.moveTo(12, 33); c.lineTo(26, 47); c.lineTo(52, 16);
+        c.stroke();
+    },
+    lock: c =>
+    {
+        //  Shackle first, then the body over the bottom of it, so the two read
+        //  as one object rather than a hoop resting on a box.
+        stroke(c, 6);
+        c.beginPath();
+        c.arc(32, 27, 12, Math.PI, 0);
+        c.lineTo(44, 34);
+        c.moveTo(20, 27);
+        c.lineTo(20, 34);
+        c.stroke();
+
+        c.fillStyle = '#fff';
+        rr(c, 11, 31, 42, 27, 7);
+        c.fill();
+
+        cut(c, () =>
+        {
+            c.fillStyle = '#000';
+            c.beginPath();
+            c.arc(32, 42, 4.5, 0, TAU);
+            c.fill();
+            c.fillRect(29.5, 42, 5, 9);
+        });
+    },
     flag: c =>
     {
         stroke(c, 6);

@@ -53,6 +53,10 @@ export interface Meta
     gifts: number;
     /** Presents opened, ever. The first one is the guaranteed face. */
     opened: number;
+    /** Local day index the daily present was last claimed on. -1 = never. */
+    dailyDay: number;
+    /** Days claimed back to back, including today's. */
+    dailyStreak: number;
 }
 
 const SAVE_KEY = 'aimer.save.v1';
@@ -62,7 +66,7 @@ function emptyMeta (): Meta
     return {
         coins: 0, rank: 0, best: 0, bestLevel: 0, perks: {}, muted: false,
         boosts: {}, armed: {}, skins: [ DEFAULT_SKIN.id ], skin: DEFAULT_SKIN.id,
-        runs: 0, gifts: 0, opened: 0
+        runs: 0, gifts: 0, opened: 0, dailyDay: -1, dailyStreak: 0
     };
 }
 
@@ -131,7 +135,11 @@ function load (): Meta
             //  of the very next run it plays.
             runs: Math.max(0, Math.floor(Number(parsed.runs)) || 0),
             gifts: Math.max(0, Math.floor(Number(parsed.gifts)) || 0),
-            opened: Math.max(0, Math.floor(Number(parsed.opened)) || 0)
+            opened: Math.max(0, Math.floor(Number(parsed.opened)) || 0),
+            //  A save from before the daily present has never claimed one, so
+            //  it is owed one the moment it next opens the menu.
+            dailyDay: Number.isFinite(Number(parsed.dailyDay)) ? Math.floor(Number(parsed.dailyDay)) : -1,
+            dailyStreak: Math.max(0, Math.floor(Number(parsed.dailyStreak)) || 0)
         };
     }
     catch
@@ -546,4 +554,104 @@ export function grantBoost (id: string, n: number): number
 export function unownedSkins (group?: SkinGroup): TargetSkin[]
 {
     return SKINS.filter(s => s.cost > 0 && !ownsSkin(s.id) && (!group || s.group === group));
+}
+
+//  ------------------------------------------------------------- daily gift
+
+/**
+ * The present that is paid for in days rather than runs.
+ *
+ * The mystery box asks for three runs; this one asks for nothing at all except
+ * that the player come back tomorrow. That is the whole point of it -- it is
+ * the only reward in the game that is waiting *before* the first shot, so the
+ * menu always has something on it worth opening the app for.
+ *
+ * The day is the player's own local day, not twenty-four hours from the last
+ * claim: a rolling timer punishes somebody who plays at eight one evening and
+ * seven the next, and midnight is the boundary everybody already understands.
+ */
+
+const DAY_MS = 86400000;
+
+/** Which local day it is, as a whole number of days since the epoch. */
+function dayIndex (at = Date.now()): number
+{
+    return Math.floor((at - new Date(at).getTimezoneOffset() * 60000) / DAY_MS);
+}
+
+/** True when today's present has not been opened yet. */
+export function dailyReady (): boolean
+{
+    return meta.dailyDay !== dayIndex();
+}
+
+/** Milliseconds until the next local midnight, when the next one lands. */
+export function msToNextDaily (): number
+{
+    if (dailyReady()) return 0;
+
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+
+    return Math.max(0, midnight - now.getTime());
+}
+
+/**
+ * Books today's present and returns the streak it lands on, counting today.
+ *
+ * A day missed drops the streak back to one rather than to zero: the player
+ * who comes back after a week away is on day one of a new run of days, not
+ * on nothing, and the button says so.
+ */
+export function claimDaily (): number
+{
+    const today = dayIndex();
+
+    if (meta.dailyDay === today) return meta.dailyStreak;
+
+    meta.dailyStreak = meta.dailyDay === today - 1 ? meta.dailyStreak + 1 : 1;
+    meta.dailyDay = today;
+    saveMeta();
+
+    return meta.dailyStreak;
+}
+
+/** Days claimed back to back. Zero before the first one is ever opened. */
+export function dailyStreak (): number
+{
+    return meta.dailyStreak;
+}
+
+//  ------------------------------------------------------------------ perks
+
+export function perkLevel (id: string): number
+{
+    return meta.perks[id] || 0;
+}
+
+/** Permanent upgrades with a level still to give. */
+export function upgradablePerks (): Perk[]
+{
+    return PERKS.filter(p => perkLevel(p.id) < p.max);
+}
+
+/**
+ * Hands over levels of a permanent upgrade, free, up to its ceiling. Returns
+ * how many actually went on, so a present can say what it really paid.
+ */
+export function grantPerk (id: string, n = 1): number
+{
+    const perk = PERKS.find(p => p.id === id);
+
+    if (!perk || n <= 0) return 0;
+
+    const before = perkLevel(id);
+    const after = Math.min(perk.max, before + n);
+
+    if (after === before) return 0;
+
+    meta.perks[id] = after;
+    saveMeta();
+
+    return after - before;
 }

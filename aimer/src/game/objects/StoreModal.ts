@@ -33,14 +33,14 @@ const CARD_DEPTH = 45;
 
 const INK = '#06101f';
 
-interface Shell
+export interface Shell
 {
     card: GameObjects.Container;
     close: (then?: () => void) => void;
 }
 
 /** The framed plate a modal can sit on. Omitted by one that is its own shape. */
-interface Plate
+export interface Plate
 {
     w: number;
     h: number;
@@ -50,8 +50,14 @@ interface Plate
 /**
  * Scrim, centred plate, and the way out. The caller fills the card in local
  * coordinates measured from its middle.
+ *
+ * `tapOut` lets the scrim itself close the card. It is off by default and has
+ * to stay off for anything that asks the player a question -- a card offering
+ * a video must not be dismissed by the thumb that was aiming at it. A card
+ * that only tells them something is a different case: there, a tap anywhere is
+ * what everybody already expects to work.
  */
-function shell (scene: Scene, plate: Plate | null, dark = 0.86): Shell
+export function shell (scene: Scene, plate: Plate | null, dark = 0.86, tapOut = false): Shell
 {
     const scrim = scene.add.graphics().setDepth(SCRIM_DEPTH);
     scrim.fillStyle(0x03050f, dark);
@@ -111,11 +117,13 @@ function shell (scene: Scene, plate: Plate | null, dark = 0.86): Shell
         });
     };
 
+    if (tapOut) scrim.on('pointerdown', () => close());
+
     return { card, close };
 }
 
 /** A solid pill with a label on it, laid into a card's local space. */
-function pill (
+export function pill (
     scene: Scene, card: GameObjects.Container,
     y: number, w: number, h: number, label: string, color: number, size: number,
     onTap: () => void, ink = INK
@@ -154,7 +162,7 @@ function pill (
 }
 
 /** The quiet way out of a modal: a word, not a button. */
-function dismiss (
+export function dismiss (
     scene: Scene, card: GameObjects.Container, y: number, label: string, onTap: () => void
 ): GameObjects.Text
 {
