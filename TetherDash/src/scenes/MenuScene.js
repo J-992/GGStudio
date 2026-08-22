@@ -40,7 +40,7 @@ class MenuScene extends Phaser.Scene {
     // buttons
     const unlocked = Save.unlockedUpTo();
     Effects.button(this, W / 2, 350, 280, 64, 'PLAY', () => {
-      this.scene.start('Game', { levelId: unlocked });
+      Poki.startLevel(this, unlocked);
     }, { fontSize: 32 });
 
     this.modeBtn = Effects.button(this, W / 2 - 150, 432, 260, 52,

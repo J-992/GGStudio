@@ -7,6 +7,7 @@ class BootScene extends Phaser.Scene {
     AudioSys.init();
     AudioSys.setEnabled(Save.data.sound);
     TextureFactory.generate(this);
+    Poki.loadingFinished();
     this.input.once('pointerdown', () => AudioSys.unlock());
     this.scene.start('Menu');
   }

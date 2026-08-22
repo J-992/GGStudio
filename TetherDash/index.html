@@ -19,15 +19,18 @@
 <body>
 <div id="game"></div>
 <div id="debug-panel"></div>
+<script src="https://game-cdn.poki.com/scripts/v2/poki-sdk.js"></script>
 <script src="vendor/phaser.min.js"></script>
 <script>
-  // Fallback for local checkouts where the vendored file is missing.
+  // Fallback to CDN for local checkouts where the vendored file is missing.
+  // The Poki build strips this block: a third-party request fails their review.
   if (!window.Phaser) document.write('<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"><\/script>');
 </script>
 <script src="src/Config.js"></script>
 <script src="src/data/levels.js"></script>
 <script src="src/systems/SaveSystem.js"></script>
 <script src="src/systems/AudioSystem.js"></script>
+<script src="src/systems/PokiSDK.js"></script>
 <script src="src/systems/TextureFactory.js"></script>
 <script src="src/systems/Projection.js"></script>
 <script src="src/systems/Course.js"></script>

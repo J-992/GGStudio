@@ -84,8 +84,11 @@ class GameScene extends Phaser.Scene {
     if (this.sys.game.device.input.touch) this.createTouchControls();
     if (/[?&]debug/.test(location.search)) this.initDebug();
 
+    Poki.gameplayStart();
+
     this.events.on('shutdown', () => {
       AudioSys.stopTension();
+      Poki.gameplayStop();
       const panel = document.getElementById('debug-panel');
       if (panel) panel.style.display = 'none';
     });
@@ -229,6 +232,7 @@ class GameScene extends Phaser.Scene {
         this.passedCp = i;
         this.lastCheckpoint = cps[i];
         AudioSys.play('checkpoint');
+        Poki.happyTime(0.4);
         this.fx.floatText(CFG.GAME_W / 2, 200, 'CHECKPOINT!', '#9ef0e0', 34);
       }
     }
@@ -300,6 +304,10 @@ class GameScene extends Phaser.Scene {
     AudioSys.stopTension();
     AudioSys.play('win');
     this.fx.winConfetti();
+    // The run is over: gameplay stops here, not when the scene changes, so the
+    // results panel is never counted as play time and never eats an ad.
+    Poki.gameplayStop();
+    Poki.happyTime(1);
 
     // synchronized victory hops on the frozen frame
     [this.sprA, this.sprB].forEach((spr, i) => {
@@ -353,10 +361,10 @@ class GameScene extends Phaser.Scene {
     const next = this.levelId < LEVELS.length;
     if (next) {
       panel.add(Effects.button(this, -5, 76, 210, 56, 'NEXT →',
-        () => this.scene.restart({ levelId: this.levelId + 1 }), { fontSize: 26, depth: 0 }));
+        () => Poki.startLevel(this, this.levelId + 1), { fontSize: 26, depth: 0 }));
     }
     panel.add(Effects.button(this, next ? -120 : -5, next ? 138 : 90, 150, 46, 'REPLAY',
-      () => this.scene.restart({ levelId: this.levelId }), { color: 0x53a8d6, fontSize: 20, depth: 0 }));
+      () => Poki.startLevel(this, this.levelId), { color: 0x53a8d6, fontSize: 20, depth: 0 }));
     panel.add(Effects.button(this, next ? 112 : -5, next ? 138 : 145, 150, 46, 'MENU',
       () => this.scene.start('Menu'), { color: 0x8899aa, fontSize: 20, depth: 0 }));
 

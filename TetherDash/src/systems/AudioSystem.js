@@ -113,5 +113,15 @@ const AudioSys = {
       try { this.creak.g.gain.setTargetAtTime(0, this.now(), 0.03); this.creak.osc.stop(this.now() + 0.2); } catch (e) {}
       this.creak = null;
     }
-  }
+  },
+
+  // Used when the tab is hidden and while an ad plays over the game.
+  suspend() { if (this.ctx && this.ctx.state === 'running') this.ctx.suspend(); },
+  resume() { if (this.ctx && this.ctx.state === 'suspended' && this.enabled) this.ctx.resume(); }
 };
+
+document.addEventListener('visibilitychange', () => {
+  // An ad owns the audio context while it runs; leave it alone.
+  if (window.Poki && Poki.adPlaying) return;
+  if (document.hidden) AudioSys.suspend(); else AudioSys.resume();
+});

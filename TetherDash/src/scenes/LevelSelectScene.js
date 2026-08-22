@@ -50,7 +50,7 @@ class LevelSelectScene extends Phaser.Scene {
         c.setInteractive({ useHandCursor: true });
         c.on('pointerdown', () => {
           AudioSys.unlock(); AudioSys.play('click');
-          this.scene.start('Game', { levelId: lv.id });
+          Poki.startLevel(this, lv.id);
         });
         c.on('pointerover', () => c.setScale(1.06));
         c.on('pointerout', () => c.setScale(1));

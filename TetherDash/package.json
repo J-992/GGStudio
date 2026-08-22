@@ -1,15 +1,17 @@
-﻿{
+{
   "name": "tether-dash",
   "version": "0.1.0",
   "private": true,
-  "description": "Fast co-op runner where two toy-factory robots are joined by an elastic bungee cord. Phaser 3, no dependencies, no build step.",
+  "description": "Fast co-op runner where two toy-factory robots are joined by an elastic bungee cord. Phaser 3, no dependencies: the build is a concatenation, not a bundle.",
   "engines": {
     "node": ">=20.19.0"
   },
   "scripts": {
     "dev": "npx -y http-server . -p 8123 -c-1 -o",
     "start": "npx -y http-server . -p 8123 -c-1 -o",
-    "check": "node tools/check.mjs"
+    "check": "node tools/check.mjs",
+    "build:poki": "node tools/build-poki.mjs",
+    "package": "npm run check && npm run build:poki && node tools/package-poki.mjs",
+    "preflight": "node ../scripts/poki/preflight.mjs ."
   }
 }
-
