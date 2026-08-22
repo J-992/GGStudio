@@ -39,16 +39,25 @@ export interface StoreLayout
     rowStep: number;
     rowW: number;
     rowH: number;
+    /**
+     * How many rows of skins one page of the wardrobe holds.
+     *
+     * A wide screen gives the store a column of its own and can afford four;
+     * a phone is showing the store *under* the whole menu, so it gets two and
+     * pages more often. Four rows of tiles down there read as the store having
+     * taken the screen over.
+     */
+    gridRows: number;
     /** Bottom of the shelf. The skin grid pages itself to fit inside it. */
     listBottom: number;
 }
 
 /** The skin grid. Four across is the widest that keeps a name legible. */
 const GRID_COLS = 4;
-const GRID_ROWS = 4;
-const PER_PAGE = GRID_COLS * GRID_ROWS;
 /** Room reserved under the grid for the pager. */
 const PAGER_H = 36;
+/** How tall a tile is allowed to get once the rows stop needing the room. */
+const TILE_MAX_H = 128;
 
 type TabId = 'perks' | 'boosts' | 'skins';
 
@@ -352,8 +361,11 @@ export class StorePanel
 
             for (let p = 0; p < perk.max; p++)
             {
+                //  Pinned to the bottom edge rather than measured down from the
+                //  middle, so a shorter row moves the pips off the effect line
+                //  instead of onto it.
                 pips.fillStyle(p < lvl ? DONE_EDGE : IDLE_EDGE, 1);
-                pips.fillRect(-rowW / 2 + 52 + p * 12, rowH / 2 - 15, 8, 4);
+                pips.fillRect(-rowW / 2 + 52 + p * 12, rowH / 2 - 9, 8, 4);
             }
 
             price.setValue(maxed ? 'MAX' : fmt(cost), !maxed);
@@ -481,19 +493,20 @@ export class StorePanel
      */
     private dealSkins (): void
     {
-        const { x, rowY0, rowW, rowH, listBottom } = this.L;
+        const { x, rowY0, rowW, rowH, gridRows, listBottom } = this.L;
 
+        const perPage = GRID_COLS * gridRows;
         const top = rowY0 - rowH / 2;
         const gapX = 8;
         const tileW = (rowW - gapX * (GRID_COLS - 1)) / GRID_COLS;
-        const tileH = Math.min(104, (listBottom - top - PAGER_H) / GRID_ROWS - 6);
+        const tileH = Math.min(TILE_MAX_H, (listBottom - top - PAGER_H) / gridRows - 6);
         const gapY = 6;
 
-        const pages = Math.ceil(SKINS.length / PER_PAGE);
+        const pages = Math.ceil(SKINS.length / perPage);
 
         this.skinPage = Math.max(0, Math.min(pages - 1, this.skinPage));
 
-        const page = SKINS.slice(this.skinPage * PER_PAGE, (this.skinPage + 1) * PER_PAGE);
+        const page = SKINS.slice(this.skinPage * perPage, (this.skinPage + 1) * perPage);
 
         page.forEach((skin, i) =>
         {
@@ -520,7 +533,7 @@ export class StorePanel
             this.rows.push(tile);
         });
 
-        if (pages > 1) this.rows.push(this.pager(pages, top + GRID_ROWS * (tileH + gapY) + PAGER_H / 2 - 4));
+        if (pages > 1) this.rows.push(this.pager(pages, top + gridRows * (tileH + gapY) + PAGER_H / 2 - 4));
     }
 
     private skinTile (skin: TargetSkin, x: number, y: number, w: number, h: number): GameObjects.Container
@@ -530,8 +543,12 @@ export class StorePanel
         const g = this.scene.add.graphics();
         tile.add(g);
 
-        const artY = -h / 2 + 30;
-        const r = 21;
+        //  The name and the price own the bottom of the tile; the preview gets
+        //  everything above them, centred -- so a shelf with fewer rows on it
+        //  spends the room it saved on bigger faces rather than a bigger gap.
+        const textH = 46;
+        const r = Math.min(28, (h - textH) / 2 - 4);
+        const artY = -h / 2 + (h - textH) / 2;
 
         //  The preview is the real thing: a bought face is drawn from the same
         //  texture the target will wear, and a bought shape from the same path.

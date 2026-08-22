@@ -38,12 +38,16 @@ const L = LANDSCAPE
         mapY: 648,
         mapNameY: 666,
         mapW: Math.min(430, 2 * (W * 0.28 - 40)),
+        //  Stop labels under the rail. A wide screen has the room; see the
+        //  portrait block for why a phone does not.
+        mapNames: true,
         storeHeaderY: 92,
         tabsY: 146,
         rowY0: 210,
         rowStep: 74,
         rowW: 440,
         rowH: 62,
+        gridRows: 4,
         listBottom: H - 62,
         muteX: W - 34,
         muteY: H - 34
@@ -51,21 +55,28 @@ const L = LANDSCAPE
     : {
         gameX: CX,
         storeX: CX,
-        titleY: 72,
-        taglineY: 116,
-        playY: 176,
-        statY: 236,
-        mapHeadY: 274,
-        mapY: 302,
-        mapNameY: 320,
+        titleY: 88,
+        taglineY: 0,
+        playY: 190,
+        statY: 264,
+        mapHeadY: 330,
+        mapY: 358,
+        mapNameY: 0,
         mapW: Math.min(430, W - 100),
-        loadoutY: 380,
-        storeHeaderY: 432,
-        tabsY: 474,
-        rowY0: 534,
-        rowStep: 70,
+        //  Seven nine-pixel captions under a seven-dot rail, on a screen that
+        //  already carries the title, two buttons, three stats, four boost
+        //  chips and the whole store. The heading above the rail already names
+        //  the world the player is actually in, which is the one that matters.
+        mapNames: false,
+        loadoutY: 444,
+        storeHeaderY: 512,
+        tabsY: 556,
+        rowY0: 620,
+        rowStep: 56,
         rowW: 464,
-        rowH: 60,
+        rowH: 52,
+        //  Two rows, not four. See StoreLayout.gridRows.
+        gridRows: 2,
         listBottom: H - 34,
         muteX: W - 30,
         muteY: H - 34
@@ -94,10 +105,14 @@ export class MainMenu extends Scene
 
         this.fx = new Fx(this, 20);
 
+        //  A wider, fainter mesh on a phone: the same grid at 58px is a lot of
+        //  line under a screen that is already full of tiles and chips.
+        const cell = LANDSCAPE ? 58 : 78;
+
         const grid = this.add.graphics().setDepth(0);
-        grid.lineStyle(1, 0x1b2a5e, 0.4);
-        for (let x = 0; x <= W; x += 58) grid.lineBetween(x, 0, x, H);
-        for (let y = 0; y <= H; y += 58) grid.lineBetween(0, y, W, y);
+        grid.lineStyle(1, 0x1b2a5e, LANDSCAPE ? 0.4 : 0.28);
+        for (let x = 0; x <= W; x += cell) grid.lineBetween(x, 0, x, H);
+        for (let y = 0; y <= H; y += cell) grid.lineBetween(0, y, W, y);
 
         this.spawnDemoTargets();
 
@@ -107,9 +122,15 @@ export class MainMenu extends Scene
 
         this.tweens.add({ targets: title, scale: 1.04, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
 
-        this.add.text(L.gameX, L.taglineY, `${LANDSCAPE ? 'CLICK' : 'TAP'} TARGETS  ·  BUILD COMBOS  ·  GET STRONG`, {
-            fontFamily: FONT_UI, fontSize: 15, color: '#7d88b0'
-        }).setOrigin(0.5).setDepth(10);
+        //  The tagline is flavour, and portrait is the layout with no room to
+        //  spare -- on a phone the title and the PLAY button under it say the
+        //  same thing in half the space.
+        if (LANDSCAPE)
+        {
+            this.add.text(L.gameX, L.taglineY, 'CLICK TARGETS  ·  BUILD COMBOS  ·  GET STRONG', {
+                fontFamily: FONT_UI, fontSize: 15, color: '#7d88b0'
+            }).setOrigin(0.5).setDepth(10);
+        }
 
         this.buildPlayButton();
         this.buildStats();
@@ -126,6 +147,7 @@ export class MainMenu extends Scene
             rowStep: L.rowStep,
             rowW: L.rowW,
             rowH: L.rowH,
+            gridRows: L.gridRows,
             listBottom: L.listBottom
         }, () => this.refreshLoadout(), () => this.startRun());
 
@@ -172,8 +194,15 @@ export class MainMenu extends Scene
         const base = DEMO_COLORS[Math.floor(Math.random() * DEMO_COLORS.length)];
         const paint = skin.tint ? skin.tint({ color: base, ring: 0xffffff }) : { color: base, ring: mix(base, 0xffffff, 0.6) };
         const r = 18 + Math.random() * 14;
+
+        //  They drift through the empty part of the menu only. Portrait puts
+        //  the store across the bottom half, and targets wandering behind a
+        //  grid of tiles is movement under something the player is reading.
+        const yTop = 200;
+        const yBot = LANDSCAPE ? H - 130 : L.storeHeaderY - 44;
+
         const x = 40 + Math.random() * (W - 80);
-        const y = 210 + Math.random() * (H - 340);
+        const y = yTop + Math.random() * Math.max(60, yBot - yTop);
 
         const dot = this.add.container(x, y).setDepth(1);
         const g = this.add.graphics();
@@ -403,7 +432,7 @@ export class MainMenu extends Scene
             x: L.gameX,
             headY: L.mapHeadY,
             railY: L.mapY,
-            nameY: L.mapNameY,
+            nameY: L.mapNames ? L.mapNameY : null,
             width: L.mapW
         });
     }

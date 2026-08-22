@@ -40,8 +40,15 @@ export interface TrailLayout
     headY: number;
     /** The rail itself. */
     railY: number;
-    /** World names, under the stops. */
-    nameY: number;
+    /**
+     * World names, under the stops -- or null to draw the rail on its own.
+     *
+     * The caption above the rail already names the world the player is
+     * standing in, which is the only one of the seven they need read out; a
+     * layout with no room to spare drops the other six rather than shrink
+     * everything around them.
+     */
+    nameY: number | null;
     /** How wide the whole route is drawn. */
     width: number;
 }
@@ -111,6 +118,7 @@ export function buildWorldTrail (scene: Scene, fx: Fx, layout: TrailLayout): voi
     }
 
     const nameSize = span >= 400 ? 10 : 9;
+    const nameY = layout.nameY;
 
     progress.forEach((q, i) =>
     {
@@ -140,10 +148,13 @@ export function buildWorldTrail (scene: Scene, fx: Fx, layout: TrailLayout): voi
 
         if (i === here && !beaten) pulse(scene, x, layout.railY, q.zone.palette.accent);
 
-        scene.add.text(x, layout.nameY, q.zone.short, {
-            fontFamily: FONT_UI, fontSize: nameSize,
-            color: q.reached ? hex(mix(color, 0xffffff, 0.35)) : DIM_TEXT
-        }).setOrigin(0.5).setDepth(10);
+        if (nameY !== null)
+        {
+            scene.add.text(x, nameY, q.zone.short, {
+                fontFamily: FONT_UI, fontSize: nameSize,
+                color: q.reached ? hex(mix(color, 0xffffff, 0.35)) : DIM_TEXT
+            }).setOrigin(0.5).setDepth(10);
+        }
     });
 
     buildHit(scene, fx, layout, span);
@@ -169,7 +180,7 @@ function pulse (scene: Scene, x: number, y: number, color: number): void
 function buildHit (scene: Scene, fx: Fx, layout: TrailLayout, span: number): void
 {
     const top = layout.headY - 14;
-    const bottom = layout.nameY + 12;
+    const bottom = (layout.nameY ?? layout.railY + 6) + 12;
     const w = span + 44;
     const h = bottom - top;
 

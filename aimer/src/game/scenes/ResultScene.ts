@@ -172,13 +172,14 @@ export class ResultScene extends Scene
         const shift = offer ? L.shift : 0;
         const primaryLabel = win ? 'PLAY AGAIN' : 'TRY AGAIN';
 
-        //  A fresh run started from here gets the same loadout the menu would
-        //  have given it: whatever is armed is paid for and carried in. Trying
-        //  the failed level again is still the *same* run, so its boosts are
-        //  already spent and still in force -- nothing is charged twice.
+        //  Either button starts a brand new run: level 1, score and rank
+        //  wiped, and the same loadout the menu would have given it -- whatever
+        //  is armed is paid for and carried in. There is no resuming a failed
+        //  run from where it died.
         const playAgain = () =>
         {
-            if (win) { run.reset(); armRun(); }
+            run.reset();
+            armRun();
             this.leave('Game');
         };
 

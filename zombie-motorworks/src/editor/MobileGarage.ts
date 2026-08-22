@@ -1,8 +1,32 @@
-/** Touch-first garage layout controller. */
+/** Compact garage layout controller: touch devices and small viewports. */
 
 import './editor-mobile.css';
 
 import { onTouchControlsChange, shouldUseTouchControls } from '../ui/device.ts';
+
+/**
+ * Viewports where the desktop dock no longer fits beside the rig.
+ *
+ * Portal frames (640x360, 836x470, 1031x580) and every phone aspect land here.
+ * Below this the two sidebars plus the stats stack claim over half the frame,
+ * so the compact layout takes over regardless of pointer type: the vehicle
+ * keeps the screen and each panel opens as one drawer at a time.
+ */
+export const COMPACT_GARAGE_QUERY = '(max-width: 1100px), (max-height: 640px)';
+
+function compactViewportMedia(): MediaQueryList | null {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return null;
+  }
+  return window.matchMedia(COMPACT_GARAGE_QUERY);
+}
+
+/** True when the garage should present its compact, one-panel-at-a-time layout. */
+export function shouldUseCompactGarage(): boolean {
+  return (
+    shouldUseTouchControls() || (compactViewportMedia()?.matches ?? false)
+  );
+}
 import { STORE_PURCHASE_EVENT, type StorePurchaseDetail } from './ui.ts';
 
 const COMPACT_BUTTON_GLYPHS: Readonly<Record<string, string>> = {
@@ -101,6 +125,7 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
   let refreshFrame: number | null = null;
   let listenerController: AbortController | null = null;
   let statsObserver: MutationObserver | null = null;
+  let selectionObserver: MutationObserver | null = null;
   let inventoryHiddenBeforeSheet: boolean | null = null;
   let originalTopbarHeight = '';
   let originalTopbarHeightPriority = '';
@@ -345,13 +370,15 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     actionGroup.setAttribute('role', 'group');
     actionGroup.setAttribute('aria-label', 'Garage screens');
 
-    const names: readonly OpenGarageSheet[] = [
-      'shop',
-      'inventory',
-      'stats',
-      'share',
-    ];
-    for (const name of names) {
+    // Short words that fit under a 16px glyph on a 44px rail: "Parts" is
+    // what an eight-year-old calls the inventory.
+    const labels: Readonly<Record<OpenGarageSheet, string>> = {
+      shop: 'Shop',
+      inventory: 'Parts',
+      stats: 'Stats',
+      share: 'Share',
+    };
+    for (const name of Object.keys(labels) as OpenGarageSheet[]) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'garage-action-bar__button';
@@ -361,8 +388,9 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
       icon.innerHTML = ACTION_ICONS[name];
       const label = document.createElement('span');
       label.className = 'garage-action-bar__label';
-      label.textContent = name.toUpperCase();
+      label.textContent = labels[name].toUpperCase();
       button.append(icon, label);
+      button.title = labels[name];
       button.setAttribute('data-touch-passthrough', '');
       button.setAttribute('aria-controls', ids[name]);
       button.setAttribute('aria-expanded', 'false');
@@ -392,11 +420,16 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     // height unconditionally pushed the notice down onto the vehicle during an
     // ordinary garage visit, so it is measured rather than assumed.
     const runBanner = root.querySelector<HTMLElement>('.run-banner.run-active');
+    const runBannerHeight = runBanner
+      ? Math.round(runBanner.getBoundingClientRect().height)
+      : 0;
+    root.style.setProperty('--garage-run-banner-h', `${runBannerHeight}px`);
+    // Height plus its gap, or nothing: every panel that hangs below the top
+    // bar (rail, drawers, inspector, notice) offsets by this one value, so an
+    // absent banner costs no blank band under the bar.
     root.style.setProperty(
-      '--garage-run-banner-h',
-      runBanner
-        ? `${Math.round(runBanner.getBoundingClientRect().height)}px`
-        : '0px',
+      '--garage-run-banner-clearance',
+      runBannerHeight > 0 ? `${runBannerHeight + 6}px` : '0px',
     );
     updateStatsAlert();
   };
@@ -513,6 +546,18 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     });
     statsObserver = new MutationObserver(updateStatsAlert);
     statsObserver.observe(vehicleStats, { childList: true, subtree: true });
+    // One panel at a time: picking a part on the rig opens its inspector, so
+    // whichever drawer was up steps aside rather than fighting it for the
+    // remaining width.
+    selectionObserver = new MutationObserver(() => {
+      if (root.classList.contains('has-selection') && currentSheet !== 'none') {
+        setSheet('none');
+      }
+    });
+    selectionObserver.observe(root, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
     refresh();
   };
 
@@ -529,6 +574,8 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     listenerController = null;
     statsObserver?.disconnect();
     statsObserver = null;
+    selectionObserver?.disconnect();
+    selectionObserver = null;
     if (refreshFrame !== null) cancelAnimationFrame(refreshFrame);
     refreshFrame = null;
 
@@ -578,11 +625,18 @@ export function installMobileGarage(root: HTMLElement): MobileGarage {
     originalStoreTitle = '';
   };
 
-  const unsubscribe = onTouchControlsChange((enabled) => {
-    if (enabled) install();
+  const sync = (): void => {
+    if (shouldUseCompactGarage()) install();
     else uninstall();
-  });
-  if (shouldUseTouchControls()) install();
+  };
+  const unsubscribeTouch = onTouchControlsChange(sync);
+  const viewportMedia = compactViewportMedia();
+  viewportMedia?.addEventListener('change', sync);
+  const unsubscribe = (): void => {
+    unsubscribeTouch();
+    viewportMedia?.removeEventListener('change', sync);
+  };
+  sync();
 
   return {
     refresh,
