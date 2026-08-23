@@ -17,6 +17,7 @@
       "(^|\\.)steffe\\.se$",
       "(^|\\.)prunegames\\.com$"
     ],
+    "max_bytes": 10485760,
     "node_version": "22",
     "token_git_secret_name": "POKI_UPLOAD_TOKEN_MERGE_NINJA"
   }

@@ -13,6 +13,12 @@ npm run dev:poki       # dev server with the SDK on and setDebug(true): test ads
 npm run dev            # dev server with no portal at all
 ```
 
+Bun runs all of these too — `bun install` in place of `npm ci`, `bun run` in
+place of `npm run`. The CI pipeline in `poki.json` is npm, so `package-lock.json`
+stays the lockfile of record: a dependency added with Bun needs
+`npm install --package-lock-only` after it or the deploy's `npm ci` will fail on
+a lockfile that no longer matches `package.json`.
+
 `--mode poki` is the whole switch. It inlines `__POKI__` as a literal `true`,
 which lets Rollup fold the branch in `src/platform/platform.ts` and drop the
 Poki module out of any other build — a playtest bundle contains no mention of
@@ -108,9 +114,11 @@ the break slots. Plain `npm run dev` has no portal in it and will never show one
 
 ## Known snags
 
-- **The build is ~29 MB**, nearly all of it PNG art in `public/assets/`. It is
-  under Poki's ceiling but well over what a phone on a slow connection wants to
-  pull before the first frame. The atlas and the per-boss catalogs are the place
-  to look first.
+- **The build is ~6 MB** (4.7 MB over the wire), down from ~29 MB: the art was
+  converted to WebP by `tools/optimize_assets.sh` and 114 unreferenced files
+  moved to `art-unused/`. `"max_bytes"` in `poki.json` fails the preflight if it
+  climbs back over 10 MB. What is left is mostly Phaser itself (1.4 MB) and the
+  packed atlas `game.webp` (852 KB), which is kept lossless because it is pixel
+  art — lossy compression bleeds colour across its frame boundaries.
 - **The unverified sprite sheets in `ASSET_LICENSES.md` are still unresolved.**
   That file is the record; read it before this goes in front of players.

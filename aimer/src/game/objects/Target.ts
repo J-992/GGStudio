@@ -7,6 +7,7 @@ import { sa } from '../core/skinart';
 import { TrailId, trailInterval } from '../core/trails';
 import type { Skin, TargetStyle } from '../data/skins';
 import type { Chain } from '../core/chain';
+import type { AbilityId } from '../core/abilities';
 
 const TAU = Math.PI * 2;
 
@@ -17,6 +18,8 @@ export class Target extends GameObjects.Container
     kind: TargetKind;
     def: KindDef;
     radius: number;
+    /** The radius this one was built at. `setBulk` is measured against it. */
+    readonly baseRadius: number;
     hp: number;
     maxHp: number;
     vx = 0;
@@ -44,6 +47,28 @@ export class Target extends GameObjects.Container
     shieldSpin = 0;
     /** Set on the halves a split leaves behind, so they cannot split again. */
     noSplit = false;
+    /**
+     * This target answers to its boss fight and to nothing else.
+     *
+     * The world's rule moves the board every frame -- the crosswind drags, the
+     * reactor turns, the cavern blinks -- and a body that is being moved by its
+     * own fight cannot also be moved by the weather, or the two fight each
+     * other and the weather wins. It used to be enough to ask whether the kind
+     * was `boss`, right up until a fight was built out of nine ordinary
+     * targets welded together: the skyline's wind pushed all nine of the
+     * serpent's links into the right-hand wall and held them there.
+     */
+    warded = false;
+    /**
+     * Nothing kills this one.
+     *
+     * The spam round's drum takes an unlimited number of taps and pays for
+     * every one of them, so its health is not a small number -- it is not a
+     * number at all, and modelling it as one would have meant either a fake
+     * ceiling the player could hit by accident or an integer quietly counting
+     * down towards a bug. `damage` simply refuses instead.
+     */
+    endless = false;
     /**
      * The ordered chain this target is welded into, and where in it it sits.
      *
@@ -104,8 +129,11 @@ export class Target extends GameObjects.Container
      */
     private decalFit = 1;
 
+    /** The ability this orb hands over when it breaks, if it is one. */
+    ability: AbilityId | null = null;
+
     /** The wake this target drags, and the countdown to its next puff. */
-    readonly trail: TrailId | null;
+    trail: TrailId | null;
     private trailTimer = 0;
 
     constructor (scene: Scene, x: number, y: number, kind: TargetKind, baseSize: number, level: number, speed: number, moving: boolean, skin?: Skin, style?: TargetStyle)
@@ -117,6 +145,7 @@ export class Target extends GameObjects.Container
         this.color = skin ? skin.color : this.def.color;
         this.ringColor = skin ? skin.ring : this.def.ring;
         this.radius = baseSize * this.def.sizeMult;
+        this.baseRadius = this.radius;
         this.maxHp = unitHp(level) * this.def.units;
         this.hp = this.maxHp;
         this.progressWorth = this.def.progress;
@@ -263,6 +292,39 @@ export class Target extends GameObjects.Container
         return this;
     }
 
+    /**
+     * Permanently resize the body to `f` of what it was built at -- hit box,
+     * life ring and all.
+     *
+     * The art is pathed once at construction and animated by scale alone (see
+     * the note on the fields above), so a lasting size change is a scale on the
+     * container and a new `radius` for everything that measures the target
+     * rather than draws it. It lands as a flinch that settles into the smaller
+     * size, and it takes the tweens with it: the hit-squash that `damage` has
+     * usually just started would otherwise finish by yoyoing the body back to
+     * the size it was before the hit.
+     */
+    setBulk (f: number): void
+    {
+        this.radius = this.baseRadius * f;
+
+        this.scene.tweens.killTweensOf(this);
+        this.setScale(f * 1.14);
+        this.scene.tweens.add({ targets: this, scale: f, duration: 160, ease: 'Back.out' });
+    }
+
+    /**
+     * Extra dressing laid over the body after construction. The hit flash and
+     * the life ring are raised back over it, so a dressed target still blinks
+     * when it is hit and still shows its clock.
+     */
+    wear (parts: GameObjects.GameObject[]): void
+    {
+        this.add(parts);
+        this.bringToTop(this.flash);
+        this.bringToTop(this.ring);
+    }
+
     setLifetime (ms: number): this
     {
         this.maxLife = ms;
@@ -273,6 +335,12 @@ export class Target extends GameObjects.Container
     /** True when the target died from this hit. */
     damage (amount: number): boolean
     {
+        if (this.endless)
+        {
+            this.flashAmount = 1;
+            return false;
+        }
+
         this.hp -= amount;
         this.flashAmount = 1;
 

@@ -25,16 +25,16 @@ export class BootScene extends Phaser.Scene {
         this.load.image(portrait.textureKey, portrait.texturePath);
       }
     }
-    this.load.image('arena_rift_stage', 'assets/arena-rift-stage.png');
-    this.load.image('arena_cloud_bank', 'assets/arena-cloud-bank.png');
-    this.load.image('dojo_night_backdrop', 'assets/dojo-night-backdrop.png');
-    this.load.image('arena_mountain', 'assets/arena-mountain.png');
-    this.load.image('arena_storm', 'assets/arena-storm.png');
-    this.load.image('arena_shrine', 'assets/arena-shrine.png');
+    this.load.image('arena_rift_stage', 'assets/arena-rift-stage.webp');
+    this.load.image('arena_cloud_bank', 'assets/arena-cloud-bank.webp');
+    this.load.image('dojo_night_backdrop', 'assets/dojo-night-backdrop.webp');
+    this.load.image('arena_mountain', 'assets/arena-mountain.webp');
+    this.load.image('arena_storm', 'assets/arena-storm.webp');
+    this.load.image('arena_shrine', 'assets/arena-shrine.webp');
     for (const floorKey of FLOOR_THEMES_MANIFEST) {
-      this.load.image(floorKey, `assets/${floorKey.replace('_', '-')}.png`);
+      this.load.image(floorKey, `assets/${floorKey.replace('_', '-')}.webp`);
     }
-    this.load.image('dojo_roster_deck', 'assets/dojo-roster-deck.png');
+    this.load.image('dojo_roster_deck', 'assets/dojo-roster-deck.webp');
     for (const id of POWERUP_ORDER) {
       const powerup = POWERUPS[id];
       this.load.image(powerup.iconTexture, powerup.iconPath);
@@ -51,8 +51,8 @@ export class BootScene extends Phaser.Scene {
     // The atlas carries no trophy, and the achievements rail button must not
     // reuse the ascension star: two unrelated systems reading as one control.
     this.load.image(ACHIEVEMENTS_ICON_KEY, ACHIEVEMENTS_ICON_PATH);
-    for (let i = 0; i < 6; i += 1) this.load.image(`tex_${i}`, `assets/tex/tex_${i}.png`);
-    this.load.image('tex_industrial', 'assets/tex/tex_industrial.png');
+    for (let i = 0; i < 6; i += 1) this.load.image(`tex_${i}`, `assets/tex/tex_${i}.webp`);
+    this.load.image('tex_industrial', 'assets/tex/tex_industrial.webp');
   }
 
   create(): void {

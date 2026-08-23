@@ -33,7 +33,7 @@ const strip = (
   id,
   textureKey: `vfx_${id}_strip`,
   animationKey: `vfx_${id}_play`,
-  path: `assets/vfx/vfx-${id}.png`,
+  path: `assets/vfx/vfx-${id}.webp`,
   frameWidth: 256,
   frameHeight: 256,
   frames: 8,

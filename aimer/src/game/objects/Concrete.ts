@@ -213,18 +213,33 @@ export class Concrete
 
         //  Hazard stripes across the face, so it reads as "do not shoot here"
         //  in the same language every other yellow-and-black thing does.
+        //
+        //  Every corner is clamped into the slab, and all four of them matter.
+        //  The first one used to be clamped on the left only -- so the moment a
+        //  stripe started past the slab's right edge it drew a triangle from a
+        //  point far out in open air back to the corner the other three had
+        //  been pinned to, and the loop drew a couple of dozen of those on top
+        //  of each other. At 0.16 alpha they stacked into a solid pale wedge
+        //  hanging off the side of every block in the game.
         const band = Math.max(16, h * 0.26);
+        const step = band * 2;
+        const nib = (v: number): number => Math.max(x, Math.min(x + w, v));
 
-        for (let i = -1; i * band < w + h; i++)
+        //  The slant carries the bottom of a stripe a full height to the left
+        //  of its top, so a stripe that has already left the top of the slab is
+        //  still crossing the bottom of it: the run keeps going for a whole
+        //  extra height past the right edge, or a tall block ends up striped
+        //  across the top and bare underneath.
+        for (let i = -1; i * step < w + h + band; i++)
         {
-            const sx = x + i * band * 2;
+            const sx = x + i * step;
 
             g.fillStyle(this.stripe, 0.16 * t);
             g.beginPath();
-            g.moveTo(Math.max(x, sx), y);
-            g.lineTo(Math.max(x, Math.min(x + w, sx + band)), y);
-            g.lineTo(Math.max(x, Math.min(x + w, sx + band - h)), y + h);
-            g.lineTo(Math.max(x, Math.min(x + w, sx - h)), y + h);
+            g.moveTo(nib(sx), y);
+            g.lineTo(nib(sx + band), y);
+            g.lineTo(nib(sx + band - h), y + h);
+            g.lineTo(nib(sx - h), y + h);
             g.closePath();
             g.fillPath();
         }

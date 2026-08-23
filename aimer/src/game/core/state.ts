@@ -1,3 +1,4 @@
+import type { AbilityId } from './abilities';
 import { baseStats, Stats, UPGRADE_BY_ID } from '../data/upgrades';
 import { pickXpBonus, rankXpBonus, xpForRank } from '../data/rank';
 import { unitHp } from '../data/levels';
@@ -203,9 +204,16 @@ export class Run
      * stop to explain it a second time.
      */
     hazardsSeen: Record<string, boolean> = {};
+    /**
+     * The ability still running when the last screen ended, and how much of
+     * it is left. A weapon always gets its whole clock: it rides through the
+     * doors into the next level, or the cash round, and picks up there.
+     */
+    ability: { id: AbilityId; left: number } | null = null;
 
     reset (): void
     {
+        this.ability = null;
         this.level = 1;
         this.score = 0;
         this.coinsEarned = 0;

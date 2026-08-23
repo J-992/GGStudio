@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { imageSize } from './imageSize';
 import { BOSS_COUNT, bossIdentity } from '../src/data/enemies';
 import { BALANCE } from '../src/data/balance';
 import { NINJAS } from '../src/data/ninjas';
@@ -70,9 +70,7 @@ describe('roster identity', () => {
     expect(animated).toHaveLength(15);
     for (const portrait of animated) {
       expect(portrait.animation).toEqual({ frameWidth: 256, frameHeight: 256 });
-      const png = readFileSync(resolve('public', portrait.texturePath));
-      const width = png.readUInt32BE(16);
-      const height = png.readUInt32BE(20);
+      const [width, height] = imageSize(resolve('public', portrait.texturePath));
       expect(width).toBe(256 * 8);
       expect(height).toBe(256);
     }

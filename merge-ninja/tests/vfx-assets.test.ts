@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { imageSize } from './imageSize';
 import { describe, expect, it } from 'vitest';
 import {
   VFX_ANIMATION_ORDER,
@@ -19,10 +19,9 @@ describe('authored VFX strips', () => {
   it('ships each animation as exactly eight equal 256px RGBA-ready frames', () => {
     for (const id of VFX_ANIMATION_ORDER) {
       const def = VFX_ANIMATIONS[id];
-      const png = readFileSync(resolve(process.cwd(), 'public', def.path));
-      expect(png.subarray(1, 4).toString('ascii')).toBe('PNG');
-      expect(png.readUInt32BE(16)).toBe(def.frameWidth * def.frames);
-      expect(png.readUInt32BE(20)).toBe(def.frameHeight);
+      const [width, height] = imageSize(resolve(process.cwd(), 'public', def.path));
+      expect(width).toBe(def.frameWidth * def.frames);
+      expect(height).toBe(def.frameHeight);
       expect(def.frameWidth).toBe(256);
       expect(def.frameHeight).toBe(256);
       expect(def.frames).toBe(8);

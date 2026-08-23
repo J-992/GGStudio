@@ -1,14 +1,14 @@
 /** The achievements rail button, kept out of the atlas as its own small icon. */
 export const ACHIEVEMENTS_ICON_KEY = 'icon_achievements';
-export const ACHIEVEMENTS_ICON_PATH = 'assets/ui/icon-achievements.png';
+export const ACHIEVEMENTS_ICON_PATH = 'assets/ui/icon-achievements.webp';
 
 /** Dedicated raster assets for the New Ninja ceremony. */
 export const REVEAL_ASSETS = {
-  backdrop: { key: 'new_ninja_reveal_backdrop', path: 'assets/ui/new-ninja-reveal-backdrop.png' },
-  halo: { key: 'new_ninja_reveal_halo', path: 'assets/ui/new-ninja-reveal-halo.png' },
-  plinth: { key: 'new_ninja_reveal_plinth', path: 'assets/ui/new-ninja-reveal-plinth.png' },
-  banner: { key: 'new_ninja_reveal_banner', path: 'assets/ui/new-ninja-reveal-banner.png' },
-  button: { key: 'new_ninja_reveal_button', path: 'assets/ui/new-ninja-reveal-button.png' },
+  backdrop: { key: 'new_ninja_reveal_backdrop', path: 'assets/ui/new-ninja-reveal-backdrop.webp' },
+  halo: { key: 'new_ninja_reveal_halo', path: 'assets/ui/new-ninja-reveal-halo.webp' },
+  plinth: { key: 'new_ninja_reveal_plinth', path: 'assets/ui/new-ninja-reveal-plinth.webp' },
+  banner: { key: 'new_ninja_reveal_banner', path: 'assets/ui/new-ninja-reveal-banner.webp' },
+  button: { key: 'new_ninja_reveal_button', path: 'assets/ui/new-ninja-reveal-button.webp' },
 } as const;
 
 /** Opaque-pixel bounds for frame zero of every ninja strip. */

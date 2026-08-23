@@ -71,5 +71,24 @@ Gameplay rules live in `src/core`, `src/data`, and `src/systems` without Phaser
 dependencies. Phaser presentation lives in `src/arena`, `src/effects`,
 `src/scenes`, and `src/ui`. Balance values live in `src/data/balance.ts`.
 
+## Assets
+
+Shipped art in `public/assets/` is **WebP**, not PNG — the conversion takes the
+build from ~29 MB to ~6 MB. The Python tools in `tools/` still emit PNG, so
+anything that regenerates a sheet (`pack_atlas.py`, `extract_ui.py`,
+`make_arena.py`) must be followed by:
+
+```bash
+./tools/optimize_assets.sh
+```
+
+That converts each new PNG at the quality its class calls for and removes the
+PNG. Skipping it is quiet rather than loud: the game goes on loading the older
+`.webp` and the regenerated art simply never appears. The one deliberate
+exception is `font.png`, a 984-byte bitmap font that has to stay pixel-exact.
+
+Art that nothing loads lives in `art-unused/` and is not built; see the README
+there before wiring a tier up.
+
 Asset provenance and the one remaining publication-license warning are tracked
 in `ASSET_LICENSES.md`. The warning does not block private playtesting.

@@ -26,7 +26,7 @@ const def = (overrides: Partial<PowerupDef> & Pick<PowerupDef, 'id'>): PowerupDe
   ({
     label: 'TEST',
     iconTexture: 'powerup_test',
-    iconPath: 'assets/powerups/test.png',
+    iconPath: 'assets/powerups/test.webp',
     cadence: { firstSpawnMs: 10_000, minGapMs: 5_000, maxGapMs: 9_000 },
     travelMs: 11_500,
     tapRadiusPx: 62,
@@ -74,7 +74,7 @@ describe('powerup data', () => {
     const paths = POWERUP_ORDER.map((id) => POWERUPS[id].iconPath);
     expect(new Set(textures).size).toBe(POWERUP_ORDER.length);
     expect(new Set(paths).size).toBe(POWERUP_ORDER.length);
-    for (const path of paths) expect(path).toMatch(/^assets\/powerups\/.+\.png$/);
+    for (const path of paths) expect(path).toMatch(/^assets\/powerups\/.+\.webp$/);
   });
 
   it('keeps labels uppercase-safe', () => {

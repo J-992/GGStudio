@@ -33,9 +33,33 @@ export interface FirstPlayVictoryView {
 }
 
 export interface FirstPlayVictoryHandlers {
-  /** The one button: hand the player to the Garage and the rig picker. */
+  /** Survival: hand the player to the Garage and the rig picker. */
   onStartRun(): void;
+  /**
+   * Creative: skip the campaign entirely and open the sandbox garage with the
+   * whole catalog in hand. Optional so an embedder that has no sandbox to give
+   * simply gets the one button.
+   */
+  onCreativeMode?(): void;
 }
+
+/** A wrecked rig over a wheel: the run you have to earn. */
+const SURVIVAL_ICON_SVG =
+  `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+  `<path d="M2 10h9v6H2z" fill="currentColor"/>` +
+  `<path d="M13 7h5l4 5v4h-9z" fill="currentColor"/>` +
+  `<circle cx="6" cy="19" r="3" fill="currentColor"/>` +
+  `<circle cx="17" cy="19" r="3" fill="currentColor"/>` +
+  `<path d="M6 2v5M10 3v4M2 4v3" stroke="currentColor" stroke-width="2"/>` +
+  `</svg>`;
+
+/** A wrench over a full parts crate — the same mark the title screen uses. */
+const CREATIVE_ICON_SVG =
+  `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+  `<path d="M3 13h18v8H3z" fill="none" stroke="currentColor" stroke-width="2"/>` +
+  `<path d="M3 16h18v2H3z" fill="currentColor"/>` +
+  `<path d="M14 2a5 5 0 0 0-4 8l-6 0v3h3l7-7a5 5 0 0 0 0-4z" fill="currentColor"/>` +
+  `</svg>`;
 
 /** Sparks thrown out of the card when it lands. */
 const SPARK_COUNT = 34;
@@ -64,7 +88,8 @@ export class FirstPlayVictory {
 
   private readonly sparkLayer: HTMLDivElement;
   private readonly stats: StatCell[] = [];
-  private readonly cta: HTMLButtonElement;
+  private readonly choices: HTMLDivElement;
+  private readonly ctas: HTMLButtonElement[] = [];
   private readonly timeouts = new Set<number>();
   private animationFrame = 0;
   private handlers: FirstPlayVictoryHandlers | null;
@@ -103,14 +128,36 @@ export class FirstPlayVictory {
 
     const note = element('p', 'first-play-victory__note');
     note.textContent =
-      'That rig was a loaner. Pick your own and spend what you just earned on it.';
+      'That rig was a loaner. Pick how you want to play — the next one is yours to build.';
 
-    this.cta = element('button', 'first-play-victory__cta');
-    this.cta.type = 'button';
-    this.cta.textContent = 'Start Run';
-    this.cta.addEventListener('click', this.onCtaClick);
+    // Two doors out, side by side and equally weighted: the campaign loop, or
+    // the sandbox. Survival is styled as the lit one because it is the game the
+    // wave they just played was a sample of, but Creative is a real button
+    // rather than a link buried under it — a player who came here to build
+    // should not have to earn the right to.
+    this.choices = element('div', 'first-play-victory__choices');
+    this.ctas.push(
+      this.buildChoice({
+        variant: 'survival',
+        label: 'Survival',
+        blurb: 'Earn, upgrade, hold the line.',
+        icon: SURVIVAL_ICON_SVG,
+        run: () => this.handlers?.onStartRun(),
+      }),
+    );
+    if (handlers.onCreativeMode !== undefined) {
+      this.ctas.push(
+        this.buildChoice({
+          variant: 'creative',
+          label: 'Creative',
+          blurb: 'Every part, no limits.',
+          icon: CREATIVE_ICON_SVG,
+          run: () => this.handlers?.onCreativeMode?.(),
+        }),
+      );
+    }
 
-    card.append(eyebrow, title, lede, statRow, note, this.cta);
+    card.append(eyebrow, title, lede, statRow, note, this.choices);
     this.root.append(rays, card, this.sparkLayer);
     parent.appendChild(this.root);
   }
@@ -135,8 +182,10 @@ export class FirstPlayVictory {
     this.root.classList.remove('is-in');
     void this.root.offsetWidth;
     this.root.classList.add('is-in');
-    this.cta.classList.remove('is-in');
-    this.cta.disabled = true;
+    for (const cta of this.ctas) {
+      cta.classList.remove('is-in');
+      cta.disabled = true;
+    }
 
     playSfx('waveClear');
     this.after(SPARK_DELAY_MS, () => {
@@ -145,11 +194,14 @@ export class FirstPlayVictory {
     });
     this.after(COUNT_DELAY_MS, () => this.startCountUp());
     this.after(CTA_DELAY_MS, () => {
-      this.cta.disabled = false;
-      this.cta.classList.add('is-in');
-      // Focused so Enter works and so a screen reader lands on the only thing
-      // there is to do. It cannot be pressed before this: it was disabled.
-      this.cta.focus();
+      for (const cta of this.ctas) {
+        cta.disabled = false;
+        cta.classList.add('is-in');
+      }
+      // Survival is focused so Enter works and so a screen reader lands on the
+      // default choice; Creative is one Tab away. Neither can be pressed before
+      // this: both were disabled.
+      this.ctas[0]?.focus();
     });
   }
 
@@ -165,21 +217,49 @@ export class FirstPlayVictory {
     this.disposed = true;
     this.handlers = null;
     this.clearTimers();
-    this.cta.removeEventListener('click', this.onCtaClick);
     this.root.remove();
   }
 
-  private readonly onCtaClick = (): void => {
-    if (this.disposed || this.cta.disabled) return;
-    // No click cue here: the survival UI layer already plays one for every
-    // button in it, and two would fire on the same press.
-    //
-    // Read before the handler runs, because it disposes this mode — and with
-    // it this component — before returning.
-    const handlers = this.handlers;
-    this.hide();
-    handlers?.onStartRun();
-  };
+  /**
+   * One of the two exits. The button carries an icon, a name and a line of
+   * copy, plus a sweep element the CSS runs a shine across.
+   *
+   * `run` is captured before `hide`, because the handler it calls tears this
+   * mode — and with it this component — down before returning.
+   */
+  private buildChoice(spec: {
+    variant: 'survival' | 'creative';
+    label: string;
+    blurb: string;
+    icon: string;
+    run: () => void;
+  }): HTMLButtonElement {
+    const button = element('button', 'first-play-victory__cta');
+    button.classList.add(`first-play-victory__cta--${spec.variant}`);
+    button.type = 'button';
+    button.disabled = true;
+
+    const glyph = element('span', 'first-play-victory__cta-glyph');
+    glyph.setAttribute('aria-hidden', 'true');
+    glyph.innerHTML = spec.icon;
+    const label = element('span', 'first-play-victory__cta-label');
+    label.textContent = spec.label;
+    const blurb = element('span', 'first-play-victory__cta-blurb');
+    blurb.textContent = spec.blurb;
+    const shine = element('span', 'first-play-victory__cta-shine');
+    shine.setAttribute('aria-hidden', 'true');
+    button.append(glyph, label, blurb, shine);
+
+    button.addEventListener('click', () => {
+      if (this.disposed || button.disabled) return;
+      // No click cue here: the survival UI layer already plays one for every
+      // button in it, and two would fire on the same press.
+      this.hide();
+      spec.run();
+    });
+    this.choices.appendChild(button);
+    return button;
+  }
 
   private buildStat(
     parent: HTMLElement,

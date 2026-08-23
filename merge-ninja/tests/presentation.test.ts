@@ -25,7 +25,7 @@ describe('New Ninja ceremony art', () => {
     const assets = Object.values(REVEAL_ASSETS);
     expect(new Set(assets.map((asset) => asset.key)).size).toBe(assets.length);
     expect(new Set(assets.map((asset) => asset.path)).size).toBe(assets.length);
-    for (const asset of assets) expect(asset.path).toMatch(/^assets\/ui\/new-ninja-reveal-.+\.png$/);
+    for (const asset of assets) expect(asset.path).toMatch(/^assets\/ui\/new-ninja-reveal-.+\.webp$/);
   });
 
   it('rigs every ninja reveal to visible pixels inside its source frame', () => {

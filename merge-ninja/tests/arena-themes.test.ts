@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { imageSize } from './imageSize';
 import { describe, expect, it } from 'vitest';
 import {
   ARENA_THEMES,
@@ -12,18 +12,15 @@ import {
 const LAST_STAGE = 80;
 const BOUNDARIES = new Set([10, 19, 28, 37]);
 const BACKDROP_FILES: Readonly<Record<string, string>> = {
-  dojo_night_backdrop: 'dojo-night-backdrop.png',
-  arena_mountain: 'arena-mountain.png',
-  arena_storm: 'arena-storm.png',
-  arena_rift_stage: 'arena-rift-stage.png',
-  arena_shrine: 'arena-shrine.png',
+  dojo_night_backdrop: 'dojo-night-backdrop.webp',
+  arena_mountain: 'arena-mountain.webp',
+  arena_storm: 'arena-storm.webp',
+  arena_rift_stage: 'arena-rift-stage.webp',
+  arena_shrine: 'arena-shrine.webp',
 };
 
-const pngDimensions = (filename: string): readonly [number, number] => {
-  const png = readFileSync(resolve(process.cwd(), 'public', 'assets', filename));
-  expect(png.subarray(1, 4).toString('ascii')).toBe('PNG');
-  return [png.readUInt32BE(16), png.readUInt32BE(20)];
-};
+const backdropDimensions = (filename: string): readonly [number, number] =>
+  imageSize(resolve(process.cwd(), 'public', 'assets', filename));
 
 describe('arena theme data', () => {
   it('resolves stages 1..80 deterministically and monotonically through the acts', () => {
@@ -73,9 +70,9 @@ describe('arena theme data', () => {
   });
 
   it('holds every act backdrop to the stage-1 source resolution', () => {
-    const stageOneDimensions = pngDimensions(BACKDROP_FILES.dojo_night_backdrop!);
+    const stageOneDimensions = backdropDimensions(BACKDROP_FILES.dojo_night_backdrop!);
     for (const key of THEMES_MANIFEST) {
-      expect(pngDimensions(BACKDROP_FILES[key]!)).toEqual(stageOneDimensions);
+      expect(backdropDimensions(BACKDROP_FILES[key]!)).toEqual(stageOneDimensions);
     }
     expect(stageOneDimensions).toEqual([1672, 941]);
   });

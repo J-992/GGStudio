@@ -1234,6 +1234,26 @@ export class App {
     this.openEditor();
   }
 
+  /**
+   * The other way out of the first wave: straight into Creative.
+   *
+   * The tutorial wave is a campaign run, so leaving it this way has to throw
+   * that run away rather than leave a wave-one checkpoint on disk for the next
+   * "Continue" to resume on a loaner rig the player never chose. The money the
+   * wave paid is already banked on the campaign profile and stays there —
+   * `enterSandboxMode` flushes it to disk before sealing it away — so the
+   * campaign is waiting, intact, whenever they come back to the title.
+   *
+   * The rig picker is also dropped: Creative hands out the beginner chassis and
+   * the whole catalog, which makes a "choose your Build" dialog a choice about
+   * nothing.
+   */
+  private beginCreativeFromFirstPlay(): void {
+    runSaveStore.clear();
+    this.pendingIsNewGame = false;
+    this.beginCreativeRun();
+  }
+
   private beginContinueGame(): void {
     this.disposeTitle();
     this.resetSessionState();
@@ -1428,74 +1448,75 @@ export class App {
       bp,
       firstPlay ? { ...run, firstPlay: true } : run,
       {
-      profileMoney: () => this.profile.money,
-      runEarnings: () => this.runMoneyEarned,
-      onRepairAll: (cost) => this.repairRunInPlace(cost),
-      missingPartsQuote: () => this.missingPartsQuote(),
-      onFullRepairRebuild: (
-        cost,
-        state,
-        survivingPartIds,
-        partHp,
-        kills,
-        score,
-      ) =>
-        this.repairRebuildAndRedeploy(
+        profileMoney: () => this.profile.money,
+        runEarnings: () => this.runMoneyEarned,
+        onRepairAll: (cost) => this.repairRunInPlace(cost),
+        missingPartsQuote: () => this.missingPartsQuote(),
+        onFullRepairRebuild: (
           cost,
           state,
           survivingPartIds,
           partHp,
           kills,
           score,
-        ),
-      onReward: (amount) => this.creditRunReward(amount),
-      onExit: () => this.abandonRun(),
-      onWaveAdvance: (state, survivingPartIds, partHp, kills, score) => {
-        this.commitClearedWaveCheckpoint(
-          state.wave,
-          survivingPartIds,
-          partHp,
-          kills,
-          score,
-          state.elapsedSeconds ?? 0,
-        );
-        this.activeRun = { wave: state.wave };
-        this.persistRunCheckpoint('wave');
-      },
-      onBuildPhase: (state, survivingPartIds, partHp, kills, score) =>
-        this.enterBuildPhase(state, survivingPartIds, partHp, kills, score),
-      onWaveCheckpoint: (state, survivingPartIds, partHp, kills, score) => {
-        this.commitClearedWaveCheckpoint(
-          state.wave,
-          survivingPartIds,
-          partHp,
-          kills,
-          score,
-          state.elapsedSeconds ?? 0,
-        );
-        this.persistRunCheckpoint('wave');
-      },
-      onGameOver: (state, pendingMoneyDiscarded, score, kills) =>
-        this.concludeRun(state, pendingMoneyDiscarded, score, kills),
-      onGameOverContinue: () => this.continueFromGameOver(),
-      onGameOverMenu: () => this.leaveFinishedRun(),
-      onResetWave: (state) => this.resetSurvivalWave(state),
-      onReturnToGarage: (state) => this.returnToGarageMidWave(state),
-      onCheatInfiniteMoney: () => this.grantInfiniteMoney(),
-      onPhoneAddictKilled: () => {
-        recordPhoneAddictKilled(this.profile);
-        this.markProfileDirty();
-      },
-      onPartSalvaged: (defId) => {
-        if (recordSalvagedPart(this.profile, defId)) this.markProfileDirty();
-      },
-      onWaveCleared: (wave) => {
-        recordWaveCleared(this.profile, wave);
-        this.markProfileDirty();
-      },
-      onSaveAndQuit: () => this.saveAndQuitRun(),
-      onGameplayActiveChanged: (active) => setPlatformGameplayActive(active),
-      onResumeFromPause: () => this.breakBeforeGameplay(),
+        ) =>
+          this.repairRebuildAndRedeploy(
+            cost,
+            state,
+            survivingPartIds,
+            partHp,
+            kills,
+            score,
+          ),
+        onReward: (amount) => this.creditRunReward(amount),
+        onExit: () => this.abandonRun(),
+        onWaveAdvance: (state, survivingPartIds, partHp, kills, score) => {
+          this.commitClearedWaveCheckpoint(
+            state.wave,
+            survivingPartIds,
+            partHp,
+            kills,
+            score,
+            state.elapsedSeconds ?? 0,
+          );
+          this.activeRun = { wave: state.wave };
+          this.persistRunCheckpoint('wave');
+        },
+        onBuildPhase: (state, survivingPartIds, partHp, kills, score) =>
+          this.enterBuildPhase(state, survivingPartIds, partHp, kills, score),
+        onFirstPlayCreative: () => this.beginCreativeFromFirstPlay(),
+        onWaveCheckpoint: (state, survivingPartIds, partHp, kills, score) => {
+          this.commitClearedWaveCheckpoint(
+            state.wave,
+            survivingPartIds,
+            partHp,
+            kills,
+            score,
+            state.elapsedSeconds ?? 0,
+          );
+          this.persistRunCheckpoint('wave');
+        },
+        onGameOver: (state, pendingMoneyDiscarded, score, kills) =>
+          this.concludeRun(state, pendingMoneyDiscarded, score, kills),
+        onGameOverContinue: () => this.continueFromGameOver(),
+        onGameOverMenu: () => this.leaveFinishedRun(),
+        onResetWave: (state) => this.resetSurvivalWave(state),
+        onReturnToGarage: (state) => this.returnToGarageMidWave(state),
+        onCheatInfiniteMoney: () => this.grantInfiniteMoney(),
+        onPhoneAddictKilled: () => {
+          recordPhoneAddictKilled(this.profile);
+          this.markProfileDirty();
+        },
+        onPartSalvaged: (defId) => {
+          if (recordSalvagedPart(this.profile, defId)) this.markProfileDirty();
+        },
+        onWaveCleared: (wave) => {
+          recordWaveCleared(this.profile, wave);
+          this.markProfileDirty();
+        },
+        onSaveAndQuit: () => this.saveAndQuitRun(),
+        onGameplayActiveChanged: (active) => setPlatformGameplayActive(active),
+        onResumeFromPause: () => this.breakBeforeGameplay(),
       },
     );
     this.survival.resize(this.root.clientWidth, this.root.clientHeight);
