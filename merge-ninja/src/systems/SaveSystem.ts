@@ -58,6 +58,8 @@ export interface MetaState {
   discoveredTiers?: number[];
   /** True once the full-roster fanfare has fired. It must never fire twice. */
   collectionCelebrated?: boolean;
+  /** True once the first-run buy, merge, and powerup coach has been completed. */
+  tutorialCompleted?: boolean;
 }
 
 /** Safely persists complete runs while treating browser storage as optional. */
@@ -171,6 +173,7 @@ export class SaveSystem {
       state.seenBosses = this.cleanIndexList(meta.seenBosses, 0, BOSS_COUNT - 1);
       state.discoveredTiers = this.cleanIndexList(meta.discoveredTiers, 1, BALANCE.tiers.count);
       if (meta.collectionCelebrated === true) state.collectionCelebrated = true;
+      if (meta.tutorialCompleted === true) state.tutorialCompleted = true;
       return state;
     } catch {
       return null;

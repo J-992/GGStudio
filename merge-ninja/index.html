@@ -36,11 +36,91 @@
         padding: env(safe-area-inset-top) env(safe-area-inset-right)
           env(safe-area-inset-bottom) env(safe-area-inset-left);
       }
+
+      /* The loading screen.
+
+         All of this is inline, in the head, so it paints on the browser's first
+         frame -- before the module script is fetched, let alone before Phaser
+         has parsed. The art arrives in two stages: a ~1 KB blur inlined as a
+         data URI that is on screen immediately, and the real 720px art as one
+         preloaded request that fades over it. Inlining the real art instead
+         would have cost 64 KB in the document, paid before any paint at all. */
+      #splash {
+        position: fixed; inset: 0; z-index: 10;
+        background: #0a0a10;
+        display: flex; align-items: center; justify-content: center;
+        opacity: 1; transition: opacity 420ms ease-out;
+      }
+      #splash.is-done { opacity: 0; pointer-events: none; }
+
+      /* The art is square and the game runs both orientations, so the box is
+         sized to the smaller viewport axis and everything inside it is
+         positioned in percentages. That is what keeps the live bar registered
+         with the groove painted into the art at every window size. */
+      #splash-art {
+        position: relative;
+        width: min(100vw, 100vh, 900px);
+        aspect-ratio: 1 / 1;
+        background: url("__SPLASH_PLACEHOLDER__") center / cover no-repeat;
+      }
+      #splash-full {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        opacity: 0; transition: opacity 260ms ease-out;
+      }
+      #splash-full.is-ready { opacity: 1; }
+
+      /* Coordinates come from tools/make_splash.py, measured off the art. */
+      #splash-track {
+        position: absolute;
+        left: __TRACK_LEFT__; top: __TRACK_TOP__;
+        width: __TRACK_WIDTH__; height: __TRACK_HEIGHT__;
+        overflow: hidden;
+      }
+      #splash-fill {
+        width: 0%; height: 100%;
+        transition: width 200ms linear;
+        /* The art's own bar colours: violet at the left, cyan at the head. */
+        background: linear-gradient(90deg, #7b1fd0 0%, #a83ce8 38%, #4fc9ee 82%, #7ef0f5 100%);
+        background-size: 100% 100%;
+        position: relative;
+      }
+      /* A sheen travelling along the filled part, so the bar is visibly working
+         even while a single large file is in flight and the width is not moving.
+         A bar that only moves on progress events is indistinguishable from a
+         stalled one for whole seconds at a time. */
+      #splash-fill::after {
+        content: "";
+        position: absolute; inset: 0;
+        background: linear-gradient(
+          100deg,
+          rgba(255, 255, 255, 0) 30%,
+          rgba(255, 255, 255, 0.45) 50%,
+          rgba(255, 255, 255, 0) 70%
+        );
+        background-size: 220% 100%;
+        animation: splash-sheen 1.15s linear infinite;
+      }
+      @keyframes splash-sheen {
+        from { background-position: 160% 0; }
+        to { background-position: -60% 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #splash, #splash-full, #splash-fill { transition: none; }
+        #splash-fill::after { animation: none; opacity: 0; }
+      }
     </style>
   </head>
   <body>
     <div id="safe-probe" aria-hidden="true"></div>
     <div id="game"></div>
+    <div id="splash" role="status" aria-live="polite" aria-label="Loading">
+      <div id="splash-art">
+        <img id="splash-full" src="./assets/loading-splash.webp" alt=""
+             decoding="async" onload="this.classList.add('is-ready')" />
+        <div id="splash-track"><div id="splash-fill"></div></div>
+      </div>
+    </div>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

@@ -74,7 +74,9 @@ describe('arena theme data', () => {
     for (const key of THEMES_MANIFEST) {
       expect(backdropDimensions(BACKDROP_FILES[key]!)).toEqual(stageOneDimensions);
     }
-    expect(stageOneDimensions).toEqual([1672, 941]);
+    // Design width is 1440 (theme.ts DESIGN_WIDTH.landscape), so nothing ever
+    // drew these at their old 1672 and the extra pixels were pure download.
+    expect(stageOneDimensions).toEqual([1440, 810]);
   });
 
   it('manifest matches the expected BootScene preload list exactly', () => {

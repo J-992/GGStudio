@@ -126,6 +126,16 @@ describe('save system', () => {
     expect(game.board.at(0)?.tier).toBe(1);
   });
 
+  it('keeps first-run tutorial completion in meta progression', () => {
+    const storage = new FakeStorage();
+    const first = new GameCore({ storage, now: () => 0 });
+    expect(first.tutorialCompleted).toBe(false);
+
+    first.completeTutorial();
+    const returning = new GameCore({ storage, now: () => 0 });
+    expect(returning.tutorialCompleted).toBe(true);
+  });
+
   it('migrates a legacy 50-tier save into the curated 29-tier roster', () => {
     const storage = new FakeStorage();
     storage.setItem(

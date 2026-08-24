@@ -67,3 +67,26 @@ export function vfxDurationMs(id: VfxAnimationId): number {
   const def = VFX_ANIMATIONS[id];
   return Math.round((def.frames / def.frameRate) * 1_000);
 }
+
+/**
+ * What to draw for an effect whose strip has not arrived yet.
+ *
+ * The strips are 398 KB and the game used to wait for all of them before its
+ * first frame, for effects that first fire a second or two into play. They now
+ * stream in at the head of the deferred queue, which leaves a brief window
+ * where an effect can be asked for before its animation exists.
+ *
+ * Every entry here is a frame already inside the packed atlas, which is always
+ * loaded -- so the effect still happens, still in the right place and the right
+ * colour, just as a single frame instead of an eight-frame cycle. That is the
+ * same trade the roster portraits make in `render/portraitTexture.ts`.
+ */
+export const VFX_STANDIN_FRAME: Readonly<Record<VfxAnimationId, string>> = {
+  slash: 'fx_slash',
+  smoke: 'fx_puff',
+  shockwave: 'fx_ring',
+  portal: 'vfx_portal',
+  flame: 'vfx_flame',
+  lightning: 'vfx_bolt_a',
+  merge: 'fx_spark',
+};

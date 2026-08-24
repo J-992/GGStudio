@@ -88,6 +88,25 @@ export class ArenaScenery extends Phaser.GameObjects.Container {
   }
 
   /**
+   * Re-applies the current act's textures now that more art may have arrived.
+   *
+   * Rooms past the opening one stream in behind the running game, and a player
+   * on a slow connection can cross a theme boundary before that room's backdrop
+   * lands. `setStage` would have switched to it and returned early on every
+   * later call, leaving the arena showing Phaser's missing-texture pattern for
+   * the rest of the session. Backdrops have no stand-in the way portraits do,
+   * so the recovery has to be an explicit re-apply.
+   *
+   * Cheap and idempotent: setting an image to the texture it already has is a
+   * no-op, so this can run after every batch without being conditional.
+   */
+  refreshTextures(): void {
+    this.backdrop.setTexture(this.currentTheme.backdropKey);
+    this.floor.setTexture(this.currentTheme.floorTextureKey);
+    this.relayout();
+  }
+
+  /**
    * Selects the act belonging to `stage`. The incoming backdrop and floor sit
    * above the current pair during the dissolve, then hand their textures back
    * to the stable images so repeated stage changes never grow the scene graph.

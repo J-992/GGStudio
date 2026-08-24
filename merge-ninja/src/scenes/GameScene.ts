@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GameCore } from '../core/GameCore';
 import { ArenaManager } from '../arena/ArenaManager';
+import { DEFERRED_ART_BATCH, streamDeferredArt } from '../render/deferredArt';
 import { CombatDirector } from '../arena/CombatDirector';
 import { VFXManager } from '../effects/VFXManager';
 import { PowerupAuras } from '../effects/PowerupAuras';
@@ -28,6 +29,7 @@ import { PowerupPickups } from '../ui/PowerupPickups';
 import { LowHealthWarning } from '../ui/LowHealthWarning';
 import { GameOverPanel } from '../ui/GameOverPanel';
 import { StageBanner } from '../ui/StageBanner';
+import { FirstRunTutorial } from '../ui/FirstRunTutorial';
 import { BALANCE } from '../data/balance';
 import { BOSS_COUNT } from '../data/enemies';
 import { previewSeedPlan } from '../data/devPreview';
@@ -66,6 +68,7 @@ export class GameScene extends Phaser.Scene {
   private potion!: HealthPotion;
   private powerups!: PowerupPickups;
   private lowHealth!: LowHealthWarning;
+  private tutorial!: FirstRunTutorial;
   private gameOver!: GameOverPanel;
   private stageBanner!: StageBanner;
   private ascension!: AscensionButton;
@@ -152,6 +155,17 @@ export class GameScene extends Phaser.Scene {
     this.timeClock = new TimeClock(this, this.core, this.fx, this.sfx, () => this.modalOpen);
     this.potion = new HealthPotion(this, this.core, this.fx, this.sfx, () => this.modalOpen);
     this.powerups = new PowerupPickups(this, this.core, this.fx, this.sfx, () => this.modalOpen);
+    this.tutorial = new FirstRunTutorial(this, this.core, {
+      buy: () => new Phaser.Math.Vector2(theme.layout.buy.x, theme.layout.buy.y),
+      ninja: (slot) => {
+        const pos = this.board.slotPos(slot);
+        return new Phaser.Math.Vector2(pos.x, pos.y - 66 * theme.layout.slots.spriteScale);
+      },
+      powerup: (id) => {
+        const pos = this.powerups.posOf(id);
+        return pos === null ? null : new Phaser.Math.Vector2(pos.x, pos.y);
+      },
+    });
     this.lowHealth = new LowHealthWarning(this);
     this.stageBanner = new StageBanner(this);
     this.settings = new SettingsPanel(this, this.sfx, () => this.restartRun());
@@ -180,6 +194,15 @@ export class GameScene extends Phaser.Scene {
       if (offline === null) announce();
       else this.time.delayedCall(1900, announce);
     }
+
+    // The board is up and playable; the rest of the art can arrive around it.
+    // Each batch that lands re-syncs the arena so any sprite currently showing
+    // a stand-in frame picks up its real portrait -- see render/deferredArt.ts.
+    this.events.on(DEFERRED_ART_BATCH, () => {
+      this.arena.scenery.refreshTextures();
+      this.arena.sync();
+    });
+    streamDeferredArt(this);
 
     this.scale.on('resize', this.onResize, this);
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -578,6 +601,7 @@ export class GameScene extends Phaser.Scene {
     this.timeClock.relayout();
     this.potion.relayout();
     this.powerups.relayout();
+    this.tutorial.relayout();
     this.lowHealth.relayout();
     this.stageBanner.relayout();
     this.ascension.relayout();
@@ -609,6 +633,7 @@ export class GameScene extends Phaser.Scene {
     this.timeClock.update(dt);
     this.potion.update(dt);
     this.powerups.update(dt);
+    this.tutorial.update();
     this.powerAuras.update(dt);
     this.lowHealth.setDanger(this.core.lowHealth);
     this.arena.update(dt);
@@ -673,6 +698,7 @@ export class GameScene extends Phaser.Scene {
       },
       powerupHud: () => ({ active: this.core.powerups.activeEffects(), hud: this.core.powerups.hudState(), charges: this.core.powerups.wardCharges }),
       powerupActivate: (id: PowerupId) => this.core.collectPowerup(id),
+      tutorialActive: () => this.tutorial.isActive,
       coinFrenzyCoins: () => this.powerups.liveRainCoins.map((coin) => this.toPage(coin.x, coin.y)),
       coinFrenzyState: () => this.core.coinFrenzyState,
       lowHealthWarning: () => this.lowHealth.isShowing,

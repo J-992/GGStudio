@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { ninjaDef } from '../data/ninjas';
 import { ninjaIdleFrameAt } from '../data/presentation';
 import { FLAME_SHOGUN_TIER, ninjaCatalogPortrait } from '../render/atlasConfig';
+import { portraitTexture } from '../render/portraitTexture';
 
 /**
  * Where the ink actually sits inside the 128px character frame, measured from
@@ -41,14 +42,10 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
     scene.add.existing(this);
 
     const def = ninjaDef(tier);
-    const catalogPortrait = ninjaCatalogPortrait(tier);
-    this.hasFrameAnimation = catalogPortrait?.animation !== undefined;
+    const art = portraitTexture(scene, def, ninjaCatalogPortrait(tier));
+    this.hasFrameAnimation = art.animated;
     this.pose = new Phaser.GameObjects.Container(scene, 0, 0);
-    this.image = scene.add.sprite(
-      0,
-      -64 + (catalogPortrait?.footInset ?? 0),
-      def.textureKey,
-    );
+    this.image = scene.add.sprite(0, -64 + art.footInset, art.key, art.frame);
     // The final supplied evolution is intentionally wide. Normalising from
     // frame height keeps it fully inside a roster cell.
     this.image.setScale(128 / this.image.frame.height).setTint(def.artTint);

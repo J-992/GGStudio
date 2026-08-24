@@ -95,6 +95,8 @@ export class GameCore {
   private achievementTimer = 0;
   /** True once the full-roster fanfare has fired, ever. Meta-scoped so it survives every future session. */
   private collectionCelebratedFlag: boolean;
+  /** First-run coach completion is lifetime state, just like the almanac. */
+  private tutorialCompletedFlag: boolean;
 
   constructor(opts: { storage?: StorageLike | null; now?: () => number } = {}) {
     const storage = opts.storage === undefined ? this.defaultStorage() : opts.storage;
@@ -109,6 +111,9 @@ export class GameCore {
     this.lastVisitDay = meta?.lastVisitDay ?? null;
     this.daysVisited = meta?.daysVisited ?? 0;
     this.collectionCelebratedFlag = meta?.collectionCelebrated === true;
+    // Existing players should never be dropped into a tutorial after updating.
+    // A missing meta record is the one unambiguous first-ever session.
+    this.tutorialCompletedFlag = meta?.tutorialCompleted ?? (meta !== null || saved !== null);
     this.economy = new EconomySystem(saved?.coins);
     this.progression = new ProgressionSystem(saved?.highestTierEverOwned);
     this.metrics = saved?.metrics ?? freshMetrics();
@@ -532,6 +537,7 @@ export class GameCore {
       seenBosses: [...this.seenBosses],
       discoveredTiers: [...this.discoveredTiers],
       collectionCelebrated: this.collectionCelebratedFlag,
+      tutorialCompleted: this.tutorialCompletedFlag,
     });
   }
 
@@ -544,6 +550,17 @@ export class GameCore {
   markCollectionCelebrated(): void {
     if (this.collectionCelebratedFlag) return;
     this.collectionCelebratedFlag = true;
+    this.saveMeta();
+  }
+
+  /** The scene calls this after the player catches their first powerup. */
+  get tutorialCompleted(): boolean {
+    return this.tutorialCompletedFlag;
+  }
+
+  completeTutorial(): void {
+    if (this.tutorialCompletedFlag) return;
+    this.tutorialCompletedFlag = true;
     this.saveMeta();
   }
 

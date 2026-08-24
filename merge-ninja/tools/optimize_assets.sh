@@ -10,11 +10,30 @@
 #
 # Quality is picked per class, because the classes fail differently:
 #
-#   lossless  Pixel art and anything tiled. game.png is a packed sheet of
-#             pixel-art frames -- lossy compression there bleeds colour across
-#             frame boundaries and shows up as fringing on every sprite. The
-#             tiling floor and tex strips would grow seams at their wrap edges.
-#             These are all small already, so lossless costs nothing worth having.
+#   lossless  Anything tiled. The floor and tex strips would grow seams at
+#             their wrap edges under any lossy pass, and they are small already,
+#             so lossless costs nothing worth having.
+#
+#   near20    The packed atlas. It was lossless on the assumption that it is
+#             clean pixel art, where lossy compression bleeds colour across the
+#             frame boundaries -- the frames are packed with no gutters -- and
+#             shows up as fringing on every sprite. It is not clean pixel art:
+#             it holds 169k distinct colours, so lossless was paying full price
+#             for painted gradients and the file came to 852 KB, over half of
+#             everything the game loads before its first frame.
+#
+#             near-lossless keeps the bleed argument intact while dropping that
+#             to 460 KB. Measured per frame against the lossless original, over
+#             every rect in game.json and ignoring transparent pixels, the worst
+#             channel error anywhere is 8/255. Plain lossy is much smaller still
+#             -- 335 KB at q95 -- but concentrates its error exactly where it is
+#             visible, putting 83/255 into the hard edges of the UI icons.
+#
+#             -exact is deliberately absent: it preserves RGB underneath fully
+#             transparent pixels, which nothing samples here because the game
+#             renders with pixelArt (nearest-neighbour) filtering, and it costs
+#             77 KB. Do not lower near-lossless below 20 without it, though --
+#             at 10 and below the alpha handling breaks outright.
 #
 #   q90       Sprite sheets. Frames sit edge to edge with no gutter, so the same
 #             bleed risk applies -- but this is soft painted effect art, where
@@ -48,7 +67,8 @@ keep_png() { [[ "$1" == "$ASSETS/font.png" ]]; }
 classify() {
   local f=$1 base=${1#"$ASSETS/"}
   case "$base" in
-    game.png|tex/*|powerups/*|floor-*|ui/icon-*) echo lossless ;;
+    game.png)                                    echo near20 ;;
+    tex/*|powerups/*|floor-*|ui/icon-*)          echo lossless ;;
     vfx/*|*-motion-*|samurai-ready.png)          echo q90 ;;
     arena-*|dojo-*)                              echo q82 ;;
     *)                                           echo q85 ;;
@@ -69,6 +89,7 @@ while IFS= read -r png; do
   else
     case "$(classify "$png")" in
       lossless) cwebp -quiet -z 9 -exact "$png" -o "$webp" ;;
+      near20)   cwebp -quiet -near_lossless 20 -z 9 -lossless "$png" -o "$webp" ;;
       q90)      cwebp -quiet -q 90 -alpha_q 100 "$png" -o "$webp" ;;
       q85)      cwebp -quiet -q 85 -alpha_q 100 "$png" -o "$webp" ;;
       q82)      cwebp -quiet -q 82 -alpha_q 100 "$png" -o "$webp" ;;

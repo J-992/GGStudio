@@ -5,6 +5,7 @@ import type { VFXManager } from '../effects/VFXManager';
 import { bossSpawnRecipe, type BossSpawnVfxRecipe } from '../data/bossVfx';
 import { ninjaDef } from '../data/ninjas';
 import { ATLAS_KEY, bossCatalogPortrait, FLAME_SHOGUN_TIER, ninjaCatalogPortrait } from '../render/atlasConfig';
+import { portraitTexture } from '../render/portraitTexture';
 import {
   bossScale,
   fourFramePoseAt,
@@ -85,14 +86,14 @@ export class ArenaManager {
       }
       const p = this.scenery.platforms[index % 3]!;
       const def = ninjaDef(ninja.tier);
-      const catalogPortrait = ninjaCatalogPortrait(ninja.tier);
-      sprite.stop().setTexture(def.textureKey);
-      if (catalogPortrait?.animation !== undefined) sprite.setFrame(0);
+      const art = portraitTexture(this.scene, def, ninjaCatalogPortrait(ninja.tier));
+      sprite.stop().setTexture(art.key, art.frame);
+      if (art.animated) sprite.setFrame(0);
       // Portraits may have different native dimensions (the final evolution is
       // deliberately wide), so normalise from the loaded frame rather than
       // assuming all supplied art is 128px high.
       const actorScale = ninjaScale(sprite.frame.width, sprite.frame.height, theme.layout.arenaNinjaHeight);
-      const footInset = (catalogPortrait?.footInset ?? 0) * actorScale;
+      const footInset = art.footInset * actorScale;
       const home = new Phaser.Math.Vector2(
         p.x,
         p.y - theme.layout.arenaNinjaHeight * (1 - actorOriginY) + footInset,
@@ -119,11 +120,11 @@ export class ArenaManager {
     this.scene.tweens.killTweensOf([this.boss, this.bossAura]);
     // Player ninjas attack from the left side of the stage, so flip the enemy
     // art toward them instead of presenting its back or weapon to the crowd.
-    const catalogPortrait = bossCatalogPortrait(boss.appearanceIndex);
+    const art = portraitTexture(this.scene, boss, bossCatalogPortrait(boss.appearanceIndex));
     this.boss.stop();
-    this.bossFootInset = catalogPortrait?.footInset ?? 0;
-    this.boss.setTexture(boss.textureKey);
-    if (catalogPortrait?.animation !== undefined) this.boss.setFrame(0);
+    this.bossFootInset = art.footInset;
+    this.boss.setTexture(art.key, art.frame);
+    if (art.animated) this.boss.setFrame(0);
     this.boss.setFlipX(true).setTint(boss.artTint);
     const nativeHeight = this.boss.frame.height;
     const scale = this.bossScale();
@@ -156,6 +157,19 @@ export class ArenaManager {
     return bossScale(this.boss.frame.width, this.boss.frame.height, theme.layout.bossHeight, { w: a.w, h: a.h });
   }
 
+  /**
+   * Whether the boss is drawing its own frame strip yet.
+   *
+   * Boss art streams in behind the running game, so until this boss's portrait
+   * arrives the sprite is showing a single stand-in frame from the packed
+   * atlas. Every strip-stepping path has to check this first: `setFrame(3)` on
+   * an atlas texture does not fail, it just draws whatever was packed fourth.
+   * The transform-driven poses are fine either way, so a stand-in still moves.
+   */
+  private bossOnStrip(): boolean {
+    return this.boss.texture.key !== ATLAS_KEY;
+  }
+
   update(dt: number): void {
     this.scenery.update(0, dt);
     const now = this.scene.time.now;
@@ -164,7 +178,7 @@ export class ArenaManager {
       const baseScale = this.bossScale();
       const home = this.bossHome();
       const boss = this.core.boss.boss;
-      if (boss.animation === 'eightFrame') {
+      if (boss.animation === 'eightFrame' && this.bossOnStrip()) {
         const idleFrame = Math.floor((now + boss.appearanceIndex * 127) / BOSS_EIGHT_IDLE_FRAME_MS) % 2;
         this.boss.setFrame(idleFrame).setPosition(home.x, home.y).setScale(baseScale).setAngle(0);
       } else {
@@ -196,7 +210,7 @@ export class ArenaManager {
     const baseScale = this.bossScale();
     this.scene.tweens.killTweensOf(this.boss);
     this.boss.setPosition(home.x, home.y).setScale(baseScale).setAngle(0);
-    if (animation === 'eightFrame') {
+    if (animation === 'eightFrame' && this.bossOnStrip()) {
       this.runBossEightFrame(home, baseScale, special, onImpact);
       return;
     }
@@ -216,7 +230,11 @@ export class ArenaManager {
 
   private animateIdleActor(actor: ArenaActor, now: number): void {
     const catalogPortrait = ninjaCatalogPortrait(actor.tier);
-    if (catalogPortrait?.animation !== undefined) {
+    // While a portrait is still streaming in, this sprite is showing a single
+    // atlas frame instead of a strip, and stepping it by index would land on
+    // whatever art happens to be packed alongside it.
+    const onStrip = actor.sprite.texture.key !== ATLAS_KEY;
+    if (onStrip && catalogPortrait?.animation !== undefined) {
       actor.sprite.setFrame(ninjaIdleFrameAt(now, actor.tier * 379, actor.tier === FLAME_SHOGUN_TIER));
     }
     // Idle poses live in the strip. Keeping this transform neutral prevents

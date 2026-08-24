@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { ATLAS_KEY, FX_FRAMES } from '../render/atlasConfig';
 import {
   VFX_ANIMATIONS,
+  VFX_STANDIN_FRAME,
   type VfxAnimationId,
 } from '../data/vfxAssets';
 import { theme } from '../ui/theme';
@@ -271,6 +272,14 @@ export class VFXManager {
     scale: number,
   ): Phaser.GameObjects.Sprite {
     const def = VFX_ANIMATIONS[id];
+    // The strip may still be streaming in; see VFX_STANDIN_FRAME. Checking the
+    // animation rather than the texture is deliberate -- the texture lands
+    // first and the animation is built from it a moment later, and playing an
+    // animation that does not exist yet leaves the sprite on frame zero of a
+    // sheet it cannot step through.
+    if (!this.scene.anims.exists(def.animationKey)) {
+      return this.takeTexture(ATLAS_KEY, VFX_STANDIN_FRAME[id], x, y, color, scale);
+    }
     const fx = this.takeTexture(def.textureKey, 0, x, y, color, scale);
     fx.play(def.animationKey);
     return fx;

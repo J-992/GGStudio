@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { dropDevArt } from './vite-plugins/dropDevArt';
+import { inlineSplash } from './vite-plugins/inlineSplash';
 import { platformSdk } from './vite-plugins/platformSdk';
 
 /**
@@ -15,7 +16,7 @@ export default defineConfig(({ mode }) => {
   return {
     base: './',
     define: { __POKI__: JSON.stringify(poki) },
-    plugins: [platformSdk(poki), dropDevArt()],
+    plugins: [platformSdk(poki), inlineSplash(), dropDevArt()],
     server: { port: 5180, host: true },
     build: {
       target: 'es2020',
