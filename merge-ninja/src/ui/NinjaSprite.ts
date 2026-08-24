@@ -31,7 +31,7 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
   private readonly pose: Phaser.GameObjects.Container;
   private readonly badgePlate: Phaser.GameObjects.NineSlice;
   private readonly sceneRef: Phaser.Scene;
-  private readonly hasFrameAnimation: boolean;
+  private hasFrameAnimation: boolean;
   private artScale = 1;
 
   constructor(scene: Phaser.Scene, readonly id: number, readonly tier: number, x: number, y: number) {
@@ -96,6 +96,26 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
     // column and sat on the head of the ninja in the row below.
     this.badgePlate.setPosition(ART.halfWidth * scale - 16, -ART.bottom * scale - 16);
     this.badge.setPosition(this.badgePlate.x, this.badgePlate.y);
+  }
+
+  /**
+   * Replaces the temporary atlas pose once a streamed portrait strip arrives.
+   * Tiers beyond the boot window are intentionally allowed to spawn before
+   * their art has downloaded; without this handoff they stayed on the static
+   * fallback forever, even though the authored frames were already in memory.
+   */
+  refreshPortrait(): void {
+    const def = ninjaDef(this.tier);
+    const art = portraitTexture(this.sceneRef, def, ninjaCatalogPortrait(this.tier));
+    if (art.key === this.image.texture.key && art.frame === this.image.frame.name && art.animated === this.hasFrameAnimation) return;
+
+    this.hasFrameAnimation = art.animated;
+    this.image
+      .setTexture(art.key, art.frame)
+      .setPosition(0, -64 + art.footInset)
+      .setScale(128 / this.image.frame.height)
+      .setTint(def.artTint);
+    this.setRosterScale(this.artScale);
   }
 
   override destroy(fromScene?: boolean): void {

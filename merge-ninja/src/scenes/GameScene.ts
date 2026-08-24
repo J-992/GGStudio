@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
 import { GameCore } from '../core/GameCore';
 import { ArenaManager } from '../arena/ArenaManager';
-import { DEFERRED_ART_BATCH, streamDeferredArt } from '../render/deferredArt';
 import { CombatDirector } from '../arena/CombatDirector';
 import { VFXManager } from '../effects/VFXManager';
 import { PowerupAuras } from '../effects/PowerupAuras';
@@ -29,6 +28,7 @@ import { PowerupPickups } from '../ui/PowerupPickups';
 import { LowHealthWarning } from '../ui/LowHealthWarning';
 import { GameOverPanel } from '../ui/GameOverPanel';
 import { StageBanner } from '../ui/StageBanner';
+import { RivalLadder } from '../ui/RivalLadder';
 import { FirstRunTutorial } from '../ui/FirstRunTutorial';
 import { BALANCE } from '../data/balance';
 import { BOSS_COUNT } from '../data/enemies';
@@ -71,6 +71,7 @@ export class GameScene extends Phaser.Scene {
   private tutorial!: FirstRunTutorial;
   private gameOver!: GameOverPanel;
   private stageBanner!: StageBanner;
+  private rivals!: RivalLadder;
   private ascension!: AscensionButton;
   private almanacButton!: Phaser.GameObjects.Image;
   private almanacPlate!: Phaser.GameObjects.NineSlice;
@@ -139,6 +140,7 @@ export class GameScene extends Phaser.Scene {
     });
     this.hud = new BossHud(this, this.core);
     this.playerHud = new PlayerHud(this, this.core);
+    this.rivals = new RivalLadder(this, this.core);
     this.makeArenaChrome();
     this.core.events.onAny((event) => this.director.onEvent(event));
 
@@ -195,15 +197,6 @@ export class GameScene extends Phaser.Scene {
       else this.time.delayedCall(1900, announce);
     }
 
-    // The board is up and playable; the rest of the art can arrive around it.
-    // Each batch that lands re-syncs the arena so any sprite currently showing
-    // a stand-in frame picks up its real portrait -- see render/deferredArt.ts.
-    this.events.on(DEFERRED_ART_BATCH, () => {
-      this.arena.scenery.refreshTextures();
-      this.arena.sync();
-    });
-    streamDeferredArt(this);
-
     this.scale.on('resize', this.onResize, this);
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       this.sfx.unlock();
@@ -236,7 +229,17 @@ export class GameScene extends Phaser.Scene {
       this.reveal.show(event.tier, this.input.activePointer.id);
       void reportPlatformHappyTime(0.8);
     });
-    this.core.events.on('bossDefeated', () => { void reportPlatformHappyTime(0.5); });
+    this.core.events.on('bossDefeated', (event) => {
+      void reportPlatformHappyTime(0.5);
+      // The very first boss is the opening's proof that the player understood
+      // the loop. Let stage 2 arrive, then replace its generic banner with a
+      // small celebration and one clear reason to keep going.
+      if (event.stage === 1) {
+        this.time.delayedCall(620, () => {
+          if (!this.core.isGameOver) this.stageBanner.announce('FIRST BOSS DEFEATED!', 'NEXT: BEAT STAGE 2', 0xfff6dd);
+        });
+      }
+    });
     this.core.events.on('ascended', () => { void reportPlatformHappyTime(1); });
     // Stage 1 needs no announcement -- it is where every run opens.
     this.core.events.on('bossSpawned', (event) => { if (event.stage > 1) this.stageBanner.show(event.stage); });
@@ -604,6 +607,7 @@ export class GameScene extends Phaser.Scene {
     this.tutorial.relayout();
     this.lowHealth.relayout();
     this.stageBanner.relayout();
+    this.rivals.relayout();
     this.ascension.relayout();
     this.layoutAlmanacButton();
     this.layoutSettingsButton();

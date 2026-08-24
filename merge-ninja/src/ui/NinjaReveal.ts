@@ -5,7 +5,8 @@ import type { GameCore } from '../core/GameCore';
 import { FLAME_SHOGUN_TIER, ninjaCatalogPortrait } from '../render/atlasConfig';
 import { REVEAL_ASSETS, revealNinjaRig } from '../render/revealAssets';
 import type { RevealNinjaRig } from '../render/revealAssets';
-import { VFX_ANIMATIONS } from '../data/vfxAssets';
+import { playVfx, vfxSource } from '../effects/vfxPlayback';
+import { portraitTexture } from '../render/portraitTexture';
 import { theme } from './theme';
 
 const BEAT = { charge: 140, burst: 620, settle: 760 } as const;
@@ -118,16 +119,16 @@ export class NinjaReveal extends Phaser.GameObjects.Container {
     this.trimL = sceneRef.add.rectangle(0, 0, 6, 10, 0xffffff);
     this.trimR = sceneRef.add.rectangle(0, 0, 6, 10, 0xffffff);
     this.glow = sceneRef.add.image(0, 0, REVEAL_ASSETS.halo.key).setAlpha(0.08);
-    const portal = VFX_ANIMATIONS.portal;
-    const flame = VFX_ANIMATIONS.flame;
-    const shockwave = VFX_ANIMATIONS.shockwave;
-    const merge = VFX_ANIMATIONS.merge;
-    this.portal = sceneRef.add.sprite(0, 0, portal.textureKey, 0).setVisible(false).setAlpha(0);
+    const portal = vfxSource(sceneRef, 'portal');
+    const flame = vfxSource(sceneRef, 'flame');
+    const shockwave = vfxSource(sceneRef, 'shockwave');
+    const merge = vfxSource(sceneRef, 'merge');
+    this.portal = sceneRef.add.sprite(0, 0, portal.texture, portal.frame).setVisible(false).setAlpha(0);
     this.rays = sceneRef.add.graphics();
     this.shadow = sceneRef.add.ellipse(0, 0, 200, 40, 0x0a0705, 0.38);
     this.plinth = sceneRef.add.image(0, 0, REVEAL_ASSETS.plinth.key);
     for (let i = 0; i < 8; i += 1) {
-      this.flames.push(sceneRef.add.sprite(0, 0, flame.textureKey, 0).setVisible(false).setAlpha(0));
+      this.flames.push(sceneRef.add.sprite(0, 0, flame.texture, flame.frame).setVisible(false).setAlpha(0));
     }
 
     this.hero = sceneRef.add.sprite(0, 0, ninjaDef(1).textureKey).setScale(0);
@@ -155,11 +156,11 @@ export class NinjaReveal extends Phaser.GameObjects.Container {
       Phaser.Geom.Rectangle.Contains,
     );
 
-    this.ringA = sceneRef.add.sprite(0, 0, shockwave.textureKey, 0).setVisible(false).setAlpha(0);
-    this.ringB = sceneRef.add.sprite(0, 0, shockwave.textureKey, 0).setVisible(false).setAlpha(0);
+    this.ringA = sceneRef.add.sprite(0, 0, shockwave.texture, shockwave.frame).setVisible(false).setAlpha(0);
+    this.ringB = sceneRef.add.sprite(0, 0, shockwave.texture, shockwave.frame).setVisible(false).setAlpha(0);
 
     for (let i = 0; i < 24; i += 1) {
-      this.sparkles.push(sceneRef.add.sprite(0, 0, merge.textureKey, 0).setAlpha(0));
+      this.sparkles.push(sceneRef.add.sprite(0, 0, merge.texture, merge.frame).setAlpha(0));
     }
 
     this.card = sceneRef.add.container(0, 0, [
@@ -298,15 +299,14 @@ export class NinjaReveal extends Phaser.GameObjects.Container {
     this.accent = def.accent;
     this.heroMultiplier = tier >= 25 ? 3.7 : tier >= 8 ? 3.25 : 2.5;
     this.heroFrameAnim = ninjaCatalogPortrait(tier)?.animation !== undefined;
-    this.hero.stop();
-    this.hero.setTexture(def.textureKey);
+    this.setHeroTexture(tier);
     this.heroRig = revealNinjaRig(tier);
     this.hero
       .setOrigin(
         (this.heroRig.x + this.heroRig.w / 2) / this.heroRig.frameW,
         (this.heroRig.y + this.heroRig.h) / this.heroRig.frameH,
       )
-      .setTint(def.artTint).setScale(0).setAngle(0).setAlpha(1).setFrame(0);
+      .setTint(def.artTint).setScale(0).setAngle(0).setAlpha(1);
     this.heroShown = false;
     this.settled = false;
     this.nameText.setText(def.name.toUpperCase());
@@ -382,7 +382,7 @@ export class NinjaReveal extends Phaser.GameObjects.Container {
         )
         .setAlpha(0.9)
         .setScale(0.14)
-        .play(VFX_ANIMATIONS.merge.animationKey);
+      playVfx(this.sceneRef, sparkle, 'merge');
       this.sceneRef.tweens.add({
         targets: sparkle,
         x: 0,
@@ -406,12 +406,13 @@ export class NinjaReveal extends Phaser.GameObjects.Container {
     this.sceneRef.tweens.add({ targets: this.flash, fillAlpha: 0, duration: 300, ease: 'Quad.easeOut', onComplete: () => this.flash.setVisible(false) });
 
     const ringTint = drama.gold ? 0xffe9a8 : mixColor(this.accent, 0xffffff, 0.6);
-    this.ringA.setVisible(true).setAlpha(0.95).setScale(0.14).setTint(ringTint).play(VFX_ANIMATIONS.shockwave.animationKey);
+    this.ringA.setVisible(true).setAlpha(0.95).setScale(0.14).setTint(ringTint);
+    playVfx(this.sceneRef, this.ringA, 'shockwave');
     this.sceneRef.tweens.add({ targets: this.ringA, scale: 1.05, alpha: 0, duration: 460, ease: 'Cubic.easeOut', onComplete: () => this.ringA.setVisible(false) });
     if (drama.doubleRing) {
       this.ringB.setVisible(true).setAlpha(0.8).setScale(0.12).setTint(ringTint);
       this.after(130, () => {
-        this.ringB.play(VFX_ANIMATIONS.shockwave.animationKey);
+        playVfx(this.sceneRef, this.ringB, 'shockwave');
         this.sceneRef.tweens.add({ targets: this.ringB, scale: 1.25, alpha: 0, duration: 520, ease: 'Cubic.easeOut', onComplete: () => this.ringB.setVisible(false) });
       });
     }
@@ -427,14 +428,16 @@ export class NinjaReveal extends Phaser.GameObjects.Container {
     }
 
     if (drama.portal) {
-      this.portal.setVisible(true).setAlpha(0).setAngle(0).setScale(this.portalBaseScale * 0.6).play(VFX_ANIMATIONS.portal.animationKey);
+      this.portal.setVisible(true).setAlpha(0).setAngle(0).setScale(this.portalBaseScale * 0.6);
+      playVfx(this.sceneRef, this.portal, 'portal');
       this.sceneRef.tweens.add({ targets: this.portal, alpha: 0.85, scale: this.portalBaseScale, duration: 420, ease: 'Back.easeOut' });
     }
 
     this.flames.forEach((flame, index) => {
       if (index >= drama.flames) return;
       const lay = this.flameLayout(index);
-      flame.setVisible(true).setAlpha(0).setPosition(lay.x, lay.y).setScale(lay.sx * 0.5, lay.sy * 0.5).play(VFX_ANIMATIONS.flame.animationKey);
+      flame.setVisible(true).setAlpha(0).setPosition(lay.x, lay.y).setScale(lay.sx * 0.5, lay.sy * 0.5);
+      playVfx(this.sceneRef, flame, 'flame');
       this.sceneRef.tweens.add({ targets: flame, alpha: 0.95, scaleX: lay.sx, scaleY: lay.sy, duration: 260, ease: 'Back.easeOut', delay: index * 45 });
     });
 
@@ -542,7 +545,7 @@ export class NinjaReveal extends Phaser.GameObjects.Container {
       this.sceneRef.tweens.killTweensOf(sparkle);
       sparkle.setPosition(0, this.heroCY).setAlpha(active ? 1 : 0).setScale(active ? 0.18 : 0).setAngle(0);
       if (!active) return;
-      sparkle.play(VFX_ANIMATIONS.merge.animationKey);
+      playVfx(this.sceneRef, sparkle, 'merge');
       const angle = (Math.PI * 2 * index) / count;
       const targetY = Phaser.Math.Clamp(
         this.heroCY + Math.sin(angle) * (130 + (index % 4) * 44),
@@ -566,6 +569,14 @@ export class NinjaReveal extends Phaser.GameObjects.Container {
     const tier = this.current;
     if (tier === null || !this.heroFrameAnim) return;
     this.hero.setFrame(ninjaIdleFrameAt(time, tier * 379 + 101, tier === FLAME_SHOGUN_TIER));
+  }
+
+  private setHeroTexture(tier: number): void {
+    const def = ninjaDef(tier);
+    const art = portraitTexture(this.sceneRef, def, ninjaCatalogPortrait(tier));
+    this.heroFrameAnim = art.animated;
+    this.hero.stop().setTexture(art.key, art.frame);
+    if (art.animated) this.hero.setFrame(0);
   }
 
   override destroy(fromScene?: boolean): void {

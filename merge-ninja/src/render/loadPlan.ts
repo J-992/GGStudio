@@ -3,28 +3,12 @@ import {
   type CatalogPortrait,
   NINJA_CATALOG_PORTRAITS,
 } from './atlasConfig';
-import { ARENA_THEMES, themeForStage } from '../data/arenaThemes';
+import { ARENA_THEMES } from '../data/arenaThemes';
 
 /**
- * Which art the game waits for, and which art it starts without.
- *
- * Everything used to be one list, loaded before the first frame: 108 files and
- * 4.4 MB, of which the opening thirty seconds of play touches maybe a tenth.
- * Measured on a local server -- the best case that exists -- the bundle was
- * ready at 185 ms and the art at 5022 ms, so essentially the whole wait was art
- * for bosses the player had not met and rooms they had not reached.
- *
- * So the manifest is split. The boot set is what the first frame genuinely
- * cannot be drawn without, plus a few tiers and bosses of headroom. The rest is
- * streamed in the background once the game is up, ordered by when the player
- * will actually reach it, which for this game is simply ascending: tier 5 comes
- * before tier 6, and stage 10's room before stage 19's.
- *
- * The lead times below come from `tests/pacing.test.ts`, which simulates a real
- * session. They are comfortable, but comfort is not a guarantee on a bad
- * connection, so nothing here is load-bearing on its own -- `portraitTexture.ts`
- * substitutes already-loaded art for anything asked for early, and the ordering
- * exists to make that substitution rare rather than to make it impossible.
+ * Complete art loading plan. The loading screen stays up until all catalog
+ * portraits and arena rooms are available, so a slow or restrictive network
+ * can never leave a player looking at a temporary ninja or missing backdrop.
  */
 
 /**
@@ -36,7 +20,7 @@ import { ARENA_THEMES, themeForStage } from '../data/arenaThemes';
  * already covers -- and the tiers a returning save actually has on the board
  * come from `boardTiers`, not from this number.
  */
-export const BOOT_NINJA_TIERS = 3;
+export const BOOT_NINJA_TIERS = NINJA_CATALOG_PORTRAITS.length;
 
 /**
  * Boss appearances loaded before the first frame.
@@ -46,10 +30,7 @@ export const BOOT_NINJA_TIERS = 3;
  * `BossDef.appearanceIndex` rather than the 0-based identity index that
  * `bossIdentityFor` returns.
  */
-export const BOOT_BOSS_APPEARANCES = 4;
-
-/** The room the game opens in; every other theme is stage-gated behind it. */
-const OPENING_THEME = ARENA_THEMES[0]!;
+export const BOOT_BOSS_APPEARANCES = BOSS_CATALOG_PORTRAITS.length;
 
 
 /**
@@ -75,41 +56,9 @@ export interface ResumePoint {
 
 export const FIRST_SESSION: ResumePoint = { stage: 1, highestTier: 1, boardTiers: [] };
 
-const BOSS_COUNT = BOSS_CATALOG_PORTRAITS.length;
-
-/** Which boss appearance a stage puts in the arena, 1-based like the catalog. */
-const appearanceForStage = (stage: number): number =>
-  ((Math.max(1, Math.floor(stage)) - 1) % BOSS_COUNT) + 1;
-
-/** The next `count` boss appearances from `stage`, wrapping like the ladder does. */
-function upcomingAppearances(stage: number, count: number): Set<number> {
-  const first = appearanceForStage(stage);
-  const out = new Set<number>();
-  for (let i = 0; i < count; i += 1) out.add(((first - 1 + i) % BOSS_COUNT) + 1);
-  return out;
-}
-
-/**
- * Roster tiers that can be on screen before the stream has caught up: whatever
- * the save has on the board, the low tiers the buy button hands out, and a
- * couple above the player's best in case they merge straight past it.
- */
-function immediateTiers(at: ResumePoint): Set<number> {
-  const tiers = new Set<number>(at.boardTiers);
-  for (let tier = 1; tier <= BOOT_NINJA_TIERS; tier += 1) tiers.add(tier);
-  const best = Math.max(1, Math.floor(at.highestTier));
-  for (let tier = best; tier <= best + 2; tier += 1) tiers.add(tier);
-  return tiers;
-}
-
-/** Catalog art the first frame waits for, given where the player is resuming. */
-export function bootPortraits(at: ResumePoint = FIRST_SESSION): readonly CatalogPortrait[] {
-  const tiers = immediateTiers(at);
-  const appearances = upcomingAppearances(at.stage, BOOT_BOSS_APPEARANCES);
-  return [
-    ...NINJA_CATALOG_PORTRAITS.filter((p) => tiers.has(p.tier)),
-    ...BOSS_CATALOG_PORTRAITS.filter((p) => appearances.has(p.tier)),
-  ];
+/** Every portrait is available before GameScene is allowed to start. */
+export function bootPortraits(_at: ResumePoint = FIRST_SESSION): readonly CatalogPortrait[] {
+  return [...NINJA_CATALOG_PORTRAITS, ...BOSS_CATALOG_PORTRAITS];
 }
 
 /**
@@ -121,28 +70,8 @@ export function bootPortraits(at: ResumePoint = FIRST_SESSION): readonly Catalog
  * through both at once -- finishing every boss before starting on the roster
  * would leave the board falling behind its own art.
  */
-export function deferredPortraits(at: ResumePoint = FIRST_SESSION): readonly CatalogPortrait[] {
-  const booted = new Set(bootPortraits(at).map((p) => p.textureKey));
-
-  const from = appearanceForStage(at.stage);
-  const bosses = BOSS_CATALOG_PORTRAITS
-    .filter((p) => !booted.has(p.textureKey))
-    .sort((a, b) => ((a.tier - from + BOSS_COUNT) % BOSS_COUNT)
-      - ((b.tier - from + BOSS_COUNT) % BOSS_COUNT));
-
-  const best = Math.max(1, Math.floor(at.highestTier));
-  const ninjas = NINJA_CATALOG_PORTRAITS
-    .filter((p) => !booted.has(p.textureKey))
-    .sort((a, b) => Math.abs(a.tier - best) - Math.abs(b.tier - best));
-
-  const out: CatalogPortrait[] = [];
-  for (let i = 0; i < Math.max(ninjas.length, bosses.length); i += 1) {
-    const boss = bosses[i];
-    const ninja = ninjas[i];
-    if (boss !== undefined) out.push(boss);
-    if (ninja !== undefined) out.push(ninja);
-  }
-  return out;
+export function deferredPortraits(_at: ResumePoint = FIRST_SESSION): readonly CatalogPortrait[] {
+  return [];
 }
 
 export interface DeferredImage {
@@ -163,11 +92,8 @@ const themeAsset = (key: string): DeferredImage => ({
  * simulation reaches at ~35 s. There is no version of a first frame that needs
  * them.
  */
-export function deferredThemeArt(at: ResumePoint = FIRST_SESSION): readonly DeferredImage[] {
-  const booted = new Set(bootThemeArt(at).map((art) => art.key));
-  return ARENA_THEMES
-    .flatMap((theme) => [themeAsset(theme.backdropKey), themeAsset(theme.floorTextureKey)])
-    .filter((art) => !booted.has(art.key));
+export function deferredThemeArt(_at: ResumePoint = FIRST_SESSION): readonly DeferredImage[] {
+  return [];
 }
 
 /**
@@ -175,8 +101,8 @@ export function deferredThemeArt(at: ResumePoint = FIRST_SESSION): readonly Defe
  * one regardless -- `GameScene` paints `dojo_night_backdrop` behind the whole
  * screen at every stage, not just during act one.
  */
-export function bootThemeArt(at: ResumePoint = FIRST_SESSION): readonly DeferredImage[] {
-  const rooms = [OPENING_THEME, themeForStage(at.stage)];
+export function bootThemeArt(_at: ResumePoint = FIRST_SESSION): readonly DeferredImage[] {
+  const rooms = ARENA_THEMES;
   const seen = new Set<string>();
   return rooms
     .flatMap((theme) => [themeAsset(theme.backdropKey), themeAsset(theme.floorTextureKey)])

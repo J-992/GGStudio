@@ -21,6 +21,7 @@ export class FirstRunTutorial extends Phaser.GameObjects.Container {
   private readonly card: Phaser.GameObjects.Container;
   private readonly title: Phaser.GameObjects.BitmapText;
   private readonly copy: Phaser.GameObjects.BitmapText;
+  private readonly progress: Phaser.GameObjects.BitmapText;
   private readonly finger: Phaser.GameObjects.Image;
   private fingerTween: Phaser.Tweens.Tween | null = null;
   private activePowerup: PowerupId | null = null;
@@ -34,10 +35,11 @@ export class FirstRunTutorial extends Phaser.GameObjects.Container {
     super(sceneRef, 0, 0);
     sceneRef.add.existing(this).setDepth(340);
 
-    const cardBody = sceneRef.add.rectangle(0, 0, 382, 66, 0x20160e, 0.94).setStrokeStyle(3, 0xffd35a);
-    this.title = sceneRef.add.bitmapText(0, -17, 'pixel', '', 14).setOrigin(0.5).setTint(0xffe58a);
-    this.copy = sceneRef.add.bitmapText(0, 12, 'pixel', '', 12).setOrigin(0.5).setCenterAlign().setTint(0xffffff);
-    this.card = sceneRef.add.container(0, 0, [cardBody, this.title, this.copy]);
+    const cardBody = sceneRef.add.rectangle(0, 0, 382, 78, 0x20160e, 0.96).setStrokeStyle(3, 0xffd35a);
+    this.progress = sceneRef.add.bitmapText(-166, -29, 'pixel', '', 10).setOrigin(0, 0.5).setTint(0x9df5cf);
+    this.title = sceneRef.add.bitmapText(0, -13, 'pixel', '', 14).setOrigin(0.5).setTint(0xffe58a);
+    this.copy = sceneRef.add.bitmapText(0, 16, 'pixel', '', 11).setOrigin(0.5).setCenterAlign().setTint(0xffffff);
+    this.card = sceneRef.add.container(0, 0, [cardBody, this.progress, this.title, this.copy]);
 
     // The origin is the fingertip: all three tutorial prompts can aim at the
     // actual touch target without bespoke offsets for this richer sprite.
@@ -98,34 +100,55 @@ export class FirstRunTutorial extends Phaser.GameObjects.Container {
     this.fingerTween?.stop();
     this.fingerTween = null;
     if (this.step === 'complete') {
-      this.setVisible(false);
+      this.setVisible(true);
+      this.progress.setText('NEW GOAL UNLOCKED');
+      this.title.setText('WORLD RECORD: STAGE 100');
+      this.copy.setText('CAN YOU BEAT IT?');
+      this.finger.setVisible(false);
+      const a = theme.layout.arena;
+      this.card.setPosition(a.x + a.w / 2, a.y + 65);
+      this.sceneRef.tweens.add({ targets: this.card, scale: { from: 0.9, to: 1 }, alpha: { from: 0, to: 1 }, duration: 260, ease: 'Back.Out' });
+      this.sceneRef.time.delayedCall(2800, () => this.setVisible(false));
       return;
     }
     this.setVisible(true);
+    // Keep the coach readable on narrow portrait canvases without shrinking
+    // the target hand (which should remain easy to see and tap around).
+    const viewportWidth = this.sceneRef.scale.gameSize.width;
+    this.card.setScale(Math.min(1, Math.max(0.72, (viewportWidth - 24) / 382)));
 
     if (this.step === 'buyFirst' || this.step === 'buySecond') {
+      this.progress.setText('1 / 3   BUILD YOUR TEAM');
       this.title.setText(this.step === 'buyFirst' ? 'YOUR FIRST NINJA' : 'GET A MATCH');
       this.copy.setText(this.step === 'buyFirst' ? 'TAP BUY TO RECRUIT A NINJA' : 'TAP BUY ONE MORE TIME');
       const buy = this.anchors.buy();
-      this.card.setPosition(buy.x, buy.y - 112);
+      // Keep the whole hand below the message, rather than hiding either one
+      // behind the other. Its fingertip still lands exactly on BUY.
+      this.card.setPosition(buy.x, buy.y - 190);
       this.pulseFinger(buy.x, buy.y);
       return;
     }
 
     if (this.step === 'merge') {
+      this.progress.setText('2 / 3   MERGE');
       this.title.setText('MAKE A STRONGER NINJA');
       this.copy.setText('DRAG ONE MATCHING NINJA ONTO THE OTHER');
       const b = theme.layout.board;
-      this.card.setPosition(b.x + b.w / 2, b.y + 88);
+      // The drag begins inside the roster; park the instruction just above it
+      // so the animated hand has its own clear side of the banner.
+      this.card.setPosition(b.x + b.w / 2, b.y - 26);
       const pair = this.firstPair();
       if (pair !== null) this.dragFinger(pair.from, pair.to);
       return;
     }
 
+    this.progress.setText('3 / 3   POWER-UP');
     this.title.setText(this.activePowerup === null ? 'POWER-UPS ARE COMING' : 'POWER-UP!');
-    this.copy.setText(this.activePowerup === null ? 'KEEP FIGHTING — CATCH THE FIRST ONE' : 'TAP IT BEFORE IT FLIES AWAY');
+    this.copy.setText(this.activePowerup === null ? 'WATCH FOR THE GLOW' : 'TAP THE GLOWING POWER-UP');
     const a = theme.layout.arena;
-    this.card.setPosition(a.x + a.w / 2, a.y + 65);
+    // Powerups travel through the arena's upper/middle lanes, so the card
+    // sits below them and never masks the finger's tap target.
+    this.card.setPosition(a.x + a.w / 2, a.y + a.h - 62);
     if (this.activePowerup !== null) {
       const target = this.anchors.powerup(this.activePowerup);
       if (target !== null) this.pulseFinger(target.x, target.y);

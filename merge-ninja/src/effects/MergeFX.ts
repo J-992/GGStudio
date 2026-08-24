@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { BALANCE } from '../data/balance';
 import { ninjaDef } from '../data/ninjas';
-import { VFX_ANIMATIONS, type VfxAnimationId } from '../data/vfxAssets';
+import type { VfxAnimationId } from '../data/vfxAssets';
+import { playVfx, vfxSource } from './vfxPlayback';
 
 /** Reusable animated merge effects; every object is pooled and replayed. */
 export class MergeFX {
@@ -65,8 +66,9 @@ export class MergeFX {
     id: VfxAnimationId,
     depth: number,
   ): Phaser.GameObjects.Sprite {
+    const source = vfxSource(this.scene, id);
     return this.scene.add
-      .sprite(-100, -100, VFX_ANIMATIONS[id].textureKey, 0)
+      .sprite(-100, -100, source.texture, source.frame)
       .setDepth(depth)
       .setVisible(false);
   }
@@ -82,17 +84,14 @@ export class MergeFX {
     duration: number,
   ): void {
     const sprite = pool[cursor]!;
-    const def = VFX_ANIMATIONS[id];
     this.scene.tweens.killTweensOf(sprite);
     sprite
-      .stop()
-      .setTexture(def.textureKey, 0)
       .setPosition(x, y)
       .setTint(tint)
       .setScale(scale)
       .setAlpha(1)
-      .setVisible(true)
-      .play(def.animationKey);
+      .setVisible(true);
+    playVfx(this.scene, sprite, id);
     this.scene.tweens.add({
       targets: sprite,
       scale: scale * 1.14,

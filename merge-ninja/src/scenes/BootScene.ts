@@ -5,6 +5,7 @@ import { readResumePoint } from '../render/resumePoint';
 import { generatePlaceholderAtlas } from '../render/PlaceholderAtlas';
 import { POWERUP_ORDER, POWERUPS } from '../data/powerups';
 import { ACHIEVEMENTS_ICON_KEY, ACHIEVEMENTS_ICON_PATH, REVEAL_ASSETS } from '../render/revealAssets';
+import { VFX_ANIMATION_ORDER, VFX_ANIMATIONS } from '../data/vfxAssets';
 import { stopPlatformLoading } from '../platform/platform';
 import { finishSplash, setSplashProgress } from '../splash';
 
@@ -39,6 +40,14 @@ export class BootScene extends Phaser.Scene {
       const powerup = POWERUPS[id];
       this.load.image(powerup.iconTexture, powerup.iconPath);
     }
+    for (const id of VFX_ANIMATION_ORDER) {
+      const effect = VFX_ANIMATIONS[id];
+      this.load.spritesheet(effect.textureKey, effect.path, {
+        frameWidth: effect.frameWidth,
+        frameHeight: effect.frameHeight,
+        endFrame: effect.frames - 1,
+      });
+    }
     this.load.image('tutorial_hand', 'assets/tutorial-hand.webp');
     for (const asset of Object.values(REVEAL_ASSETS)) this.load.image(asset.key, asset.path);
     // The atlas carries no trophy, and the achievements rail button must not
@@ -50,6 +59,16 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     if (ATLAS.mode === 'placeholder') generatePlaceholderAtlas(this);
+    for (const id of VFX_ANIMATION_ORDER) {
+      const effect = VFX_ANIMATIONS[id];
+      if (this.anims.exists(effect.animationKey)) continue;
+      this.anims.create({
+        key: effect.animationKey,
+        frames: this.anims.generateFrameNumbers(effect.textureKey, { start: 0, end: effect.frames - 1 }),
+        frameRate: effect.frameRate,
+        repeat: 0,
+      });
+    }
     // Every texture and animation the game opens with now exists, which is the
     // only honest moment to take Poki's loader down: report it before the
     // handoff so their spinner does not sit over a game that is already up.

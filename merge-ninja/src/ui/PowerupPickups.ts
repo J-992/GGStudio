@@ -42,6 +42,7 @@ interface RainCoin {
   delayMs: number;
   fallMs: number;
   originX: number;
+  startY: number;
   swayPx: number;
   swayPhase: number;
   spin: number;
@@ -51,10 +52,12 @@ const CHIP_W = 148;
 const CHIP_H = 34;
 const PICKUP_ICON_SIZE = 62;
 const CHIP_ICON_SIZE = 25;
-const RAIN_COIN_SIZE = 46;
-const RAIN_TAP_RADIUS = 39;
+const RAIN_COIN_SIZE = 54;
+const RAIN_TAP_RADIUS = 46;
 const RAIN_EDGE_MARGIN = 34;
-const RAIN_STAGGER_MS = 105;
+const RAIN_STAGGER_MS = 24;
+const ACTIVATION_PARTICLES = 22;
+const ACTIVATION_BEAMS = 10;
 
 export class PowerupPickups extends Phaser.GameObjects.Container {
   private readonly core: GameCore;
@@ -66,6 +69,15 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
   private readonly chipRow: Phaser.GameObjects.Container;
   private readonly banners = new Map<PowerupId, Phaser.GameObjects.Container>();
   private readonly rainCoins: RainCoin[] = [];
+  /** Brief, non-interactive screen-wide payoff for every collected powerup. */
+  private readonly activationRoot: Phaser.GameObjects.Container;
+  private readonly activationFlash: Phaser.GameObjects.Rectangle;
+  private readonly activationIcon: Phaser.GameObjects.Image;
+  private readonly activationLabel: Phaser.GameObjects.BitmapText;
+  private readonly activationRings: Phaser.GameObjects.Arc[] = [];
+  private readonly activationBeams: Phaser.GameObjects.Rectangle[] = [];
+  private readonly activationParticles: Phaser.GameObjects.Image[] = [];
+  private activationToken = 0;
 
   constructor(
     sceneRef: Phaser.Scene,
@@ -82,6 +94,26 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
     sceneRef.add.existing(this);
 
     this.chipRow = sceneRef.add.container(0, 0).setDepth(305);
+    this.activationFlash = sceneRef.add.rectangle(0, 0, 1, 1, 0xffffff, 0);
+    this.activationIcon = sceneRef.add.image(0, 0, POWERUPS.shurikenFrenzy.iconTexture).setVisible(false);
+    this.activationLabel = sceneRef.add
+      .bitmapText(0, 0, 'pixel', '', 18)
+      .setOrigin(0.5)
+      .setCenterAlign()
+      .setVisible(false);
+    for (let i = 0; i < 3; i += 1) {
+      this.activationRings.push(sceneRef.add.circle(0, 0, 60, 0xffffff, 0).setStrokeStyle(5, 0xffffff, 0).setVisible(false));
+    }
+    for (let i = 0; i < ACTIVATION_BEAMS; i += 1) {
+      this.activationBeams.push(sceneRef.add.rectangle(0, 0, 1, 1, 0xffffff, 0).setVisible(false));
+    }
+    for (let i = 0; i < ACTIVATION_PARTICLES; i += 1) {
+      this.activationParticles.push(sceneRef.add.image(0, 0, POWERUPS.shurikenFrenzy.iconTexture).setVisible(false));
+    }
+    this.activationRoot = sceneRef.add
+      .container(0, 0, [this.activationFlash, ...this.activationRings, ...this.activationBeams, ...this.activationParticles, this.activationIcon, this.activationLabel])
+      .setDepth(350)
+      .setVisible(false);
 
     core.events.on('powerupSpawned', (event) => this.beginFlight(event.id));
     core.events.on('powerupCollected', (event) => this.onCollected(event.id));
@@ -141,6 +173,7 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
     for (const coin of this.rainCoins) {
       if (coin.active) coin.originX = Phaser.Math.Clamp(coin.originX, RAIN_EDGE_MARGIN, l.width - RAIN_EDGE_MARGIN);
     }
+    this.activationFlash.setPosition(l.width / 2, l.height / 2).setSize(l.width, l.height);
   }
 
   /** Is this press on a token? Generous radius; these are moving targets. */
@@ -264,14 +297,134 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
       this.scatter(flight);
       this.hide(flight);
     }
+    this.playActivation(def);
     if (def.effect === 'coinRain') this.startCoinRain(def.coinCount);
     this.showBanner(def);
+  }
+
+  /**
+   * Every pickup gets a quick whole-screen signature moment. This lives above
+   * the board but owns no input, so a Coin Frenzy can immediately rain
+   * collectable coins over the celebration instead of waiting for it to end.
+   */
+  private playActivation(def: PowerupDef): void {
+    const token = this.activationToken + 1;
+    this.activationToken = token;
+    const l = theme.layout;
+    const centerX = l.width / 2;
+    const centerY = l.height / 2;
+    const targets = [
+      this.activationRoot,
+      this.activationFlash,
+      this.activationIcon,
+      this.activationLabel,
+      ...this.activationRings,
+      ...this.activationBeams,
+      ...this.activationParticles,
+    ];
+    this.scene.tweens.killTweensOf(targets);
+    this.activationRoot.setVisible(true);
+    this.activationFlash.setFillStyle(def.hudColor, 0).setAlpha(0);
+    this.activationIcon
+      .setTexture(def.iconTexture)
+      .setPosition(centerX, centerY - 24)
+      .setDisplaySize(184, 184)
+      .setScale(0.34)
+      .setAlpha(0)
+      .setVisible(true);
+    this.activationLabel
+      .setPosition(centerX, centerY + 132)
+      .setText(def.effect === 'coinRain' ? `${def.label}!\nTAP COINS!` : `${def.label}!`)
+      .setTint(def.hudColor)
+      .setScale(0.7)
+      .setAlpha(0)
+      .setVisible(true);
+    this.scene.tweens.add({ targets: this.activationFlash, alpha: { from: 0.36, to: 0 }, duration: 760, ease: 'Quad.easeOut' });
+    this.scene.tweens.add({ targets: this.activationIcon, alpha: { from: 0, to: 1 }, scale: { from: 0.34, to: 1.12 }, duration: 300, ease: 'Back.easeOut' });
+    this.scene.tweens.add({ targets: this.activationIcon, angle: { from: -12, to: 12 }, yoyo: true, repeat: 1, duration: 160, delay: 220, ease: 'Sine.easeInOut' });
+    this.scene.tweens.add({ targets: this.activationIcon, alpha: { from: 1, to: 0 }, scale: { from: 1.12, to: 1.46 }, duration: 310, delay: 620, ease: 'Quad.easeIn' });
+    this.scene.tweens.add({ targets: this.activationLabel, alpha: { from: 0, to: 1 }, scale: { from: 0.7, to: 1 }, duration: 260, delay: 120, ease: 'Back.easeOut' });
+    this.scene.tweens.add({ targets: this.activationLabel, alpha: { from: 1, to: 0 }, y: centerY + 98, duration: 340, delay: 650, ease: 'Quad.easeIn' });
+
+    const maxRingScale = Math.max(l.width, l.height) / 74;
+    this.activationRings.forEach((ring, index) => {
+      ring
+        .setPosition(centerX, centerY)
+        .setRadius(50 + index * 24)
+        .setStrokeStyle(5, def.hudColor, 0.9)
+        .setScale(0.1)
+        .setAlpha(0.95)
+        .setVisible(true);
+      this.scene.tweens.add({
+        targets: ring,
+        scale: maxRingScale,
+        alpha: 0,
+        duration: 720 + index * 110,
+        delay: index * 80,
+        ease: 'Cubic.easeOut',
+        onComplete: () => ring.setVisible(false),
+      });
+    });
+
+    // Wide, transparent rays make the activation register across the entire
+    // display even for powerups whose source icon is intentionally compact.
+    const beamLength = Math.hypot(l.width, l.height) * 1.3;
+    this.activationBeams.forEach((beam, index) => {
+      beam
+        .setPosition(centerX, centerY)
+        .setSize(42, beamLength)
+        .setAngle((360 / this.activationBeams.length) * index + Phaser.Math.Between(-12, 12))
+        .setFillStyle(def.hudColor, 0.22)
+        .setScale(0.08, 1)
+        .setAlpha(0.64)
+        .setVisible(true);
+      this.scene.tweens.add({
+        targets: beam,
+        scaleX: 1.9,
+        alpha: 0,
+        duration: 620,
+        delay: index * 18,
+        ease: 'Cubic.easeOut',
+        onComplete: () => beam.setVisible(false),
+      });
+    });
+
+    this.activationParticles.forEach((particle, index) => {
+      const startX = Phaser.Math.Between(-30, l.width + 30);
+      const startY = Phaser.Math.Between(-30, l.height + 30);
+      particle
+        .setTexture(def.iconTexture)
+        // The burst begins across the entire display rather than travelling
+        // there from the centre, so it reads as a screen takeover on frame 1.
+        .setPosition(startX, startY)
+        .setDisplaySize(Phaser.Math.Between(62, 96), Phaser.Math.Between(62, 96))
+        .setAngle(Phaser.Math.Between(-35, 35))
+        .setScale(0.58)
+        .setAlpha(0.96)
+        .setVisible(true);
+      this.scene.tweens.add({
+        targets: particle,
+        x: startX + Phaser.Math.Between(-90, 90),
+        y: startY + Phaser.Math.Between(-90, 90),
+        angle: particle.angle + Phaser.Math.Between(-540, 540),
+        scale: Phaser.Math.FloatBetween(0.92, 1.3),
+        alpha: 0,
+        duration: Phaser.Math.Between(620, 960),
+        delay: index * 12,
+        ease: 'Cubic.easeOut',
+        onComplete: () => particle.setVisible(false),
+      });
+    });
+
+    this.scene.time.delayedCall(1_020, () => {
+      if (token === this.activationToken) this.activationRoot.setVisible(false);
+    });
   }
 
   private startCoinRain(count: number): void {
     this.clearCoinRain();
     while (this.rainCoins.length < count) {
-      const image = this.scene.add.image(0, 0, ATLAS_KEY, 'icon_coin').setVisible(false).setDepth(304);
+      const image = this.scene.add.image(0, 0, ATLAS_KEY, 'icon_coin').setVisible(false).setDepth(370);
       this.rainCoins.push({
         image,
         active: false,
@@ -279,30 +432,40 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
         delayMs: 0,
         fallMs: 0,
         originX: 0,
+        startY: 0,
         swayPx: 0,
         swayPhase: 0,
         spin: 0,
       });
     }
     const l = theme.layout;
+    const lanes = Math.min(6, Math.max(1, count));
     for (let i = 0; i < count; i += 1) {
       const coin = this.rainCoins[i]!;
+      const lane = i % lanes;
+      const wave = Math.floor(i / lanes);
       coin.active = true;
       coin.elapsedMs = 0;
-      coin.delayMs = i * RAIN_STAGGER_MS + Phaser.Math.Between(0, 260);
-      coin.fallMs = Phaser.Math.Between(3_400, 4_900);
-      coin.originX = Phaser.Math.Between(RAIN_EDGE_MARGIN, Math.max(RAIN_EDGE_MARGIN, l.width - RAIN_EDGE_MARGIN));
-      coin.swayPx = Phaser.Math.Between(18, 54);
+      // Six quick waves put every payout on screen within half a second,
+      // instead of making a 36-coin frenzy look like a few stray drops.
+      coin.delayMs = wave * RAIN_STAGGER_MS + Phaser.Math.Between(0, 48);
+      coin.fallMs = Phaser.Math.Between(4_700, 6_200);
+      const laneCenter = ((lane + 0.5) / lanes) * l.width;
+      coin.originX = Phaser.Math.Clamp(laneCenter + Phaser.Math.Between(-26, 26), RAIN_EDGE_MARGIN, l.width - RAIN_EDGE_MARGIN);
+      // A whole-screen field is legible immediately and still reads as a rain
+      // cascade while every coin drifts down toward the wallet.
+      coin.startY = Phaser.Math.Between(-RAIN_COIN_SIZE, Math.round(l.height * 0.58));
+      coin.swayPx = Phaser.Math.Between(24, 62);
       coin.swayPhase = Math.random() * Math.PI * 2;
       coin.spin = Phaser.Math.Between(-190, 190);
       this.scene.tweens.killTweensOf(coin.image);
       coin.image
-        .setPosition(coin.originX, -RAIN_COIN_SIZE)
+        .setPosition(coin.originX, coin.startY)
         .setDisplaySize(RAIN_COIN_SIZE, RAIN_COIN_SIZE)
         .setAngle(Phaser.Math.Between(-30, 30))
         .setAlpha(1)
         .setVisible(false)
-        .setDepth(304);
+        .setDepth(370);
     }
   }
 
@@ -322,7 +485,7 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
       const wave = Math.sin(progress * Math.PI * 3 + coin.swayPhase) * coin.swayPx;
       coin.image
         .setVisible(true)
-        .setPosition(Phaser.Math.Clamp(coin.originX + wave, RAIN_EDGE_MARGIN, theme.layout.width - RAIN_EDGE_MARGIN), Phaser.Math.Linear(-RAIN_COIN_SIZE, height + RAIN_COIN_SIZE, progress))
+        .setPosition(Phaser.Math.Clamp(coin.originX + wave, RAIN_EDGE_MARGIN, theme.layout.width - RAIN_EDGE_MARGIN), Phaser.Math.Linear(coin.startY, height + RAIN_COIN_SIZE, progress))
         .setAngle(coin.image.angle + coin.spin * (dtMs / 1000))
         .setAlpha(Phaser.Math.Clamp(Math.min(progress * 8, (1 - progress) * 8), 0, 1));
     }
@@ -348,7 +511,7 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
     this.sfx.play('coin');
     this.floatCoinValue(coin.image.x, coin.image.y, value);
     const target = theme.layout.coin;
-    coin.image.setDepth(309).setAlpha(1);
+    coin.image.setDepth(380).setAlpha(1);
     this.scene.tweens.add({
       targets: coin.image,
       x: target.x,
@@ -357,7 +520,7 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
       duration: 360,
       ease: 'Quad.easeIn',
       onComplete: () => {
-        coin.image.setVisible(false).setDepth(304);
+        coin.image.setVisible(false).setDepth(370);
         CurrencyDisplay.of(this.scene)?.tick();
       },
     });
@@ -368,7 +531,7 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
       .bitmapText(x, y - 28, 'pixel', `+${compactNumber(value)}`, 13)
       .setOrigin(0.5)
       .setTint(0xffe58a)
-      .setDepth(310);
+      .setDepth(381);
     this.scene.tweens.add({
       targets: label,
       y: label.y - 42,
@@ -383,7 +546,7 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
     for (const coin of this.rainCoins) {
       this.scene.tweens.killTweensOf(coin.image);
       coin.active = false;
-      coin.image.setVisible(false).setDepth(304);
+      coin.image.setVisible(false).setDepth(370);
     }
   }
 
@@ -458,7 +621,10 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
       const bg = this.scene.add.rectangle(0, 0, 300, coinRain ? 70 : 56, 0x241a10).setStrokeStyle(4, def.hudColor);
       const copy = coinRain ? `${def.label}!\nTAP THE COINS!` : def.label;
       const label = this.scene.add.bitmapText(0, 0, 'pixel', copy, coinRain ? 12 : 14).setOrigin(0.5).setCenterAlign().setTint(def.hudColor);
-      banner = this.scene.add.container(0, 0, [bg, label]).setVisible(false).setDepth(307);
+      // Stage announcements share this arena lane. A collected powerup is the
+      // actionable, time-sensitive message, so it must read above "STAGE
+      // REACHED" rather than being hidden behind it.
+      banner = this.scene.add.container(0, 0, [bg, label]).setVisible(false).setDepth(320);
       this.scene.add.existing(banner);
       this.banners.set(def.id, banner);
     }

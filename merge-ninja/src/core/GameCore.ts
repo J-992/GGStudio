@@ -97,6 +97,9 @@ export class GameCore {
   private collectionCelebratedFlag: boolean;
   /** First-run coach completion is lifetime state, just like the almanac. */
   private tutorialCompletedFlag: boolean;
+  /** Deadline for the guaranteed first-run pickup, armed by the first merge. */
+  private tutorialPowerupAtMs: number | null = null;
+  private tutorialShieldActive = false;
 
   constructor(opts: { storage?: StorageLike | null; now?: () => number } = {}) {
     const storage = opts.storage === undefined ? this.defaultStorage() : opts.storage;
@@ -117,6 +120,13 @@ export class GameCore {
     this.economy = new EconomySystem(saved?.coins);
     this.progression = new ProgressionSystem(saved?.highestTierEverOwned);
     this.metrics = saved?.metrics ?? freshMetrics();
+    // The safe runway begins with the first real purchase, not only after its merge.
+    // A reload after that merge also needs the promised pickup re-armed -- the
+    // offer itself is ephemeral, while the completed-tutorial flag is not.
+    this.tutorialShieldActive = !this.tutorialCompletedFlag && this.metrics.purchases > 0;
+    if (this.tutorialShieldActive && this.metrics.merges > 0) {
+      this.tutorialPowerupAtMs = this.metrics.timePlayedMs + 1_000;
+    }
     // Discoveries are unioned across both slots so a player mid-upgrade keeps
     // everything: the meta slot is the new home, the run slot is where an
     // older build left them.
@@ -178,7 +188,17 @@ export class GameCore {
     // Powerup durations are real-time like the boost itself, and freeze while
     // the sim is paused so a reveal modal never burns a frenzy unseen.
     this.powerups.update(this.speedMultiplier > 0 ? real : 0);
-    const spawnedPowerup = this.powerups.maybeSpawn(this.metrics.timePlayedMs);
+    let spawnedPowerup: PowerupId | null = null;
+    if (!this.tutorialCompletedFlag && this.tutorialPowerupAtMs !== null && this.metrics.timePlayedMs >= this.tutorialPowerupAtMs) {
+      // Make the guided pickup a Coin Frenzy. It is the only powerup that
+      // asks for a follow-up tap, so teaching it here ensures every new
+      // player sees and learns the coin-rain interaction right away.
+      spawnedPowerup = this.powerups.forceSpawn('coinFrenzy');
+      // A modal can temporarily close the presentation gate. Keep the promise
+      // armed until a real token enters the lane rather than losing it unseen.
+      if (spawnedPowerup !== null) this.tutorialPowerupAtMs = null;
+    }
+    if (spawnedPowerup === null) spawnedPowerup = this.powerups.maybeSpawn(this.metrics.timePlayedMs);
     if (spawnedPowerup !== null) {
       this.events.emit({ type: 'powerupSpawned', id: spawnedPowerup, travelMs: POWERUPS[spawnedPowerup].travelMs });
     }
@@ -293,6 +313,9 @@ export class GameCore {
     if (ninja === null) return null;
     this.totalPurchases += 1;
     this.metrics.purchases += 1;
+    // Before the first buy there is no line to damage. From this moment until
+    // the guided pickup is caught, a new player has room to learn safely.
+    if (!this.tutorialCompletedFlag && this.metrics.purchases === 1) this.tutorialShieldActive = true;
     this.discoverTier(tier);
     this.metrics.highestTier = Math.max(this.metrics.highestTier, tier);
     this.events.emit({ type: 'coinsChanged', coins: this.economy.coins, delta: -cost });
@@ -331,6 +354,10 @@ export class GameCore {
       return 'swapped';
     }
     this.metrics.merges += 1; this.metrics.highestTier = Math.max(this.metrics.highestTier, merged.result.tier);
+    if (!this.tutorialCompletedFlag && this.tutorialPowerupAtMs === null) {
+      this.tutorialShieldActive = true;
+      this.tutorialPowerupAtMs = this.metrics.timePlayedMs + 5_000;
+    }
     const discovered = this.discoverTier(merged.result.tier);
     this.events.emit({ type: 'ninjaMerged', fromSlot, toSlot: target.slot, consumedIds: merged.consumedIds, result: merged.result });
     if (discovered) this.events.emit({ type: 'newTierDiscovered', tier: merged.result.tier, name: ninjaDef(merged.result.tier).name });
@@ -432,6 +459,8 @@ export class GameCore {
     this.progression.highestTierEverOwned = 1; Object.assign(this.metrics, freshMetrics()); this.damageCoinRemainder = 0;
     this.powerups.clear();
     this.coinFrenzyRemaining = 0; this.coinFrenzyValue = 0;
+    this.tutorialPowerupAtMs = null;
+    this.tutorialShieldActive = false;
     this.playerHp = this.playerMaxHealth; this.activeTempoId = this.tempo.id; this.over = false;
     this.events.emit({ type: 'playerHealthChanged', hp: this.playerHp, maxHp: this.playerMaxHealth, delta: 0, reason: 'reset' });
     this.boss.reset(); this.syncChampion(); this.emitBossSpawned(); this.markDirty();
@@ -462,6 +491,9 @@ export class GameCore {
         this.coinFrenzyValue = coinFrenzyCoinValue(this.boss.stage);
       }
       this.events.emit({ type: 'powerupCollected', id });
+      // A player who waits out a normal offer before learning to merge still
+      // needs the guided sequence; only a post-merge pickup completes it.
+      if (this.tutorialShieldActive && this.metrics.merges > 0) this.completeTutorial();
     }
     return applied;
   }
@@ -561,6 +593,8 @@ export class GameCore {
   completeTutorial(): void {
     if (this.tutorialCompletedFlag) return;
     this.tutorialCompletedFlag = true;
+    this.tutorialShieldActive = false;
+    this.tutorialPowerupAtMs = null;
     this.saveMeta();
   }
 
@@ -670,7 +704,9 @@ export class GameCore {
     // A boss has a visual idle strike before recruits exist, but can only hurt
     // the line once there is an actual ninja to protect.
     const ceiling = Math.max(1, Math.ceil(this.playerMaxHealth * BALANCE.player.maxHitShare));
-    const damage = this.highestTier > 0 ? Math.max(1, Math.min(ceiling, Math.round(rawDamage))) : 0;
+    // The first-ever player gets a forgiving runway until the tutorial pickup
+    // is caught. Keep the boss animation/event alive, but do not drain health.
+    const damage = this.highestTier > 0 && (this.tutorialCompletedFlag || !this.tutorialShieldActive) ? Math.max(1, Math.min(ceiling, Math.round(rawDamage))) : 0;
     const before = this.playerHp;
     let defeated = false;
     if (damage > 0 && !this.over) {

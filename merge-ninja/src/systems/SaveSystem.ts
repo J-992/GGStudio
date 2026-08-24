@@ -173,7 +173,7 @@ export class SaveSystem {
       state.seenBosses = this.cleanIndexList(meta.seenBosses, 0, BOSS_COUNT - 1);
       state.discoveredTiers = this.cleanIndexList(meta.discoveredTiers, 1, BALANCE.tiers.count);
       if (meta.collectionCelebrated === true) state.collectionCelebrated = true;
-      if (meta.tutorialCompleted === true) state.tutorialCompleted = true;
+      if (typeof meta.tutorialCompleted === 'boolean') state.tutorialCompleted = meta.tutorialCompleted;
       return state;
     } catch {
       return null;

@@ -182,6 +182,16 @@ export class PowerupSystem {
     return null;
   }
 
+  /** Schedules a one-off guaranteed offer without allowing the normal window
+   * to produce a duplicate immediately afterwards. */
+  forceSpawn(id: PowerupId = this.order[0]!): PowerupId | null {
+    const rt = this.runtime.get(id);
+    const def = this.defs.get(id);
+    if (!rt || !def || !this.canSpawn()) return null;
+    rt.nextSpawnAtMs = this.visibleClockMs + this.rollGapMs(def);
+    return id;
+  }
+
   /** Apply a collected pickup honouring its stack policy. False if unknown id. */
   activate(id: PowerupId): boolean {
     const def = this.defs.get(id);

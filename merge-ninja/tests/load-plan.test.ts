@@ -108,42 +108,14 @@ describe('load plan', () => {
     }
   });
 
-  /**
-   * The regression that made a returning save slower to start than a new one:
-   * the boot set was every boss up to the current stage rather than the few
-   * still ahead, so a stage-17 save waited on 2.2 MB of art for bosses it had
-   * already beaten. The boot set must not grow with how far in the save is.
-   */
-  it.each(RESUMES)('boots a window, not everything behind it (stage $stage)', (at) => {
+  it.each(RESUMES)('boots the complete catalog before the scene starts (stage $stage)', (at) => {
     const total = NINJA_CATALOG_PORTRAITS.length + BOSS_CATALOG_PORTRAITS.length;
-    expect(bootPortraits(at).length).toBeLessThan(total / 3);
+    expect(bootPortraits(at)).toHaveLength(total);
   });
 
-  it('streams what the player meets next before what they left behind', () => {
-    // A save at stage 17 faces boss 18 next and boss 3 some thirty stages
-    // later; ordering the queue from tier one would fetch them the wrong way
-    // round and guarantee the stand-in shows.
-    // Membership, not the texture name: a couple of boss appearances reuse a
-    // ninja catalog texture, so `boss_`-prefixed keys are not the boss list.
-    const bossKeys = new Set(BOSS_CATALOG_PORTRAITS.map((p) => p.textureKey));
-    const at = { stage: 17, highestTier: 6, boardTiers: [4, 6] };
-    const bosses = deferredPortraits(at).filter((p) => bossKeys.has(p.textureKey));
-    const first = bosses.slice(0, 6).map((p) => p.tier);
-
-    expect(first).toEqual([21, 22, 23, 24, 25, 26]);
-  });
-
-  it('streams a new game’s deferred art in the order the player reaches it', () => {
-    const bossKeys = new Set(BOSS_CATALOG_PORTRAITS.map((p) => p.textureKey));
-    const deferred = deferredPortraits();
-
-    for (const list of [
-      deferred.filter((p) => bossKeys.has(p.textureKey)),
-      deferred.filter((p) => !bossKeys.has(p.textureKey)),
-    ]) {
-      const tiers = list.map((p) => p.tier);
-      expect(tiers).toEqual([...tiers].sort((a, b) => a - b));
-    }
+  it('defers neither character nor arena art', () => {
+    expect(deferredPortraits()).toEqual([]);
+    expect(deferredThemeArt()).toEqual([]);
   });
 
   it('gives every roster and boss entry an atlas frame to stand in with', () => {

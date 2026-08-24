@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { BALANCE } from '../data/balance';
 import type { GameCore } from '../core/GameCore';
 import type { GameEvent } from '../core/EventBus';
-import { VFX_ANIMATIONS } from '../data/vfxAssets';
+import { playVfx, vfxSource } from '../effects/vfxPlayback';
 import { NinjaSprite } from './NinjaSprite';
 import { TrashSlot, TRASH_PICKUP_RADIUS } from './TrashSlot';
 import { theme } from './theme';
@@ -403,6 +403,11 @@ export class MergeBoard extends Phaser.GameObjects.Container {
     if (this.fingerprint() !== this.boardFingerprint) this.syncFromCore();
   }
 
+  /** Apply streamed portrait strips to roster units already on the board. */
+  refreshPortraits(): void {
+    for (const sprite of this.sprites.values()) sprite.refreshPortrait();
+  }
+
   private handle(event: GameEvent): void {
     if (event.type === 'ninjaSpawned') {
       // Every unit that arrives through this event was just created by
@@ -620,18 +625,18 @@ export class MergeBoard extends Phaser.GameObjects.Container {
   }
 
   private embers(x: number, y: number, count: number): void {
-    const merge = VFX_ANIMATIONS.merge;
     for (let i = 0; i < count; i += 1) {
       const angle = (Math.PI * 2 * i) / count + Math.random() * 0.8;
       const distance = 30 + Math.random() * 24;
       const tint = EMBER_TINTS[i % EMBER_TINTS.length] ?? 0xffd23f;
+      const source = vfxSource(this.sceneRef, 'merge');
       const ember = this.sceneRef.add
-        .sprite(x, y, merge.textureKey, 0)
+        .sprite(x, y, source.texture, source.frame)
         .setTint(tint)
         .setDepth(26)
         .setScale(0.12)
-        .setMask(this.contentMask)
-        .play(merge.animationKey);
+        .setMask(this.contentMask);
+      playVfx(this.sceneRef, ember, 'merge');
       this.sceneRef.tweens.add({
         targets: ember,
         x: x + Math.cos(angle) * distance,
@@ -646,13 +651,14 @@ export class MergeBoard extends Phaser.GameObjects.Container {
   }
 
   private maskedPuff(x: number, y: number, tint: number, depth: number): Phaser.GameObjects.Sprite {
-    const smoke = VFX_ANIMATIONS.smoke;
-    return this.sceneRef.add
-      .sprite(x, y, smoke.textureKey, 0)
+    const source = vfxSource(this.sceneRef, 'smoke');
+    const puff = this.sceneRef.add
+      .sprite(x, y, source.texture, source.frame)
       .setTint(tint)
       .setDepth(depth)
-      .setMask(this.contentMask)
-      .play(smoke.animationKey);
+      .setMask(this.contentMask);
+    playVfx(this.sceneRef, puff, 'smoke');
+    return puff;
   }
 
   /**
