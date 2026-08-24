@@ -62,6 +62,14 @@ export class MergeBoard extends Phaser.GameObjects.Container {
   private feedbackKey = '';
   /** Live purchase smokes keyed by slot, so a re-buy interrupts its predecessor. */
   private readonly smokes = new Map<number, SmokeRun>();
+  /**
+   * The one-time drag demonstration: a fingertip sliding from one pulsing pad
+   * to its match. Shown only while `core.metrics.merges` is still zero --
+   * PLAN.md's "disappears forever after first merge" -- so a first-time
+   * player is told what the pulse means instead of just seeing it glow.
+   */
+  private readonly dragHint: Phaser.GameObjects.Container;
+  private dragHintTween: Phaser.Tweens.Tween | null = null;
 
   constructor(
     private readonly sceneRef: Phaser.Scene,
@@ -84,7 +92,7 @@ export class MergeBoard extends Phaser.GameObjects.Container {
       .nineslice(b.x + b.w / 2, b.y + 28, 'game', 'banner_name_9', b.w - 42, 28, 11, 11, 7, 7)
       .setDepth(6);
     this.title = sceneRef.add
-      .bitmapText(b.x + b.w / 2, b.y + 28, 'pixel', 'CURRENT UNIT ROSTER GRIDS', 14)
+      .bitmapText(b.x + b.w / 2, b.y + 28, 'pixel', 'YOUR NINJAS', 14)
       .setOrigin(0.5)
       .setTint(0xffffff)
       .setDepth(7);
@@ -103,6 +111,11 @@ export class MergeBoard extends Phaser.GameObjects.Container {
     }
     this.hoverOutline = sceneRef.add.graphics().setVisible(false).setDepth(4);
     this.add(this.hoverOutline);
+    this.dragHint = sceneRef.add.container(0, 0, [
+      sceneRef.add.circle(0, 4, 15, 0x000000, 0.22),
+      sceneRef.add.circle(0, 0, 13, 0xfff6dd).setStrokeStyle(3, 0x3a2a12),
+    ]).setVisible(false).setDepth(9);
+    this.add(this.dragHint);
     this.relayout();
     core.events.onAny((event) => this.handle(event));
   }
@@ -459,7 +472,36 @@ export class MergeBoard extends Phaser.GameObjects.Container {
       this.syncFromCore();
     } else if (event.type === 'mergeHint') {
       for (const slot of event.slots) this.pulse(slot);
+      if (this.core.metrics.merges === 0) this.showDragHint(event.slots[0], event.slots[1]);
     }
+  }
+
+  /** One fingertip sliding pad-to-pad and back, twice, then gone for good. */
+  private showDragHint(fromSlot: number, toSlot: number): void {
+    this.dragHintTween?.stop();
+    const from = this.slotPos(fromSlot);
+    const to = this.slotPos(toSlot);
+    this.dragHint.setPosition(from.x, from.y).setAlpha(0).setScale(1).setVisible(true);
+    this.sceneRef.tweens.add({ targets: this.dragHint, alpha: 1, duration: 180 });
+    this.dragHintTween = this.sceneRef.tweens.add({
+      targets: this.dragHint,
+      x: { from: from.x, to: to.x },
+      y: { from: from.y, to: to.y },
+      scale: { from: 1, to: 0.82 },
+      duration: 520,
+      hold: 160,
+      yoyo: true,
+      repeat: 1,
+      ease: 'Sine.easeInOut',
+      onComplete: () => {
+        this.sceneRef.tweens.add({
+          targets: this.dragHint,
+          alpha: 0,
+          duration: 200,
+          onComplete: () => this.dragHint.setVisible(false),
+        });
+      },
+    });
   }
 
   private animateMerge(event: Extract<GameEvent, { type: 'ninjaMerged' }>): void {

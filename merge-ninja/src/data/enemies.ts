@@ -6,10 +6,16 @@ import type { BossDef, CombatAnimation, CombatKit } from './types';
  * One unique visual identity per boss-stage slot; no boss texture is reused.
  * The first act stays human / ninja-forward. Animal and monster silhouettes
  * take over only once the player reaches the later boss stages.
+ *
+ * Stages 1-6 are deliberately plain (Training Dummy through Hooded Duelist):
+ * PLAN.md's gentle-ramp intent got lost once every stage became a named boss
+ * with its own portal entrance, and a 6-year-old's first opponent should not
+ * need a word like "Executioner" sounded out. Stage 7 onward ramps back into
+ * the existing ladder's vocabulary.
  */
 const BOSS_NAMES = [
-  'Chronofog Swordsman', 'Hooded Fang Lord', 'Frosthook Alchemist',
-  'Clockblade Captain', 'Glitchblade Raider', 'Masked Signal Executioner',
+  'Training Dummy', 'Rookie Rival Ninja', 'Masked Bandit',
+  'Bamboo Guard', 'Twin Blade Trainee', 'Hooded Duelist',
   'Ironfist Ninja', 'Copper Gear Enforcer', 'Copper Gear Brawler',
   'Chain Sickle Assassin', 'Caskblade Reaper', 'Rift Eye Adept',
   'Foxflame Warlord', 'Jade Staff Bruiser', 'Goldwing Duelist',

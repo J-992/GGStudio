@@ -79,7 +79,13 @@ export class AscensionButton extends Phaser.GameObjects.Container {
     const hintX = starHalf + this.label.width + 14 + this.hint.width / 2;
     const plateWidth = Math.ceil(hintX + this.hint.width / 2 + 14 + starHalf);
     this.plate.setSize(plateWidth, 56).setPosition(plateWidth / 2 - starHalf, 0);
-    this.plate.setInteractive(new Phaser.Geom.Rectangle(-starHalf - 8, -36, plateWidth + 16, 72), Phaser.Geom.Rectangle.Contains);
+    // Written in the plate's own local frame (top-left-anchored, per Phaser's
+    // displayOrigin shift -- see BuyButton's fix): the plate's displayOriginX
+    // is plateWidth / 2 regardless of where setPosition moved it, so an
+    // `-starHalf` term here doesn't cancel anything and instead pushes the
+    // whole hit rect starHalf px left, opening a dead zone on the right end
+    // (right where the "TAP AGAIN" hint text sits).
+    this.plate.setInteractive(new Phaser.Geom.Rectangle(-8, -36, plateWidth + 16, 72), Phaser.Geom.Rectangle.Contains);
     this.star.setPosition(0, 0);
     this.label.setPosition(labelX, 0).setVisible(true);
     this.hint.setPosition(hintX, 0).setVisible(true);

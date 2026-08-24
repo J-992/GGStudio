@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { ATLAS_KEY } from '../render/atlasConfig';
 import { compactNumber, theme } from './theme';
+import { bossForStage } from '../data/enemies';
 import type { GameEvent } from '../core/EventBus';
 import type { Sfx } from '../audio/Sfx';
 
@@ -35,6 +36,8 @@ export class GameOverPanel extends Phaser.GameObjects.Container {
   private readonly title: Phaser.GameObjects.BitmapText;
   private readonly subtitle: Phaser.GameObjects.BitmapText;
   private readonly rows: Row[] = [];
+  /** A soft, spoiler-free curiosity hook -- what's one stage past the player's best ever. Never a countdown, never urgent. */
+  private readonly nextTease: Phaser.GameObjects.BitmapText;
   private readonly buttonBody: Phaser.GameObjects.Rectangle;
   private readonly buttonLabel: Phaser.GameObjects.BitmapText;
   private open = false;
@@ -73,6 +76,13 @@ export class GameOverPanel extends Phaser.GameObjects.Container {
       this.rows.push(row);
       this.add([row.caption, row.tag, row.value]);
     }
+
+    this.nextTease = sceneRef.add
+      .bitmapText(0, 0, 'pixel', '', 10)
+      .setOrigin(0.5, 0)
+      .setCenterAlign()
+      .setTint(0xb9ac9d);
+    this.add(this.nextTease);
 
     this.buttonBody = sceneRef.add.rectangle(0, 0, 260, 58, theme.colors.buy).setStrokeStyle(4, 0x14520f);
     this.buttonLabel = sceneRef.add.bitmapText(0, 0, 'pixel', 'TRY AGAIN', 14).setOrigin(0.5).setTint(0xffffff);
@@ -129,6 +139,10 @@ export class GameOverPanel extends Phaser.GameObjects.Container {
     // Kept to one line at the panel's narrowest: the subtitle sits 50px above
     // the first stat row, and a wrapped second line would land on top of it.
     this.subtitle.setText(celebrating ? 'YOU WENT FURTHER THAN EVER.' : 'THE LINE IS DOWN.');
+    // Purely informational curiosity hook: what's one stage past the player's
+    // best ever, named plainly. No countdown, no penalty for not returning.
+    const next = bossForStage(event.best.stage + 1);
+    this.nextTease.setText(`NEXT UP: ${next.name.toUpperCase()}`);
 
     this.relayout();
     this.setVisible(true).setAlpha(0);
@@ -201,6 +215,10 @@ export class GameOverPanel extends Phaser.GameObjects.Container {
     });
 
     const buttonY = top + height - 56;
+    // Sits in the gap between the last stat row and the button; the row loop
+    // above always leaves at least ~60px here (rowGap is capped at 42 for four
+    // rows against this panel's minimum height).
+    this.nextTease.setPosition(centerX, buttonY - 46).setMaxWidth(width - 64);
     const buttonWidth = Math.min(300, width - 96);
     this.buttonBody.setPosition(centerX, buttonY).setSize(buttonWidth, 58);
     // A resized Rectangle keeps its old hit area, so the shape is re-set here.

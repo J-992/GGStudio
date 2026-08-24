@@ -56,6 +56,8 @@ export interface MetaState {
    * collection counter would sit one short of complete forever.
    */
   discoveredTiers?: number[];
+  /** True once the full-roster fanfare has fired. It must never fire twice. */
+  collectionCelebrated?: boolean;
 }
 
 /** Safely persists complete runs while treating browser storage as optional. */
@@ -168,6 +170,7 @@ export class SaveSystem {
       state.revealedTiers = this.cleanIndexList(meta.revealedTiers, 1, BALANCE.tiers.count);
       state.seenBosses = this.cleanIndexList(meta.seenBosses, 0, BOSS_COUNT - 1);
       state.discoveredTiers = this.cleanIndexList(meta.discoveredTiers, 1, BALANCE.tiers.count);
+      if (meta.collectionCelebrated === true) state.collectionCelebrated = true;
       return state;
     } catch {
       return null;

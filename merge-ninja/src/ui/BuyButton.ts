@@ -29,8 +29,13 @@ export class BuyButton extends Phaser.GameObjects.Container {
     // button) so little fingers land it without aiming; the visible green
     // rectangle keeps its tuned size and position.
     const hitHeight = Math.max(r.h, MIN_HIT_HEIGHT);
+    // Phaser tests a custom hit area against the pointer AFTER shifting it by
+    // the object's own displayOrigin (InputManager.pointWithinHitArea), so a
+    // rectangle here has to be written top-left-anchored (0, 0, w, h) --
+    // centering it at (-w/2, -h/2) double-applies that shift and silently
+    // halves the clickable region onto the button's left side only.
     this.setSize(r.w, hitHeight).setInteractive(
-      new Phaser.Geom.Rectangle(-r.w / 2, -hitHeight / 2, r.w, hitHeight),
+      new Phaser.Geom.Rectangle(0, 0, r.w, hitHeight),
       Phaser.Geom.Rectangle.Contains,
     );
     // The press flash lands under the finger, not in the middle of the button:
@@ -57,7 +62,7 @@ export class BuyButton extends Phaser.GameObjects.Container {
     const hitHeight = Math.max(r.h, MIN_HIT_HEIGHT);
     this.setSize(r.w, hitHeight);
     if (this.input !== null) {
-      this.input.hitArea.setTo(-r.w / 2, -hitHeight / 2, r.w, hitHeight);
+      this.input.hitArea.setTo(0, 0, r.w, hitHeight);
     }
   }
   pulse(): void { if (this.scene.tweens.isTweening(this)) return; this.scene.tweens.add({ targets: this, scaleX: 1.06, scaleY: 1.06, yoyo: true, repeat: 2, duration: 130 }); }

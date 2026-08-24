@@ -73,7 +73,7 @@ const FAMILIES: Record<FamilyName, BossSpawnVfxRecipe> = {
 
 /** Family membership per identity (matches src/data/enemies.ts roster order). */
 const IDENTITY_FAMILY: readonly FamilyName[] = [
-  // Chronofog .. Masked Signal: first-act humanoid ladder.
+  // Training Dummy .. Hooded Duelist: first-act humanoid ladder.
   'blade', 'blade', 'arcane', 'blade', 'blade', 'blade',
   // Ironfist .. Rift Eye Adept.
   'blade', 'gear', 'gear', 'blade', 'blade', 'void',
@@ -92,7 +92,7 @@ if (IDENTITY_FAMILY.length !== BOSS_COUNT) {
 
 /** Hand-tuned per-identity flavor where the family default is not enough. */
 const OVERRIDES: Record<number, Partial<BossSpawnVfxRecipe>> = {
-  4: { motif: 'bolt', palette: [0x9fd7ff, 0x2b2440] }, // Glitchblade Raider
+  4: { motif: 'bolt', palette: [0x9fd7ff, 0x2b2440] }, // Twin Blade Trainee
   10: { motif: 'shadow', palette: [0x2b2440, 0xa778dd] }, // Caskblade Reaper
   12: { entrance: 'portal', motif: 'flame', palette: [0xef5a4a, 0xffe7a3] }, // Foxflame Warlord
   14: { shake: 0 }, // Goldwing Duelist lands light for a fencer

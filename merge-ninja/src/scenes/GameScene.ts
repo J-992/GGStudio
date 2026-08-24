@@ -85,8 +85,6 @@ export class GameScene extends Phaser.Scene {
   private readonly sectionTitles: Phaser.GameObjects.BitmapText[] = [];
   private readonly gears: Array<{ image: Phaser.GameObjects.Image; speed: number }> = [];
   private boughtOnce = false;
-  /** Set once per session when the almanac hits 100%, so the fanfare is one-time. */
-  private collectionCelebrated = false;
   /** True when this create came from Settings' Restart, not from a boot. */
   private restarted = false;
   /** Last gameplay state handed to the portal; see syncGameplayReport. */
@@ -301,12 +299,12 @@ export class GameScene extends Phaser.Scene {
 
   private makeSectionTitles(): void {
     const arenaTitle = this.add
-      .bitmapText(0, 0, 'pixel', '[ARENA COMBAT]', 14)
+      .bitmapText(0, 0, 'pixel', 'ARENA', 14)
       .setOrigin(0.5)
       .setTint(0xe9ece6)
       .setDepth(60);
     const rosterTitle = this.add
-      .bitmapText(0, 0, 'pixel', '[MERGE GRIDS & MANAGEMENT]', 14)
+      .bitmapText(0, 0, 'pixel', 'MERGE BOARD', 14)
       .setOrigin(0.5)
       .setTint(0xe9ece6)
       .setDepth(60);
@@ -395,10 +393,11 @@ export class GameScene extends Phaser.Scene {
     const text = `${have}/${total}`;
     if (force || this.almanacBadge.text !== text) this.almanacBadge.setText(text);
 
-    // The whole collection is done: celebrate once per session through the
-    // single banner, and never again -- it is a moment, not a nag.
-    if (have >= total && !this.collectionCelebrated) {
-      this.collectionCelebrated = true;
+    // The whole collection is done: celebrate exactly once, ever -- persisted
+    // in the meta save, so a player who already saw this does not see it again
+    // on their next session. It is a moment, not a nag.
+    if (have >= total && !this.core.collectionCelebrated) {
+      this.core.markCollectionCelebrated();
       this.stageBanner.announce('COLLECTION COMPLETE!', 'EVERY NINJA AND BOSS DISCOVERED');
     }
   }
@@ -430,8 +429,13 @@ export class GameScene extends Phaser.Scene {
       .setTint(0xfff6dd)
       .setDepth(9)
       // Covers the 56px plate with a little margin (scale 1.25 turns this
-      // into a ~60px world-space square).
-      .setInteractive(new Phaser.Geom.Rectangle(-24, -24, 48, 48), Phaser.Geom.Rectangle.Contains);
+      // into a ~60px world-space square). Written relative to the icon's own
+      // native frame (31x33, prop_gear_small_a) rather than centred at 0:
+      // Phaser tests a custom hit area after shifting the pointer by the
+      // object's own displayOrigin (see BuyButton's fix), so a rectangle
+      // centred at (-24,-24) here would have left an 8-9px dead zone along
+      // the gear's right and bottom edges.
+      .setInteractive(new Phaser.Geom.Rectangle(-8.5, -7.5, 48, 48), Phaser.Geom.Rectangle.Contains);
     this.settingsButton.on('pointerdown', () => {
       this.sfx.unlock();
       this.sfx.play('click');
@@ -467,7 +471,9 @@ export class GameScene extends Phaser.Scene {
       .image(a.x, a.y, ACHIEVEMENTS_ICON_KEY)
       .setScale(1.4)
       .setDepth(9)
-      .setInteractive(new Phaser.Geom.Rectangle(-24, -24, 48, 48), Phaser.Geom.Rectangle.Contains);
+      // Same fix as the settings gear: written relative to the icon's own
+      // native 30x30 frame, not centred at 0 -- see that comment for why.
+      .setInteractive(new Phaser.Geom.Rectangle(-9, -9, 48, 48), Phaser.Geom.Rectangle.Contains);
     this.achievementsButton.on('pointerdown', () => {
       this.sfx.unlock();
       this.sfx.play('click');
@@ -680,6 +686,12 @@ export class GameScene extends Phaser.Scene {
         const a = this.almanac.anchors();
         return { previous: this.toPage(a.previous.x, a.previous.y), next: this.toPage(a.next.x, a.next.y) };
       },
+      almanacEntryPos: (kind: 'ninja' | 'boss', index: number) => {
+        const anchor = this.almanac.entryAnchor(kind, index);
+        return anchor === null ? null : this.toPage(anchor.x, anchor.y);
+      },
+      almanacDebugTap: (kind: 'ninja' | 'boss', index: number) => this.almanac.debugTap(kind, index),
+      almanacDetail: () => this.almanac.detailState(),
       stageBannerVisible: () => this.stageBanner.visible,
       settingsOpen: () => this.settings.isOpen,
       openSettings: () => this.settings.show(),

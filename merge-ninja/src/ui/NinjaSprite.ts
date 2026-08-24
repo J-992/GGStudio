@@ -14,6 +14,13 @@ const ART = { halfWidth: 62, top: 126, bottom: 2 } as const;
 /** Extra grab margin, in unscaled art pixels, around the body. */
 const GRAB_PAD = 14;
 
+/**
+ * The idle breathing float layered under the four-frame cycle: small enough
+ * to read as alive rather than jittery, slow enough not to compete with the
+ * frame swap it rides on top of.
+ */
+const IDLE_BOB = { amplitudeArtPx: 2.4, periodMs: 2100 } as const;
+
 /** Full-body source art with a low-foot pivot and authored weapon-ready frames. */
 export class NinjaSprite extends Phaser.GameObjects.Container {
   readonly image: Phaser.GameObjects.Sprite;
@@ -72,13 +79,11 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
   /** Four source-authored weapon-ready frames, phase-shifted per roster card. */
   private updateIdleFrame(time: number): void {
     if (!this.active || !this.hasFrameAnimation) return;
-    const index = ninjaIdleFrameAt(
-      time,
-      this.id * 211 + this.tier * 379,
-      this.tier === FLAME_SHOGUN_TIER,
-    );
+    const phase = this.id * 211 + this.tier * 379;
+    const index = ninjaIdleFrameAt(time, phase, this.tier === FLAME_SHOGUN_TIER);
     this.image.setFrame(index);
-    this.pose.setPosition(0, 0).setAngle(0).setScale(this.artScale);
+    const bob = Math.sin(((time + phase) / IDLE_BOB.periodMs) * Math.PI * 2) * IDLE_BOB.amplitudeArtPx;
+    this.pose.setPosition(0, bob * this.artScale).setAngle(0).setScale(this.artScale);
   }
 
   setHome(x: number, y: number): void {

@@ -90,5 +90,4 @@ exception is `font.png`, a 984-byte bitmap font that has to stay pixel-exact.
 Art that nothing loads lives in `art-unused/` and is not built; see the README
 there before wiring a tier up.
 
-Asset provenance and the one remaining publication-license warning are tracked
-in `ASSET_LICENSES.md`. The warning does not block private playtesting.
+Asset provenance is tracked in `ASSET_LICENSES.md`. Every entry is resolved.

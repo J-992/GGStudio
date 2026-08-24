@@ -3,6 +3,7 @@ import { BALANCE } from '../data/balance';
 import { BOSS_COUNT, bossIdentity } from '../data/enemies';
 import { ninjaDef } from '../data/ninjas';
 import { almanacPageCount, almanacPageSlice } from '../data/presentation';
+import { bossFlavorText, ninjaFlavorText } from '../data/flavorText';
 import { ATLAS_KEY } from '../render/atlasConfig';
 import { collectionProgress } from '../systems/CollectionProgress';
 import { theme } from './theme';
@@ -15,9 +16,14 @@ interface Entry {
   art: Phaser.GameObjects.Image;
   question: Phaser.GameObjects.BitmapText;
   label: Phaser.GameObjects.BitmapText;
+  /** Invisible tap target sized to the whole cell (portrait + label), not just the plate -- a small kid's finger should not have to land on the art precisely. */
+  hitZone: Phaser.GameObjects.Zone;
   textureKey: string;
   frame?: string | number;
   name: string;
+  description: string;
+  /** Kept in sync by `paint()`; the tap handler reads this at press time. */
+  unlocked: boolean;
 }
 
 interface Grid {
@@ -34,6 +40,9 @@ interface PageButton {
   body: Phaser.GameObjects.Rectangle;
   icon: Phaser.GameObjects.Image;
 }
+
+/** Shown whenever no tapped entry's description is currently on screen. */
+const DEFAULT_DETAIL = 'TAP A DISCOVERED ENTRY TO LEARN MORE';
 
 /** Half a fold each way. Long enough to read as paper, short enough to spam. */
 const FOLD_MS = 150;
@@ -70,6 +79,8 @@ export class Almanac extends Phaser.GameObjects.Container {
   private readonly previousPage: PageButton;
   private readonly nextPage: PageButton;
   private readonly pageLabel: Phaser.GameObjects.BitmapText;
+  /** One shared caption below the grid: whatever was last tapped, or a hint. */
+  private readonly detailText: Phaser.GameObjects.BitmapText;
   private open = false;
   private page = 0;
   private turning = false;
@@ -127,11 +138,11 @@ export class Almanac extends Phaser.GameObjects.Container {
 
     for (let tier = 1; tier <= BALANCE.tiers.count; tier += 1) {
       const ninja = ninjaDef(tier);
-      this.ninjas.push(this.makeEntry(ninja.textureKey, undefined, ninja.name));
+      this.ninjas.push(this.makeEntry(ninja.textureKey, undefined, ninja.name, ninjaFlavorText(tier)));
     }
     for (let index = 0; index < BOSS_COUNT; index += 1) {
       const boss = bossIdentity(index);
-      this.bosses.push(this.makeEntry(boss.textureKey, undefined, boss.name));
+      this.bosses.push(this.makeEntry(boss.textureKey, undefined, boss.name, bossFlavorText(index)));
     }
 
     // The controls sit on their own footer rail. They used to be tucked either
@@ -141,6 +152,12 @@ export class Almanac extends Phaser.GameObjects.Container {
     this.nextPage = this.makePageButton('arrow_right', 1);
     this.pageLabel = sceneRef.add.bitmapText(0, 0, 'pixel', '', 14).setOrigin(0.5).setTint(0xffe58a);
     this.add(this.pageLabel);
+    this.detailText = sceneRef.add
+      .bitmapText(0, 0, 'pixel', DEFAULT_DETAIL, 12)
+      .setOrigin(0.5)
+      .setCenterAlign()
+      .setTint(0xb9ac9d);
+    this.add(this.detailText);
 
     this.applyPage();
     this.relayout();
@@ -199,6 +216,24 @@ export class Almanac extends Phaser.GameObjects.Container {
     };
   }
 
+  /** Verification hook: game-space anchor for one visible grid entry's plate. */
+  entryAnchor(kind: 'ninja' | 'boss', index: number): { x: number; y: number } | null {
+    const entry = (kind === 'ninja' ? this.ninjas : this.bosses)[index];
+    if (entry === undefined || !entry.root.visible) return null;
+    return { x: this.spread.x + entry.root.x, y: this.spread.y + entry.root.y };
+  }
+
+  /** Verification hook: force the same press an entry's own plate would receive. */
+  debugTap(kind: 'ninja' | 'boss', index: number): void {
+    const entry = (kind === 'ninja' ? this.ninjas : this.bosses)[index];
+    if (entry !== undefined) this.showDetail(entry);
+  }
+
+  /** Verification hook: the shared detail caption's current text. */
+  detailState(): string {
+    return this.detailText.text;
+  }
+
   relayout(): void {
     const l = theme.layout;
     this.shade.setPosition(l.width / 2, l.height / 2).setSize(l.width, l.height);
@@ -219,11 +254,18 @@ export class Almanac extends Phaser.GameObjects.Container {
     this.placePageButton(this.previousPage, centerX - Math.min(210, width / 2 - 46), footerY);
     this.placePageButton(this.nextPage, centerX + Math.min(210, width / 2 - 46), footerY);
     this.pageLabel.setPosition(centerX, footerY);
+    // Sits in the strip `detailReserve` carves out of the grid below, clear of
+    // both the last grid row and the footer rail.
+    this.detailText.setPosition(centerX, footerY - 44).setMaxWidth(width - 64);
 
     const gridLeft = centerX - width / 2 + 26;
     const gridWidth = width - 52;
     const bodyTop = top + 64;
-    const bodyHeight = height - 88 - 56;
+    // Reserves a fixed strip between the grid and the footer for the tapped
+    // entry's description; the grid shrinks by exactly this much rather than
+    // hoping the existing footer gap happens to have slack.
+    const detailReserve = 26;
+    const bodyHeight = height - 88 - 56 - detailReserve;
 
     const columns = this.columns;
     const rows = this.rows;
@@ -355,6 +397,9 @@ export class Almanac extends Phaser.GameObjects.Container {
   /** Shows the current page's slice of each list and repaints the footer. */
   private applyPage(): void {
     this.page = Phaser.Math.Clamp(this.page, 0, this.pageCount - 1);
+    // Whatever was on the detail line belonged to whichever entry sat on the
+    // page just left; a turned page must not keep talking about it.
+    this.detailText.setText(DEFAULT_DETAIL);
     const ninjaSlice = almanacPageSlice(this.ninjas.length, this.page, this.perSection);
     const bossSlice = almanacPageSlice(this.bosses.length, this.page, this.perSection);
     this.ninjas.forEach((entry, index) => entry.root.setVisible(index >= ninjaSlice.start && index < ninjaSlice.end));
@@ -401,15 +446,33 @@ export class Almanac extends Phaser.GameObjects.Container {
     button.icon.setAlpha(enabled ? 1 : 0.3);
   }
 
-  private makeEntry(textureKey: string, frame: string | number | undefined, name: string): Entry {
+  private makeEntry(textureKey: string, frame: string | number | undefined, name: string, description: string): Entry {
     const root = this.sceneRef.add.container(0, 0);
     const plate = this.sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'panel_frame_9', 120, 120, 8, 8, 8, 8);
     const art = this.sceneRef.add.image(0, 0, textureKey, frame);
     const question = this.sceneRef.add.bitmapText(0, 0, 'pixel', '?', 14).setOrigin(0.5).setScale(2).setTint(0xffffff);
     const label = this.sceneRef.add.bitmapText(0, 0, 'pixel', name.toUpperCase(), 14).setOrigin(0.5, 0).setCenterAlign();
-    root.add([plate, art, question, label]);
+    // Invisible, sized to the whole cell in placeEntry -- the tappable region
+    // covers the portrait AND the name below it, not just the framed plate.
+    const hitZone = this.sceneRef.add.zone(0, 0, 10, 10).setOrigin(0.5, 0.5);
+    root.add([plate, art, question, label, hitZone]);
     this.spread.add(root);
-    return { root, plate, art, question, label, textureKey, frame, name };
+    const entry: Entry = { root, plate, art, question, label, hitZone, textureKey, frame, name, description, unlocked: false };
+    // Matches the page arrows' pattern: stop propagation on release so a tap
+    // never falls through to the shade behind it and closes the book.
+    hitZone.setInteractive();
+    hitZone.on('pointerup', (_p: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
+      event.stopPropagation();
+      this.showDetail(entry);
+    });
+    return entry;
+  }
+
+  /** Shows a discovered entry's one-line description; silhouettes stay silent. */
+  private showDetail(entry: Entry): void {
+    if (!entry.unlocked) return;
+    this.sfx.play('click');
+    this.detailText.setText(`${entry.name.toUpperCase()} - ${entry.description}`);
   }
 
   private placeEntry(entry: Entry, grid: Grid, index: number): void {
@@ -431,10 +494,13 @@ export class Almanac extends Phaser.GameObjects.Container {
     entry.plate.setSize(plateWidth, grid.artHeight + 12).setPosition(0, centerY);
     entry.art.setScale(scale).setPosition(0, centerY);
     entry.question.setPosition(0, centerY);
+    // The whole cell, portrait and name together -- a forgiving mobile target.
+    entry.hitZone.setSize(grid.cellWidth, grid.cellHeight).setPosition(0, grid.cellHeight / 2);
     entry.label.setPosition(0, grid.artHeight + 18).setMaxWidth(grid.cellWidth - 6);
   }
 
   private paint(entry: Entry, unlocked: boolean): void {
+    entry.unlocked = unlocked;
     entry.art.setTint(unlocked ? 0xffffff : 0x000000).setAlpha(unlocked ? 1 : 0.92);
     entry.question.setVisible(!unlocked);
     entry.label.setText(unlocked ? entry.name.toUpperCase() : '???');

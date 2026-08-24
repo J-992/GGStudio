@@ -93,6 +93,8 @@ export class GameCore {
   private daysVisited: number;
   /** Throttle for the achievement sweep; the ladder is re-tested on a timer. */
   private achievementTimer = 0;
+  /** True once the full-roster fanfare has fired, ever. Meta-scoped so it survives every future session. */
+  private collectionCelebratedFlag: boolean;
 
   constructor(opts: { storage?: StorageLike | null; now?: () => number } = {}) {
     const storage = opts.storage === undefined ? this.defaultStorage() : opts.storage;
@@ -106,6 +108,7 @@ export class GameCore {
     this.bestRun = normalizeBest(meta?.best ?? null);
     this.lastVisitDay = meta?.lastVisitDay ?? null;
     this.daysVisited = meta?.daysVisited ?? 0;
+    this.collectionCelebratedFlag = meta?.collectionCelebrated === true;
     this.economy = new EconomySystem(saved?.coins);
     this.progression = new ProgressionSystem(saved?.highestTierEverOwned);
     this.metrics = saved?.metrics ?? freshMetrics();
@@ -528,7 +531,20 @@ export class GameCore {
       revealedTiers: [...this.revealedTiers],
       seenBosses: [...this.seenBosses],
       discoveredTiers: [...this.discoveredTiers],
+      collectionCelebrated: this.collectionCelebratedFlag,
     });
+  }
+
+  /** Whether the one-time full-roster fanfare has already fired, ever. */
+  get collectionCelebrated(): boolean {
+    return this.collectionCelebratedFlag;
+  }
+
+  /** Marks the full-roster fanfare as spent, for good. A no-op past the first call. */
+  markCollectionCelebrated(): void {
+    if (this.collectionCelebratedFlag) return;
+    this.collectionCelebratedFlag = true;
+    this.saveMeta();
   }
 
   /** Everything the award ladder is allowed to see, gathered in one place. */

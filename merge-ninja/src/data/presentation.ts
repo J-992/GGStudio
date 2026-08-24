@@ -197,7 +197,7 @@ const SERPENT_COIL = motion('serpent', 3400, .032, 4.6, 220, 46, 9, 'collapse');
 const BEAST_PANT = motion('breathe', 1250, .042, 1.4, 75, 30, 8, 'topple');
 
 const IDENTITY_MOTION: readonly BossMotionRecipe[] = [
-  // Chronofog .. Masked Signal: first-act humanoid ladder.
+  // Training Dummy .. Hooded Duelist: first-act humanoid ladder.
   HUMANOID_DUELIST, HUMANOID_DUELIST, HUMANOID_DUELIST, HUMANOID_DUELIST, HUMANOID_ASSASSIN, HUMANOID_ASSASSIN,
   // Ironfist .. Chain Sickle.
   HUMANOID_DUELIST, BRUTE_SQUASH, BRUTE_SQUASH, HUMANOID_ASSASSIN,
