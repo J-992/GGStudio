@@ -1,15 +1,14 @@
 {
-  "game_id": "REPLACE_WITH_POKI_GAME_ID",
+  "game_id": "a5726ab5-8b6e-4d54-98c6-c55b99faba5f",
   "build_dir": "dist",
   "ggs": {
     "package_manager": "bun",
     "install": "bun install --frozen-lockfile",
     "build": "bun run build:poki",
-    "verify": [
-      "bun run check"
-    ],
+    "verify": ["bun run check"],
     "max_bytes": 20971520,
     "node_version": "22",
-    "bun_version": "1.3.14"
+    "bun_version": "1.3.14",
+    "token_git_secret_name": "POKI_UPLOAD_TOKEN_MESSY_DRAWER"
   }
 }

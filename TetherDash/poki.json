@@ -1,15 +1,14 @@
 {
-  "game_id": "REPLACE_WITH_POKI_GAME_ID",
+  "game_id": "56e4650f-785e-483e-b0e6-7ad820f8b4ee",
   "build_dir": "dist",
   "ggs": {
     "id": "tether-dash",
     "package_manager": "npm",
     "install": "npm install --no-audit --no-fund",
     "build": "npm run build:poki",
-    "verify": [
-      "npm run check"
-    ],
+    "verify": ["npm run check"],
     "max_bytes": 20971520,
-    "node_version": "22"
+    "node_version": "22",
+    "token_git_secret_name": "POKI_UPLOAD_TOKEN_TETHER_DASH"
   }
 }
