@@ -3,7 +3,7 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import {
   FIXED_DT, MAX_FRAME_DT, KILL_DIST, MAX_AIR_TIME,
   HALF, ROT_COOLDOWN, PLAYER_HALF_H, SLICE_LEN,
-  P1_COLOR, P2_COLOR, TETHER_REST, SCREEN_KILL_GRACE,
+  P1_COLOR, P2_COLOR, TETHER_REST, SCREEN_KILL_GRACE, FORWARD_SPEED,
 } from "./Constants";
 import { InputManager } from "../input/InputManager";
 import { touchState } from "../input/touchState";
@@ -44,6 +44,9 @@ export class Game {
 
   state: GameState = GameState.Title;
   levelIdx = 0;
+  timeScale = 1;
+  botInput = { lat: 0, jump: false, active: false };
+  bot: { tick(dt: number): void } | null = null;
   orientation: Orientation = Orientation.Floor;
   deaths = 0;
   rescues = 0;
@@ -93,6 +96,7 @@ export class Game {
     this.input.onPauseToggle = () => this.handlePause();
     this.input.onRestart = () => this.handleRestart();
     this.input.onMuteToggle = () => this.handleMute();
+    this.input.setBotSource(this.botInput);
     document.addEventListener("pointerdown", () => this.handleAnyKey());
 
     window.addEventListener("resize", () => {
@@ -169,7 +173,7 @@ export class Game {
     this.world = new RAPIER.World({ x: 0, y: 0, z: 0 });
     this.world.timestep = FIXED_DT;
     const spawnY = -HALF + PLAYER_HALF_H + 0.02;
-    this.tunnel = new Tunnel(this.scene, this.world, def, (x, y, z, hx, hy, hz) => {
+    this.tunnel = new Tunnel(this.scene, this.world, def, RAPIER, (x: number, y: number, z: number, hx: number, hy: number, hz: number) => {
       const body = this.world.createRigidBody(
         RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z),
       );
@@ -210,6 +214,7 @@ export class Game {
     this.coopCam.snapTo(this.orientation);
     this.rotCooldown = 0;
     this.tetherPhysics.wasHigh = false;
+    this.tunnel.resetCrumbles(this.world);
     this.ui.flash("#000000", 0);
   }
 
@@ -256,6 +261,7 @@ export class Game {
   frame(dtReal: number) {
     dtReal = Math.min(dtReal, MAX_FRAME_DT);
     this.time += dtReal;
+    this.bot?.tick(dtReal);
 
     if (this.state === GameState.Title || this.state === GameState.Finished) {
       if (this.pollPadStart()) this.handleAnyKey();
@@ -270,9 +276,9 @@ export class Game {
       this.state === GameState.Dying ||
       this.state === GameState.Complete
     ) {
-      this.accumulator += dtReal * scale;
+      this.accumulator += dtReal * scale * this.timeScale;
       let steps = 0;
-      while (this.accumulator >= FIXED_DT && steps < 8) {
+      while (this.accumulator >= FIXED_DT && steps < 40) {
         this.fixedUpdate(FIXED_DT);
         this.accumulator -= FIXED_DT;
         steps++;
@@ -282,7 +288,7 @@ export class Game {
     const frameUp = getFrame(this.orientation);
 
     if (this.state !== GameState.Paused && this.state !== GameState.Title) {
-      const visDt = dtReal * (this.state === GameState.Dying ? 0.25 : 1);
+      const visDt = dtReal * scale * this.timeScale;
       for (const p of this.players) p.updateVisual(visDt, frameUp);
       this.tetherRender.update(
         this.players[0], this.players[1], frameUp,
@@ -295,8 +301,8 @@ export class Game {
       this.effects.update(visDt, _gravDir, this.coopCam.camera.position.z);
       this.coopCam.update(visDt, this.players[0], this.players[1], this.orientation);
 
-      if (this.state === GameState.Playing) {
-        this.checkScreenDeath(dtReal);
+      if (this.state === GameState.Playing && !this.coopCam.rolling) {
+        this.checkScreenDeath(dtReal * this.timeScale);
       }
     }
 
@@ -356,7 +362,14 @@ export class Game {
     this.players[0].integrate(frame, dt, ev0);
     this.players[1].integrate(frame, dt, ev1);
 
+    this.tunnel.updateSpinners(dt);
     this.world.step();
+
+    const cev = this.tunnel.updateCrumble(dt, this.players, this.world, frame.up);
+    if (cev.broken.length) {
+      audio.crumble();
+      for (const bp of cev.broken) this.effects.burst(bp, 0xffa060, 10, 5, 0.5, 10);
+    }
 
     this.players[0].postStep(RAPIER, this.world, frame, RAY_GROUPS, dt, ev0);
     this.players[1].postStep(RAPIER, this.world, frame, RAY_GROUPS, dt, ev1);
@@ -504,6 +517,7 @@ export class Game {
         deaths: this.deaths,
         rescues: this.rescues,
         finishZ: this.tunnel.finishZ,
+        spinners: this.tunnel.spinnerStates(),
       }),
       warp: (i: number, x: number, y: number, z: number) => this.players[i].warp(x, y, z),
       setAutoRun: (i: number, on: boolean) => {
@@ -521,6 +535,10 @@ export class Game {
         this.coopCam.requestRoll(from, this.orientation);
       },
       musicPlaying: () => audio.musicPlaying,
+      setTimeScale: (ts: number) => { this.timeScale = ts; },
+      setPlayerCollision: (on: boolean) => { for (const p of this.players) p.setCollide(on); },
+      crumbleBroken: () => this.tunnel.crumbleBrokenCount(),
+      bot: null as unknown,
       touch: () => ({ ...touchState }),
       levels: () =>
         LEVELS.map((d) => {
@@ -546,6 +564,28 @@ export class Game {
         this.startRun(idx);
       },
     };
+  }
+
+  botRead() {
+    return {
+      state: this.state as number,
+      orientation: this.orientation,
+      def: LEVELS[this.levelIdx],
+      level: this.levelIdx + 1,
+      p1: this.players[0],
+      p2body: this.players[1].body,
+      spinners: this.tunnel.spinnerStates(),
+      timeScale: this.timeScale,
+      time: this.time,
+    };
+  }
+
+  botFollow() {
+    const p2 = this.players[1];
+    p2.autoRun = false;
+    const t = this.players[0].body.translation();
+    p2.warp(t.x, t.y, t.z + 1.5);
+    p2.body.setLinvel({ x: 0, y: 0, z: -FORWARD_SPEED }, true);
   }
 
   private playerSnap(p: Player) {

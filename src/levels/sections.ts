@@ -21,3 +21,11 @@ export function faceP(face: "l" | "r" | "c", p: string, n = 1): SliceDef[] {
 }
 
 export const bridge = (col: string, n = 1): SliceDef[] => rep(n, { f: pat(col) });
+
+export const crumble = (n = 1): SliceDef[] => rep(n, { f: "~~~~~" });
+
+export function faceCrumble(face: "l" | "r" | "c", n = 1): SliceDef[] {
+  if (face === "l") return rep(n, { l: "~~~~~" });
+  if (face === "r") return rep(n, { r: "~~~~~" });
+  return rep(n, { c: "~~~~~" });
+}

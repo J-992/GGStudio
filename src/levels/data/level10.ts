@@ -15,6 +15,7 @@ export const level10: LevelDef = {
     rep(4, { f: E, r: pat("#..#.") }),
     rep(4, { f: E, r: pat(".#..#") }),
     rep(4, { f: E, r: pat("#..#.") }),
+    rep(3, { f: E, r: "~~~~~" }),
     rep(2, { f: E, r: E }),
     rep(8, { f: E, r: pat("#...#") }),
     rep(10, { r: E }),

@@ -13,7 +13,7 @@ export const level17: LevelDef = {
     slice({ f: pat("#..##") }), solidRun(2),
     rep(2, { f: E }),
     solidRun(4),
-    rep(3, { f: E }),
+    rep(2, { f: E }),
     rep(2, { f: E, r: E }),
     rep(4, { f: E }),
     solidRun(4),

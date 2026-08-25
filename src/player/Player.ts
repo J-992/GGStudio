@@ -84,6 +84,12 @@ export class Player {
   autoRun = true;
   private input: PlayerInputSample = { lateral: 0, jumpHeld: false, jumpPressed: false };
 
+  collider!: RAPIER.Collider;
+
+  setCollide(on: boolean) {
+    this.collider.setCollisionGroups((PLAYER_GROUP << 16) | (on ? STATIC_GROUP | PLAYER_GROUP : STATIC_GROUP));
+  }
+
   readonly container = new THREE.Group();
   private modelRoot = new THREE.Group();
   private orientQuat = new THREE.Quaternion();
@@ -177,7 +183,7 @@ export class Player {
       .setFriction(0)
       .setRestitution(0)
       .setCollisionGroups((PLAYER_GROUP << 16) | (STATIC_GROUP | PLAYER_GROUP));
-    world.createCollider(colDesc, this.body);
+    this.collider = world.createCollider(colDesc, this.body);
   }
 
   resetToSpawn() {

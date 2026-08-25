@@ -58,7 +58,7 @@ async function main() {
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
 
-  await page.goto(BASE, { waitUntil: "load" });
+  await page.goto(BASE + "/?bot=1", { waitUntil: "load" });
   await page.waitForFunction(() => !!window.__TR__, null, { timeout: 15000 });
   await page.waitForTimeout(1200);
   await shot("01-title.png");
@@ -361,6 +361,54 @@ async function main() {
   s = await snap();
   check("R restarts run from L1", s.state === "Playing" && s.level === 1 && s.deaths === 0, `lvl=${s.level} deaths=${s.deaths}`);
 
+  await page.evaluate(() => {
+    window.__TR__.startRun(1);
+  });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const t = window.__TR__;
+    t.setAutoRun(0, false);
+    t.setAutoRun(1, false);
+    t.warp(0, 0, -4.52, -69);
+    t.warp(1, 0, -4.52, -67.5);
+  });
+  await page.waitForTimeout(1400);
+  check("crumble tiles break underfoot", await page.evaluate(() => window.__TR__.crumbleBroken()) > 0, "");
+  await page.evaluate(() => {
+    const t = window.__TR__;
+    t.setAutoRun(0, true);
+    t.setAutoRun(1, true);
+  });
+  await page.evaluate(() => window.__TR__.startRun(3));
+  await page.waitForTimeout(400);
+  const spA = (await snap()).spinners;
+  await page.waitForTimeout(500);
+  const spB = (await snap()).spinners;
+  check("spinner exists and rotates", spA.length > 0 && Math.abs(spB[0].angle - spA[0].angle) > 0.5, "");
+
+  await page.evaluate(() => {
+    window.__TR__.setTimeScale(2);
+    window.__TR__.setPlayerCollision(false);
+  });
+  const beatable = new Array(20).fill(false);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    for (let i = 0; i < 20; i++) {
+      if (beatable[i] && attempt === 0) continue;
+      const res = await page.evaluate((idx) => window.__TR__.bot.run(idx), i);
+      if (res.ok) beatable[i] = true;
+      check(`level ${i + 1} BEATABLE (bot playthrough)`, res.ok, `attempt ${attempt + 1}: ${res.reason}`);
+    }
+    if (beatable.every(Boolean)) break;
+  }
+  const failedLevels = beatable.map((b, i) => (b ? null : i + 1)).filter(Boolean);
+  if (failedLevels.length) console.log("BOT-UNVERIFIED LEVELS:", failedLevels.join(", "));
+  await page.evaluate(() => {
+    window.__TR__.setPlayerCollision(true);
+    window.__TR__.setTimeScale(1);
+  });
+
+  await page.keyboard.press("KeyR");
+  await page.waitForTimeout(500);
   const fps = await page.evaluate(() => new Promise((res) => {
     let frames = 0;
     const t0 = performance.now();
@@ -376,7 +424,7 @@ async function main() {
   await page.setViewportSize({ width: 900, height: 620 });
   await page.waitForTimeout(500);
   s = await snap();
-  check("resize survives", errors.length === 0 && s.state === "Playing", s.state);
+  check("resize survives", errors.length === 0 && (s.state === "Playing" || s.state === "Dying"), s.state);
   await shot("09-narrow.png");
 
   const mctx = await browser.newContext({

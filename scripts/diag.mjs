@@ -2,6 +2,8 @@ import { chromium } from "playwright-core";
 import { spawn } from "node:child_process";
 
 const PORT = 5199;
+const levelIdx = parseInt(process.argv[2] ?? "14", 10);
+const useBot = process.argv[3] === "bot";
 const server = spawn("npx", ["vite", "--port", String(PORT), "--strictPort"], {
   cwd: new URL("..", import.meta.url).pathname,
   stdio: "pipe",
@@ -10,51 +12,40 @@ await new Promise((resolve) => {
   server.stdout.on("data", (d) => { if (d.toString().includes("Local:")) resolve(); });
 });
 const browser = await chromium.launch({ channel: "chrome", headless: true });
-const mctx = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
-const mp = await mctx.newPage();
-mp.on("pageerror", (e) => console.log("[pageerror]", String(e)));
-await mp.goto(`http://localhost:${PORT}`, { waitUntil: "load" });
-await mp.waitForFunction(() => !!window.__TR__, null, { timeout: 15000 });
-await mp.waitForTimeout(800);
-await mp.touchscreen.tap(422, 195);
-await mp.waitForTimeout(900);
-
-await mp.evaluate(() => {
-  const t = window.__TR__;
-  t.warp(0, -1.2, -4.52, -5);
-  t.warp(1, 1.2, -4.52, -5);
-});
-await mp.waitForTimeout(400);
-
-await mp.evaluate(() => {
-  const g = window.__TR__.game;
-  window.__log = [];
-  const p = g.players[0];
-  const origSet = p.body.setLinvel.bind(p.body);
-  p.body.setLinvel = (v, w) => {
-    if (window.__log.length < 600) {
-      window.__log.push({
-        t: performance.now().toFixed(0),
-        vy: (+v.y).toFixed(1),
-        jh: p.input?.jumpHeld ? 1 : 0,
-        jp: p.input?.jumpPressed ? 1 : 0,
-      });
-    }
-    origSet(v, w);
-  };
-});
-
-await mp.locator(".tc-left .tc-jump").dispatchEvent("pointerdown");
-await mp.waitForTimeout(700);
-
-const out = await mp.evaluate(() => {
-  const l = [...window.__log];
-  delete window.__log;
-  return l;
-});
-const maxVy = Math.max(...out.map((r) => +r.vy));
-const sawPressed = out.some((r) => r.jp === 1);
-console.log("maxVy:", maxVy, "sawPressed:", sawPressed, "calls:", out.length);
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+page.on("pageerror", (e) => console.log("[pageerror]", String(e)));
+await page.goto(`http://localhost:${PORT}/?bot=1`, { waitUntil: "load" });
+await page.waitForFunction(() => !!window.__TR__, null, { timeout: 15000 });
+await page.waitForTimeout(600);
+console.log("booted");
+await page.evaluate((idx) => {
+  window.__TR__.setTimeScale(3);
+  window.__TR__.setPlayerCollision(false);
+  window.__TR__.startRun(idx);
+}, levelIdx);
+console.log("started, ticking 8s...");
+if (useBot) {
+  await page.evaluate(() => {
+    const g = window.__TR__.game;
+    g.botInput.active = true;
+    const origTick = g.bot.tick.bind(g.bot);
+    g.bot.tick = (dt) => {
+      const t0 = performance.now();
+      origTick(dt);
+      const dt2 = performance.now() - t0;
+      if (dt2 > 30) console.log("SLOW TICK", dt2.toFixed(0));
+    };
+    window.__tickGuard = setInterval(() => { window.__alive = Date.now(); }, 100);
+  });
+}
+for (let i = 0; i < 16; i++) {
+  await page.waitForTimeout(500);
+  const ok = await Promise.race([
+    page.evaluate(() => ({ z: window.__TR__.snapshot().p1.z.toFixed(1), st: window.__TR__.snapshot().state })),
+    new Promise((res) => setTimeout(() => res("HUNG"), 2000)),
+  ]);
+  console.log(typeof ok === "string" ? ok : JSON.stringify(ok));
+}
 await browser.close();
 server.kill();
 process.exit(0);

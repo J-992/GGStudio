@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type RAPIER from "@dimforge/rapier3d-compat";
 import type { LevelDef, SliceDef } from "../levels/types";
-import { COLS, HALF, SLAB_T, SLICE_LEN, TILE } from "../game/Constants";
+import { COLS, CRUMBLE_DELAY, HALF, SLAB_T, SLICE_LEN, TILE } from "../game/Constants";
 
 function makePanelTexture(): THREE.CanvasTexture {
   const c = document.createElement("canvas");
@@ -59,10 +59,15 @@ export class Tunnel {
   private disposables: (THREE.BufferGeometry | THREE.Material | THREE.Texture)[] = [];
   private time = 0;
 
+  private crumbleTiles: CrumbleTile[] = [];
+  private spinners: Spinner[] = [];
+  private crumbleMat!: THREE.MeshStandardMaterial;
+
   constructor(
     scene: THREE.Scene,
     world: RAPIER.World,
     def: LevelDef,
+    R: typeof RAPIER,
     addStaticBox: (x: number, y: number, z: number, hx: number, hy: number, hz: number) => void,
   ) {
     const slices = def.slices;
@@ -72,6 +77,16 @@ export class Tunnel {
     const ceilBoxes: RunBox[] = [];
     const leftBoxes: RunBox[] = [];
     const rightBoxes: RunBox[] = [];
+
+    const tex = makePanelTexture();
+    this.disposables.push(tex);
+    const slabMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0.35 });
+    this.disposables.push(slabMat);
+    this.crumbleMat = new THREE.MeshStandardMaterial({
+      map: tex, color: 0xffd9b0, emissive: 0x8a3c12, emissiveIntensity: 0.4,
+      roughness: 0.7, metalness: 0.3, transparent: true,
+    });
+    this.disposables.push(this.crumbleMat);
 
     const faces: { key: keyof SliceDef; out: RunBox[] }[] = [
       { key: "f", out: floorBoxes },
@@ -85,14 +100,23 @@ export class Tunnel {
         let runStart = -1;
         for (let i = 0; i <= slices.length; i++) {
           const s: SliceDef | undefined = slices[i];
-          let solid = false;
-          if (s && s[key]) solid = s[key]![col] === "#";
-          else if (!s) solid = false;
-          else if (!s[key]) solid = true;
-          if (solid && runStart < 0) runStart = i;
-          if (!solid && runStart >= 0) {
+          let kind: "static" | "crumble" | "empty";
+          if (!s) kind = "empty";
+          else {
+            const p = s[key];
+            if (!p) kind = "static";
+            else {
+              const ch = p[col];
+              kind = ch === "#" ? "static" : ch === "~" ? "crumble" : "empty";
+            }
+          }
+          if (kind === "static" && runStart < 0) runStart = i;
+          if (kind !== "static" && runStart >= 0) {
             out.push(this.boxForFace(key, col, runStart, i - runStart));
             runStart = -1;
+          }
+          if (kind === "crumble") {
+            this.addCrumbleTile(this.boxForFace(key, col, i, 1), world, R);
           }
         }
       }
@@ -102,10 +126,6 @@ export class Tunnel {
       addStaticBox(b.x, b.y, b.z, b.w / 2, b.h / 2, b.d / 2);
     }
 
-    const tex = makePanelTexture();
-    this.disposables.push(tex);
-    const slabMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0.35 });
-    this.disposables.push(slabMat);
     const geos: THREE.BoxGeometry[] = [];
     for (const b of all) {
       const g = new THREE.BoxGeometry(b.w, b.h, b.d);
@@ -129,6 +149,7 @@ export class Tunnel {
       }
     }
 
+    this.buildSpinners(def, world, R);
     this.buildBackground(slices.length * SLICE_LEN);
     this.buildPortal();
 
@@ -144,6 +165,132 @@ export class Tunnel {
       case "c": return { x: c, y: HALF + SLAB_T / 2, z, w: TILE, h: SLAB_T, d: depth };
       case "l": return { x: -HALF - SLAB_T / 2, y: c, z, w: SLAB_T, h: TILE, d: depth };
       default: return { x: HALF + SLAB_T / 2, y: c, z, w: SLAB_T, h: TILE, d: depth };
+    }
+  }
+
+  private addCrumbleTile(b: RunBox, world: RAPIER.World, R: typeof RAPIER) {
+    const mat = this.crumbleMat.clone();
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, b.d), mat);
+    mesh.position.set(b.x, b.y, b.z);
+    this.group.add(mesh);
+    const body = world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(b.x, b.y, b.z));
+    const desc = R.ColliderDesc.cuboid(b.w / 2, b.h / 2, b.d / 2)
+      .setFriction(0)
+      .setRestitution(0)
+      .setCollisionGroups((0x0001 << 16) | 0xffff);
+    const collider = world.createCollider(desc, body);
+    this.disposables.push(mesh.geometry, mat);
+    this.crumbleTiles.push({
+      mesh, body, collider, desc, mat,
+      x: b.x, y: b.y, z: b.z, hx: b.w / 2, hy: b.h / 2, hz: b.d / 2,
+      origPos: new THREE.Vector3(b.x, b.y, b.z),
+      fallDir: new THREE.Vector3(),
+      timer: -1, broken: false, fallT: 0,
+    });
+  }
+
+  updateCrumble(
+    dt: number,
+    players: { grounded: boolean; position(out: THREE.Vector3): THREE.Vector3 }[],
+    world: RAPIER.World,
+    up: THREE.Vector3,
+  ): { broken: THREE.Vector3[] } {
+    const broken: THREE.Vector3[] = [];
+    const pp = new THREE.Vector3();
+    for (const t of this.crumbleTiles) {
+      if (t.broken) {
+        t.fallT += dt;
+        t.mesh.position.addScaledVector(t.fallDir, 9 * dt);
+        t.mesh.rotation.z += 3.5 * dt;
+        t.mat.opacity = Math.max(0, 1 - t.fallT / 0.9);
+        if (t.fallT > 0.9) t.mesh.visible = false;
+        continue;
+      }
+      let touched = false;
+      for (const p of players) {
+        if (!p.grounded) continue;
+        p.position(pp);
+        if (
+          Math.abs(pp.x - t.x) < t.hx + 0.45 &&
+          Math.abs(pp.y - t.y) < t.hy + 0.6 &&
+          Math.abs(pp.z - t.z) < t.hz + 0.35
+        ) {
+          touched = true;
+          break;
+        }
+      }
+      if (touched) {
+        if (t.timer < 0) t.timer = 0;
+        else t.timer += dt;
+        if (t.timer > CRUMBLE_DELAY) {
+          t.broken = true;
+          t.fallT = 0;
+          t.fallDir.copy(up).negate();
+          world.removeCollider(t.collider, true);
+          broken.push(new THREE.Vector3(t.x, t.y, t.z));
+        }
+      } else {
+        t.timer = -1;
+      }
+    }
+    return { broken };
+  }
+
+  resetCrumbles(world: RAPIER.World) {
+    for (const t of this.crumbleTiles) {
+      if (!t.broken) continue;
+      t.collider = world.createCollider(t.desc, t.body);
+      t.broken = false;
+      t.timer = -1;
+      t.fallT = 0;
+      t.mesh.visible = true;
+      t.mesh.position.copy(t.origPos);
+      t.mesh.rotation.set(0, 0, 0);
+      t.mat.opacity = 1;
+    }
+  }
+
+  crumbleBrokenCount(): number {
+    return this.crumbleTiles.filter((t) => t.broken).length;
+  }
+
+  updateSpinners(dt: number) {
+    for (const sp of this.spinners) {
+      sp.angle = (sp.angle + sp.speed * dt) % (Math.PI * 2);
+      sp.body.setNextKinematicRotation({ x: 0, y: 0, z: Math.sin(sp.angle / 2), w: Math.cos(sp.angle / 2) });
+      sp.mesh.rotation.z = sp.angle;
+    }
+  }
+
+  spinnerStates(): { z: number; angle: number }[] {
+    return this.spinners.map((s) => ({ z: s.z, angle: s.angle }));
+  }
+
+  private buildSpinners(def: LevelDef, world: RAPIER.World, R: typeof RAPIER) {
+    for (const sp of def.spinners ?? []) {
+      const z = -(sp.atSlice + 0.5) * SLICE_LEN;
+      const body = world.createRigidBody(
+        R.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -4.0, z),
+      );
+      const col = R.ColliderDesc.cuboid(2.6, 0.175, 1.0)
+        .setFriction(0.1)
+        .setRestitution(0)
+        .setCollisionGroups((0x0001 << 16) | 0xffff);
+      world.createCollider(col, body);
+      const barMat = new THREE.MeshStandardMaterial({
+        color: 0xffb347, emissive: 0xff8c1a, emissiveIntensity: 0.8, roughness: 0.4,
+      });
+      const barGeo = new THREE.BoxGeometry(5.2, 0.35, 1.0);
+      const bar = new THREE.Mesh(barGeo, barMat);
+      bar.position.set(0, -4.0, z);
+      this.group.add(bar);
+      const hubGeo = new THREE.CylinderGeometry(0.3, 0.3, 1.2, 10);
+      const hub = new THREE.Mesh(hubGeo, barMat);
+      hub.rotation.x = Math.PI / 2;
+      hub.position.set(0, -4.0, z);
+      this.group.add(hub);
+      this.disposables.push(barMat, barGeo, hubGeo);
+      this.spinners.push({ body, mesh: bar, angle: 0, speed: sp.speed ?? 2.2, z });
     }
   }
 
@@ -230,5 +377,31 @@ export class Tunnel {
     for (const d of this.disposables) d.dispose();
     this.disposables = [];
     this.turbines = [];
+    this.crumbleTiles = [];
+    this.spinners = [];
   }
+}
+
+
+interface CrumbleTile {
+  mesh: THREE.Mesh;
+  body: RAPIER.RigidBody;
+  collider: RAPIER.Collider;
+  desc: RAPIER.ColliderDesc;
+  mat: THREE.MeshStandardMaterial;
+  x: number; y: number; z: number;
+  hx: number; hy: number; hz: number;
+  origPos: THREE.Vector3;
+  fallDir: THREE.Vector3;
+  timer: number;
+  broken: boolean;
+  fallT: number;
+}
+
+interface Spinner {
+  body: RAPIER.RigidBody;
+  mesh: THREE.Mesh;
+  angle: number;
+  speed: number;
+  z: number;
 }

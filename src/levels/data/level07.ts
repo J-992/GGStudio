@@ -1,5 +1,6 @@
 import type { LevelDef } from "../types";
 import { pat, rep, seq, solidRun } from "../helpers";
+import { faceCrumble } from "../sections";
 
 const E = ".....";
 
@@ -16,7 +17,9 @@ export const level07: LevelDef = {
     rep(6, { f: pat(E), l: pat(E), r: pat(E) }),
     solidRun(6),
     rep(2, { c: pat(E) }),
-    solidRun(8),
+    solidRun(3),
+    faceCrumble("c", 3),
+    solidRun(2),
     rep(12, { c: pat(E) }),
     solidRun(4),
     rep(2, { l: pat(E), r: pat(E) }),

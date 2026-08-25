@@ -33,6 +33,10 @@ export function slice(overrides: Partial<SliceDef>): SliceDef {
   return { ...overrides };
 }
 
+export function crumbleRun(n: number): SliceDef[] {
+  return rep(n, { f: "~~~~~" });
+}
+
 export function withFloor(patterns: string[], base: Partial<SliceDef> = {}): SliceDef[] {
   return patterns.map((f) => ({ ...base, f: pat(f) }));
 }

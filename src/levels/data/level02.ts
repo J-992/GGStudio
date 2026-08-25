@@ -1,4 +1,5 @@
 import type { LevelDef } from "../types";
+import { crumble } from "../sections";
 import { seq, solidRun, slice, pat, rep } from "../helpers";
 
 export const level02: LevelDef = {
@@ -10,7 +11,9 @@ export const level02: LevelDef = {
     rep(2, { f: pat(".....") }),
     solidRun(8),
     rep(2, { f: pat(".....") }),
-    solidRun(8),
+    solidRun(3),
+    crumble(4),
+    solidRun(1),
     slice({ f: pat("#..#.") }),
     solidRun(5),
     slice({ f: pat(".#..#") }),

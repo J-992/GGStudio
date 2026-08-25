@@ -120,6 +120,7 @@ class AudioManager {
     this.noise(0.5, 2400, 0.05, "highpass");
   }
   snap() { this.noise(0.12, 2000, 0.2, "bandpass"); }
+  crumble() { this.noise(0.16, 900, 0.2); this.tone("square", 220, 80, 0.14, 0.1); }
 }
 
 export const audio = new AudioManager();

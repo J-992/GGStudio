@@ -12,8 +12,14 @@ export interface HintDef {
   text: string;
 }
 
+export interface SpinnerDef {
+  atSlice: number;
+  speed?: number;
+}
+
 export interface LevelDef {
   name: string;
   slices: SliceDef[];
   hints?: HintDef[];
+  spinners?: SpinnerDef[];
 }

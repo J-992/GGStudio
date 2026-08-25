@@ -1,6 +1,7 @@
 import "./style.css";
 import { Game } from "./game/Game";
 import { TouchControls } from "./ui/TouchControls";
+import { Bot } from "./game/Bot";
 
 const canvas = document.getElementById("game-canvas") as HTMLCanvasElement;
 const game = new Game();
@@ -21,6 +22,8 @@ if (matchMedia("(pointer: coarse)").matches || "ontouchstart" in window) {
   document.body.classList.add("touch");
 }
 
+const botMode = new URLSearchParams(location.search).has("bot");
+
 game.init(canvas).then(() => {
   booted = true;
   new TouchControls(
@@ -28,4 +31,9 @@ game.init(canvas).then(() => {
     () => game.pauseGame(),
     () => game.muteGame(),
   );
+  if (botMode) {
+    game.bot = new Bot(game);
+    (window as unknown as Record<string, unknown>).__TR__ &&
+      ((window as any).__TR__.bot = game.bot);
+  }
 });

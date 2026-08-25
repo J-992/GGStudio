@@ -38,6 +38,7 @@ export const KILL_DIST = 30;
 export const MAX_AIR_TIME = 6;
 export const SCREEN_KILL_GRACE = 0.3;
 
+export const CRUMBLE_DELAY = 0.3;
 export const ROT_HOLD_TIME = 0.12;
 export const ROT_COOLDOWN = 0.45;
 export const WALL_TRIGGER_DIST = 1.05;

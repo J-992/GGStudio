@@ -24,7 +24,7 @@ export const level15: LevelDef = {
     rep(10, { r: E }),
     rep(2, { f: pat("#..##") }),
     rep(2, { f: pat("##..#") }),
-    rep(3, { f: E }),
+    rep(2, { f: E }),
     solidRun(14),
   ),
 };

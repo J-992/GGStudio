@@ -8,7 +8,20 @@ export interface PlayerInput {
   jumpPressed: boolean;
 }
 
+export interface BotSource {
+  lat: number;
+  jump: boolean;
+  active: boolean;
+}
+
 export class InputManager {
+  private botSrc: BotSource | null = null;
+  private prevBotJump = false;
+
+  setBotSource(src: BotSource | null) {
+    this.botSrc = src;
+  }
+
   private keys = new Set<string>();
   private padJumpPrev: boolean[][] = [];
   onAnyKey?: () => void;
@@ -74,6 +87,12 @@ export class InputManager {
       if (j) jumpHeld = true;
       this.padJumpPrev[player][0] = j;
       break;
+    }
+    if (this.botSrc?.active) {
+      lat = Math.max(-1, Math.min(1, this.botSrc.lat));
+      jumpHeld = this.botSrc.jump;
+      jumpPressed = this.botSrc.jump && !this.prevBotJump;
+      this.prevBotJump = this.botSrc.jump;
     }
     lat = Math.max(-1, Math.min(1, lat));
     return { lateral: lat, jumpHeld, jumpPressed };
