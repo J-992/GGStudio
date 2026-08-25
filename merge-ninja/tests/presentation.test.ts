@@ -12,6 +12,7 @@ import {
   HUMANOID_BOSS_SPECIAL_FOUR_FRAME,
   NINJA_BASIC_FOUR_FRAME,
   ninjaIdleFrameAt,
+  ninjaBoardAnchorY,
   NINJA_IDLE_FOUR_FRAME,
   NINJA_SPECIAL_FOUR_FRAME,
   ninjaScale,
@@ -46,6 +47,23 @@ describe('boss presence', () => {
     const boss = bossScale(128, 128, 190, ARENA);
 
     expect(boss / ninja).toBeGreaterThan(1.6);
+  });
+
+  it('gives the wide final ninja more board presence than a normal ninja', () => {
+    const normalFootprint = 128 * ninjaScale(128, 128, 96);
+    const finalFootprint = 256 * ninjaScale(256, 256, 96, 29);
+
+    expect(finalFootprint).toBeGreaterThan(normalFootprint);
+    expect(finalFootprint / normalFootprint).toBeCloseTo(3);
+  });
+
+  it('keeps the final ninja feet on the merge tile despite its 256px frame', () => {
+    const scale = ninjaScale(256, 256, 128, 29);
+    const centreY = ninjaBoardAnchorY(256, scale, 18, 29);
+
+    // The bottom of a 256px frame is 128px below its centre. It should land
+    // at the same 2px visual foot inset as every normal board ninja.
+    expect(centreY + 128 * scale).toBeCloseTo(2);
   });
 
   it('still reads as big when the art is squat and wide', () => {

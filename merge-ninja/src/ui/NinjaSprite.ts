@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { ninjaDef } from '../data/ninjas';
-import { ninjaIdleFrameAt } from '../data/presentation';
+import { FINAL_NINJA_TIER, ninjaBoardAnchorY, ninjaIdleFrameAt, ninjaScale } from '../data/presentation';
 import { FLAME_SHOGUN_TIER, ninjaCatalogPortrait } from '../render/atlasConfig';
 import { portraitTexture } from '../render/portraitTexture';
 
@@ -33,6 +33,7 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
   private readonly sceneRef: Phaser.Scene;
   private hasFrameAnimation: boolean;
   private artScale = 1;
+  private imageScale = 1;
 
   constructor(scene: Phaser.Scene, readonly id: number, readonly tier: number, x: number, y: number) {
     super(scene, x, y);
@@ -45,10 +46,12 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
     const art = portraitTexture(scene, def, ninjaCatalogPortrait(tier));
     this.hasFrameAnimation = art.animated;
     this.pose = new Phaser.GameObjects.Container(scene, 0, 0);
-    this.image = scene.add.sprite(0, -64 + art.footInset, art.key, art.frame);
-    // The final supplied evolution is intentionally wide. Normalising from
-    // frame height keeps it fully inside a roster cell.
-    this.image.setScale(128 / this.image.frame.height).setTint(def.artTint);
+    this.image = scene.add.sprite(0, 0, art.key, art.frame);
+    this.imageScale = ninjaScale(this.image.frame.width, this.image.frame.height, 128, tier);
+    this.image
+      .setPosition(0, ninjaBoardAnchorY(this.image.frame.height, this.imageScale, art.footInset, tier))
+      .setScale(this.imageScale)
+      .setTint(def.artTint);
     this.pose.add(this.image);
     this.add(this.pose);
 
@@ -94,7 +97,10 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
     else this.pose.setScale(scale);
     // Tucked inside the cell: hung off the art's edge it clipped the next
     // column and sat on the head of the ninja in the row below.
-    this.badgePlate.setPosition(ART.halfWidth * scale - 16, -ART.bottom * scale - 16);
+    const badgeHalfWidth = this.tier === FINAL_NINJA_TIER
+      ? this.image.frame.width * this.imageScale / 2
+      : ART.halfWidth;
+    this.badgePlate.setPosition(badgeHalfWidth * scale - 16, -ART.bottom * scale - 16);
     this.badge.setPosition(this.badgePlate.x, this.badgePlate.y);
   }
 
@@ -112,8 +118,8 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
     this.hasFrameAnimation = art.animated;
     this.image
       .setTexture(art.key, art.frame)
-      .setPosition(0, -64 + art.footInset)
-      .setScale(128 / this.image.frame.height)
+      .setScale(this.imageScale = ninjaScale(this.image.frame.width, this.image.frame.height, 128, this.tier))
+      .setPosition(0, ninjaBoardAnchorY(this.image.frame.height, this.imageScale, art.footInset, this.tier))
       .setTint(def.artTint);
     this.setRosterScale(this.artScale);
   }
@@ -129,14 +135,16 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
    * the empty tile below its feet.
    */
   grabBounds(): Phaser.Geom.Rectangle {
-    const halfWidth = ART.halfWidth * this.artScale + GRAB_PAD;
-    const top = this.y - ART.top * this.artScale - GRAB_PAD * 0.5;
+    const finalDragon = this.tier === FINAL_NINJA_TIER;
+    const halfWidth = (finalDragon ? this.image.frame.width * this.imageScale / 2 : ART.halfWidth) * this.artScale + GRAB_PAD;
+    const top = this.y - (finalDragon ? ART.top * this.imageScale : ART.top) * this.artScale - GRAB_PAD * 0.5;
     const bottom = this.y - ART.bottom * this.artScale + GRAB_PAD;
     return new Phaser.Geom.Rectangle(this.x - halfWidth, top, halfWidth * 2, bottom - top);
   }
 
   /** Centre of the full drawn body -- the point a drag should track. */
   bodyCenterY(): number {
-    return this.y - ((ART.top + ART.bottom) / 2) * this.artScale;
+    const heightScale = this.tier === FINAL_NINJA_TIER ? this.imageScale : 1;
+    return this.y - ((ART.top + ART.bottom) / 2) * heightScale * this.artScale;
   }
 }

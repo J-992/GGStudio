@@ -246,8 +246,31 @@ export function bossMotionForIdentity(identity: number): BossMotionRecipe {
  * width plays no part -- it is taken only to mirror `bossScale`'s shape at the
  * call sites and in the tests that compare the two.
  */
-export function ninjaScale(_frameWidth: number, frameHeight: number, targetHeight: number): number {
-  return targetHeight / Math.max(1, frameHeight);
+/** The final dragon is the roster's capstone and deliberately dominates a tile. */
+export const FINAL_NINJA_TIER = 29;
+const FINAL_NINJA_PRESENCE_MULTIPLIER = 3;
+
+export function ninjaScale(
+  _frameWidth: number,
+  frameHeight: number,
+  targetHeight: number,
+  tier?: number,
+): number {
+  const base = targetHeight / Math.max(1, frameHeight);
+  return tier === FINAL_NINJA_TIER ? base * FINAL_NINJA_PRESENCE_MULTIPLIER : base;
+}
+
+/** Local Y of a roster image's centre, with its feet planted on the tile. */
+export function ninjaBoardAnchorY(
+  frameHeight: number,
+  imageScale: number,
+  footInset: number,
+  tier?: number,
+): number {
+  // Tier 29 is a broad 256px dragon frame. Its reveal inset is intentionally
+  // generous, but applying it on the board put its feet below the tile.
+  if (tier === FINAL_NINJA_TIER) return -(frameHeight / 2) * imageScale + 2;
+  return -64 + footInset;
 }
 
 /**

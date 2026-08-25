@@ -92,7 +92,7 @@ export class ArenaManager {
       // Portraits may have different native dimensions (the final evolution is
       // deliberately wide), so normalise from the loaded frame rather than
       // assuming all supplied art is 128px high.
-      const actorScale = ninjaScale(sprite.frame.width, sprite.frame.height, theme.layout.arenaNinjaHeight);
+      const actorScale = ninjaScale(sprite.frame.width, sprite.frame.height, theme.layout.arenaNinjaHeight, ninja.tier);
       const footInset = art.footInset * actorScale;
       const home = new Phaser.Math.Vector2(
         p.x,
