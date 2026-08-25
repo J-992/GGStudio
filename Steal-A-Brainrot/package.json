@@ -1,0 +1,20 @@
+{
+  "name": "steal-the-brainrot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Italian brainrot arcade tycoon for Poki. No bundler: classic scripts, vendored Phaser.",
+  "type": "module",
+  "scripts": {
+    "dev": "npx -y http-server . -p 8091 -c-1 -o",
+    "start": "npx -y http-server . -p 8091 -c-1 -o",
+    "check": "node tools/check.mjs",
+    "build:poki": "node tools/build-poki.mjs",
+    "package": "npm run check && npm run build:poki",
+    "preflight": "node ../scripts/poki/preflight.mjs .",
+    "art": "node tools/import-art.mjs --apply",
+    "art:manifest": "node tools/import-art.mjs --manifest"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

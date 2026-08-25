@@ -4,3 +4,7 @@
 art/source/
 art/models/
 art/turntable/
+
+# Build output: regenerate with `npm run build:poki`.
+dist/
+node_modules/

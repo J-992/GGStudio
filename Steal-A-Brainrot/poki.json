@@ -1,0 +1,18 @@
+{
+  "game_id": "REPLACE_WITH_POKI_GAME_ID",
+  "build_dir": "dist",
+  "ggs": {
+    "id": "steal-the-brainrot",
+    "package_manager": "npm",
+    "install": "npm install --no-audit --no-fund",
+    "build": "npm run build:poki",
+    "verify": [
+      "npm run check"
+    ],
+    "lfs": [
+      "Steal-A-Brainrot/assets/sprites/**"
+    ],
+    "max_bytes": 20971520,
+    "node_version": "22"
+  }
+}
