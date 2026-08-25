@@ -7,8 +7,9 @@ with a phone.
 
 ```bash
 npm ci
-npm run build:poki     # the Poki build: SDK tag in the head, ad calls live
-npm run build          # a playtest build: no SDK tag, no Poki code at all
+npm run build          # default shipping build: SDK tag in the head, ad calls live
+npm run build:poki     # explicit alias for the same Poki build
+npm run build:standalone # local/non-Poki export: no SDK tag or Poki code
 npm run dev:poki       # dev server with the SDK on and setDebug(true): test ads
 npm run dev            # dev server with no portal at all
 ```

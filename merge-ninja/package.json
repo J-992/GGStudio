@@ -8,8 +8,9 @@
   "scripts": {
     "dev": "vite --host --port 5180",
     "dev:poki": "vite --mode poki --host --port 5180",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build --mode poki",
     "build:poki": "tsc --noEmit && vite build --mode poki",
+    "build:standalone": "tsc --noEmit && vite build",
     "preview": "vite preview --port 5181",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
