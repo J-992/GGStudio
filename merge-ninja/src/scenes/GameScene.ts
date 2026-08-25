@@ -39,6 +39,7 @@ import { attachAdHold } from '../platform/adHold';
 import {
   reportPlatformHappyTime,
   requestPlatformCommercialBreak,
+  requestPlatformRewardedBreak,
   setPlatformGameplayActive,
 } from '../platform/platform';
 
@@ -93,6 +94,10 @@ export class GameScene extends Phaser.Scene {
   private restarted = false;
   /** Last gameplay state handed to the portal; see syncGameplayReport. */
   private gameplayReported = false;
+  /** Poki counts gameplay only after the player has deliberately entered it. */
+  private playerStartedGameplay = false;
+  /** Coalesces the first intent while Poki decides whether to show an ad. */
+  private gameplayStartPending = false;
   /** True from the moment a restart is asked for until the scene is rebuilt. */
   private restarting = false;
   private detachAdHold: (() => void) | null = null;
@@ -106,6 +111,8 @@ export class GameScene extends Phaser.Scene {
   init(data?: { restarted?: boolean }): void {
     this.core = new GameCore({});
     this.boughtOnce = false;
+    this.playerStartedGameplay = false;
+    this.gameplayStartPending = false;
     this.restarted = data?.restarted === true;
   }
 
@@ -172,7 +179,7 @@ export class GameScene extends Phaser.Scene {
     this.lowHealth = new LowHealthWarning(this);
     this.stageBanner = new StageBanner(this);
     this.settings = new SettingsPanel(this, this.sfx, () => this.restartRun());
-    this.gameOver = new GameOverPanel(this, this.sfx, () => this.restartRun());
+    this.gameOver = new GameOverPanel(this, this.sfx, () => this.restartRun(), () => this.reviveFromRewardedAd());
     this.ascension = new AscensionButton(this, this.core, this.sfx);
     this.makeAlmanacButton();
     this.makeSettingsButton();
@@ -204,11 +211,11 @@ export class GameScene extends Phaser.Scene {
       if (this.modalOpen) return;
       // The clock only swallows presses that actually land on it -- everything
       // else still reaches the board while it drifts past.
-      if (this.timeClock.tryCollect(pointer)) return;
-      if (this.potion.tryCollect(pointer)) return;
-      if (this.powerups.tryCollect(pointer)) return;
-      if (this.arena.containsBossPoint(pointer.x, pointer.y) && this.core.tapBoss() > 0) return;
-      if (this.board.beginDrag(pointer)) this.core.notePlayerAction();
+      if (this.timeClock.tryCollect(pointer)) { this.startGameplayOnInteraction(); return; }
+      if (this.potion.tryCollect(pointer)) { this.startGameplayOnInteraction(); return; }
+      if (this.powerups.tryCollect(pointer)) { this.startGameplayOnInteraction(); return; }
+      if (this.arena.containsBossPoint(pointer.x, pointer.y) && this.core.tapBoss() > 0) { this.startGameplayOnInteraction(); return; }
+      if (this.board.beginDrag(pointer)) { this.startGameplayOnInteraction(); this.core.notePlayerAction(); }
     });
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       if (!this.modalOpen) this.board.moveDrag(pointer);
@@ -380,6 +387,15 @@ export class GameScene extends Phaser.Scene {
       this.core.wipeSave();
       this.scene.restart({ restarted: true });
     })();
+  }
+
+  /** The ad choice is explicit on the game-over screen; no fill, no revive. */
+  private async reviveFromRewardedAd(): Promise<boolean> {
+    if (!this.core.canRewardedRevive) return false;
+    const rewarded = await requestPlatformRewardedBreak();
+    if (!rewarded || !this.core.reviveFromRewardedAd()) return false;
+    this.gameOver.hide();
+    return true;
   }
 
   private makeAlmanacButton(): void {
@@ -627,10 +643,25 @@ export class GameScene extends Phaser.Scene {
    * SDK wrapper dedupes, but only after building a promise to do it in.
    */
   private syncGameplayReport(): void {
-    const active = !this.modalOpen && !this.core.isGameOver;
+    const active = this.playerStartedGameplay && !this.modalOpen && !this.core.isGameOver;
     if (active === this.gameplayReported) return;
     this.gameplayReported = active;
     setPlatformGameplayActive(active);
+  }
+
+  /** The SDK event must follow an actual game interaction, never the first frame. */
+  private startGameplayOnInteraction(): void {
+    if (this.playerStartedGameplay || this.gameplayStartPending) return;
+    this.gameplayStartPending = true;
+    void (async () => {
+      // The player just chose to begin a run. This is a legitimate commercial
+      // opportunity, and Poki decides whether an ad is due; either way, play
+      // starts only once the break callback has returned.
+      await requestPlatformCommercialBreak();
+      this.gameplayStartPending = false;
+      this.playerStartedGameplay = true;
+      this.syncGameplayReport();
+    })();
   }
 
   override update(_time: number, dt: number): void {
@@ -661,6 +692,7 @@ export class GameScene extends Phaser.Scene {
   private onBuy(): void {
     // The button itself already played the click; a second one here flams
     // against it. This handler only reacts to the outcome.
+    this.startGameplayOnInteraction();
     this.core.notePlayerAction();
     const ninja = this.core.buy();
     if (ninja !== null) this.boughtOnce = true;

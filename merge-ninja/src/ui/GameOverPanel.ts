@@ -38,16 +38,20 @@ export class GameOverPanel extends Phaser.GameObjects.Container {
   private readonly rows: Row[] = [];
   /** A soft, spoiler-free curiosity hook -- what's one stage past the player's best ever. Never a countdown, never urgent. */
   private readonly nextTease: Phaser.GameObjects.BitmapText;
+  private readonly reviveBody: Phaser.GameObjects.Rectangle;
+  private readonly reviveLabel: Phaser.GameObjects.BitmapText;
   private readonly buttonBody: Phaser.GameObjects.Rectangle;
   private readonly buttonLabel: Phaser.GameObjects.BitmapText;
   private open = false;
   /** Ignores taps for a moment: a finger already mid-merge must not restart. */
   private armedAt = 0;
+  private revivePending = false;
 
   constructor(
     private readonly sceneRef: Phaser.Scene,
     private readonly sfx: Sfx,
     private readonly onRestart: () => void,
+    private readonly onRevive: () => Promise<boolean>,
   ) {
     super(sceneRef, 0, 0);
     sceneRef.add.existing(this).setDepth(430).setVisible(false);
@@ -84,6 +88,12 @@ export class GameOverPanel extends Phaser.GameObjects.Container {
       .setTint(0xb9ac9d);
     this.add(this.nextTease);
 
+    this.reviveBody = sceneRef.add.rectangle(0, 0, 260, 52, 0x548ac4).setStrokeStyle(4, 0x244c78);
+    this.reviveLabel = sceneRef.add.bitmapText(0, 0, 'pixel', 'WATCH AD: REVIVE', 14).setOrigin(0.5).setTint(0xffffff);
+    this.reviveBody.setInteractive();
+    this.reviveBody.on('pointerup', () => { void this.tryRevive(); });
+    this.add([this.reviveBody, this.reviveLabel]);
+
     this.buttonBody = sceneRef.add.rectangle(0, 0, 260, 58, theme.colors.buy).setStrokeStyle(4, 0x14520f);
     this.buttonLabel = sceneRef.add.bitmapText(0, 0, 'pixel', 'TRY AGAIN', 14).setOrigin(0.5).setTint(0xffffff);
     this.buttonBody.setInteractive();
@@ -100,6 +110,9 @@ export class GameOverPanel extends Phaser.GameObjects.Container {
   show(event: Extract<GameEvent, { type: 'gameOver' }>): void {
     if (this.open) return;
     this.open = true;
+    this.revivePending = false;
+    this.reviveBody.setVisible(true).setAlpha(1).setInteractive();
+    this.reviveLabel.setVisible(true).setText('WATCH AD: REVIVE');
     this.armedAt = this.sceneRef.time.now + 400;
 
     const values = [
@@ -181,9 +194,12 @@ export class GameOverPanel extends Phaser.GameObjects.Container {
     this.setVisible(false).setAlpha(1);
   }
 
-  /** Game-space anchor for the one button, for the verification harness. */
-  anchors(): { tryAgain: { x: number; y: number } } {
-    return { tryAgain: { x: this.buttonBody.x, y: this.buttonBody.y } };
+  /** Game-space anchors for the post-run choices, for the verification harness. */
+  anchors(): { tryAgain: { x: number; y: number }; revive: { x: number; y: number } } {
+    return {
+      tryAgain: { x: this.buttonBody.x, y: this.buttonBody.y },
+      revive: { x: this.reviveBody.x, y: this.reviveBody.y },
+    };
   }
 
   relayout(): void {
@@ -191,7 +207,7 @@ export class GameOverPanel extends Phaser.GameObjects.Container {
     this.shade.setPosition(l.width / 2, l.height / 2).setSize(l.width, l.height);
 
     const width = Math.min(l.landscape ? 560 : 600, l.width - 56);
-    const height = Math.min(400, l.height - 80);
+    const height = Math.min(450, l.height - 80);
     const centerX = l.width / 2;
     const top = (l.height - height) / 2;
 
@@ -214,12 +230,15 @@ export class GameOverPanel extends Phaser.GameObjects.Container {
       row.value.setPosition(rowRight, rowTop + rowGap * index);
     });
 
-    const buttonY = top + height - 56;
+    const buttonY = top + height - 48;
     // Sits in the gap between the last stat row and the button; the row loop
     // above always leaves at least ~60px here (rowGap is capped at 42 for four
     // rows against this panel's minimum height).
-    this.nextTease.setPosition(centerX, buttonY - 46).setMaxWidth(width - 64);
+    this.nextTease.setPosition(centerX, buttonY - 116).setMaxWidth(width - 64);
     const buttonWidth = Math.min(300, width - 96);
+    this.reviveBody.setPosition(centerX, buttonY - 62).setSize(buttonWidth, 52);
+    this.reviveBody.setInteractive(new Phaser.Geom.Rectangle(0, 0, buttonWidth, 52), Phaser.Geom.Rectangle.Contains);
+    this.reviveLabel.setPosition(centerX, buttonY - 62);
     this.buttonBody.setPosition(centerX, buttonY).setSize(buttonWidth, 58);
     // A resized Rectangle keeps its old hit area, so the shape is re-set here.
     this.buttonBody.setInteractive(new Phaser.Geom.Rectangle(0, 0, buttonWidth, 58), Phaser.Geom.Rectangle.Contains);
@@ -232,5 +251,18 @@ export class GameOverPanel extends Phaser.GameObjects.Container {
     this.sceneRef.tweens.add({ targets: [this.buttonBody, this.buttonLabel], scale: 0.95, yoyo: true, duration: 80 });
     this.open = false;
     this.onRestart();
+  }
+
+  private async tryRevive(): Promise<void> {
+    if (!this.open || this.revivePending || this.sceneRef.time.now < this.armedAt) return;
+    this.revivePending = true;
+    this.sfx.play('click');
+    this.reviveBody.disableInteractive().setFillStyle(0x75879b);
+    this.reviveLabel.setText('LOADING AD...');
+    const revived = await this.onRevive();
+    if (revived) return;
+    this.revivePending = false;
+    this.reviveBody.setFillStyle(0x548ac4).setInteractive();
+    this.reviveLabel.setText('AD UNAVAILABLE — TRY AGAIN');
   }
 }

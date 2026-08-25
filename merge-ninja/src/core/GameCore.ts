@@ -102,6 +102,8 @@ export class GameCore {
   /** The guided pickup was caught; the final first-run lesson is a boss tap. */
   private tutorialPowerupCollected = false;
   private tutorialShieldActive = false;
+  /** One opt-in ad revive per run: valuable, but never an infinite stall. */
+  private rewardedReviveUsed = false;
 
   constructor(opts: { storage?: StorageLike | null; now?: () => number } = {}) {
     const storage = opts.storage === undefined ? this.defaultStorage() : opts.storage;
@@ -473,9 +475,22 @@ export class GameCore {
     this.tutorialPowerupAtMs = null;
     this.tutorialPowerupCollected = false;
     this.tutorialShieldActive = false;
-    this.playerHp = this.playerMaxHealth; this.activeTempoId = this.tempo.id; this.over = false;
+    this.playerHp = this.playerMaxHealth; this.activeTempoId = this.tempo.id; this.over = false; this.rewardedReviveUsed = false;
     this.events.emit({ type: 'playerHealthChanged', hp: this.playerHp, maxHp: this.playerMaxHealth, delta: 0, reason: 'reset' });
     this.boss.reset(); this.syncChampion(); this.emitBossSpawned(); this.markDirty();
+  }
+  get canRewardedRevive(): boolean { return this.over && !this.rewardedReviveUsed; }
+  /** Restores a defeated run only after the platform confirms an opted-in ad. */
+  reviveFromRewardedAd(): boolean {
+    if (!this.canRewardedRevive) return false;
+    this.rewardedReviveUsed = true;
+    this.over = false;
+    this.wiped = false;
+    this.playerHp = Math.max(1, Math.ceil(this.playerMaxHealth * 0.45));
+    this.events.emit({ type: 'playerHealthChanged', hp: this.playerHp, maxHp: this.playerMaxHealth, delta: this.playerHp, reason: 'revive' });
+    this.markDirty();
+    this.save();
+    return true;
   }
   /**
    * Throw the whole save away, discoveries included.

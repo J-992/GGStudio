@@ -17,7 +17,7 @@ export type GameEvent =
   | { type: 'bossDefeated'; stage: number; reward: number }
   | { type: 'bossSpawned'; stage: number; name: string; maxHp: number }
   | { type: 'bossAttack'; damage: number; playerHp: number; playerMaxHp: number; defeated: boolean }
-  | { type: 'playerHealthChanged'; hp: number; maxHp: number; delta: number; reason: 'bossStrike' | 'victory' | 'rankUp' | 'potion' | 'defeat' | 'reset' }
+  | { type: 'playerHealthChanged'; hp: number; maxHp: number; delta: number; reason: 'bossStrike' | 'victory' | 'rankUp' | 'potion' | 'revive' | 'defeat' | 'reset' }
   | { type: 'potionCollected'; healed: number; hp: number; maxHp: number }
   /** A powerup token entered the arena lane; travelMs is its crossing window. */
   | { type: 'powerupSpawned'; id: PowerupId; travelMs: number }

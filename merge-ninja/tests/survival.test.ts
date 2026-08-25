@@ -86,6 +86,18 @@ describe('running out of health', () => {
     expect(game.healPlayer(50)).toBe(0);
     expect(game.playerHealth).toBe(0);
   });
+
+  it('allows exactly one rewarded revive and resumes the frozen run at 45% health', () => {
+    const game = newGame();
+    game.spawnTier(1);
+    playUntilDead(game);
+
+    expect(game.canRewardedRevive).toBe(true);
+    expect(game.reviveFromRewardedAd()).toBe(true);
+    expect(game.isGameOver).toBe(false);
+    expect(game.healthRatio).toBeGreaterThanOrEqual(0.45);
+    expect(game.reviveFromRewardedAd()).toBe(false);
+  });
 });
 
 describe('low health warning', () => {
