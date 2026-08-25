@@ -74,6 +74,12 @@ export const BALANCE = {
     attackIntervalMs: 2050,
     attackDamage: 8,
     attackDamageGrowth: 1.055,
+    /**
+     * A player's manual tap always removes a visible slice of the current
+     * boss, independent of late-game health scaling. This is intentionally a
+     * generous playtest value so the click loop can be judged in context.
+     */
+    playerTapHealthShare: 0.01,
     scale: 1.5,
   },
   player: {

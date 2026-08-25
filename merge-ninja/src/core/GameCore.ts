@@ -99,6 +99,8 @@ export class GameCore {
   private tutorialCompletedFlag: boolean;
   /** Deadline for the guaranteed first-run pickup, armed by the first merge. */
   private tutorialPowerupAtMs: number | null = null;
+  /** The guided pickup was caught; the final first-run lesson is a boss tap. */
+  private tutorialPowerupCollected = false;
   private tutorialShieldActive = false;
 
   constructor(opts: { storage?: StorageLike | null; now?: () => number } = {}) {
@@ -204,19 +206,8 @@ export class GameCore {
     }
     this.hintTimer += dt;
     this.boss.update(dt, this.totalDps * this.powerups.dpsMultiplier, tempo, {
-      damaged: (damage, hp, maxHp, dps) => {
-        this.events.emit({ type: 'bossDamaged', hp, maxHp, dps });
-        this.addDamageCoins(damage);
-        this.markDirty();
-      },
-      defeated: (stage, reward) => {
-        this.metrics.bossDefeats += 1;
-        const pacedReward = Math.max(1, Math.round(reward * tempo.rewardMultiplier * this.incomeMultiplier * this.powerups.coinMultiplier));
-        this.changeCoins(pacedReward);
-        this.restorePlayerHealth(Math.ceil(this.playerMaxHealth * BALANCE.player.bossVictoryHealRatio), 'victory');
-        this.events.emit({ type: 'bossDefeated', stage, reward: pacedReward });
-        this.markDirty();
-      },
+      damaged: (damage, hp, maxHp, dps) => this.handleBossDamage(damage, hp, maxHp, dps, 'ninja'),
+      defeated: (stage, reward) => this.handleBossDefeated(stage, reward),
       spawned: () => { this.emitBossSpawned(); this.markDirty(); },
       attack: (damage) => this.receiveBossAttack(damage),
       canAttack: () => !this.powerups.bossAttacksPaused,
@@ -283,6 +274,26 @@ export class GameCore {
   /** True while the run is still alive but the line is nearly out. */
   get lowHealth(): boolean { return !this.over && this.healthRatio <= BALANCE.player.lowHealthRatio; }
   get isGameOver(): boolean { return this.over; }
+
+  /**
+   * Player-assisted boss strike. Every tap registers immediately, while each
+   * each hit removes a clear one-percent health slice for playtesting. Returns
+   * zero for an empty, paused or transitioning battle.
+   */
+  tapBoss(): number {
+    if (this.over || this.speedMultiplier <= 0 || this.totalDps <= 0) return 0;
+    const effectiveDps = this.totalDps * this.powerups.dpsMultiplier;
+    const damage = Math.max(1, Math.round(this.boss.boss.maxHealth * BALANCE.boss.playerTapHealthShare));
+    const dealt = this.boss.damage(damage, effectiveDps, {
+      damaged: (hit, hp, maxHp, dps) => this.handleBossDamage(hit, hp, maxHp, dps, 'tap'),
+      defeated: (stage, reward) => this.handleBossDefeated(stage, reward),
+    });
+    if (dealt > 0) {
+      this.notePlayerAction();
+      if (this.tutorialShieldActive && this.tutorialPowerupCollected && this.metrics.merges > 0) this.completeTutorial();
+    }
+    return dealt;
+  }
 
   /**
    * Give health back, from a potion pickup. Returns what actually landed, so
@@ -460,6 +471,7 @@ export class GameCore {
     this.powerups.clear();
     this.coinFrenzyRemaining = 0; this.coinFrenzyValue = 0;
     this.tutorialPowerupAtMs = null;
+    this.tutorialPowerupCollected = false;
     this.tutorialShieldActive = false;
     this.playerHp = this.playerMaxHealth; this.activeTempoId = this.tempo.id; this.over = false;
     this.events.emit({ type: 'playerHealthChanged', hp: this.playerHp, maxHp: this.playerMaxHealth, delta: 0, reason: 'reset' });
@@ -491,9 +503,9 @@ export class GameCore {
         this.coinFrenzyValue = coinFrenzyCoinValue(this.boss.stage);
       }
       this.events.emit({ type: 'powerupCollected', id });
-      // A player who waits out a normal offer before learning to merge still
-      // needs the guided sequence; only a post-merge pickup completes it.
-      if (this.tutorialShieldActive && this.metrics.merges > 0) this.completeTutorial();
+      // The guided sequence now ends on one player boss tap after this pickup,
+      // so players see that their own strikes can build a streak too.
+      if (this.tutorialShieldActive && this.metrics.merges > 0) this.tutorialPowerupCollected = true;
     }
     return applied;
   }
@@ -514,6 +526,19 @@ export class GameCore {
     return true;
   }
   private syncChampion(): void { const current = this.highestTier; if (current !== this.activeChampion) { const prevTier = this.activeChampion; this.activeChampion = current; this.events.emit({ type: 'championChanged', tier: current, prevTier }); } }
+  private handleBossDamage(damage: number, hp: number, maxHp: number, dps: number, source: 'ninja' | 'tap'): void {
+    this.events.emit({ type: 'bossDamaged', damage, hp, maxHp, dps, source });
+    this.addDamageCoins(damage);
+    this.markDirty();
+  }
+  private handleBossDefeated(stage: number, reward: number): void {
+    this.metrics.bossDefeats += 1;
+    const pacedReward = Math.max(1, Math.round(reward * this.tempo.rewardMultiplier * this.incomeMultiplier * this.powerups.coinMultiplier));
+    this.changeCoins(pacedReward);
+    this.restorePlayerHealth(Math.ceil(this.playerMaxHealth * BALANCE.player.bossVictoryHealRatio), 'victory');
+    this.events.emit({ type: 'bossDefeated', stage, reward: pacedReward });
+    this.markDirty();
+  }
   private addDamageCoins(damage: number): void {
     this.damageCoinRemainder += damage * BALANCE.boss.coinsPerDamage * this.tempo.rewardMultiplier
       * this.incomeMultiplier * this.powerups.coinMultiplier;

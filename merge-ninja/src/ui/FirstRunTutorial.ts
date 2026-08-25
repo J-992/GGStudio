@@ -4,12 +4,13 @@ import type { GameEvent } from '../core/EventBus';
 import type { PowerupId } from '../data/powerups';
 import { theme } from './theme';
 
-type TutorialStep = 'buyFirst' | 'buySecond' | 'merge' | 'powerup' | 'complete';
+type TutorialStep = 'buyFirst' | 'buySecond' | 'merge' | 'powerup' | 'bossTap' | 'complete';
 
 type TutorialAnchors = {
   buy: () => Phaser.Math.Vector2;
   ninja: (slot: number) => Phaser.Math.Vector2;
   powerup: (id: PowerupId) => Phaser.Math.Vector2 | null;
+  boss: () => Phaser.Math.Vector2;
 };
 
 /**
@@ -56,10 +57,14 @@ export class FirstRunTutorial extends Phaser.GameObjects.Container {
   }
 
   override update(): void {
-    if (this.step !== 'powerup' || this.activePowerup === null) return;
-    const target = this.anchors.powerup(this.activePowerup);
-    if (target === null) return;
-    this.finger.setPosition(target.x, target.y);
+    if (this.step === 'powerup' && this.activePowerup !== null) {
+      const target = this.anchors.powerup(this.activePowerup);
+      if (target !== null) this.finger.setPosition(target.x, target.y);
+    }
+    if (this.step === 'bossTap') {
+      const target = this.anchors.boss();
+      this.finger.setPosition(target.x, target.y);
+    }
   }
 
   relayout(): void {
@@ -84,6 +89,8 @@ export class FirstRunTutorial extends Phaser.GameObjects.Container {
       this.activePowerup = event.id;
       this.applyStep();
     } else if (event.type === 'powerupCollected' && this.step === 'powerup' && event.id === this.activePowerup) {
+      this.setStep('bossTap');
+    } else if (event.type === 'bossDamaged' && this.step === 'bossTap' && event.source === 'tap') {
       this.core.completeTutorial();
       this.setStep('complete');
     }
@@ -118,7 +125,7 @@ export class FirstRunTutorial extends Phaser.GameObjects.Container {
     this.card.setScale(Math.min(1, Math.max(0.72, (viewportWidth - 24) / 382)));
 
     if (this.step === 'buyFirst' || this.step === 'buySecond') {
-      this.progress.setText('1 / 3   BUILD YOUR TEAM');
+      this.progress.setText('1 / 4   BUILD YOUR TEAM');
       this.title.setText(this.step === 'buyFirst' ? 'YOUR FIRST NINJA' : 'GET A MATCH');
       this.copy.setText(this.step === 'buyFirst' ? 'TAP BUY TO RECRUIT A NINJA' : 'TAP BUY ONE MORE TIME');
       const buy = this.anchors.buy();
@@ -130,7 +137,7 @@ export class FirstRunTutorial extends Phaser.GameObjects.Container {
     }
 
     if (this.step === 'merge') {
-      this.progress.setText('2 / 3   MERGE');
+      this.progress.setText('2 / 4   MERGE');
       this.title.setText('MAKE A STRONGER NINJA');
       this.copy.setText('DRAG ONE MATCHING NINJA ONTO THE OTHER');
       const b = theme.layout.board;
@@ -142,20 +149,31 @@ export class FirstRunTutorial extends Phaser.GameObjects.Container {
       return;
     }
 
-    this.progress.setText('3 / 3   POWER-UP');
-    this.title.setText(this.activePowerup === null ? 'POWER-UPS ARE COMING' : 'POWER-UP!');
-    this.copy.setText(this.activePowerup === null ? 'WATCH FOR THE GLOW' : 'TAP THE GLOWING POWER-UP');
-    const a = theme.layout.arena;
-    // Powerups travel through the arena's upper/middle lanes, so the card
-    // sits below them and never masks the finger's tap target.
-    this.card.setPosition(a.x + a.w / 2, a.y + a.h - 62);
-    if (this.activePowerup !== null) {
-      const target = this.anchors.powerup(this.activePowerup);
-      if (target !== null) this.pulseFinger(target.x, target.y);
-      else this.finger.setVisible(false);
-    } else {
-      this.finger.setVisible(false);
+    if (this.step === 'powerup') {
+      this.progress.setText('3 / 4   POWER-UP');
+      this.title.setText(this.activePowerup === null ? 'POWER-UPS ARE COMING' : 'POWER-UP!');
+      this.copy.setText(this.activePowerup === null ? 'WATCH FOR THE GLOW' : 'TAP THE GLOWING POWER-UP');
+      const a = theme.layout.arena;
+      // Powerups travel through the arena's upper/middle lanes, so the card
+      // sits below them and never masks the finger's tap target.
+      this.card.setPosition(a.x + a.w / 2, a.y + a.h - 62);
+      if (this.activePowerup !== null) {
+        const target = this.anchors.powerup(this.activePowerup);
+        if (target !== null) this.pulseFinger(target.x, target.y);
+        else this.finger.setVisible(false);
+      } else {
+        this.finger.setVisible(false);
+      }
+      return;
     }
+
+    this.progress.setText('4 / 4   JOIN THE FIGHT');
+    this.title.setText('BUILD A STREAK');
+    this.copy.setText('TAP THE BOSS TO START A STREAK');
+    const a = theme.layout.arena;
+    this.card.setPosition(a.x + a.w / 2, a.y + a.h - 62);
+    const target = this.anchors.boss();
+    this.pulseFinger(target.x, target.y);
   }
 
   private firstPair(): { from: Phaser.Math.Vector2; to: Phaser.Math.Vector2 } | null {

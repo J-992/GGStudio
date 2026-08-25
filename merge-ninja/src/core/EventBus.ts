@@ -13,7 +13,7 @@ export type GameEvent =
   | { type: 'ninjaSold'; id: number; slot: number; refund: number }
   | { type: 'newTierDiscovered'; tier: number; name: string }
   | { type: 'championChanged'; tier: number; prevTier: number }
-  | { type: 'bossDamaged'; hp: number; maxHp: number; dps: number }
+  | { type: 'bossDamaged'; damage: number; hp: number; maxHp: number; dps: number; source: 'ninja' | 'tap' }
   | { type: 'bossDefeated'; stage: number; reward: number }
   | { type: 'bossSpawned'; stage: number; name: string; maxHp: number }
   | { type: 'bossAttack'; damage: number; playerHp: number; playerMaxHp: number; defeated: boolean }

@@ -100,6 +100,28 @@ describe('board DPS accounting', () => {
     expect(game.boss.boss.maxHealth).toBeGreaterThan(firstHp);
     expect(game.boss.hp).toBe(game.boss.boss.maxHealth);
   });
+
+  it('lets every player tap remove the configured share of the boss health immediately', () => {
+    const game = newGame();
+    game.spawnTier(1);
+    const hpBefore = game.boss.hp;
+    let tapDamage = 0;
+    game.events.on('bossDamaged', (event) => {
+      if (event.source === 'tap') tapDamage = event.damage;
+    });
+
+    const dealt = game.tapBoss();
+    expect(dealt).toBe(Math.max(1, Math.round(game.boss.boss.maxHealth * BALANCE.boss.playerTapHealthShare)));
+    expect(game.boss.hp).toBe(hpBefore - dealt);
+    expect(tapDamage).toBe(dealt);
+    const second = game.tapBoss();
+    expect(second).toBe(dealt);
+    expect(game.boss.hp).toBe(hpBefore - dealt - second);
+  });
+
+  it('does not allow boss taps before the player has a ninja', () => {
+    expect(newGame().tapBoss()).toBe(0);
+  });
 });
 
 describe('incoming damage', () => {

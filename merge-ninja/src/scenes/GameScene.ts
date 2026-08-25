@@ -163,6 +163,7 @@ export class GameScene extends Phaser.Scene {
         const pos = this.board.slotPos(slot);
         return new Phaser.Math.Vector2(pos.x, pos.y - 66 * theme.layout.slots.spriteScale);
       },
+      boss: () => new Phaser.Math.Vector2(this.arena.boss.x, this.arena.boss.y),
       powerup: (id) => {
         const pos = this.powerups.posOf(id);
         return pos === null ? null : new Phaser.Math.Vector2(pos.x, pos.y);
@@ -206,6 +207,7 @@ export class GameScene extends Phaser.Scene {
       if (this.timeClock.tryCollect(pointer)) return;
       if (this.potion.tryCollect(pointer)) return;
       if (this.powerups.tryCollect(pointer)) return;
+      if (this.arena.containsBossPoint(pointer.x, pointer.y) && this.core.tapBoss() > 0) return;
       if (this.board.beginDrag(pointer)) this.core.notePlayerAction();
     });
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {

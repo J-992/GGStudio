@@ -197,6 +197,15 @@ export class ArenaManager {
   }
   bossAccent(): number { return this.core.boss.boss.accent; }
   bossDef() { return this.core.boss.boss; }
+  /** Generous body-only hit test for the player's optional manual strike. */
+  containsBossPoint(x: number, y: number): boolean {
+    if (!this.boss.visible || this.boss.alpha < .5 || this.core.boss.defeated) return false;
+    const radiusX = Math.max(34, this.boss.displayWidth * .38);
+    const radiusY = Math.max(42, this.boss.displayHeight * .44);
+    const dx = (x - this.boss.x) / radiusX;
+    const dy = (y - this.boss.y) / radiusY;
+    return dx * dx + dy * dy <= 1;
+  }
   /** Scene wiring for the shared VFX pool, camera shake, and sfx bus. Pass null to detach. */
   attachBossEntrancePresenter(presenter: BossEntrancePresenter | null): void { this.entrancePresenter = presenter; }
   /**

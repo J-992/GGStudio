@@ -13,10 +13,13 @@ export class BossHud extends Phaser.GameObjects.Container {
   private readonly namePlate: Phaser.GameObjects.NineSlice;
   private readonly stagePlate: Phaser.GameObjects.NineSlice;
   private readonly barBack: Phaser.GameObjects.NineSlice;
+  /** Briefly marks the exact HP slice removed by a manual boss tap. */
+  private readonly tapDamageCut: Phaser.GameObjects.NineSlice;
   private shownHp = 1;
   private targetHp = 1;
   private maxHp = 1;
   private barWidth = 300;
+  private tapColorStep = 0;
 
   constructor(private readonly sceneRef: Phaser.Scene, core: GameCore) {
     super(sceneRef, 0, 0); sceneRef.add.existing(this).setDepth(30);
@@ -26,8 +29,9 @@ export class BossHud extends Phaser.GameObjects.Container {
     this.bossName = sceneRef.add.bitmapText(0, 0, 'pixel', '', 14).setOrigin(.5).setTint(0xffffff);
     this.barBack = sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'panel_frame_9', this.barWidth, 24, 8, 8, 8, 8);
     this.fill = sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'banner_name_9', this.barWidth - 8, 14, 11, 11, 7, 7).setOrigin(0, .5).setTint(0xc94e4a);
+    this.tapDamageCut = sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'banner_name_9', 1, 14, 11, 11, 7, 7).setOrigin(0, .5).setVisible(false);
     this.label = sceneRef.add.bitmapText(0, 0, 'pixel', '', 14).setOrigin(.5).setTint(0xffffff);
-    this.add([this.namePlate, this.stagePlate, this.barBack, this.fill, this.bossName, this.stage, this.label]);
+    this.add([this.namePlate, this.stagePlate, this.barBack, this.fill, this.tapDamageCut, this.bossName, this.stage, this.label]);
     core.events.onAny((event) => this.handle(event, core));
     this.setBoss(core);
   }
@@ -46,6 +50,7 @@ export class BossHud extends Phaser.GameObjects.Container {
     this.bossName.setPosition(centre, top + 28);
     this.barBack.setPosition(centre, top + 55).setSize(this.barWidth, 24);
     this.fill.setPosition(centre - this.barWidth / 2 + 4, top + 55).setSize(Math.max(1, this.barWidth - 8), 14);
+    this.tapDamageCut.setPosition(centre - this.barWidth / 2 + 4, top + 55);
     this.label.setPosition(centre, top + 55);
   }
 
@@ -58,6 +63,7 @@ export class BossHud extends Phaser.GameObjects.Container {
   private handle(event: GameEvent, core: GameCore): void {
     if (event.type === 'bossDamaged') {
       this.targetHp = event.hp; this.maxHp = event.maxHp;
+      if (event.source === 'tap') this.showTapDamageCut(event.damage, event.hp, event.maxHp);
       if (event.maxHp > 0 && event.dps / event.maxHp > .08) this.sceneRef.tweens.add({ targets: this.fill, alpha: .25, yoyo: true, repeat: 2, duration: 65 });
     }
     if (event.type === 'bossDefeated') this.sceneRef.tweens.add({ targets: this, alpha: .25, duration: 160, yoyo: true });
@@ -69,5 +75,32 @@ export class BossHud extends Phaser.GameObjects.Container {
     this.maxHp = boss.maxHealth; this.targetHp = core.boss.hp; this.shownHp = this.targetHp;
     this.fill.setAlpha(1); this.stage.setText(`STAGE ${boss.stage}`); this.bossName.setText(boss.name.toUpperCase());
     this.relayout();
+  }
+
+  /** Shows the incoming tap damage as a coloured bite out of the current HP. */
+  private showTapDamageCut(damage: number, hpAfter: number, maxHp: number): void {
+    if (damage <= 0 || maxHp <= 0) return;
+    this.sceneRef.tweens.killTweensOf(this.tapDamageCut);
+    const usableWidth = this.barWidth - 8;
+    const start = Math.max(0, Math.min(1, hpAfter / maxHp));
+    const width = Math.max(2, Math.min(usableWidth * (1 - start), usableWidth * (damage / maxHp)));
+    const left = theme.layout.arena.x + theme.layout.arena.w / 2 - this.barWidth / 2 + 4;
+    // A new hue for each tap makes the cut read as player-caused instead of
+    // blending into the boss's automatic red health loss.
+    const color = Phaser.Display.Color.HSVToRGB((this.tapColorStep * .11) % 1, .78, 1).color;
+    this.tapColorStep += 1;
+    this.tapDamageCut
+      .setPosition(left + usableWidth * start, this.tapDamageCut.y)
+      .setSize(width, 14)
+      .setTint(color)
+      .setAlpha(1)
+      .setVisible(true);
+    this.sceneRef.tweens.add({
+      targets: this.tapDamageCut,
+      alpha: 0,
+      duration: 420,
+      ease: 'Quad.easeOut',
+      onComplete: () => this.tapDamageCut.setVisible(false),
+    });
   }
 }

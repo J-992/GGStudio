@@ -52,6 +52,8 @@ describe('first-run onboarding', () => {
     expect(offers).toHaveLength(1);
     expect(offers[0]!.id).toBe('coinFrenzy');
     expect(game.collectPowerup(offers[0]!.id)).toBe(true);
+    expect(game.tutorialCompleted).toBe(false);
+    expect(game.tapBoss()).toBeGreaterThan(0);
     expect(game.tutorialCompleted).toBe(true);
 
     game.update(30_000);

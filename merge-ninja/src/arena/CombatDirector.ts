@@ -34,8 +34,22 @@ export class CombatDirector {
   /** Guards the wall-clock flash restore so only the latest timer clears. */
   private flashToken = 0;
   private lastFlashAt = -Infinity;
+  private tapCombo = 0;
+  private lastTapAt = -Infinity;
+  private lastTapSoundAt = -Infinity;
+  /** A short visible history makes a rapid tap streak read as a rising combo. */
+  private readonly tapComboLabels: Phaser.GameObjects.BitmapText[] = [];
+  private tapComboLabelCursor = 0;
 
-  constructor(private readonly scene: Phaser.Scene, private readonly arena: ArenaManager, private readonly vfx: VFXManager, private readonly fx: Fx, private readonly sfx: Sfx) {}
+  constructor(private readonly scene: Phaser.Scene, private readonly arena: ArenaManager, private readonly vfx: VFXManager, private readonly fx: Fx, private readonly sfx: Sfx) {
+    for (let index = 0; index < 14; index += 1) {
+      this.tapComboLabels.push(
+        // Above the boss (depth 40) and the arena HUD (depth 30), so a fast
+        // streak never disappears behind the character art on a small phone.
+        scene.add.bitmapText(-100, -100, 'pixel', '', 18).setOrigin(.5).setDepth(60).setVisible(false),
+      );
+    }
+  }
 
   setForceHigh(value: boolean): void { this.forcedHigh = value; }
 
@@ -56,6 +70,7 @@ export class CombatDirector {
     if (event.type === 'bossDamaged') {
       this.lowBoss = event.hp / event.maxHp < .22;
       this.flashBossHit();
+      if (event.source === 'tap') this.playerTapHit();
       this.damageClock += 100;
       if (this.damageClock >= 340) {
         this.damageClock = 0;
@@ -153,6 +168,111 @@ export class CombatDirector {
       if (token !== this.flashToken || !boss.active) return;
       boss.clearTint();
     }, 50);
+  }
+
+  /**
+   * Every player tap gets a tangible cut/impact. A quick string builds an
+   * uncapped combo and punctuates every fifth strike with a larger shockwave.
+   * The label trail makes the growing streak visible without filling the
+   * arena with damage arithmetic.
+   */
+  private playerTapHit(): void {
+    const boss = this.arena.boss;
+    if (!boss.visible) return;
+    const now = this.scene.time.now;
+    this.tapCombo = now - this.lastTapAt <= 460 ? this.tapCombo + 1 : 1;
+    this.lastTapAt = now;
+    const finisher = this.tapCombo % 5 === 0;
+    const x = boss.x + Phaser.Math.Between(-Math.round(boss.displayWidth * .18), Math.round(boss.displayWidth * .18));
+    const y = boss.y + Phaser.Math.Between(-Math.round(boss.displayHeight * .18), Math.round(boss.displayHeight * .18));
+    const rainbow = Phaser.Display.Color.HSVToRGB((this.tapCombo * .065) % 1, .82, 1).color;
+    this.vfx.slash(x, y, rainbow, finisher ? 1.45 : 1, Phaser.Math.Between(-36, 36), finisher ? 2.2 : 1.15);
+    this.vfx.impact(x, y, rainbow);
+    this.vfx.sparks(x, y, rainbow, finisher ? 8 : 3);
+    this.showTapCombo(x, y, rainbow, finisher);
+    this.hapticTap(finisher);
+    if (finisher) {
+      this.vfx.shockwave(x, y, rainbow, 2.4);
+      this.fx.shake(.004, 80);
+    }
+    if (now - this.lastTapSoundAt >= 70) {
+      this.lastTapSoundAt = now;
+      this.sfx.play(finisher ? 'strongHit' : 'hit');
+    }
+    // Entrance/attack/defeat choreography owns the boss body. Between those
+    // beats, add a fast recoil without cancelling the authored animation.
+    if (this.scene.tweens.isTweening(boss)) return;
+    const scaleX = boss.scaleX;
+    const scaleY = boss.scaleY;
+    this.scene.tweens.add({
+      targets: boss,
+      scaleX: scaleX * (finisher ? 1.09 : 1.045),
+      scaleY: scaleY * (finisher ? .91 : .955),
+      angle: finisher ? Phaser.Math.Between(-4, 4) : 0,
+      duration: finisher ? 90 : 55,
+      yoyo: true,
+      ease: 'Quad.easeOut',
+    });
+  }
+
+  /** Shows this click in front while making prior streak counts recede. */
+  private showTapCombo(x: number, y: number, color: number, finisher: boolean): void {
+    for (const prior of this.tapComboLabels) {
+      if (!prior.visible) continue;
+      this.scene.tweens.killTweensOf(prior);
+      this.scene.tweens.add({
+        targets: prior,
+        alpha: Math.min(prior.alpha, .32),
+        scaleX: prior.scaleX * .92,
+        scaleY: prior.scaleY * .92,
+        angle: prior.angle + (prior.x < x ? -7 : 7),
+        duration: 120,
+        ease: 'Sine.easeOut',
+        onComplete: () => this.scene.tweens.add({
+          targets: prior,
+          y: prior.y - 24,
+          alpha: 0,
+          duration: 620,
+          ease: 'Quad.easeOut',
+          onComplete: () => prior.setVisible(false),
+        }),
+      });
+    }
+    const label = this.tapComboLabels.find((candidate) => !candidate.visible)
+      ?? this.tapComboLabels[this.tapComboLabelCursor % this.tapComboLabels.length]!;
+    this.tapComboLabelCursor += 1;
+    this.scene.tweens.killTweensOf(label);
+    const angle = Phaser.Math.Between(-12, 12);
+    const scale = finisher ? 2.55 : 2.05;
+    label
+      .setText(`STREAK x${this.tapCombo}${finisher ? '!' : ''}`)
+      .setPosition(x, y - (finisher ? 18 : 6))
+      .setTint(color)
+      .setAngle(angle)
+      .setScale(scale)
+      .setAlpha(1)
+      .setVisible(true);
+    this.scene.tweens.add({
+      targets: label,
+      y: label.y - (finisher ? 72 : 52),
+      angle: angle + (angle < 0 ? -20 : 20),
+      scaleX: scale * (finisher ? 1.12 : .88),
+      scaleY: scale * (finisher ? 1.12 : .88),
+      alpha: 0,
+      duration: finisher ? 1_400 : 1_100,
+      ease: 'Quad.easeOut',
+      onComplete: () => label.setVisible(false),
+    });
+  }
+
+  /**
+   * Android and some in-app mobile browsers expose the Vibration API. It is
+   * deliberately optional: iOS Safari simply ignores it, so this never
+   * blocks a click or asks for a permission prompt where haptics are absent.
+   */
+  private hapticTap(finisher: boolean): void {
+    if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
+    navigator.vibrate(finisher ? [12, 18, 26] : 8);
   }
 
   private sequence(actor: ArenaActor, intensity: number, special: boolean): void {

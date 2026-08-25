@@ -34,6 +34,28 @@ export class BossController {
     this.attackTimer = 0;
   }
 
+  /**
+   * Applies an immediate player-caused hit using the same defeat path as the
+   * fixed DPS tick. This keeps a click from bypassing rewards or spawning a
+   * second boss before the defeat presentation has had time to play.
+   */
+  damage(
+    damage: number,
+    dps: number,
+    callbacks: Pick<Parameters<BossController['update']>[3], 'damaged' | 'defeated'>,
+  ): number {
+    if (this.defeatTimer > 0 || this.hp <= 0) return 0;
+    const dealt = Math.min(this.hp, Math.max(0, damage));
+    if (dealt <= 0) return 0;
+    this.hp = Math.max(0, this.hp - dealt);
+    callbacks.damaged(dealt, this.hp, this.boss.maxHealth, dps);
+    if (this.hp <= 0) {
+      callbacks.defeated(this.stage, this.boss.reward);
+      this.defeatTimer = BALANCE.boss.defeatDelayMs;
+    }
+    return dealt;
+  }
+
   update(
     dtMs: number,
     dps: number,
@@ -74,13 +96,7 @@ export class BossController {
       if (this.tickAccumulator < BALANCE.boss.fixedTickMs) continue;
       this.tickAccumulator = 0;
       if (dps <= 0) continue;
-      const damage = Math.min(this.hp, (dps * BALANCE.boss.fixedTickMs) / 1000);
-      this.hp = Math.max(0, this.hp - damage);
-      callbacks.damaged(damage, this.hp, this.boss.maxHealth, dps);
-      if (this.hp <= 0) {
-        callbacks.defeated(this.stage, this.boss.reward);
-        this.defeatTimer = BALANCE.boss.defeatDelayMs;
-      }
+      this.damage((dps * BALANCE.boss.fixedTickMs) / 1000, dps, callbacks);
     }
   }
 
