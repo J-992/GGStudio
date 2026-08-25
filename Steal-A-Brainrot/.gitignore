@@ -1,0 +1,6 @@
+# Art inputs are not committed — they are large, third-party, and only ever
+# feed the importers. The sprites they produce ARE committed, because the game
+# loads them at runtime and they have to be in the Poki build.
+art/source/
+art/models/
+art/turntable/
