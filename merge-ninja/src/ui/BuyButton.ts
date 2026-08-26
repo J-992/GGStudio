@@ -14,6 +14,7 @@ export class BuyButton extends Phaser.GameObjects.Container {
   private readonly costLabel: Phaser.GameObjects.BitmapText;
   private readonly coin: Phaser.GameObjects.Image;
   private renderState = '';
+  private wasAvailable: boolean | null = null;
   constructor(scene: Phaser.Scene, onBuy: () => void, private readonly fx: Fx, private readonly sfx: Sfx) {
     const r = theme.layout.buy;
     super(scene, r.x, r.y); scene.add.existing(this).setDepth(8);
@@ -48,10 +49,13 @@ export class BuyButton extends Phaser.GameObjects.Container {
     });
   }
   refresh(tier: number, cost: number, canBuy: boolean): void {
+    const becameAvailable = this.wasAvailable === false && canBuy;
+    this.wasAvailable = canBuy;
     const state = `${tier}:${cost}:${canBuy}`; if (this.renderState === state) return;
     this.renderState = state; this.buyLabel.setText(`BUY LV.${tier}`); this.costLabel.setText(compactNumber(cost));
     this.buttonBody.setFillStyle(canBuy ? theme.colors.buy : theme.colors.buyDisabled);
     this.buttonBody.setStrokeStyle(5, canBuy ? 0x14520f : 0x4a4f49);
+    if (becameAvailable) this.pulse();
   }
   relayout(): void {
     const r = theme.layout.buy;

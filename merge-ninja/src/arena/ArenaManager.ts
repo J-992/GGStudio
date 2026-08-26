@@ -8,6 +8,7 @@ import { ATLAS_KEY, bossCatalogPortrait, FLAME_SHOGUN_TIER, ninjaCatalogPortrait
 import { portraitTexture } from '../render/portraitTexture';
 import {
   bossScale,
+  bossTapContainsPoint,
   fourFramePoseAt,
   HUMANOID_BOSS_BASIC_FOUR_FRAME,
   HUMANOID_BOSS_IDLE_FOUR_FRAME,
@@ -200,11 +201,7 @@ export class ArenaManager {
   /** Generous body-only hit test for the player's optional manual strike. */
   containsBossPoint(x: number, y: number): boolean {
     if (!this.boss.visible || this.boss.alpha < .5 || this.core.boss.defeated) return false;
-    const radiusX = Math.max(34, this.boss.displayWidth * .38);
-    const radiusY = Math.max(42, this.boss.displayHeight * .44);
-    const dx = (x - this.boss.x) / radiusX;
-    const dy = (y - this.boss.y) / radiusY;
-    return dx * dx + dy * dy <= 1;
+    return bossTapContainsPoint(this.boss, x, y);
   }
   /** Scene wiring for the shared VFX pool, camera shake, and sfx bus. Pass null to detach. */
   attachBossEntrancePresenter(presenter: BossEntrancePresenter | null): void { this.entrancePresenter = presenter; }

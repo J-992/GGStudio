@@ -69,6 +69,23 @@ describe('damage progression', () => {
 });
 
 describe('board DPS accounting', () => {
+  it('turns every successful merge into an immediate boss-health payoff', () => {
+    const game = newGame();
+    game.grantCoins(100);
+    game.buy();
+    game.buy();
+    const before = game.boss.hp;
+    let mergeDamage = 0;
+    game.events.on('bossDamaged', (event) => {
+      if (event.source === 'merge') mergeDamage = event.damage;
+    });
+
+    expect(game.drop(0, { kind: 'slot', slot: 1 })).toBe('merged');
+    const expected = Math.max(1, Math.round(game.boss.boss.maxHealth * BALANCE.progression.mergeStrikeHealthShare));
+    expect(mergeDamage).toBe(expected);
+    expect(game.boss.hp).toBe(before - expected);
+  });
+
   it('sums DPS from every ninja on the board', () => {
     const game = newGame();
     game.spawnTier(1); game.spawnTier(3); game.spawnTier(5);

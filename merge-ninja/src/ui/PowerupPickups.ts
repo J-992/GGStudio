@@ -298,7 +298,7 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
       this.hide(flight);
     }
     this.playActivation(def);
-    if (def.effect === 'coinRain') this.startCoinRain(def.coinCount);
+    if (def.effect === 'coinRain') this.startCoinRain(this.core.coinFrenzyState.remaining);
     this.showBanner(def);
   }
 

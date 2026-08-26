@@ -29,6 +29,7 @@ interface PokiSdk {
   commercialBreak?: (beforeAd?: () => void) => Promise<unknown> | void;
   rewardedBreak?: (beforeAd?: () => void) => Promise<unknown> | void;
   happyTime?: (intensity: number) => void;
+  measure?: (category: string, what: string, action: string) => void;
   captureError?: (error: unknown) => void;
 }
 
@@ -341,6 +342,16 @@ export async function pokiHappyTime(intensity: number): Promise<boolean> {
   if (s?.happyTime === undefined) return false;
 
   try { s.happyTime(clamped); return true; } catch { return false; }
+}
+
+/** Send one game-specific funnel checkpoint to Poki Game Events. */
+export async function pokiMeasure(category: string, what: string, action: string): Promise<boolean> {
+  if (adInFlight || !(await initPoki())) return false;
+
+  const s = sdk();
+  if (s?.measure === undefined) return false;
+
+  try { s.measure(category, what, action); return true; } catch { return false; }
 }
 
 /** Hand a caught error to Poki so it shows up in their dashboard. */

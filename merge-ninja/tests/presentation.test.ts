@@ -5,6 +5,7 @@ import {
   almanacPageCount,
   almanacPageSlice,
   bossScale,
+  bossTapContainsPoint,
   FLAME_SHOGUN_IDLE_FOUR_FRAME,
   fourFramePoseAt,
   HUMANOID_BOSS_BASIC_FOUR_FRAME,
@@ -13,6 +14,7 @@ import {
   NINJA_BASIC_FOUR_FRAME,
   ninjaIdleFrameAt,
   ninjaBoardAnchorY,
+  isShowcaseNinjaTier,
   NINJA_IDLE_FOUR_FRAME,
   NINJA_SPECIAL_FOUR_FRAME,
   ninjaScale,
@@ -22,6 +24,12 @@ import { REVEAL_ASSETS, REVEAL_NINJA_RIGS, revealNinjaRig } from '../src/render/
 const ARENA = { w: 735, h: 570 };
 
 describe('New Ninja ceremony art', () => {
+  it('keeps early discoveries in play and reserves full showcases for real milestones', () => {
+    expect([2, 3, 4, 5, 6, 10, 15, 20, 25, 29].map(isShowcaseNinjaTier)).toEqual([
+      false, false, false, true, false, true, true, true, true, true,
+    ]);
+  });
+
   it('uses a dedicated uniquely keyed asset set', () => {
     const assets = Object.values(REVEAL_ASSETS);
     expect(new Set(assets.map((asset) => asset.key)).size).toBe(assets.length);
@@ -42,6 +50,13 @@ describe('New Ninja ceremony art', () => {
 });
 
 describe('boss presence', () => {
+  it('accepts taps across the visible boss body without swallowing the whole arena', () => {
+    const boss = { x: 500, y: 300, displayWidth: 200, displayHeight: 240 };
+
+    expect(bossTapContainsPoint(boss, 500 + 200 * 0.7, 300)).toBe(true);
+    expect(bossTapContainsPoint(boss, 500 + 200 * 0.9, 300)).toBe(false);
+  });
+
   it('makes a same-shaped boss clearly larger than a ninja', () => {
     const ninja = ninjaScale(128, 128, 96);
     const boss = bossScale(128, 128, 190, ARENA);

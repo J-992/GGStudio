@@ -100,7 +100,8 @@ export class GameCore {
   /** Deadline for the guaranteed first-run pickup, armed by the first merge. */
   private tutorialPowerupAtMs: number | null = null;
   /** The guided pickup was caught; the final first-run lesson is a boss tap. */
-  private tutorialPowerupCollected = false;
+  /** The guided pickup has finished its interaction, including every rain coin. */
+  private tutorialPowerupFinished = false;
   private tutorialShieldActive = false;
   /** One opt-in ad revive per run: valuable, but never an infinite stall. */
   private rewardedReviveUsed = false;
@@ -292,7 +293,7 @@ export class GameCore {
     });
     if (dealt > 0) {
       this.notePlayerAction();
-      if (this.tutorialShieldActive && this.tutorialPowerupCollected && this.metrics.merges > 0) this.completeTutorial();
+      if (this.tutorialShieldActive && this.tutorialPowerupFinished && this.metrics.merges > 0) this.completeTutorial();
     }
     return dealt;
   }
@@ -374,7 +375,9 @@ export class GameCore {
     const discovered = this.discoverTier(merged.result.tier);
     this.events.emit({ type: 'ninjaMerged', fromSlot, toSlot: target.slot, consumedIds: merged.consumedIds, result: merged.result });
     if (discovered) this.events.emit({ type: 'newTierDiscovered', tier: merged.result.tier, name: ninjaDef(merged.result.tier).name });
-    this.syncChampion(); this.markDirty(); return 'merged';
+    this.syncChampion();
+    this.strikeBossFromMerge();
+    this.markDirty(); return 'merged';
   }
 
   /** Temporary speed-up granted by the golden clock pickup. */
@@ -473,7 +476,7 @@ export class GameCore {
     this.powerups.clear();
     this.coinFrenzyRemaining = 0; this.coinFrenzyValue = 0;
     this.tutorialPowerupAtMs = null;
-    this.tutorialPowerupCollected = false;
+    this.tutorialPowerupFinished = false;
     this.tutorialShieldActive = false;
     this.playerHp = this.playerMaxHealth; this.activeTempoId = this.tempo.id; this.over = false; this.rewardedReviveUsed = false;
     this.events.emit({ type: 'playerHealthChanged', hp: this.playerHp, maxHp: this.playerMaxHealth, delta: 0, reason: 'reset' });
@@ -514,13 +517,16 @@ export class GameCore {
     if (applied) {
       const def = POWERUPS[id];
       if (def.effect === 'coinRain') {
-        this.coinFrenzyRemaining = def.coinCount;
+        const guided = this.tutorialShieldActive && this.metrics.merges > 0 && !this.tutorialCompletedFlag;
+        this.coinFrenzyRemaining = guided ? def.tutorialCoinCount : def.coinCount;
         this.coinFrenzyValue = coinFrenzyCoinValue(this.boss.stage);
       }
       this.events.emit({ type: 'powerupCollected', id });
-      // The guided sequence now ends on one player boss tap after this pickup,
-      // so players see that their own strikes can build a streak too.
-      if (this.tutorialShieldActive && this.metrics.merges > 0) this.tutorialPowerupCollected = true;
+      // A one-tap effect is finished immediately. Coin Frenzy remains the
+      // player's active lesson until its last coin is caught or missed.
+      if (this.tutorialShieldActive && this.metrics.merges > 0) {
+        this.tutorialPowerupFinished = def.effect !== 'coinRain';
+      }
     }
     return applied;
   }
@@ -530,18 +536,32 @@ export class GameCore {
     this.coinFrenzyRemaining -= 1;
     const value = this.coinFrenzyValue;
     this.changeCoins(value);
-    if (this.coinFrenzyRemaining === 0) this.coinFrenzyValue = 0;
+    this.finishCoinFrenzyIfEmpty();
     return value;
   }
   /** Remove a rain coin that reached the bottom; missed coins pay nothing. */
   missCoinFrenzyCoin(): boolean {
     if (this.coinFrenzyRemaining <= 0) return false;
     this.coinFrenzyRemaining -= 1;
-    if (this.coinFrenzyRemaining === 0) this.coinFrenzyValue = 0;
+    this.finishCoinFrenzyIfEmpty();
     return true;
   }
+  private finishCoinFrenzyIfEmpty(): void {
+    if (this.coinFrenzyRemaining !== 0) return;
+    this.coinFrenzyValue = 0;
+    if (this.tutorialShieldActive && this.metrics.merges > 0) this.tutorialPowerupFinished = true;
+    this.events.emit({ type: 'coinFrenzyFinished' });
+  }
   private syncChampion(): void { const current = this.highestTier; if (current !== this.activeChampion) { const prevTier = this.activeChampion; this.activeChampion = current; this.events.emit({ type: 'championChanged', tier: current, prevTier }); } }
-  private handleBossDamage(damage: number, hp: number, maxHp: number, dps: number, source: 'ninja' | 'tap'): void {
+  private strikeBossFromMerge(): number {
+    const effectiveDps = this.totalDps * this.powerups.dpsMultiplier;
+    const damage = Math.max(1, Math.round(this.boss.boss.maxHealth * BALANCE.progression.mergeStrikeHealthShare));
+    return this.boss.damage(damage, effectiveDps, {
+      damaged: (hit, hp, maxHp, dps) => this.handleBossDamage(hit, hp, maxHp, dps, 'merge'),
+      defeated: (stage, reward) => this.handleBossDefeated(stage, reward),
+    });
+  }
+  private handleBossDamage(damage: number, hp: number, maxHp: number, dps: number, source: 'ninja' | 'tap' | 'merge'): void {
     this.events.emit({ type: 'bossDamaged', damage, hp, maxHp, dps, source });
     this.addDamageCoins(damage);
     this.markDirty();
@@ -636,6 +656,7 @@ export class GameCore {
     this.tutorialShieldActive = false;
     this.tutorialPowerupAtMs = null;
     this.saveMeta();
+    this.events.emit({ type: 'tutorialCompleted' });
   }
 
   /** Everything the award ladder is allowed to see, gathered in one place. */

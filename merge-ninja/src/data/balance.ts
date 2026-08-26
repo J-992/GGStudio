@@ -32,6 +32,8 @@ export const BALANCE = {
     mergeSpikeTarget: 1.2,
     /** How far any individual adjacent pair may sit from that target. */
     mergeSpikeTolerance: 0.05,
+    /** Immediate boss-health slice carved out by the core merge action. */
+    mergeStrikeHealthShare: 0.08,
   },
   economy: {
     // Covers the first two buys so the opening merge needs no waiting.
@@ -107,7 +109,7 @@ export const BALANCE = {
      */
     maxHitShare: 0.013,
   },
-  fx: { hintIdleMs: 4500, mergeDuration: 550 },
+  fx: { hintIdleMs: 2800, mergeDuration: 550 },
   save: { key: 'mergeninja.save.v1', metaKey: 'mergeninja.meta.v1', version: 5, flushMs: 1000 },
   offline: {
     /** A quick refresh is not an absence; anything shorter earns nothing. */

@@ -71,6 +71,7 @@ export class CombatDirector {
       this.lowBoss = event.hp / event.maxHp < .22;
       this.flashBossHit();
       if (event.source === 'tap') this.playerTapHit();
+      if (event.source === 'merge') this.mergeStrikeHit();
       this.damageClock += 100;
       if (this.damageClock >= 340) {
         this.damageClock = 0;
@@ -92,6 +93,18 @@ export class CombatDirector {
     } else if (event.type === 'ninjaSold' || event.type === 'ninjaMerged' || event.type === 'stateLoaded') {
       this.arena.sync();
     }
+  }
+
+  /** The board's core verb lands in the arena immediately, not one DPS tick later. */
+  private mergeStrikeHit(): void {
+    const boss = this.arena.boss;
+    if (!boss.visible) return;
+    const color = 0xffd35a;
+    this.vfx.shockwave(boss.x, boss.y, color, 2.5);
+    this.vfx.sparks(boss.x, boss.y - 20, color, 10);
+    this.fx.gain(boss.x, boss.y - boss.displayHeight * 0.3, 'MERGE STRIKE!');
+    this.fx.shake(0.006, 100);
+    this.sfx.play('strongHit');
   }
 
   private intensity(): number { return this.forcedHigh || this.lowBoss ? 3 : Math.random() < .18 ? 2 : 1; }

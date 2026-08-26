@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { nextRivalIndex, rivalMilestone, upcomingRivals } from '../src/data/rivals';
+import { isRivalMilestoneStage, nextRivalIndex, rivalMilestone, upcomingRivals } from '../src/data/rivals';
 
 describe('rival ladder milestones', () => {
-  it('starts with reachable stage goals that widen as the player climbs', () => {
-    expect([0, 1, 2, 3, 4].map((index) => rivalMilestone(index).stage)).toEqual([2, 4, 7, 11, 16]);
+  it('turns the existing arena chapters into the first rival goals', () => {
+    expect([0, 1, 2, 3, 4].map((index) => rivalMilestone(index).stage)).toEqual([10, 19, 28, 37, 50]);
   });
 
   it('always chooses a rival strictly ahead of the player', () => {
     expect(nextRivalIndex(1)).toBe(0);
-    expect(nextRivalIndex(2)).toBe(1);
-    expect(upcomingRivals(11)).toMatchObject([{ stage: 16 }, { stage: 22 }, { stage: 29 }]);
+    expect(nextRivalIndex(10)).toBe(1);
+    expect(upcomingRivals(19)).toMatchObject([{ stage: 28 }, { stage: 37 }, { stage: 50 }]);
+  });
+
+  it('distinguishes milestone arrivals from routine stages', () => {
+    expect([9, 10, 11, 19, 28, 37, 50].map(isRivalMilestoneStage)).toEqual([
+      false, true, false, true, true, true, true,
+    ]);
   });
 });

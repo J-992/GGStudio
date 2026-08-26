@@ -22,6 +22,7 @@ import {
   pokiCaptureError,
   pokiCommercialBreak,
   pokiHappyTime,
+  pokiMeasure,
   pokiRewardedBreak,
   setPokiGameplayActive,
   startPokiLoading,
@@ -44,6 +45,7 @@ interface GamePlatform {
   commercialBreak: () => Promise<boolean>;
   rewardedBreak: () => Promise<boolean>;
   happyTime: (intensity: number) => Promise<boolean>;
+  measure: (category: string, what: string, action: string) => Promise<boolean>;
   captureError: (error: unknown) => Promise<boolean>;
 }
 
@@ -60,6 +62,7 @@ const pokiPlatform: GamePlatform = {
   commercialBreak: pokiCommercialBreak,
   rewardedBreak: pokiRewardedBreak,
   happyTime: pokiHappyTime,
+  measure: pokiMeasure,
   captureError: pokiCaptureError,
 };
 
@@ -78,6 +81,7 @@ const nonePlatform: GamePlatform = {
   commercialBreak: NO,
   rewardedBreak: NO,
   happyTime: NO,
+  measure: NO,
   captureError: NO,
 };
 
@@ -129,6 +133,10 @@ export function requestPlatformRewardedBreak(): Promise<boolean> {
 
 export function reportPlatformHappyTime(intensity: number): Promise<boolean> {
   return platform.happyTime(intensity);
+}
+
+export function reportPlatformMeasure(category: string, what: string, action: string): Promise<boolean> {
+  return platform.measure(category, what, action);
 }
 
 export function reportPlatformError(error: unknown): Promise<boolean> {

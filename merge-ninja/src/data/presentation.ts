@@ -250,6 +250,32 @@ export function bossMotionForIdentity(identity: number): BossMotionRecipe {
 export const FINAL_NINJA_TIER = 29;
 const FINAL_NINJA_PRESENCE_MULTIPLIER = 3;
 
+/**
+ * Full-screen ceremonies are chapter rewards, not a tax on every merge.
+ * Smaller discoveries still receive the arena banner and merge VFX while the
+ * player keeps control.
+ */
+export function isShowcaseNinjaTier(tier: number): boolean {
+  const safe = Math.max(1, Math.floor(tier));
+  return safe === FINAL_NINJA_TIER || (safe >= 5 && safe % 5 === 0);
+}
+
+export interface BossTapBody {
+  readonly x: number;
+  readonly y: number;
+  readonly displayWidth: number;
+  readonly displayHeight: number;
+}
+
+/** A forgiving body-shaped target that still excludes the surrounding arena. */
+export function bossTapContainsPoint(boss: BossTapBody, x: number, y: number): boolean {
+  const radiusX = Math.max(52, boss.displayWidth * 0.74);
+  const radiusY = Math.max(58, boss.displayHeight * 0.68);
+  const dx = (x - boss.x) / radiusX;
+  const dy = (y - boss.y) / radiusY;
+  return dx * dx + dy * dy <= 1;
+}
+
 export function ninjaScale(
   _frameWidth: number,
   frameHeight: number,

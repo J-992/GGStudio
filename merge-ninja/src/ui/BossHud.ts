@@ -13,7 +13,7 @@ export class BossHud extends Phaser.GameObjects.Container {
   private readonly namePlate: Phaser.GameObjects.NineSlice;
   private readonly stagePlate: Phaser.GameObjects.NineSlice;
   private readonly barBack: Phaser.GameObjects.NineSlice;
-  /** Briefly marks the exact HP slice removed by a manual boss tap. */
+  /** Briefly marks the exact HP slice removed by a player action. */
   private readonly tapDamageCut: Phaser.GameObjects.NineSlice;
   private shownHp = 1;
   private targetHp = 1;
@@ -63,7 +63,9 @@ export class BossHud extends Phaser.GameObjects.Container {
   private handle(event: GameEvent, core: GameCore): void {
     if (event.type === 'bossDamaged') {
       this.targetHp = event.hp; this.maxHp = event.maxHp;
-      if (event.source === 'tap') this.showTapDamageCut(event.damage, event.hp, event.maxHp);
+      if (event.source === 'tap' || event.source === 'merge') {
+        this.showPlayerDamageCut(event.damage, event.hp, event.maxHp, event.source);
+      }
       if (event.maxHp > 0 && event.dps / event.maxHp > .08) this.sceneRef.tweens.add({ targets: this.fill, alpha: .25, yoyo: true, repeat: 2, duration: 65 });
     }
     if (event.type === 'bossDefeated') this.sceneRef.tweens.add({ targets: this, alpha: .25, duration: 160, yoyo: true });
@@ -77,8 +79,8 @@ export class BossHud extends Phaser.GameObjects.Container {
     this.relayout();
   }
 
-  /** Shows the incoming tap damage as a coloured bite out of the current HP. */
-  private showTapDamageCut(damage: number, hpAfter: number, maxHp: number): void {
+  /** Shows an active player hit as a coloured bite out of the current HP. */
+  private showPlayerDamageCut(damage: number, hpAfter: number, maxHp: number, source: 'tap' | 'merge'): void {
     if (damage <= 0 || maxHp <= 0) return;
     this.sceneRef.tweens.killTweensOf(this.tapDamageCut);
     const usableWidth = this.barWidth - 8;
@@ -87,8 +89,10 @@ export class BossHud extends Phaser.GameObjects.Container {
     const left = theme.layout.arena.x + theme.layout.arena.w / 2 - this.barWidth / 2 + 4;
     // A new hue for each tap makes the cut read as player-caused instead of
     // blending into the boss's automatic red health loss.
-    const color = Phaser.Display.Color.HSVToRGB((this.tapColorStep * .11) % 1, .78, 1).color;
-    this.tapColorStep += 1;
+    const color = source === 'merge'
+      ? 0xffd35a
+      : Phaser.Display.Color.HSVToRGB((this.tapColorStep * .11) % 1, .78, 1).color;
+    if (source === 'tap') this.tapColorStep += 1;
     this.tapDamageCut
       .setPosition(left + usableWidth * start, this.tapDamageCut.y)
       .setSize(width, 14)

@@ -35,7 +35,11 @@ describe('first-run onboarding', () => {
   it('keeps the opening safe, offers a powerup after the first merge, then restores danger', () => {
     const game = new GameCore({ storage: null, now: () => 0 });
     const offers: Extract<GameEvent, { type: 'powerupSpawned' }>[] = [];
+    let frenzyFinished = 0;
+    let tutorialFinished = 0;
     game.events.on('powerupSpawned', (event) => offers.push(event));
+    game.events.on('coinFrenzyFinished', () => { frenzyFinished += 1; });
+    game.events.on('tutorialCompleted', () => { tutorialFinished += 1; });
 
     game.grantCoins(100);
     expect(game.buy()).not.toBeNull();
@@ -52,9 +56,17 @@ describe('first-run onboarding', () => {
     expect(offers).toHaveLength(1);
     expect(offers[0]!.id).toBe('coinFrenzy');
     expect(game.collectPowerup(offers[0]!.id)).toBe(true);
+    expect(game.coinFrenzyState.remaining).toBe(8);
     expect(game.tutorialCompleted).toBe(false);
     expect(game.tapBoss()).toBeGreaterThan(0);
+    expect(game.tutorialCompleted).toBe(false);
+    while (game.coinFrenzyState.remaining > 0) game.missCoinFrenzyCoin();
+    expect(frenzyFinished).toBe(1);
+    expect(game.tapBoss()).toBeGreaterThan(0);
     expect(game.tutorialCompleted).toBe(true);
+    expect(tutorialFinished).toBe(1);
+    game.completeTutorial();
+    expect(tutorialFinished).toBe(1);
 
     game.update(30_000);
     expect(game.playerHealth).toBeLessThan(game.playerMaxHealth);

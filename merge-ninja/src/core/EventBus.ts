@@ -13,7 +13,7 @@ export type GameEvent =
   | { type: 'ninjaSold'; id: number; slot: number; refund: number }
   | { type: 'newTierDiscovered'; tier: number; name: string }
   | { type: 'championChanged'; tier: number; prevTier: number }
-  | { type: 'bossDamaged'; damage: number; hp: number; maxHp: number; dps: number; source: 'ninja' | 'tap' }
+  | { type: 'bossDamaged'; damage: number; hp: number; maxHp: number; dps: number; source: 'ninja' | 'tap' | 'merge' }
   | { type: 'bossDefeated'; stage: number; reward: number }
   | { type: 'bossSpawned'; stage: number; name: string; maxHp: number }
   | { type: 'bossAttack'; damage: number; playerHp: number; playerMaxHp: number; defeated: boolean }
@@ -23,6 +23,10 @@ export type GameEvent =
   | { type: 'powerupSpawned'; id: PowerupId; travelMs: number }
   | { type: 'powerupCollected'; id: PowerupId }
   | { type: 'powerupExpired'; id: PowerupId }
+  /** The last Coin Frenzy target was either caught or missed. */
+  | { type: 'coinFrenzyFinished' }
+  /** The player completed the one-time, interactive first-run lesson. */
+  | { type: 'tutorialCompleted' }
   /** A protective ward ate a boss strike that would have dealt this much. */
   | { type: 'powerupWardBlocked'; damage: number }
   /**

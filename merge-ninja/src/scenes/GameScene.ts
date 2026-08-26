@@ -33,15 +33,21 @@ import { FirstRunTutorial } from '../ui/FirstRunTutorial';
 import { BALANCE } from '../data/balance';
 import { BOSS_COUNT } from '../data/enemies';
 import { previewSeedPlan } from '../data/devPreview';
+import { themeForStage } from '../data/arenaThemes';
+import { isShowcaseNinjaTier } from '../data/presentation';
+import { isRivalMilestoneStage } from '../data/rivals';
 import type { PowerupId } from '../data/powerups';
 import { collectionProgress } from '../systems/CollectionProgress';
 import { attachAdHold } from '../platform/adHold';
 import {
   reportPlatformHappyTime,
+  reportPlatformMeasure,
   requestPlatformCommercialBreak,
   requestPlatformRewardedBreak,
   setPlatformGameplayActive,
 } from '../platform/platform';
+import { shouldOfferCommercialBreak } from '../platform/adPolicy';
+import { RetentionFunnel } from '../platform/retentionFunnel';
 
 export class GameScene extends Phaser.Scene {
   /**
@@ -96,10 +102,9 @@ export class GameScene extends Phaser.Scene {
   private gameplayReported = false;
   /** Poki counts gameplay only after the player has deliberately entered it. */
   private playerStartedGameplay = false;
-  /** Coalesces the first intent while Poki decides whether to show an ad. */
-  private gameplayStartPending = false;
   /** True from the moment a restart is asked for until the scene is rebuilt. */
   private restarting = false;
+  private retention!: RetentionFunnel;
   private detachAdHold: (() => void) | null = null;
   private fx!: Fx;
   private readonly sfx = new Sfx();
@@ -112,7 +117,6 @@ export class GameScene extends Phaser.Scene {
     this.core = new GameCore({});
     this.boughtOnce = false;
     this.playerStartedGameplay = false;
-    this.gameplayStartPending = false;
     this.restarted = data?.restarted === true;
   }
 
@@ -175,7 +179,16 @@ export class GameScene extends Phaser.Scene {
         const pos = this.powerups.posOf(id);
         return pos === null ? null : new Phaser.Math.Vector2(pos.x, pos.y);
       },
+      coin: () => {
+        const pos = this.powerups.liveRainCoins[0];
+        return pos === undefined ? null : new Phaser.Math.Vector2(pos.x, pos.y);
+      },
     });
+    this.retention = new RetentionFunnel((event) => {
+      void reportPlatformMeasure(event.category, event.what, event.action);
+    });
+    if (!this.core.tutorialCompleted) this.retention.startTutorial();
+    this.core.events.onAny((event) => this.retention.handle(event, this.core.metrics.purchases));
     this.lowHealth = new LowHealthWarning(this);
     this.stageBanner = new StageBanner(this);
     this.settings = new SettingsPanel(this, this.sfx, () => this.restartRun());
@@ -184,6 +197,7 @@ export class GameScene extends Phaser.Scene {
     this.makeAlmanacButton();
     this.makeSettingsButton();
     this.makeAchievementsButton();
+    this.syncFirstRunChrome();
 
     // The welcome-back reward was already credited to the wallet at load; the
     // banner is announced here so it can never be missed by an event fired
@@ -235,7 +249,8 @@ export class GameScene extends Phaser.Scene {
     // would tell someone else about: a ninja they have never seen, a boss down,
     // a named goal met, and a prestige.
     this.core.events.on('newTierDiscovered', (event) => {
-      this.reveal.show(event.tier, this.input.activePointer.id);
+      if (isShowcaseNinjaTier(event.tier)) this.reveal.show(event.tier, this.input.activePointer.id);
+      else this.core.revealTier(event.tier);
       void reportPlatformHappyTime(0.8);
     });
     this.core.events.on('bossDefeated', (event) => {
@@ -245,13 +260,19 @@ export class GameScene extends Phaser.Scene {
       // small celebration and one clear reason to keep going.
       if (event.stage === 1) {
         this.time.delayedCall(620, () => {
-          if (!this.core.isGameOver) this.stageBanner.announce('FIRST BOSS DEFEATED!', 'NEXT: BEAT STAGE 2', 0xfff6dd);
+          if (!this.core.isGameOver) this.stageBanner.announce('FIRST BOSS DEFEATED!', 'NEXT: PASS KAI AT STAGE 10', 0xfff6dd);
         });
       }
     });
     this.core.events.on('ascended', () => { void reportPlatformHappyTime(1); });
-    // Stage 1 needs no announcement -- it is where every run opens.
-    this.core.events.on('bossSpawned', (event) => { if (event.stage > 1) this.stageBanner.show(event.stage); });
+    // Routine stage changes stay in the HUD. Only authored chapter/rival
+    // arrivals take over the arena, so forward progress feels meaningful
+    // without interrupting the merge loop every few seconds.
+    this.core.events.on('bossSpawned', (event) => {
+      if (!isRivalMilestoneStage(event.stage)) return;
+      const arenaTheme = themeForStage(event.stage);
+      this.stageBanner.announce(arenaTheme.label.toUpperCase(), `RIVAL REACHED - STAGE ${event.stage}`, 0xfff6dd);
+    });
     // An ascension restarts the run from stage 1, so it deserves the banner
     // more than the stage-1 spawn that follows it does.
     // The rank is announced ahead of the percentage on purpose: the bonus
@@ -382,7 +403,7 @@ export class GameScene extends Phaser.Scene {
     // way. Whether an ad actually plays is Poki's call -- they cap the
     // frequency, so a player who restarts twice in a minute does not pay for it.
     void (async () => {
-      await requestPlatformCommercialBreak();
+      if (shouldOfferCommercialBreak('runRestart')) await requestPlatformCommercialBreak();
       this.restarting = false;
       this.core.wipeSave();
       this.scene.restart({ restarted: true });
@@ -651,17 +672,12 @@ export class GameScene extends Phaser.Scene {
 
   /** The SDK event must follow an actual game interaction, never the first frame. */
   private startGameplayOnInteraction(): void {
-    if (this.playerStartedGameplay || this.gameplayStartPending) return;
-    this.gameplayStartPending = true;
-    void (async () => {
-      // The player just chose to begin a run. This is a legitimate commercial
-      // opportunity, and Poki decides whether an ad is due; either way, play
-      // starts only once the break callback has returned.
-      await requestPlatformCommercialBreak();
-      this.gameplayStartPending = false;
-      this.playerStartedGameplay = true;
-      this.syncGameplayReport();
-    })();
+    if (this.playerStartedGameplay) return;
+    // The first tap is the hook, not a natural break. Report play immediately;
+    // interstitial opportunities begin only after a completed run.
+    this.playerStartedGameplay = true;
+    this.retention.startStage(this.core.boss.stage);
+    this.syncGameplayReport();
   }
 
   override update(_time: number, dt: number): void {
@@ -671,6 +687,7 @@ export class GameScene extends Phaser.Scene {
     this.potion.update(dt);
     this.powerups.update(dt);
     this.tutorial.update();
+    this.syncFirstRunChrome();
     this.powerAuras.update(dt);
     this.lowHealth.setDanger(this.core.lowHealth);
     this.arena.update(dt);
@@ -687,6 +704,21 @@ export class GameScene extends Phaser.Scene {
     this.refreshAchievementsBadge();
     if (this.almanac.isOpen) this.almanac.updateProgress();
     if (this.debug.visible) this.debug.refresh();
+  }
+
+  /** Keep the first lesson focused on one verb; secondary systems arrive after it clicks. */
+  private syncFirstRunChrome(): void {
+    const visible = !this.tutorial.isActive && !this.tutorial.visible;
+    this.rivals.setVisible(visible);
+    this.trash.setVisible(visible);
+    this.almanacPlate.setVisible(visible);
+    this.almanacButton.setVisible(visible);
+    this.almanacBadge.setVisible(visible);
+    this.settingsPlate.setVisible(visible);
+    this.settingsButton.setVisible(visible);
+    this.achievementsPlate.setVisible(visible);
+    this.achievementsButton.setVisible(visible);
+    this.achievementsBadge.setVisible(visible);
   }
 
   private onBuy(): void {
