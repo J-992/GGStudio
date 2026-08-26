@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2305070c'/%3E%3Ccircle cx='4' cy='8' r='2.4' fill='%23ff8a3d'/%3E%3Ccircle cx='12' cy='8' r='2.4' fill='%2335e0ff'/%3E%3Cpath d='M6 8h4' stroke='%239ff5ff' stroke-width='1.2'/%3E%3C/svg%3E" />
+  <title>TETHER RUN</title>
+</head>
+<body>
+  <div id="app">
+    <canvas id="game-canvas"></canvas>
+    <div id="hud">
+      <div id="level-label"></div>
+      <div id="hint"></div>
+      <div id="rescue-popup">RESCUE!</div>
+      <div id="banner"><div id="banner-main"></div><div id="banner-sub"></div></div>
+    </div>
+    <div id="flash"></div>
+    <div id="pause-overlay">
+      <div class="panel">
+        <h2>PAUSED</h2>
+        <p>ESC — Resume<br/>R — Restart level<br/>M — Mute</p>
+      </div>
+    </div>
+    <div id="title-screen">
+      <h1>TETHER<span>RUN</span></h1>
+      <p class="tag">two robots · one elastic tether · every wall is a floor</p>
+      <div class="controls-grid">
+        <div class="ctl p1"><h3>P1 · IGNIS</h3><p>A / D — move<br/>W — jump</p></div>
+        <div class="ctl p2"><h3>P2 · VOLTA</h3><p>&larr; / &rarr; — move<br/>&uarr; — jump</p></div>
+      </div>
+      <p class="press">GAMEPADS SUPPORTED · PRESS ANY KEY TO START</p>
+    </div>
+    <div id="finish-screen">
+      <h1>ALL CONDUITS CLEAR</h1>
+      <p id="finish-stats"></p>
+      <p class="press">PRESS R TO RUN IT AGAIN</p>
+    </div>
+    <div id="loading">BOOTING CONDUIT&hellip;</div>
+  </div>
+    <div id="rotate-overlay"><p>ROTATE YOUR DEVICE<span>landscape plays best</span></p></div>
+    <div id="sys-buttons">
+      <div id="btn-mute" class="sys-btn">&#9834;</div>
+      <div id="btn-pause" class="sys-btn">II</div>
+    </div>
+    <div id="touch-ui">
+      <div class="tc-cluster tc-left">
+        <div class="tc-btn tc-jump" data-p="0" data-k="j">JUMP</div>
+        <div class="tc-row">
+          <div class="tc-btn tc-arrow" data-p="0" data-k="l">&#9664;</div>
+          <div class="tc-btn tc-arrow" data-p="0" data-k="r">&#9654;</div>
+        </div>
+      </div>
+      <div class="tc-cluster tc-right">
+        <div class="tc-btn tc-jump" data-p="1" data-k="j">JUMP</div>
+        <div class="tc-row">
+          <div class="tc-btn tc-arrow" data-p="1" data-k="l">&#9664;</div>
+          <div class="tc-btn tc-arrow" data-p="1" data-k="r">&#9654;</div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
