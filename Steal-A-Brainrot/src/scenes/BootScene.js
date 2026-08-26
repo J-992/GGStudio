@@ -18,7 +18,7 @@ class BootScene extends Phaser.Scene {
 
     const man = this._noManifest ? null : this.cache.json.get('artManifest');
     const jobs = this._jobsFrom(man);
-    if (jobs.length === 0) { this.scene.start('Menu'); return; }
+    if (jobs.length === 0) { this._done(); return; }
 
     // Free the placeholder keys so the images can claim them, but remember
     // them: if a file 404s we put the placeholder straight back.
@@ -30,9 +30,17 @@ class BootScene extends Phaser.Scene {
     });
     this.load.once('complete', () => {
       this._failed.forEach((key) => this._regenerate(key));
-      this.scene.start('Menu');
+      this._done();
     });
     this.load.start();
+  }
+
+  // Every exit from boot goes through here. Poki's loading window closes when
+  // the assets are in — not when some later scene happens to render, which is
+  // what it used to be tied to.
+  _done() {
+    Poki.loadingFinished();
+    this.scene.start('Menu');
   }
 
   // manifest shape: { "base": "assets/", "sprites": { "<textureKey>": "<file>" } }

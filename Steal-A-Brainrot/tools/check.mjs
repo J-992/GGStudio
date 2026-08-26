@@ -210,6 +210,9 @@ async function checkLateInit() {
   }
 
   poki.init();
+  //  init() defers sdk.init() onto the microtask queue so a synchronous throw
+  //  inside it cannot escape; let that run before pretending the SDK answered.
+  await new Promise((res) => setTimeout(res, 0));
   poki.loadingFinished();   // the boot scene does not wait for the SDK
   poki.gameplayStart();     // ...and neither does the player
   resolveInit();
@@ -231,7 +234,75 @@ async function checkLateInit() {
   if (calls.length !== before) fail('a repeated gameplayStart was forwarded to the SDK twice.');
 }
 
+/**
+ * The Inspector run that failed step 1 of SDK Basics. Two ways the wrapper
+ * could swallow gameLoadingFinished, both now covered:
+ *
+ *   throws  an SDK that rejects a call made in an order it dislikes must not
+ *           be able to throw into game code -- that killed Phaser construction
+ *           in main.js, so the game never loaded at all
+ *   rejects an init() that never succeeds must not mean the loading call is
+ *           recorded and never sent
+ */
+async function checkHostileSdk(label, sdkFactory) {
+  const calls = [];
+
+  const sandbox = {
+    setTimeout, Date, Math, JSON, Object, Promise,
+    location: { hostname: 'games.poki.com', search: '' },
+    AudioSys: { suspend() {}, resume() {} },
+    PokiSDK: sdkFactory(calls)
+  };
+  sandbox.window = sandbox;
+
+  const context = createContext(sandbox);
+  runInContext(readFileSync(join(ROOT, 'src/systems/PokiSDK.js'), 'utf8'), context, { filename: 'src/systems/PokiSDK.js' });
+
+  const poki = sandbox.Poki;
+
+  try {
+    await poki.init();
+  } catch (err) {
+    fail(`${label}: Poki.init() threw into game code (${err.message}) -- main.js would never construct Phaser.`);
+    return;
+  }
+
+  poki.loadingFinished();
+  await new Promise((res) => setTimeout(res, 0));
+
+  if (!calls.includes('gameLoadingFinished')) {
+    fail(`${label}: gameLoadingFinished never reached the SDK (sent: ${calls.join(', ') || 'nothing'}).`);
+  }
+}
+
 await checkLateInit();
+
+//  An SDK that throws on anything called before init resolves.
+await checkHostileSdk('SDK that rejects out-of-order calls', (calls) => {
+  let started = false;
+  const guard = (name) => () => {
+    if (!started && name !== 'init' && name !== 'setDebug') throw new Error('PokiSDK not initialized');
+    calls.push(name);
+  };
+  return {
+    init: () => { started = true; calls.push('init'); return Promise.resolve(); },
+    setDebug() {},
+    gameLoadingStart: guard('gameLoadingStart'),
+    gameLoadingFinished: guard('gameLoadingFinished'),
+    gameplayStart: guard('gameplayStart'),
+    gameplayStop: guard('gameplayStop')
+  };
+});
+
+//  An SDK whose init() never succeeds -- adblock, sandbox, bad network.
+await checkHostileSdk('SDK whose init rejects', (calls) => ({
+  init: () => Promise.reject(new Error('blocked')),
+  setDebug() {},
+  gameLoadingStart: () => calls.push('gameLoadingStart'),
+  gameLoadingFinished: () => calls.push('gameLoadingFinished'),
+  gameplayStart: () => calls.push('gameplayStart'),
+  gameplayStop: () => calls.push('gameplayStop')
+}));
 
 //  ------------------------------------------------------------------ done
 

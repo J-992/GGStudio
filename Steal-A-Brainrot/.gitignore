@@ -8,3 +8,6 @@ art/turntable/
 # Build output: regenerate with `npm run build:poki`.
 dist/
 node_modules/
+
+# Hand-upload archive: regenerate with `node tools/package-poki.mjs`.
+*-poki.zip

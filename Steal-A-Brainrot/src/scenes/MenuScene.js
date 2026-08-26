@@ -52,7 +52,6 @@ class MenuScene extends Phaser.Scene {
       }).setOrigin(0.5);
     }
 
-    Poki.loadingFinished();
     this._started = false;
   }
 
