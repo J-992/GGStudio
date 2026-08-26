@@ -8,11 +8,11 @@ class MenuScene extends Phaser.Scene {
     this.add.rectangle(W / 2, H / 2, W, H, 0x1a237e);
     this.add.rectangle(W / 2, H - 130, W, 260, 0x283593);
 
-    this.add.text(W / 2, 150, 'STEAL THE', {
+    this.add.text(W / 2, 150, 'BRAINROT', {
       fontFamily: 'Arial Black, Arial', fontSize: '54px', color: '#ffffff',
       stroke: '#000000', strokeThickness: 8,
     }).setOrigin(0.5);
-    const title = this.add.text(W / 2, 226, 'BRAINROT', {
+    const title = this.add.text(W / 2, 226, 'FACTORY', {
       fontFamily: 'Arial Black, Arial', fontSize: '96px', color: '#ffd54f',
       stroke: '#7b1fa2', strokeThickness: 12,
     }).setOrigin(0.5);
