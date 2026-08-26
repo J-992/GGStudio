@@ -18,6 +18,7 @@
 import { gzipSync } from 'node:zlib';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { readGame } from './config.mjs';
 
@@ -175,7 +176,11 @@ export function preflight (game, log = console.log)
 
 //  ------------------------------------------------------------------ cli
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname))
+//  fileURLToPath, not `new URL(...).pathname`: on Windows the latter yields
+//  "/C:/..." and resolve() turns that into "C:\C:\...", which never equals
+//  argv[1]. The block below then never runs and the command exits 0 having
+//  checked nothing -- the same silent pass this pipeline exists to prevent.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
 {
     const target = process.argv[2];
 

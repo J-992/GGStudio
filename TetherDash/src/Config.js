@@ -51,6 +51,18 @@ const CFG = {
   // ----- scoring -----
   BOLT_STAR_RATIO: 0.6,   // star 2: collect at least 60% of bolts
 
+  // ----- character sprites -----
+  // The rendered Meshy sheets frame a fixed world box with the feet on the
+  // bottom edge, so they carry headroom the hand-drawn fallback does not.
+  // Both anchor at the feet; only the world height of the image differs.
+  SPRITE_H_MESH: 1.39,
+  SPRITE_H_PROC: 1.18,
+  RUNNER_FRAME_W: 200,
+  RUNNER_FRAME_H: 240,
+  RUNNER_FRAMES: 8,
+  RUNNER_JUMP_FRAME: 7,   // narrowest leg spread of the cycle
+  RUNNER_FPS: 16,
+
   // colors
   SKY_TOP: 0x8ecdf4, SKY_BOT: 0xd7ecfb,
   FLOOR_A: 0xffd45c, FLOOR_B: 0xffc247, FLOOR_EDGE: 0xe09a2a, FLOOR_SIDE: 0xc77f1d,

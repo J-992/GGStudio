@@ -62,8 +62,16 @@ class GameScene extends Phaser.Scene {
     this.playerB = new PlayerController(this, this.course, 'B', 0.9);
     this.shadowA = this.add.image(0, 0, 'shadow');
     this.shadowB = this.add.image(0, 0, 'shadow');
-    this.sprA = this.add.image(0, 0, 'runnerA');
-    this.sprB = this.add.image(0, 0, 'runnerB');
+    // Sprites anchor at the feet: squash/stretch then compresses toward the
+    // floor instead of shrinking about the middle and lifting them off it.
+    this.animated = !!Save.meshRunners;
+    this.sprH = this.animated ? CFG.SPRITE_H_MESH : CFG.SPRITE_H_PROC;
+    this.sprA = this.add.sprite(0, 0, 'runnerA').setOrigin(0.5, 1);
+    this.sprB = this.add.sprite(0, 0, 'runnerB').setOrigin(0.5, 1);
+    if (this.animated) {
+      this.sprA.play('runnerA_run');
+      this.sprB.play('runnerB_run');
+    }
 
     this.tether = new TetherSystem();
     this.cam = new CameraController();
@@ -605,14 +613,29 @@ class GameScene extends Phaser.Scene {
   }
 
   placePlayer(p, spr, shadow) {
-    const pr = Projection.project(p.x, p.y + 0.58, p.z);
-    const base = 1.18 * pr.s / spr.height;
+    // Anchored at the feet, so the projection point is the player's own
+    // ground position and the image rises from there.
+    const pr = Projection.project(p.x, p.y, p.z);
+    const base = this.sprH * pr.s / spr.height;
     spr.setPosition(pr.x, pr.y);
     spr.setScale(base * (1 + p.squash * 0.7), base * (1 - p.squash));
     spr.rotation = Phaser.Math.Clamp(p.vx * 0.035, -0.3, 0.3);
     spr.setDepth(p.y < -0.6 ? 8 : 20 + Math.max(0, CFG.DRAW_DIST - pr.dz));
     spr.setAlpha(p.stun > 0 ? (Math.floor(this.t * 18) % 2 === 0 ? 0.45 : 1) : 1);
     spr.setVisible(true);
+
+    // The run cycle keeps pace with how fast this runner is actually moving,
+    // and holds one pose in the air -- a walk cycle mid-jump reads as a bug.
+    if (this.animated) {
+      if (p.grounded && p.state === 'run') {
+        if (!spr.anims.isPlaying) spr.anims.play(spr.texture.key + '_run', true);
+        spr.anims.timeScale = Phaser.Math.Clamp(
+          p.vzTotal / (CFG.RUN_SPEED * this.level.speed), 0.35, 2.2);
+      } else if (spr.anims.isPlaying) {
+        spr.anims.stop();
+        spr.setFrame(CFG.RUNNER_JUMP_FRAME);
+      }
+    }
 
     const ground = this.course.groundAt(p.x, p.z, this.t);
     if (ground && p.y > -0.3) {
