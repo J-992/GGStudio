@@ -141,4 +141,4 @@ if (entries.length > 0) {
 }
 
 console.log(`\n  Ready to upload: ${relative(ROOT, ZIP)}  (${bytes(statSync(ZIP).size)}, ${entries.length} entries)\n`);
-console.log(`  Game Title:      Steal the Brainrot\n`);
+console.log(`  Game Title:      Brainrot Factory\n`);
