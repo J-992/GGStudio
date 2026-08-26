@@ -84,7 +84,11 @@ let page = html;
 //  The CDN fallback exists so opening the folder without the vendored Phaser
 //  still works. In a Poki build it is a request to jsdelivr, which the sandbox
 //  blocks and the reviewer rejects.
-const fallback = /\n<script>\n\s*\/\/ Fallback to CDN[\s\S]*?<\/script>/;
+//  `\r?\n`, not `\n`: this repo is developed on Windows with autocrlf, so a
+//  fresh clone or worktree hands index.html over with CRLF line endings and a
+//  bare `\n` here matches nothing. The build then dies claiming the page has
+//  changed shape, on a page nobody touched.
+const fallback = /\r?\n<script>\s*\/\/ Fallback to CDN[\s\S]*?<\/script>/;
 
 if (!fallback.test(page)) die('index.html no longer contains the Phaser CDN fallback block this build expects to strip. Check the page, then update tools/build-poki.mjs.');
 
@@ -96,7 +100,7 @@ const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 page = page.replace(new RegExp(`<script src="${escape(sources[0])}"><\\/script>`), `<script src="${BUNDLE}"></script>`);
 
 for (const file of sources.slice(1)) {
-  page = page.replace(new RegExp(`\\n<script src="${escape(file)}"><\\/script>`), '');
+  page = page.replace(new RegExp(`\\r?\\n<script src="${escape(file)}"><\\/script>`), '');
 }
 
 if (page.includes('src/')) die('some src/ script tags survived the rewrite -- dist/index.html would load files that are not in the build.');
