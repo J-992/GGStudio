@@ -16,6 +16,7 @@ import { CoinFX } from '../effects/CoinFX';
 import { VFXManager } from '../effects/VFXManager';
 import { ArenaManager, type ArenaActor } from './ArenaManager';
 import { compactNumber } from '../ui/theme';
+import { CLASSIC_DOJO_STYLE, type DojoStyleDef } from '../data/dojoStyles';
 
 /**
  * Rhythm-driven choreography. GameCore owns damage; this class gives every
@@ -40,6 +41,7 @@ export class CombatDirector {
   /** A short visible history makes a rapid tap streak read as a rising combo. */
   private readonly tapComboLabels: Phaser.GameObjects.BitmapText[] = [];
   private tapComboLabelCursor = 0;
+  private style: DojoStyleDef = CLASSIC_DOJO_STYLE;
 
   constructor(private readonly scene: Phaser.Scene, private readonly arena: ArenaManager, private readonly vfx: VFXManager, private readonly fx: Fx, private readonly sfx: Sfx) {
     for (let index = 0; index < 14; index += 1) {
@@ -52,6 +54,7 @@ export class CombatDirector {
   }
 
   setForceHigh(value: boolean): void { this.forcedHigh = value; }
+  setDojoStyle(style: DojoStyleDef): void { this.style = style; }
 
   update(dt: number): void {
     this.syncBossMotion();
@@ -99,7 +102,7 @@ export class CombatDirector {
   private mergeStrikeHit(): void {
     const boss = this.arena.boss;
     if (!boss.visible) return;
-    const color = 0xffd35a;
+    const color = this.style.palette.vfx;
     this.vfx.shockwave(boss.x, boss.y, color, 2.5);
     this.vfx.sparks(boss.x, boss.y - 20, color, 10);
     this.fx.gain(boss.x, boss.y - boss.displayHeight * 0.3, 'MERGE STRIKE!');
@@ -198,7 +201,9 @@ export class CombatDirector {
     const finisher = this.tapCombo % 5 === 0;
     const x = boss.x + Phaser.Math.Between(-Math.round(boss.displayWidth * .18), Math.round(boss.displayWidth * .18));
     const y = boss.y + Phaser.Math.Between(-Math.round(boss.displayHeight * .18), Math.round(boss.displayHeight * .18));
-    const rainbow = Phaser.Display.Color.HSVToRGB((this.tapCombo * .065) % 1, .82, 1).color;
+    const rainbow = this.style.id === 'crimson-dojo'
+      ? (this.tapCombo % 2 === 0 ? this.style.palette.accentBright : this.style.palette.vfx)
+      : Phaser.Display.Color.HSVToRGB((this.tapCombo * .065) % 1, .82, 1).color;
     this.vfx.slash(x, y, rainbow, finisher ? 1.45 : 1, Phaser.Math.Between(-36, 36), finisher ? 2.2 : 1.15);
     this.vfx.impact(x, y, rainbow);
     this.vfx.sparks(x, y, rainbow, finisher ? 8 : 3);
@@ -385,9 +390,12 @@ export class CombatDirector {
     const boss = this.arena.boss;
     const hitX = boss.x - 22;
     const hitY = boss.y - 35;
-    if (special) this.ninjaSpecial(def.combat.style, hitX, hitY, def.vfx.color, intensity);
-    else this.ninjaBasic(def.combat.style, actor, hitX, hitY, def.vfx.color, intensity);
-    this.vfx.sparks(hitX + 7, hitY, def.vfx.color, special ? 7 + intensity : 2 + intensity);
+    const color = this.style.id === 'crimson-dojo'
+      ? (special ? this.style.palette.accentBright : this.style.palette.vfx)
+      : def.vfx.color;
+    if (special) this.ninjaSpecial(def.combat.style, hitX, hitY, color, intensity);
+    else this.ninjaBasic(def.combat.style, actor, hitX, hitY, color, intensity);
+    this.vfx.sparks(hitX + 7, hitY, color, special ? 7 + intensity : 2 + intensity);
   }
 
   private ninjaBasic(style: CombatStyle, actor: ArenaActor, hitX: number, hitY: number, color: number, intensity: number): void {

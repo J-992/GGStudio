@@ -9,6 +9,7 @@ import { collectionProgress } from '../systems/CollectionProgress';
 import { theme } from './theme';
 import type { GameCore } from '../core/GameCore';
 import type { Sfx } from '../audio/Sfx';
+import { CRIMSON_DOJO_PAGE, type DojoStyleDef } from '../data/dojoStyles';
 
 interface Entry {
   root: Phaser.GameObjects.Container;
@@ -81,6 +82,15 @@ export class Almanac extends Phaser.GameObjects.Container {
   private readonly pageLabel: Phaser.GameObjects.BitmapText;
   /** One shared caption below the grid: whatever was last tapped, or a hint. */
   private readonly detailText: Phaser.GameObjects.BitmapText;
+  private readonly stylesButton: Phaser.GameObjects.Rectangle;
+  private readonly stylesButtonText: Phaser.GameObjects.BitmapText;
+  private readonly stylesView: Phaser.GameObjects.Container;
+  private readonly styleStickers: Phaser.GameObjects.Image[] = [];
+  private readonly styleHeading: Phaser.GameObjects.BitmapText;
+  private readonly styleStatus: Phaser.GameObjects.BitmapText;
+  private readonly equipStyleButton: Phaser.GameObjects.Rectangle;
+  private readonly equipStyleText: Phaser.GameObjects.BitmapText;
+  private showingStyles = false;
   private open = false;
   private page = 0;
   private turning = false;
@@ -159,6 +169,38 @@ export class Almanac extends Phaser.GameObjects.Container {
       .setTint(0xb9ac9d);
     this.add(this.detailText);
 
+    this.stylesButton = sceneRef.add.rectangle(0, 0, 124, 34, 0x2b1d12, .92).setStrokeStyle(2, 0xffd35a).setInteractive();
+    this.stylesButtonText = sceneRef.add.bitmapText(0, 0, 'pixel', 'STYLES', 12).setOrigin(.5).setTint(0xffe58a);
+    this.stylesButton.on('pointerdown', () => {
+      this.sfx.play('click');
+      this.setStylesView(!this.showingStyles);
+    });
+    this.stylesButton.on('pointerup', (_p: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => event.stopPropagation());
+    this.add([this.stylesButton, this.stylesButtonText]);
+
+    this.stylesView = sceneRef.add.container(0, 0).setVisible(false);
+    const styleBacking = sceneRef.add.rectangle(0, 0, 560, 410, 0x160d12, .86).setStrokeStyle(3, 0xd9a441);
+    this.stylesView.add(styleBacking);
+    this.styleHeading = sceneRef.add.bitmapText(0, -158, 'pixel', 'CRIMSON DOJO', 14).setScale(1.8).setOrigin(.5).setTint(0xffe58a);
+    const styleCopy = sceneRef.add.bitmapText(0, 112, 'pixel', 'COLLECT THREE BOSS SEALS\nTO RESTYLE YOUR DOJO', 14).setOrigin(.5).setCenterAlign().setTint(0xffe7c1);
+    this.styleStatus = sceneRef.add.bitmapText(0, 160, 'pixel', '', 14).setOrigin(.5).setTint(0xffffff);
+    CRIMSON_DOJO_PAGE.stickers.forEach((sticker, index) => {
+      const image = sceneRef.add.image((index - 1) * 154, -28, sticker.textureKey).setDisplaySize(136, 136);
+      this.styleStickers.push(image);
+      this.stylesView.add(image);
+    });
+    this.equipStyleButton = sceneRef.add.rectangle(0, 212, 280, 54, 0xb92f38, 1).setStrokeStyle(3, 0xffc85b).setInteractive();
+    this.equipStyleText = sceneRef.add.bitmapText(0, 212, 'pixel', '', 14).setOrigin(.5).setTint(0xffffff);
+    this.equipStyleButton.on('pointerdown', () => {
+      if (!this.core.crimsonDojoProgress.complete) return;
+      const next = this.core.equippedDojoStyle.id === 'crimson-dojo' ? 'classic' : 'crimson-dojo';
+      if (this.core.equipDojoStyle(next, 'player')) this.sfx.play('click');
+      this.refreshStyleView();
+    });
+    this.equipStyleButton.on('pointerup', (_p: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => event.stopPropagation());
+    this.stylesView.add([this.styleHeading, styleCopy, this.styleStatus, this.equipStyleButton, this.equipStyleText]);
+    this.add(this.stylesView);
+
     this.applyPage();
     this.relayout();
   }
@@ -178,6 +220,7 @@ export class Almanac extends Phaser.GameObjects.Container {
     this.open = true;
     this.pressedOnShade = false;
     this.turning = false;
+    this.setStylesView(false);
     this.spread.setScale(1);
     this.crease.setAlpha(0);
     this.refresh();
@@ -234,6 +277,12 @@ export class Almanac extends Phaser.GameObjects.Container {
     return this.detailText.text;
   }
 
+  stylesAnchor(): { x: number; y: number } {
+    return { x: this.stylesButton.x, y: this.stylesButton.y };
+  }
+
+  get stylesOpen(): boolean { return this.showingStyles; }
+
   relayout(): void {
     const l = theme.layout;
     this.shade.setPosition(l.width / 2, l.height / 2).setSize(l.width, l.height);
@@ -248,6 +297,8 @@ export class Almanac extends Phaser.GameObjects.Container {
     this.titlePlate.setPosition(centerX, top + 30).setSize(l.landscape ? 300 : 340, 34);
     this.title.setPosition(centerX, top + 30);
     this.closeButton.setPosition(centerX + width / 2 - 34, top + 32);
+    this.stylesButton.setPosition(centerX - width / 2 + 76, top + 31).setSize(124, 34);
+    this.stylesButtonText.setPosition(this.stylesButton.x, this.stylesButton.y);
 
     // Footer rail: arrows out at the edges, the counter between them.
     const footerY = top + height - 40;
@@ -257,6 +308,8 @@ export class Almanac extends Phaser.GameObjects.Container {
     // Sits in the strip `detailReserve` carves out of the grid below, clear of
     // both the last grid row and the footer rail.
     this.detailText.setPosition(centerX, footerY - 44).setMaxWidth(width - 64);
+    const styleScale = Math.min(1, Math.max(.72, (width - 48) / 560), Math.max(.72, (height - 150) / 500));
+    this.stylesView.setPosition(centerX, top + height / 2).setScale(styleScale);
 
     const gridLeft = centerX - width / 2 + 26;
     const gridWidth = width - 52;
@@ -322,6 +375,17 @@ export class Almanac extends Phaser.GameObjects.Container {
     this.ninjas.forEach((entry, index) => this.paint(entry, this.core.discoveredTiers.has(index + 1)));
     this.bosses.forEach((entry, index) => this.paint(entry, this.core.seenBosses.has(index)));
     this.updateProgress();
+    this.refreshStyleView();
+  }
+
+  applyDojoStyle(style: DojoStyleDef): void {
+    const crimson = style.id === 'crimson-dojo';
+    this.panel.setTint(crimson ? style.palette.frame : 0xffffff);
+    this.titlePlate.setTint(crimson ? style.palette.plate : 0xffffff);
+    this.stylesButton.setFillStyle(style.palette.panelDark, .92).setStrokeStyle(2, style.palette.accentBright);
+    this.stylesButtonText.setTint(style.palette.accentBright);
+    this.equipStyleButton.setFillStyle(crimson ? 0x4f2528 : 0xb92f38).setStrokeStyle(3, style.palette.accentBright);
+    this.refreshStyleView();
   }
 
   /**
@@ -333,6 +397,37 @@ export class Almanac extends Phaser.GameObjects.Container {
     const bosses = collectionProgress(this.core.seenBosses.size, BOSS_COUNT);
     this.leftReadouts[0]?.setText(`${ninjas.left} LEFT`);
     this.leftReadouts[1]?.setText(`${bosses.left} LEFT`);
+    if (this.showingStyles) this.refreshStyleView();
+  }
+
+  private setStylesView(show: boolean): void {
+    this.showingStyles = show;
+    this.stylesView.setVisible(show);
+    this.spread.setVisible(!show);
+    this.crease.setVisible(!show);
+    this.previousPage.body.setVisible(!show);
+    this.previousPage.icon.setVisible(!show);
+    this.nextPage.body.setVisible(!show);
+    this.nextPage.icon.setVisible(!show);
+    this.pageLabel.setVisible(!show);
+    this.detailText.setVisible(!show);
+    this.stylesButtonText.setText(show ? 'COLLECTION' : 'STYLES');
+    if (show) this.refreshStyleView();
+  }
+
+  private refreshStyleView(): void {
+    const progress = this.core.crimsonDojoProgress;
+    CRIMSON_DOJO_PAGE.stickers.forEach((sticker, index) => {
+      const owned = this.core.collectedStickerIds.has(sticker.id);
+      this.styleStickers[index]?.setTint(owned ? 0xffffff : 0x000000).setAlpha(owned ? 1 : .42);
+    });
+    this.styleStatus.setText(progress.complete
+      ? 'SET COMPLETE - STYLE UNLOCKED'
+      : `${progress.have} / ${progress.total} SEALS - NEXT AT STAGE ${progress.next?.stage ?? 10}`);
+    const equipped = this.core.equippedDojoStyle.id === 'crimson-dojo';
+    this.equipStyleText.setText(progress.complete ? (equipped ? 'EQUIPPED - USE CLASSIC' : 'EQUIP CRIMSON DOJO') : 'LOCKED');
+    this.equipStyleButton.setAlpha(progress.complete ? 1 : .42);
+    this.styleHeading.setTint(progress.complete ? 0xffe58a : 0x9a8f84);
   }
 
   private get columns(): number {

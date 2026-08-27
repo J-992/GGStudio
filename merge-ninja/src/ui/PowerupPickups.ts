@@ -150,6 +150,7 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
       if (progress >= 1) {
         // Drifted off unpunished: it simply leaves, the next offer comes later.
         this.hide(flight);
+        this.core.notePowerupExpired(id);
         continue;
       }
       flight.bobPhase += dtMs;

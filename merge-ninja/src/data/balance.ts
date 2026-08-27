@@ -110,7 +110,197 @@ export const BALANCE = {
     maxHitShare: 0.013,
   },
   fx: { hintIdleMs: 2800, mergeDuration: 550 },
-  save: { key: 'mergeninja.save.v1', metaKey: 'mergeninja.meta.v1', version: 5, flushMs: 1000 },
+  /**
+   * The one decision the loop was missing.
+   *
+   * Three cards on every boss kill, offered without pausing the simulation:
+   * DPS keeps ticking and the next boss still spawns on `boss.defeatDelayMs`,
+   * so an offer can never become a stall. `autoPickMs` deliberately outlives
+   * that delay -- a player who ignores the cards entirely watches the fight
+   * carry on underneath them and the leftmost card resolves itself.
+   */
+  draft: {
+    cards: 3,
+    /**
+     * Cards are offered on every fifth boss, not every boss.
+     *
+     * A choice that arrives constantly stops being a choice: the row became
+     * chrome to tap through rather than a decision to make, and it kept the
+     * arena covered more often than not. Spaced out, the offer is an event the
+     * player can see coming -- and it can afford to matter more when it lands.
+     */
+    everyStages: 5,
+    autoPickMs: 4_000,
+    /** The card about to be taken pulses for this long first, so it never feels stolen. */
+    autoPickWarnMs: 500,
+    /** `purse` pays this multiple of the boss reward just earned. */
+    purseMultiplier: 1.6,
+    /** `recruit` spawns this far above the current buy tier. */
+    recruitTierBonus: 1,
+    /** `bounty` multiplies the next boss reward, but only if it dies in time. */
+    bountyWindowMs: 20_000,
+    bountyMultiplier: 3,
+    /** `mend` restores this share of the line's maximum health. */
+    mendHealRatio: 0.35,
+    /** `edge` multiplies board DPS for this long. */
+    edgeMultiplier: 1.4,
+    edgeDurationMs: 25_000,
+    /**
+     * `focus`: this many merges land a heavier strike on the boss.
+     *
+     * The safe shape carries exactly one money card, and this is why. Any coin
+     * gift raises `totalPurchases`, `economy.costGrowth` compounds on that, and
+     * the shop is permanently dearer for the rest of the run -- the drafting
+     * pacing run stalled at 24.2s on a second money card worth four purchases,
+     * and at 24.7s on one worth half a minute of income. `purse` survives
+     * because it pays a multiple of the boss reward, which grows at 1.12 per
+     * stage against a blended cost curve near 2.5 per tier, so it shrinks in
+     * real terms exactly as fast as it would otherwise distort. A guaranteed
+     * non-monetary reward gives the shape its second card without touching the
+     * economy at all.
+     */
+    focusMerges: 3,
+    focusStrikeMultiplier: 2.5,
+    /** `wager` is the steeper bet: more pay, less time. */
+    wagerWindowMs: 12_000,
+    wagerMultiplier: 5,
+    /** `barrage` takes this share off the boss on the spot. */
+    barrageHealthShare: 0.25,
+    /** `drill` promotes this many of the board's weakest fighters. */
+    drillCount: 1,
+    /**
+     * `stagger`: the boss cannot swing for this long.
+     *
+     * Bought as breathing room, not as damage. The pacing sim has rejected
+     * every free-DPS card put in front of it -- the ladder outruns the roster
+     * that has to kill it -- so the counter shape pays in time instead.
+     */
+    staggerMs: 7_000,
+    /**
+     * `hotHand`: this many of the following bosses deal cards off the cadence.
+     *
+     * Two, not three: the row is authored as an event the player sees coming
+     * every fifth boss, and a card that turns it into a stream would spend the
+     * anticipation the cadence exists to build.
+     */
+    hotHandBosses: 2,
+    /**
+     * Below this health share `mend` is drawn this many times more often.
+     *
+     * A pool that ignores the player's state produces offers that read as
+     * random; weighting the one card that answers the current problem makes
+     * the same three slots feel authored.
+     */
+    mendUrgentRatio: 0.5,
+    mendUrgentWeight: 3,
+  },
+  /**
+   * What makes stage N different from stage N-1 beyond a larger number.
+   *
+   * Each modifier is introduced alone, at its easiest setting, on a stage the
+   * player reaches with a comfortable board -- that first encounter is the
+   * entire tutorial for it. Below `restBeatUntilStage` a modified boss is
+   * always followed by a plain one, because back-to-back modifiers read as
+   * difficulty rather than variety.
+   */
+  archetypes: {
+    /** Everything below this is plain: the opening ladder teaches merging alone. */
+    shieldedFromStage: 8,
+    enragedFromStage: 14,
+    greedyFromStage: 20,
+    restBeatUntilStage: 25,
+    shield: {
+      /** charges = ceil(stage / stageDivisor), capped; the introduction is always 1. */
+      stageDivisor: 6,
+      maxCharges: 8,
+      /**
+       * How long the whole barrier takes to fall on its own, at any charge
+       * count.
+       *
+       * Tapping is the fast way through and is what the archetype teaches, but
+       * it can never be the *only* way: a player who does not tap would meet a
+       * boss they cannot pass at all, which is a wall, not a lesson. The
+       * pacing sim found exactly that -- a 566-second stall at stage 8 -- so
+       * the barrier now sheds its charges evenly across this window whatever
+       * the player does. Tapping still clears it in about a second.
+       */
+      decayMs: 9_000,
+      /** Barrier segments drawn around the boss; the charge count is read from the shape. */
+      segments: 6,
+    },
+    enrage: {
+      /** Share of maximum health regained per second while no merge has landed. */
+      regenPerSec: 0.02,
+      windowMs: 8_000,
+      /** The introduction instance gives nearly half again as long to answer. */
+      firstWindowMs: 12_000,
+    },
+    greed: {
+      windowMs: 20_000,
+      firstWindowMs: 30_000,
+      rewardMultiplier: 3,
+    },
+  },
+  /**
+   * The boss finally reaching the board.
+   *
+   * `player.maxHitShare` capped incoming damage so hard that a swing became
+   * invisible; the same swing now costs the player a slot for a few seconds
+   * instead. Pressure is paid in space and time, never in progress -- nothing
+   * here can destroy a ninja the player bought.
+   */
+  debris: {
+    startStage: 12,
+    holdMs: 12_000,
+    maxConcurrent: 2,
+    /** Debris never takes the board below this many usable empty slots. */
+    minFreeSlots: 2,
+    /** Share of swings that throw, ramped by stage to a ceiling. */
+    chanceBase: 0.25,
+    chancePerStage: 0.01,
+    chanceMax: 0.55,
+    /** Nothing is thrown for this long after an ascension, or during the tutorial. */
+    graceMs: 20_000,
+  },
+  /**
+   * Rewards the player earns instead of waits for.
+   *
+   * Powerup spawn cadence in `powerups.ts` is unchanged; these grants sit on
+   * top of it as a ceiling, so a player who never chains is never starved.
+   */
+  combo: {
+    /** A merge inside this window of the previous one extends the chain. */
+    windowMs: 3_000,
+    /** Chain length that earns a powerup outright. */
+    rewardAt: 4,
+    /** Taps inside the combat director's own streak window that earn one. */
+    tapRewardAt: 25,
+  },
+  /**
+   * Board space as a reward rather than a given.
+   *
+   * Six slots is comfortably enough to reach the first unlock, and every
+   * unlock lands inside the stage band where the funnel showed players
+   * leaving. The locked cells keep their places in the 3x4 grid: the layout
+   * never changes shape, and a visibly boarded-over slot advertises the next
+   * reward in a way a smaller board cannot.
+   */
+  slots: {
+    /**
+     * Eight, not six.
+     *
+     * Six was the plan, and the pacing sim rejected it: the opening minute
+     * stalled past the attention span in two runs out of three, because a
+     * board that small fills before the player can merge their way out of it
+     * and `canBuy` then has nowhere to put a purchase. Locking slots is meant
+     * to make space feel earned, not to make the first minute a waiting game.
+     * Eight keeps the opening exactly as it was and still leaves four unlocks
+     * to spend across the stages where the funnel says players leave.
+     */
+    initial: 8,
+    unlockStages: [10, 16, 22, 28],
+  },
+  save: { key: 'mergeninja.save.v1', metaKey: 'mergeninja.meta.v1', version: 6, flushMs: 1000 },
   offline: {
     /** A quick refresh is not an absence; anything shorter earns nothing. */
     minMs: 60_000,
@@ -149,6 +339,10 @@ export const BALANCE = {
 
 if (BALANCE.board.slots !== BALANCE.board.rows * BALANCE.board.cols) {
   throw new Error('Board slots must equal rows multiplied by columns');
+}
+
+if (BALANCE.slots.initial + BALANCE.slots.unlockStages.length !== BALANCE.board.slots) {
+  throw new Error('Starting slots plus unlocks must account for every board slot');
 }
 
 /** The sell value is exactly half of the tier's base shop price. */

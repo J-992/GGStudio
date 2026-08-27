@@ -2,7 +2,19 @@ import { ACHIEVEMENT_COUNT } from '../data/achievements';
 import type { AchievementSnapshot } from '../data/achievements';
 import { BALANCE, sellValueOf } from '../data/balance';
 import type { OfflineConfig } from '../data/balance';
+import { isArchetypeId, type ArchetypeId, type ArchetypeSpec } from '../data/bossArchetypes';
 import { bossIdentityFor } from '../data/enemies';
+import {
+  CRIMSON_DOJO_PAGE,
+  bossStickerForStage,
+  dojoStyle,
+  isDojoStyleUnlocked,
+  legacyStickerIdsForReachedStage,
+  stickerPageProgress,
+  type DojoStyleDef,
+  type DojoStyleId,
+} from '../data/dojoStyles';
+import { drawCards, isDraftCardId, type DraftCardId } from '../data/draftCards';
 import { ninjaDef } from '../data/ninjas';
 import { phaseClockAdvance, tempoFor } from '../data/pacing';
 import { coinFrenzyCoinValue, POWERUPS, POWERUP_ORDER } from '../data/powerups';
@@ -15,6 +27,8 @@ import { improveBest, normalizeBest } from '../systems/BestRun';
 import type { BestComparison, BestRun } from '../systems/BestRun';
 import { currentDayIndex, dailyBonus } from '../systems/DailyBonus';
 import { BossController } from '../systems/BossController';
+import { DebrisField } from '../systems/DebrisField';
+import { DraftSystem } from '../systems/DraftSystem';
 import { EconomySystem } from '../systems/EconomySystem';
 import { MergeSystem } from '../systems/MergeSystem';
 import { offlineReward } from '../systems/OfflineProgress';
@@ -58,6 +72,12 @@ export class GameCore {
   readonly discoveredTiers: Set<number>;
   /** Boss identities met so far. Feeds the almanac; never shrinks. */
   readonly seenBosses: Set<number>;
+  /** Authored boss seals earned by milestone victories. Lifetime, unlike a run. */
+  readonly collectedStickerIds: Set<string>;
+  /** Archetypes whose one-time introduction banner has played. Lifetime. */
+  readonly archetypeSeen: Set<ArchetypeId>;
+  /** Board lessons already shown. Lifetime: dying is no reason to re-teach. */
+  private readonly boardLessonsSeen: Set<string>;
 
   private readonly saves: SaveSystem;
   /** True when boot found an existing run save; false only on a first-ever session. */
@@ -97,19 +117,44 @@ export class GameCore {
   private collectionCelebratedFlag: boolean;
   /** First-run coach completion is lifetime state, just like the almanac. */
   private tutorialCompletedFlag: boolean;
-  /** Deadline for the guaranteed first-run pickup, armed by the first merge. */
-  private tutorialPowerupAtMs: number | null = null;
-  /** The guided pickup was caught; the final first-run lesson is a boss tap. */
-  /** The guided pickup has finished its interaction, including every rain coin. */
-  private tutorialPowerupFinished = false;
+  /** The first naturally spawned powerup has been taught and caught. */
+  private powerupCoachCompletedFlag: boolean;
+  private equippedDojoStyleId: DojoStyleId;
   private tutorialShieldActive = false;
   /** One opt-in ad revive per run: valuable, but never an infinite stall. */
   private rewardedReviveUsed = false;
+  private readonly draft: DraftSystem;
+  /** Cards taken this run, oldest first. Telemetry only; never read back. */
+  private draftPicks: DraftCardId[] = [];
+  /** The reward the pending offer was drawn against; `purse` pays a multiple of it. */
+  private pendingDraftReward = 0;
+  /** Merges landing inside `combo.windowMs` of each other. */
+  private comboCount = 0;
+  private comboWindowMs = 0;
+  /** Taps banked toward an earned powerup; the combat director owns the visuals. */
+  private tapStreak = 0;
+  private tapStreakWindowMs = 0;
+  /** `focus` card: merges left that still land the heavier strike. */
+  private focusMerges = 0;
+  /** `edge` card: a flat board-DPS multiplier that burns down in real time. */
+  private edgeRemainingMs = 0;
+  private edgeMultiplier = 1;
+  /** `stagger` card: while this is running the boss holds its swing. */
+  private staggerRemainingMs = 0;
+  /** `hotHand` card: bosses that deal a row even though the cadence says otherwise. */
+  private bonusDraftBosses = 0;
+  private readonly rng: () => number;
+  private readonly debris: DebrisField;
+  /** Board slots earned so far this run. Relocks on every reset, by design. */
+  private unlockedSlots: number = BALANCE.board.slots;
 
-  constructor(opts: { storage?: StorageLike | null; now?: () => number } = {}) {
+  constructor(opts: { storage?: StorageLike | null; now?: () => number; rng?: () => number } = {}) {
     const storage = opts.storage === undefined ? this.defaultStorage() : opts.storage;
     this.saves = new SaveSystem(storage);
     this.now = opts.now ?? ((): number => Date.now());
+    this.rng = opts.rng ?? ((): number => Math.random());
+    this.draft = new DraftSystem({ resolved: (stage, card, auto) => this.applyDraftCard(stage, card, auto) });
+    this.debris = new DebrisField({ rng: this.rng });
     const saved = this.saves.load();
     this.loadedFromSave = saved !== null;
     const meta = this.saves.loadMeta();
@@ -122,16 +167,23 @@ export class GameCore {
     // Existing players should never be dropped into a tutorial after updating.
     // A missing meta record is the one unambiguous first-ever session.
     this.tutorialCompletedFlag = meta?.tutorialCompleted ?? (meta !== null || saved !== null);
+    this.powerupCoachCompletedFlag = meta?.powerupCoachCompleted ?? (meta !== null || saved !== null);
+    const historicalReachedStage = Math.max(saved?.stage ?? 1, meta?.best?.stage ?? 1);
+    this.collectedStickerIds = new Set(
+      meta?.collectedStickerIds ?? legacyStickerIdsForReachedStage(historicalReachedStage),
+    );
+    this.archetypeSeen = new Set((meta?.archetypeSeen ?? []).filter(isArchetypeId));
+    this.boardLessonsSeen = new Set(meta?.boardLessonsSeen ?? []);
+    const requestedStyle = meta?.equippedDojoStyle ?? 'classic';
+    this.equippedDojoStyleId = isDojoStyleUnlocked(requestedStyle, this.collectedStickerIds)
+      ? requestedStyle
+      : 'classic';
     this.economy = new EconomySystem(saved?.coins);
     this.progression = new ProgressionSystem(saved?.highestTierEverOwned);
     this.metrics = saved?.metrics ?? freshMetrics();
-    // The safe runway begins with the first real purchase, not only after its merge.
-    // A reload after that merge also needs the promised pickup re-armed -- the
-    // offer itself is ephemeral, while the completed-tutorial flag is not.
+    // The safe runway begins with the first real purchase and ends when the
+    // player applies the taught merge loop to the boss.
     this.tutorialShieldActive = !this.tutorialCompletedFlag && this.metrics.purchases > 0;
-    if (this.tutorialShieldActive && this.metrics.merges > 0) {
-      this.tutorialPowerupAtMs = this.metrics.timePlayedMs + 1_000;
-    }
     // Discoveries are unioned across both slots so a player mid-upgrade keeps
     // everything: the meta slot is the new home, the run slot is where an
     // older build left them.
@@ -140,6 +192,18 @@ export class GameCore {
     this.discoveredTiers = this.restoreDiscoveredTiers(meta?.discoveredTiers, saved?.highestTierEverOwned);
     this.totalPurchases = saved?.totalPurchases ?? 0;
     this.damageCoinRemainder = saved?.damageCoinRemainder ?? 0;
+    this.draftPicks = (saved?.draftPicks ?? []).filter(isDraftCardId);
+    this.bonusDraftBosses = saved?.bonusDraftBosses ?? 0;
+    // A run in progress keeps whatever it had; only a fresh run starts small,
+    // because relocking the board is the entire point of the mechanic and
+    // taking slots off a live run would read as a bug.
+    this.unlockedSlots = saved?.unlockedSlots ?? (saved === null ? BALANCE.slots.initial : BALANCE.board.slots);
+    this.board.setUnlockedCount(this.unlockedSlots);
+    this.debris.load(saved?.debris ?? []);
+    for (const entry of this.debris.all) this.board.block(entry.slot);
+    // A brand-new player meets the boss before they meet debris: the throw is
+    // held off until the first-run coach is behind them.
+    if (!this.tutorialCompletedFlag) this.debris.startGrace(Number.MAX_SAFE_INTEGER);
     if (saved !== null) this.board.load(saved.board);
     this.boss = new BossController(saved?.stage, saved?.bossHp);
     this.playerHp = this.clampPlayerHp(saved?.playerHp ?? this.playerMaxHealth);
@@ -192,28 +256,54 @@ export class GameCore {
     }
     // Powerup durations are real-time like the boost itself, and freeze while
     // the sim is paused so a reveal modal never burns a frenzy unseen.
-    this.powerups.update(this.speedMultiplier > 0 ? real : 0);
-    let spawnedPowerup: PowerupId | null = null;
-    if (!this.tutorialCompletedFlag && this.tutorialPowerupAtMs !== null && this.metrics.timePlayedMs >= this.tutorialPowerupAtMs) {
-      // Make the guided pickup a Coin Frenzy. It is the only powerup that
-      // asks for a follow-up tap, so teaching it here ensures every new
-      // player sees and learns the coin-rain interaction right away.
-      spawnedPowerup = this.powerups.forceSpawn('coinFrenzy');
-      // A modal can temporarily close the presentation gate. Keep the promise
-      // armed until a real token enters the lane rather than losing it unseen.
-      if (spawnedPowerup !== null) this.tutorialPowerupAtMs = null;
+    // The card row and the `edge` buff burn down in real time, frozen while
+    // the sim is paused, exactly like powerups and the golden clock: a reveal
+    // modal must never eat an offer the player has not seen yet.
+    const live = this.speedMultiplier > 0 ? real : 0;
+    if (this.staggerRemainingMs > 0) {
+      this.staggerRemainingMs = Math.max(0, this.staggerRemainingMs - live);
+      if (this.staggerRemainingMs === 0) this.events.emit({ type: 'bossStaggered', msLeft: 0 });
     }
-    if (spawnedPowerup === null) spawnedPowerup = this.powerups.maybeSpawn(this.metrics.timePlayedMs);
+    if (this.edgeRemainingMs > 0) {
+      this.edgeRemainingMs = Math.max(0, this.edgeRemainingMs - live);
+      if (this.edgeRemainingMs === 0) this.edgeMultiplier = 1;
+    }
+    if (this.comboWindowMs > 0) {
+      this.comboWindowMs = Math.max(0, this.comboWindowMs - live);
+      if (this.comboWindowMs === 0 && this.comboCount > 0) {
+        this.comboCount = 0;
+        this.events.emit({ type: 'mergeComboChanged', count: 0, windowMs: 0 });
+      }
+    }
+    if (this.tapStreakWindowMs > 0) {
+      this.tapStreakWindowMs = Math.max(0, this.tapStreakWindowMs - live);
+      if (this.tapStreakWindowMs === 0) this.tapStreak = 0;
+    }
+    this.draft.update(live);
+    this.debris.update(live, (slot) => {
+      this.board.unblock(slot);
+      this.events.emit({ type: 'debrisCleared', slot, cause: 'expire' });
+      this.markDirty();
+    });
+    this.powerups.update(live);
+    const spawnedPowerup: PowerupId | null = this.powerups.maybeSpawn(this.metrics.timePlayedMs);
     if (spawnedPowerup !== null) {
       this.events.emit({ type: 'powerupSpawned', id: spawnedPowerup, travelMs: POWERUPS[spawnedPowerup].travelMs });
     }
     this.hintTimer += dt;
-    this.boss.update(dt, this.totalDps * this.powerups.dpsMultiplier, tempo, {
+    this.boss.update(dt, this.effectiveDps, tempo, {
       damaged: (damage, hp, maxHp, dps) => this.handleBossDamage(damage, hp, maxHp, dps, 'ninja'),
       defeated: (stage, reward) => this.handleBossDefeated(stage, reward),
       spawned: () => { this.emitBossSpawned(); this.markDirty(); },
       attack: (damage) => this.receiveBossAttack(damage),
-      canAttack: () => !this.powerups.bossAttacksPaused,
+      canAttack: () => !this.powerups.bossAttacksPaused && this.staggerRemainingMs <= 0,
+      enrageChanged: (enraged, regenPerSec) => {
+        this.events.emit({ type: 'bossEnraged', enraged, regenPerSec: enraged ? regenPerSec : 0 });
+      },
+      bountyExpired: () => this.events.emit({ type: 'bossBountyResolved', won: false, bonus: 0 }),
+      shieldDecayed: (charges, max) => {
+        this.events.emit({ type: 'bossShieldChanged', charges, max, broken: charges === 0 });
+      },
     });
     const pair = this.board.mergePair();
     if (this.hintTimer >= BALANCE.fx.hintIdleMs && pair !== null) {
@@ -231,6 +321,13 @@ export class GameCore {
     }
   }
 
+  /** The stage now being fought. */
+  get currentStage(): number { return this.boss.stage; }
+  /** The modifier the current boss carries, for the arena and the HUD. */
+  get bossArchetype(): ArchetypeSpec { return this.boss.archetype; }
+  get bossShieldCharges(): number { return this.boss.shieldCharges; }
+  get bossBountyMsLeft(): number { return this.boss.bountyMsLeft; }
+  get bossEnraged(): boolean { return this.boss.enraged; }
   get buyCost(): number { return this.economy.cost(this.totalPurchases, this.buyTier); }
   get tempo() { return tempoFor(this.metrics.timePlayedMs); }
   get buyTier(): number { return this.progression.buyTier(this.tempo.buyTierOffset); }
@@ -239,6 +336,31 @@ export class GameCore {
   /** Compatibility seam for the current arena; foreground logic should use highestTier. */
   get championTier(): number { return this.highestTier; }
   get totalDps(): number { return this.board.slots.reduce((sum, ninja) => sum + (ninja ? ninjaDef(ninja.tier).dps : 0), 0); }
+  /**
+   * Board DPS after every temporary multiplier.
+   *
+   * `totalDps` stays the raw roster sum because the HUD, the almanac and the
+   * merge-spike tests all want the honest board value; everything that
+   * actually deals damage goes through here instead, so a buff can never be
+   * applied twice or forgotten in one of the three strike paths.
+   */
+  get effectiveDps(): number { return this.totalDps * this.powerups.dpsMultiplier * this.edgeMultiplier; }
+  /** Remaining `edge` buff, for the HUD chip. */
+  /** Merges still carrying the `focus` bonus, for the HUD. */
+  get focusMergesLeft(): number { return this.focusMerges; }
+  get draftEdge(): { active: boolean; remainingMs: number; multiplier: number } {
+    return { active: this.edgeRemainingMs > 0, remainingMs: this.edgeRemainingMs, multiplier: this.edgeMultiplier };
+  }
+
+  /** How long the boss still has to hold its swing, in ms. Zero when it may hit. */
+  get staggerMsLeft(): number {
+    return this.staggerRemainingMs;
+  }
+  get pendingDraft(): { stage: number; cards: readonly DraftCardId[]; msLeft: number; warning: boolean } | null {
+    const offer = this.draft.pending;
+    return offer === null ? null : { ...offer, msLeft: this.draft.msLeft, warning: this.draft.warning };
+  }
+  get bountyMsRemaining(): number { return this.draft.bountyMsRemaining; }
   /**
    * The live earn rate in coins per second: the exact rate damage coins accrue
    * during play. Offline crediting pays a reduced share of this.
@@ -285,15 +407,29 @@ export class GameCore {
    */
   tapBoss(): number {
     if (this.over || this.speedMultiplier <= 0 || this.totalDps <= 0) return 0;
-    const effectiveDps = this.totalDps * this.powerups.dpsMultiplier;
+    // A barrier eats the tap instead of the boss. The player still spent an
+    // action and still sees a segment shatter, so the tap is never wasted.
+    if (this.boss.shielded) {
+      this.boss.breakShield();
+      this.notePlayerAction();
+      this.events.emit({
+        type: 'bossShieldChanged',
+        charges: this.boss.shieldCharges,
+        max: this.boss.archetype.shieldCharges,
+        broken: this.boss.shieldCharges === 0,
+      });
+      this.markDirty();
+      return 0;
+    }
     const damage = Math.max(1, Math.round(this.boss.boss.maxHealth * BALANCE.boss.playerTapHealthShare));
-    const dealt = this.boss.damage(damage, effectiveDps, {
+    const dealt = this.boss.damage(damage, this.effectiveDps, {
       damaged: (hit, hp, maxHp, dps) => this.handleBossDamage(hit, hp, maxHp, dps, 'tap'),
       defeated: (stage, reward) => this.handleBossDefeated(stage, reward),
     });
     if (dealt > 0) {
+      this.advanceTapStreak();
       this.notePlayerAction();
-      if (this.tutorialShieldActive && this.tutorialPowerupFinished && this.metrics.merges > 0) this.completeTutorial();
+      if (this.tutorialShieldActive && this.metrics.merges > 0) this.completeTutorial();
     }
     return dealt;
   }
@@ -368,17 +504,118 @@ export class GameCore {
       return 'swapped';
     }
     this.metrics.merges += 1; this.metrics.highestTier = Math.max(this.metrics.highestTier, merged.result.tier);
-    if (!this.tutorialCompletedFlag && this.tutorialPowerupAtMs === null) {
-      this.tutorialShieldActive = true;
-      this.tutorialPowerupAtMs = this.metrics.timePlayedMs + 5_000;
-    }
+    if (!this.tutorialCompletedFlag) this.tutorialShieldActive = true;
     const discovered = this.discoverTier(merged.result.tier);
     this.events.emit({ type: 'ninjaMerged', fromSlot, toSlot: target.slot, consumedIds: merged.consumedIds, result: merged.result });
     if (discovered) this.events.emit({ type: 'newTierDiscovered', tier: merged.result.tier, name: ninjaDef(merged.result.tier).name });
     this.syncChampion();
+    this.clearDebrisNear(target.slot);
+    this.advanceMergeCombo();
     this.strikeBossFromMerge();
     this.markDirty(); return 'merged';
   }
+
+  get mergeCombo(): { count: number; windowMs: number; target: number } {
+    return { count: this.comboCount, windowMs: this.comboWindowMs, target: BALANCE.combo.rewardAt };
+  }
+
+  /**
+   * Extends the merge chain, and pays out when it is long enough.
+   *
+   * The chain is the only reward in the game the player earns purely by
+   * playing well rather than by waiting: the timed spawns in `powerups.ts` are
+   * untouched and remain the floor, so nobody who never chains is starved.
+   * A merge that clears debris counts like any other, so the two systems
+   * compound in the player's favour instead of competing.
+   */
+  private advanceMergeCombo(): void {
+    this.comboCount += 1;
+    this.comboWindowMs = BALANCE.combo.windowMs;
+    if (this.comboCount >= BALANCE.combo.rewardAt) {
+      this.comboCount = 0;
+      this.comboWindowMs = 0;
+      this.events.emit({ type: 'mergeComboChanged', count: 0, windowMs: 0 });
+      this.grantEarnedPowerup('merge', BALANCE.combo.rewardAt);
+      return;
+    }
+    this.events.emit({ type: 'mergeComboChanged', count: this.comboCount, windowMs: this.comboWindowMs });
+  }
+
+  /**
+   * Banks a tap toward the streak the combat director already counts.
+   *
+   * That counter has been drawing an escalating label trail since it shipped
+   * and paying nothing at all; this is the payout it was always drawn for.
+   */
+  private advanceTapStreak(): void {
+    this.tapStreak += 1;
+    this.tapStreakWindowMs = BALANCE.combo.windowMs;
+    if (this.tapStreak < BALANCE.combo.tapRewardAt) return;
+    this.tapStreak = 0;
+    this.tapStreakWindowMs = 0;
+    this.grantEarnedPowerup('tap', BALANCE.combo.tapRewardAt);
+  }
+
+  /**
+   * Hands over a powerup the player earned outright.
+   *
+   * Routed through the same `activate` path a caught token uses, so an earned
+   * grant obeys the definition's own stack policy and per-powerup cap rather
+   * than becoming a second way to hold five frenzies at once.
+   *
+   * The pool is deliberately combat only. Coin Frenzy is authored as a rare
+   * surprise with its own eligibility window and handing it out on a chain
+   * would quietly make it ordinary -- but Lucky Charm is excluded for a
+   * harder reason: the pacing sim stalled the ten-minute run at 20.6s once
+   * chains started paying it out. Doubling coins accelerates purchase-count
+   * inflation (`costGrowth` compounds per purchase), the shop outruns income
+   * a few minutes later, and the player is left staring at a board they
+   * cannot act on. Skill pays in power here; money stays on its own curve.
+   */
+  private grantEarnedPowerup(source: 'merge' | 'tap', count: number): void {
+    // A merge chain pays in safety, not in damage. The chain already hands the
+    // player a stronger board and a merge strike; adding a DPS multiplier on
+    // top raced the stage ladder ahead of the roster that has to kill it, and
+    // the twenty-minute run stalled at 27s waiting for a boss it had outrun.
+    // A tap streak still pays a frenzy -- twenty-five taps is rare enough that
+    // it never compounds, and damage is the thing tapping is about.
+    const eligible: PowerupId[] = source === 'tap'
+      ? ['shurikenFrenzy', 'smokeBomb', 'protectiveWard']
+      : ['smokeBomb', 'protectiveWard'];
+    const preferred = eligible[Math.floor(this.rng() * eligible.length)];
+    const order = [preferred ?? eligible[0]!, ...eligible];
+    for (const id of order) {
+      if (!this.powerups.activate(id)) continue;
+      this.events.emit({ type: 'powerupCollected', id });
+      this.events.emit({ type: 'mergeComboRewarded', id, count, source });
+      this.markDirty();
+      return;
+    }
+  }
+
+  /** A merge shatters any debris orthogonally beside where it landed. */
+  private clearDebrisNear(slot: number): number {
+    return this.debris.clearNear(this.board.neighbours(slot), (cleared) => {
+      this.board.unblock(cleared);
+      this.events.emit({ type: 'debrisCleared', slot: cleared, cause: 'merge' });
+    });
+  }
+
+  /** Slots the player has not earned yet, for the board renderer. */
+  get lockedSlots(): readonly number[] { return this.board.lockedSlots; }
+  get unlockedSlotCount(): number { return this.unlockedSlots; }
+  /** The slot the next unlock will open, or null once the board is whole. */
+  get nextUnlockSlot(): number | null {
+    return this.unlockedSlots >= BALANCE.board.slots ? null : this.unlockedSlots;
+  }
+  /** The stage that opens the next slot, or null once the board is whole. */
+  get nextUnlockStage(): number | null {
+    const index = this.unlockedSlots - BALANCE.slots.initial;
+    return BALANCE.slots.unlockStages[index] ?? null;
+  }
+
+  /** Slots a boss swing is currently holding, for the board renderer. */
+  get debrisSlots(): ReadonlyArray<{ slot: number; msLeft: number }> { return this.debris.all; }
 
   /** Temporary speed-up granted by the golden clock pickup. */
   startTimeBoost(multiplier: number, durationMs: number): void {
@@ -440,6 +677,8 @@ export class GameCore {
     this.revealedTiers.clear();
     this.discoveredTiers.clear();
     this.seenBosses.clear();
+    this.collectedStickerIds.clear();
+    this.equippedDojoStyleId = 'classic';
     this.wipeSave();
     this.saves.clearAll();
   }
@@ -474,9 +713,19 @@ export class GameCore {
     this.board.clear(); this.economy.coins = BALANCE.economy.startCoins; this.totalPurchases = 0;
     this.progression.highestTierEverOwned = 1; Object.assign(this.metrics, freshMetrics()); this.damageCoinRemainder = 0;
     this.powerups.clear();
+    // Session luck does not survive a reset, and neither does a bet: carrying
+    // a bounty or a live `edge` into a fresh stage-1 board would pay it out
+    // against the easiest boss in the game.
+    this.draft.reset(); this.draftPicks = []; this.pendingDraftReward = 0;
+    this.comboCount = 0; this.comboWindowMs = 0; this.tapStreak = 0; this.tapStreakWindowMs = 0;
+    // A fresh stage-1 board starts clean, and stays clean long enough for the
+    // player to rebuild a line before the arena starts taking slots again.
+    for (const entry of this.debris.all) this.board.unblock(entry.slot);
+    this.debris.clear(); this.debris.startGrace();
+    this.unlockedSlots = BALANCE.slots.initial; this.board.setUnlockedCount(this.unlockedSlots);
+    this.bonusDraftBosses = 0; this.staggerRemainingMs = 0;
+    this.edgeRemainingMs = 0; this.edgeMultiplier = 1; this.focusMerges = 0; this.staggerRemainingMs = 0;
     this.coinFrenzyRemaining = 0; this.coinFrenzyValue = 0;
-    this.tutorialPowerupAtMs = null;
-    this.tutorialPowerupFinished = false;
     this.tutorialShieldActive = false;
     this.playerHp = this.playerMaxHealth; this.activeTempoId = this.tempo.id; this.over = false; this.rewardedReviveUsed = false;
     this.events.emit({ type: 'playerHealthChanged', hp: this.playerHp, maxHp: this.playerMaxHealth, delta: 0, reason: 'reset' });
@@ -507,7 +756,7 @@ export class GameCore {
   wipeSave(): void { this.dirty = false; this.saveTimer = 0; this.wiped = true; this.saves.clear(); }
   save(): void {
     if (this.wiped) return;
-    this.saves.save({ version: BALANCE.save.version, coins: this.economy.coins, board: this.board.slots.map((ninja) => ninja === null ? null : { id: ninja.id, tier: ninja.tier }), stage: this.boss.stage, bossHp: this.boss.hp, damageCoinRemainder: this.damageCoinRemainder, totalPurchases: this.totalPurchases, highestTierEverOwned: this.progression.highestTierEverOwned, playerHp: this.playerHp, revealedTiers: [...this.revealedTiers], seenBosses: [...this.seenBosses], lastSavedAt: Math.floor(this.now()), metrics: this.metrics });
+    this.saves.save({ version: BALANCE.save.version, coins: this.economy.coins, board: this.board.slots.map((ninja) => ninja === null ? null : { id: ninja.id, tier: ninja.tier }), stage: this.boss.stage, bossHp: this.boss.hp, damageCoinRemainder: this.damageCoinRemainder, draftPicks: [...this.draftPicks], debris: this.debris.serialize(), unlockedSlots: this.unlockedSlots, bonusDraftBosses: this.bonusDraftBosses, totalPurchases: this.totalPurchases, highestTierEverOwned: this.progression.highestTierEverOwned, playerHp: this.playerHp, revealedTiers: [...this.revealedTiers], seenBosses: [...this.seenBosses], lastSavedAt: Math.floor(this.now()), metrics: this.metrics });
     this.dirty = false; this.saveTimer = 0;
   }
   notePlayerAction(): void { this.hintTimer = 0; }
@@ -517,16 +766,10 @@ export class GameCore {
     if (applied) {
       const def = POWERUPS[id];
       if (def.effect === 'coinRain') {
-        const guided = this.tutorialShieldActive && this.metrics.merges > 0 && !this.tutorialCompletedFlag;
-        this.coinFrenzyRemaining = guided ? def.tutorialCoinCount : def.coinCount;
+        this.coinFrenzyRemaining = def.coinCount;
         this.coinFrenzyValue = coinFrenzyCoinValue(this.boss.stage);
       }
       this.events.emit({ type: 'powerupCollected', id });
-      // A one-tap effect is finished immediately. Coin Frenzy remains the
-      // player's active lesson until its last coin is caught or missed.
-      if (this.tutorialShieldActive && this.metrics.merges > 0) {
-        this.tutorialPowerupFinished = def.effect !== 'coinRain';
-      }
     }
     return applied;
   }
@@ -549,14 +792,21 @@ export class GameCore {
   private finishCoinFrenzyIfEmpty(): void {
     if (this.coinFrenzyRemaining !== 0) return;
     this.coinFrenzyValue = 0;
-    if (this.tutorialShieldActive && this.metrics.merges > 0) this.tutorialPowerupFinished = true;
     this.events.emit({ type: 'coinFrenzyFinished' });
   }
   private syncChampion(): void { const current = this.highestTier; if (current !== this.activeChampion) { const prevTier = this.activeChampion; this.activeChampion = current; this.events.emit({ type: 'championChanged', tier: current, prevTier }); } }
   private strikeBossFromMerge(): number {
-    const effectiveDps = this.totalDps * this.powerups.dpsMultiplier;
-    const damage = Math.max(1, Math.round(this.boss.boss.maxHealth * BALANCE.progression.mergeStrikeHealthShare));
-    return this.boss.damage(damage, effectiveDps, {
+    // Any merge answers an enraged boss, whether or not it can reach past a
+    // barrier -- the archetype asks for the verb, not for the damage.
+    this.boss.noteMerge();
+    if (this.boss.shielded) return 0;
+    let share = BALANCE.progression.mergeStrikeHealthShare;
+    if (this.focusMerges > 0) {
+      this.focusMerges -= 1;
+      share *= BALANCE.draft.focusStrikeMultiplier;
+    }
+    const damage = Math.max(1, Math.round(this.boss.boss.maxHealth * share));
+    return this.boss.damage(damage, this.effectiveDps, {
       damaged: (hit, hp, maxHp, dps) => this.handleBossDamage(hit, hp, maxHp, dps, 'merge'),
       defeated: (stage, reward) => this.handleBossDefeated(stage, reward),
     });
@@ -568,11 +818,310 @@ export class GameCore {
   }
   private handleBossDefeated(stage: number, reward: number): void {
     this.metrics.bossDefeats += 1;
-    const pacedReward = Math.max(1, Math.round(reward * this.tempo.rewardMultiplier * this.incomeMultiplier * this.powerups.coinMultiplier));
+    const bounty = this.draft.consumeBounty();
+    const bountyMultiplier = bounty === 'wager' ? BALANCE.draft.wagerMultiplier
+      : bounty === 'bounty' ? BALANCE.draft.bountyMultiplier
+      : 1;
+    // A greedy boss pays its own multiple only if its window is still open;
+    // the card's bounty stacks on top, because the player bet on this kill.
+    const greed = this.boss.archetype.rewardMultiplier > 1 && this.boss.bountyMsLeft > 0
+      ? this.boss.archetype.rewardMultiplier
+      : 1;
+    const multiplier = this.tempo.rewardMultiplier * this.incomeMultiplier * this.powerups.coinMultiplier
+      * bountyMultiplier * greed;
+    const pacedReward = Math.max(1, Math.round(reward * multiplier));
     this.changeCoins(pacedReward);
     this.restorePlayerHealth(Math.ceil(this.playerMaxHealth * BALANCE.player.bossVictoryHealRatio), 'victory');
     this.events.emit({ type: 'bossDefeated', stage, reward: pacedReward });
+    if (bounty !== null || greed > 1) {
+      const stacked = bountyMultiplier * greed;
+      this.events.emit({ type: 'bossBountyResolved', won: true, bonus: pacedReward - Math.round(pacedReward / stacked) });
+    }
+    this.collectBossSticker(stage);
+    this.unlockSlotsFor(stage);
+    this.offerDraft(stage, pacedReward);
     this.markDirty();
+  }
+
+  /**
+   * Puts three cards up for the kill that just happened.
+   *
+   * Suppressed for the whole of the first-run coach: the opening minutes are
+   * already teaching buy, merge and tap, and the funnel showed the tutorial
+   * chain is where players leave. The draft introduces itself later, on a
+   * board the player already understands.
+   */
+  private offerDraft(stage: number, reward: number): void {
+    if (this.tutorialShieldActive || !this.tutorialCompletedFlag) return;
+    // Every fifth boss, not every boss. A choice that arrives constantly is
+    // chrome to tap through; spaced out it is an event the player sees coming.
+    // `hotHand` spends its charges here: the cadence still owns every fifth
+    // boss, and the card buys the ones in between.
+    const offCadence = stage % BALANCE.draft.everyStages !== 0;
+    if (offCadence && this.bonusDraftBosses <= 0) return;
+    if (offCadence) this.bonusDraftBosses -= 1;
+    const cards = drawCards(
+      {
+        boardHasFreeSlot: this.board.firstEmpty() !== null,
+        boardHasFighter: this.board.slots.some((ninja) => ninja !== null),
+        healthRatio: this.healthRatio,
+        boardHasDebris: this.debris.all.length > 0,
+        boardHasLockedSlot: this.unlockedSlots < BALANCE.board.slots,
+        bossHasTrick: this.boss.archetype.id !== 'bare',
+      },
+      this.rng,
+    );
+    if (cards.length === 0) return;
+    this.pendingDraftReward = reward;
+    this.draft.present(stage, cards);
+    this.events.emit({ type: 'draftOffered', stage, cards });
+  }
+
+  /**
+   * Promotes the board's weakest fighters one tier each.
+   *
+   * Deliberately the weakest rather than the strongest: promoting the top of
+   * the board skips the ladder, while promoting the bottom hands the player a
+   * merge they can see and hardly moves total DPS. Nothing is destroyed -- the
+   * fighter keeps its slot and comes back one rank up.
+   */
+  private promoteWeakest(count: number): number {
+    let promoted = 0;
+    for (let step = 0; step < count; step += 1) {
+      let best: { slot: number; tier: number } | null = null;
+      this.board.slots.forEach((ninja, slot) => {
+        if (ninja === null || ninja.tier >= BALANCE.tiers.count) return;
+        if (best === null || ninja.tier < best.tier) best = { slot, tier: ninja.tier };
+      });
+      if (best === null) break;
+      const target = best as { slot: number; tier: number };
+      this.board.remove(target.slot);
+      const grown = this.board.spawn(target.tier + 1, target.slot);
+      if (grown === null) break;
+      promoted += 1;
+      this.discoverTier(grown.tier);
+      this.metrics.highestTier = Math.max(this.metrics.highestTier, grown.tier);
+      this.events.emit({ type: 'ninjaSpawned', ninja: grown, cost: 0 });
+    }
+    if (promoted > 0) { this.syncChampion(); this.markDirty(); }
+    return promoted;
+  }
+
+  /**
+   * Takes every blocked slot back at once.
+   *
+   * Debris clears itself on a timer anyway, so this card is not buying the
+   * space -- it is buying the space *now*, in the minute the player is short
+   * of it. Each slot is reported as a normal clear so the board animates it
+   * the way it animates a merge clearing one.
+   */
+  private sweepDebris(): number {
+    const blocked = this.debris.all.map((entry) => entry.slot);
+    for (const slot of blocked) {
+      this.debris.remove(slot);
+      this.board.unblock(slot);
+      this.events.emit({ type: 'debrisCleared', slot, cause: 'merge' });
+    }
+    if (blocked.length > 0) this.markDirty();
+    return blocked.length;
+  }
+
+  /**
+   * Pulls the next laddered slot unlock forward to now.
+   *
+   * Deliberately not an *extra* slot. Board space is the throttle the economy
+   * is balanced against: every added slot raises the purchase count, and
+   * `economy.costGrowth` compounds on that, so a run handed spare slots pays
+   * for them minutes later in a shop it can no longer afford -- the twenty
+   * minute pacing sim stalled at 20.8s against a 20.1s bound on exactly that.
+   * Taking the slot early is worth plenty on its own: it arrives in the minute
+   * the board is tight rather than at the stage the ladder chose.
+   */
+  private pullForwardSlotUnlock(): boolean {
+    if (this.unlockedSlots >= BALANCE.board.slots) return false;
+    const slot = this.unlockedSlots;
+    this.unlockedSlots += 1;
+    this.board.setUnlockedCount(this.unlockedSlots);
+    this.events.emit({ type: 'slotUnlocked', slot, unlockedTotal: this.unlockedSlots });
+    this.markDirty();
+    return true;
+  }
+
+  /**
+   * Copies the board's best fighter into a free slot.
+   *
+   * The merge-shaped reward: it does not hand over a tier the player has not
+   * reached, it hands over the *second half of a pair*, which is one drag away
+   * from being a promotion they earned. Capped below the top tier for the same
+   * reason `drill` is -- there is nothing above it to merge into.
+   */
+  private echoStrongest(): number | null {
+    let best: number | null = null;
+    for (const ninja of this.board.slots) {
+      if (ninja === null || ninja.tier >= BALANCE.tiers.count) continue;
+      if (best === null || ninja.tier > best) best = ninja.tier;
+    }
+    if (best === null) return null;
+    const spawned = this.spawnTier(best);
+    return spawned === null ? null : best;
+  }
+
+  /** Immediate damage on the boss in front of the player, through the usual path. */
+  private barrageBoss(): number {
+    const damage = Math.max(1, Math.round(this.boss.boss.maxHealth * BALANCE.draft.barrageHealthShare));
+    if (this.boss.shielded) return 0;
+    return this.boss.damage(damage, this.effectiveDps, {
+      damaged: (hit, hp, maxHp, dps) => this.handleBossDamage(hit, hp, maxHp, dps, 'merge'),
+      defeated: (stage, reward) => this.handleBossDefeated(stage, reward),
+    });
+  }
+
+  /** Takes the card the player tapped. Returns false for a card not on offer. */
+  pickDraftCard(card: DraftCardId): boolean { return this.draft.pick(card); }
+
+  private applyDraftCard(stage: number, card: DraftCardId, auto: boolean): void {
+    const reward = this.pendingDraftReward;
+    this.pendingDraftReward = 0;
+    switch (card) {
+      case 'purse':
+        this.changeCoins(Math.max(1, Math.round(reward * BALANCE.draft.purseMultiplier)));
+        break;
+      case 'focus':
+        this.focusMerges = BALANCE.draft.focusMerges;
+        break;
+      case 'recruit':
+        this.spawnTier(Math.min(BALANCE.tiers.count, this.buyTier + BALANCE.draft.recruitTierBonus));
+        break;
+      case 'drill':
+        this.promoteWeakest(BALANCE.draft.drillCount);
+        break;
+      case 'bounty':
+        this.draft.armBounty('bounty');
+        break;
+      case 'wager':
+        this.draft.armBounty('wager');
+        break;
+      case 'mend':
+        this.restorePlayerHealth(Math.ceil(this.playerMaxHealth * BALANCE.draft.mendHealRatio), 'draft');
+        break;
+      case 'ward':
+        if (this.powerups.activate('protectiveWard')) this.events.emit({ type: 'powerupCollected', id: 'protectiveWard' });
+        break;
+      case 'edge':
+        this.edgeMultiplier = BALANCE.draft.edgeMultiplier;
+        this.edgeRemainingMs = BALANCE.draft.edgeDurationMs;
+        break;
+      case 'barrage':
+        this.barrageBoss();
+        break;
+      case 'sweep':
+        this.sweepDebris();
+        break;
+      case 'openMat':
+        this.pullForwardSlotUnlock();
+        break;
+      case 'echo':
+        this.echoStrongest();
+        break;
+      case 'disarm':
+        if (this.boss.disarm()) {
+          this.events.emit({ type: 'bossShieldChanged', charges: 0, max: 0, broken: true });
+          this.events.emit({ type: 'bossEnraged', enraged: false, regenPerSec: 0 });
+          this.events.emit({ type: 'bossDisarmed', stage: this.boss.stage });
+        }
+        break;
+      case 'stagger':
+        this.staggerRemainingMs = BALANCE.draft.staggerMs;
+        this.events.emit({ type: 'bossStaggered', msLeft: this.staggerRemainingMs });
+        break;
+      case 'hotHand':
+        this.bonusDraftBosses += BALANCE.draft.hotHandBosses;
+        break;
+    }
+    this.draftPicks.push(card);
+    this.events.emit({ type: 'draftPicked', stage, card, auto });
+    this.markDirty();
+  }
+
+  /**
+   * Announces the modifier the new boss carries.
+   *
+   * The banner fires once per archetype per player, ever -- it is the only
+   * teaching these mechanics get, and repeating it every eighth stage would
+   * turn a lesson into chrome.
+   */
+  private emitArchetype(): void {
+    const spec = this.boss.archetype;
+    if (spec.id === 'bare') return;
+    const firstSeen = !this.archetypeSeen.has(spec.id);
+    if (firstSeen) {
+      this.archetypeSeen.add(spec.id);
+      this.saveMeta();
+    }
+    this.events.emit({ type: 'bossArchetype', stage: this.boss.stage, archetype: spec.id, firstSeen });
+    if (spec.shieldCharges > 0) {
+      this.events.emit({ type: 'bossShieldChanged', charges: spec.shieldCharges, max: spec.shieldCharges, broken: false });
+    }
+  }
+
+  /**
+   * A swing that could not meaningfully hurt the line takes a slot instead.
+   *
+   * Held off entirely while the first-run coach is running, and refused
+   * whenever it would leave the board too tight to act on -- `DebrisField`
+   * owns both rules so no caller can forget one.
+   */
+  private maybeThrowDebris(): void {
+    // An enraged boss already asks for a merge on a clock. Taking a slot at
+    // the same time, before the player has the board to absorb it, is the
+    // arithmetic death the maxHitShare comment warns about -- so below the
+    // rest-beat line the two never stack.
+    if (this.boss.archetype.regenPerSec > 0 && this.boss.stage < BALANCE.archetypes.restBeatUntilStage) return;
+    const slot = this.debris.maybeThrow(this.boss.stage, this.board.freeSlots);
+    if (slot === null) return;
+    this.board.block(slot);
+    this.events.emit({ type: 'debrisLanded', slot, msLeft: BALANCE.debris.holdMs });
+    this.markDirty();
+  }
+
+  /**
+   * Opens every slot the player has now earned.
+   *
+   * Driven off the stage rather than a counter so a skipped or replayed stage
+   * cannot desynchronise the board from the ladder, and so a save restored
+   * mid-run lands on exactly the slots its stage says it should have.
+   */
+  private unlockSlotsFor(stage: number): void {
+    const earned = BALANCE.slots.unlockStages.filter((at) => stage >= at).length;
+    const target = Math.min(BALANCE.board.slots, BALANCE.slots.initial + earned);
+    while (this.unlockedSlots < target) {
+      const slot = this.unlockedSlots;
+      this.unlockedSlots += 1;
+      this.board.setUnlockedCount(this.unlockedSlots);
+      this.events.emit({ type: 'slotUnlocked', slot, unlockedTotal: this.unlockedSlots });
+    }
+  }
+
+  private collectBossSticker(stage: number): void {
+    const sticker = bossStickerForStage(stage);
+    if (sticker === null || this.collectedStickerIds.has(sticker.id)) return;
+    this.collectedStickerIds.add(sticker.id);
+    const progress = stickerPageProgress(CRIMSON_DOJO_PAGE, this.collectedStickerIds);
+    this.saveMeta();
+    this.events.emit({
+      type: 'bossStickerCollected',
+      id: sticker.id,
+      pageId: sticker.pageId,
+      stage: sticker.stage,
+      slot: sticker.slot,
+      progress: progress.have,
+      total: progress.total,
+      textureKey: sticker.textureKey,
+      pageComplete: progress.complete,
+    });
+    if (!progress.complete) return;
+    this.events.emit({ type: 'dojoStyleUnlocked', id: CRIMSON_DOJO_PAGE.rewardStyleId });
+    this.equipDojoStyle(CRIMSON_DOJO_PAGE.rewardStyleId, 'unlock');
   }
   private addDamageCoins(damage: number): void {
     this.damageCoinRemainder += damage * BALANCE.boss.coinsPerDamage * this.tempo.rewardMultiplier
@@ -630,7 +1179,33 @@ export class GameCore {
       discoveredTiers: [...this.discoveredTiers],
       collectionCelebrated: this.collectionCelebratedFlag,
       tutorialCompleted: this.tutorialCompletedFlag,
+      powerupCoachCompleted: this.powerupCoachCompletedFlag,
+      collectedStickerIds: [...this.collectedStickerIds],
+      archetypeSeen: [...this.archetypeSeen],
+      boardLessonsSeen: [...this.boardLessonsSeen],
+      equippedDojoStyle: this.equippedDojoStyleId,
     });
+  }
+
+  get equippedDojoStyle(): DojoStyleDef {
+    return dojoStyle(this.equippedDojoStyleId);
+  }
+
+  get crimsonDojoProgress(): ReturnType<typeof stickerPageProgress> {
+    return stickerPageProgress(CRIMSON_DOJO_PAGE, this.collectedStickerIds);
+  }
+
+  isDojoStyleUnlocked(id: DojoStyleId): boolean {
+    return isDojoStyleUnlocked(id, this.collectedStickerIds);
+  }
+
+  equipDojoStyle(id: DojoStyleId, source: 'unlock' | 'player' = 'player'): boolean {
+    if (!isDojoStyleUnlocked(id, this.collectedStickerIds)) return false;
+    if (this.equippedDojoStyleId === id) return true;
+    this.equippedDojoStyleId = id;
+    this.saveMeta();
+    this.events.emit({ type: 'dojoStyleEquipped', id, source });
+    return true;
   }
 
   /** Whether the one-time full-roster fanfare has already fired, ever. */
@@ -645,18 +1220,45 @@ export class GameCore {
     this.saveMeta();
   }
 
-  /** The scene calls this after the player catches their first powerup. */
+  /** The scene calls this after the player applies the opening lesson to the boss. */
   get tutorialCompleted(): boolean {
     return this.tutorialCompletedFlag;
+  }
+
+  get powerupCoachCompleted(): boolean {
+    return this.powerupCoachCompletedFlag;
+  }
+
+  boardLessonSeen(id: string): boolean { return this.boardLessonsSeen.has(id); }
+
+  /** Marks a board lesson taught, for good. */
+  completeBoardLesson(id: string): void {
+    if (this.boardLessonsSeen.has(id)) return;
+    this.boardLessonsSeen.add(id);
+    this.saveMeta();
   }
 
   completeTutorial(): void {
     if (this.tutorialCompletedFlag) return;
     this.tutorialCompletedFlag = true;
     this.tutorialShieldActive = false;
-    this.tutorialPowerupAtMs = null;
+    // The indefinite hold set at boot becomes an ordinary grace: the lesson is
+    // over, but the very next swing should still not take a slot.
+    this.debris.clear();
+    this.debris.startGrace();
     this.saveMeta();
     this.events.emit({ type: 'tutorialCompleted' });
+  }
+
+  completePowerupCoach(id: PowerupId): void {
+    if (this.powerupCoachCompletedFlag) return;
+    this.powerupCoachCompletedFlag = true;
+    this.saveMeta();
+    this.events.emit({ type: 'powerupCoachCompleted', id });
+  }
+
+  notePowerupExpired(id: PowerupId): void {
+    this.events.emit({ type: 'powerupExpired', id });
   }
 
   /** Everything the award ladder is allowed to see, gathered in one place. */
@@ -727,6 +1329,30 @@ export class GameCore {
    * the ascension persistence contract has to hold across a loss too.
    */
   endRunForTest(): void { this.endRun(); }
+  /** Cards taken this run, oldest first. Telemetry and verification only. */
+  get draftPicksThisRun(): readonly DraftCardId[] { return this.draftPicks; }
+
+  /** Test seam: puts a chosen row on offer, so verification can press a named card. */
+  offerDraftForTest(cards: readonly DraftCardId[]): void {
+    if (cards.length === 0) return;
+    this.pendingDraftReward = 0;
+    this.draft.present(this.boss.stage, cards);
+    this.events.emit({ type: 'draftOffered', stage: this.boss.stage, cards: [...cards] });
+  }
+
+  /**
+   * Test seam: takes one card's effect without waiting for the pool to offer
+   * that card. The draw is tested separately in `draft.test.ts`; this is for
+   * asserting what a card actually does to the run.
+   */
+  takeDraftCardForTest(card: DraftCardId): void { this.applyDraftCard(this.boss.stage, card, false); }
+  /** Kills the current boss outright, so a test can walk the ladder honestly. */
+  defeatBossForTest(): void {
+    this.boss.damage(this.boss.hp, Math.max(1, this.effectiveDps), {
+      damaged: (hit, hp, maxHp, dps) => this.handleBossDamage(hit, hp, maxHp, dps, 'tap'),
+      defeated: (stage, reward) => this.handleBossDefeated(stage, reward),
+    });
+  }
   private emitBossSpawned(): void {
     const boss = this.boss.boss;
     const identity = bossIdentityFor(boss.stage);
@@ -737,6 +1363,7 @@ export class GameCore {
       this.saveMeta();
     }
     this.events.emit({ type: 'bossSpawned', stage: boss.stage, name: boss.name, maxHp: boss.maxHealth });
+    this.emitArchetype();
   }
   private discoverTier(tier: number): boolean {
     const oldMax = this.playerMaxHealth;
@@ -779,6 +1406,7 @@ export class GameCore {
       else this.markDirty();
     }
     this.events.emit({ type: 'bossAttack', damage, playerHp: this.playerHp, playerMaxHp: this.playerMaxHealth, defeated });
+    if (!defeated && !this.over) this.maybeThrowDebris();
   }
 
   /**
@@ -808,7 +1436,7 @@ export class GameCore {
       best: comparison.best,
     });
   }
-  private restorePlayerHealth(amount: number, reason: 'victory' | 'rankUp'): void {
+  private restorePlayerHealth(amount: number, reason: 'victory' | 'rankUp' | 'draft'): void {
     const before = this.playerHp;
     this.playerHp = this.clampPlayerHp(before + Math.max(0, amount));
     const delta = this.playerHp - before;

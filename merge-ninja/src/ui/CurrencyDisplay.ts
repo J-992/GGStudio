@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { ATLAS_KEY } from '../render/atlasConfig';
 import { VFX_ANIMATIONS } from '../data/vfxAssets';
 import { compactNumber, theme } from './theme';
+import { CLASSIC_DOJO_STYLE, type DojoStyleDef } from '../data/dojoStyles';
 
 /** Crisper wallet coin: the 22px atlas frame drawn at x2.5 inside the plate. */
 const ICON_SCALE = 2.5;
@@ -60,6 +61,7 @@ export class CurrencyDisplay extends Phaser.GameObjects.Container {
   private shown = 0; private lastBurstAt = -Infinity; private lastTickAt = -Infinity;
   private pendingHuge = false;
   private hopDirection = 1;
+  private style: DojoStyleDef = CLASSIC_DOJO_STYLE;
   constructor(scene: Phaser.Scene) {
     super(scene, theme.layout.coin.x, theme.layout.coin.y); scene.add.existing(this).setDepth(8);
     CurrencyDisplay.instances.set(scene, this);
@@ -129,6 +131,12 @@ export class CurrencyDisplay extends Phaser.GameObjects.Container {
     this.icon.setPosition(0, 0).setAngle(0).setScale(ICON_SCALE);
   }
   relayout(): void { this.setPosition(theme.layout.coin.x, theme.layout.coin.y); }
+  applyDojoStyle(style: DojoStyleDef): void {
+    this.style = style;
+    this.glow.setFillStyle(style.palette.accentBright);
+    this.sparkles.forEach((sparkle) => sparkle.setTint(style.palette.accentBright));
+    this.resizePlate(this.text.text);
+  }
   /**
    * Hop and settle without touching scale. Repeated rewards alternate their
    * tilt, so the motion stays lively while the enlarged icon remains crisp and
@@ -177,8 +185,8 @@ export class CurrencyDisplay extends Phaser.GameObjects.Container {
     const left = -ICON_HALF - PAD_X;
     const h = ICON_HALF * 2 + PAD_Y * 2;
     this.plate.clear();
-    this.plate.fillStyle(theme.colors.shadow, .92).fillRoundedRect(left, -h / 2, right - left, h, PLATE_RADIUS);
-    this.plate.lineStyle(3, theme.colors.matBorder, 1).strokeRoundedRect(left, -h / 2, right - left, h, PLATE_RADIUS);
+    this.plate.fillStyle(this.style.palette.panelDark, .92).fillRoundedRect(left, -h / 2, right - left, h, PLATE_RADIUS);
+    this.plate.lineStyle(3, this.style.id === 'crimson-dojo' ? this.style.palette.accentBright : theme.colors.matBorder, 1).strokeRoundedRect(left, -h / 2, right - left, h, PLATE_RADIUS);
   }
   /** Measures via a synchronous swap -- render never sees the borrowed label. */
   private measure(label: string): number {

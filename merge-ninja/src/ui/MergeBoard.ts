@@ -5,9 +5,11 @@ import type { GameEvent } from '../core/EventBus';
 import { playVfx, vfxSource } from '../effects/vfxPlayback';
 import { NinjaSprite } from './NinjaSprite';
 import { TrashSlot, TRASH_PICKUP_RADIUS } from './TrashSlot';
+import { SlotOverlays } from './SlotOverlays';
 import { theme } from './theme';
 import type { Fx } from '../effects/Fx';
 import type { Sfx } from '../audio/Sfx';
+import { CLASSIC_DOJO_STYLE, type DojoStyleDef } from '../data/dojoStyles';
 
 /**
  * Purchase-smoke beats. The whole sequence lands inside 450ms so rapid tapping
@@ -70,6 +72,10 @@ export class MergeBoard extends Phaser.GameObjects.Container {
    */
   private readonly dragHint: Phaser.GameObjects.Container;
   private dragHintTween: Phaser.Tweens.Tween | null = null;
+  private style: DojoStyleDef = CLASSIC_DOJO_STYLE;
+  private readonly overlays: SlotOverlays;
+  /** Chevrons above the title plate showing how far the merge chain has run. */
+  private readonly chainMeter: Phaser.GameObjects.Graphics;
 
   constructor(
     private readonly sceneRef: Phaser.Scene,
@@ -116,6 +122,10 @@ export class MergeBoard extends Phaser.GameObjects.Container {
       sceneRef.add.circle(0, 0, 13, 0xfff6dd).setStrokeStyle(3, 0x3a2a12),
     ]).setVisible(false).setDepth(9);
     this.add(this.dragHint);
+    this.overlays = new SlotOverlays(sceneRef, core, (slot) => this.slotPos(slot), fx, sfx);
+    this.chainMeter = sceneRef.add.graphics().setDepth(7.5);
+    this.add(this.chainMeter);
+    core.events.on('mergeComboRewarded', () => this.playChainPayout());
     this.relayout();
     core.events.onAny((event) => this.handle(event));
   }
@@ -153,6 +163,18 @@ export class MergeBoard extends Phaser.GameObjects.Container {
       sprite.setRosterScale(theme.layout.slots.spriteScale);
       if (sprite !== this.dragged) sprite.setPosition(p.x, p.y);
     }
+  }
+
+  applyDojoStyle(style: DojoStyleDef): void {
+    this.style = style;
+    const crimson = style.id === 'crimson-dojo';
+    this.deck.setTint(crimson ? style.palette.board : 0xffffff);
+    this.boardFrame.setTint(crimson ? style.palette.frame : 0xffffff);
+    this.titlePlate.setTint(crimson ? style.palette.plate : 0xffffff);
+    this.title.setTint(crimson ? 0xfff1c2 : 0xffffff);
+    this.pads.forEach((pad) => pad.setTint(crimson ? style.palette.slot : 0xffffff));
+    this.sprites.forEach((sprite) => sprite.applyDojoStyle(style));
+    this.overlays.applyDojoStyle(style);
   }
 
   /**
@@ -399,8 +421,82 @@ export class MergeBoard extends Phaser.GameObjects.Container {
     this.boardFingerprint = this.fingerprint();
   }
 
-  refreshExternalState(): void {
+  refreshExternalState(dtMs = 0): void {
     if (this.fingerprint() !== this.boardFingerprint) this.syncFromCore();
+    this.overlays.update(dtMs);
+    this.refreshTitle();
+    this.drawChainMeter();
+  }
+
+  /**
+   * Four chevrons that fill with the chain and drain as its window closes.
+   *
+   * The drain is the point: a meter that only counted up would tell the player
+   * they have a chain but not that it is about to end, and the whole skill the
+   * chain asks for is lining the next pair up before the current one lands.
+   */
+  private drawChainMeter(): void {
+    const { count, windowMs, target } = this.core.mergeCombo;
+    const g = this.chainMeter.clear();
+    if (count <= 0) return;
+
+    const b = theme.layout.board;
+    const p = this.style.palette;
+    const width = 15;
+    const gap = 7;
+    const span = target * width + (target - 1) * gap;
+    const left = b.x + b.w / 2 - span / 2;
+    const y = b.y + 58;
+    // The last part of the window drains the whole row, so the closing gap is
+    // visible without adding a second widget to read.
+    const fade = windowMs < 600 ? Math.max(0.15, windowMs / 600) : 1;
+
+    for (let i = 0; i < target; i += 1) {
+      const lit = i < count;
+      const x = left + i * (width + gap);
+      g.lineStyle(4, lit ? p.accentBright : p.panelDark, lit ? fade : 0.5);
+      g.beginPath();
+      g.moveTo(x, y + 5);
+      g.lineTo(x + width / 2, y - 5);
+      g.lineTo(x + width, y + 5);
+      g.strokePath();
+    }
+  }
+
+  /** The chevrons converge into the board centre and hand over the powerup. */
+  private playChainPayout(): void {
+    const b = theme.layout.board;
+    const x = b.x + b.w / 2;
+    const y = b.y + 58;
+    this.fx.mergeFlash(x, y);
+    this.fx.shake(0.004, 90);
+    this.sfx.play('newTier');
+    const ring = this.sceneRef.add
+      .image(x, y, 'game', 'fx_ring')
+      .setDepth(9.5)
+      .setTint(this.style.palette.vfx)
+      .setScale(0.2);
+    this.sceneRef.tweens.add({
+      targets: ring,
+      scale: 1.5,
+      alpha: 0,
+      duration: 400,
+      ease: 'Quad.easeOut',
+      onComplete: () => ring.destroy(),
+    });
+  }
+
+  /**
+   * The board's own title advertises the next reward.
+   *
+   * The unlock ladder is the only thing on screen that tells a player a
+   * concrete good thing is a known number of stages away, so it is worth the
+   * one line it costs -- and it costs nothing once the board is whole.
+   */
+  private refreshTitle(): void {
+    const stage = this.core.nextUnlockStage;
+    const wanted = stage === null ? 'YOUR NINJAS' : `NEXT SLOT - STAGE ${stage}`;
+    if (this.title.text !== wanted) this.title.setText(wanted);
   }
 
   /** Apply streamed portrait strips to roster units already on the board. */
@@ -530,12 +626,28 @@ export class MergeBoard extends Phaser.GameObjects.Container {
     this.sceneRef.time.delayedCall(155, () => this.fx.mergeFlash(target.x, target.y), undefined, this);
     this.sceneRef.time.delayedCall(245, () => {
       this.fx.merge(target.x, target.y, event.result.tier);
+      if (this.style.id === 'crimson-dojo') this.embers(target.x, target.y - 30, 9);
       this.sfx.play('merge', event.result.tier);
       const result = this.make(event.result.id, event.result.tier, event.toSlot, true);
       result.setScale(1.5);
       this.sceneRef.tweens.add({ targets: result, scale: 1, duration: 360, ease: 'Back.easeOut' });
       if (event.result.tier >= 5) this.fx.shake(event.result.tier >= 8 ? 0.011 : 0.006, 130);
+      this.escalateForChain(target.x, target.y);
     });
+  }
+
+  /**
+   * Layers extra spectacle onto a merge as the chain grows.
+   *
+   * Deliberately additive: the authored merge animation is untouched, and each
+   * chain step only adds one thing on top of it. A chain that rewrote the
+   * merge would make the core verb feel different depending on state, which is
+   * exactly the confusion the escalation is meant to avoid.
+   */
+  private escalateForChain(x: number, y: number): void {
+    const { count } = this.core.mergeCombo;
+    if (count >= 2) this.fx.mergeFlash(x, y);
+    if (count >= 3) this.fx.shake(0.003, 70);
   }
 
   /**
@@ -628,7 +740,9 @@ export class MergeBoard extends Phaser.GameObjects.Container {
     for (let i = 0; i < count; i += 1) {
       const angle = (Math.PI * 2 * i) / count + Math.random() * 0.8;
       const distance = 30 + Math.random() * 24;
-      const tint = EMBER_TINTS[i % EMBER_TINTS.length] ?? 0xffd23f;
+      const crimsonTints = [this.style.palette.vfx, this.style.palette.accentBright, 0xffffff] as const;
+      const palette = this.style.id === 'crimson-dojo' ? crimsonTints : EMBER_TINTS;
+      const tint = palette[i % palette.length] ?? 0xffd23f;
       const source = vfxSource(this.sceneRef, 'merge');
       const ember = this.sceneRef.add
         .sprite(x, y, source.texture, source.frame)
@@ -702,6 +816,7 @@ export class MergeBoard extends Phaser.GameObjects.Container {
 
     const p = this.slotPos(slot);
     const sprite = new NinjaSprite(this.sceneRef, id, tier, p.x, p.y);
+    sprite.applyDojoStyle(this.style);
     sprite.setDepth(3).setVisible(visible).setMask(this.contentMask);
     sprite.setRosterScale(theme.layout.slots.spriteScale);
     this.sprites.set(id, sprite);

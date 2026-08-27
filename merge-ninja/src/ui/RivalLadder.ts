@@ -28,12 +28,16 @@ export class RivalLadder extends Phaser.GameObjects.Container {
     const trackBack = sceneRef.add.rectangle(-34, 17, TRACK_WIDTH, 14, 0x0c1118, 1).setStrokeStyle(2, 0x526172, 1);
     this.trackFill = sceneRef.add.rectangle(-135, 17, 1, 10, 0x66e6a8, 1).setOrigin(0, 0.5);
     this.playerDot = sceneRef.add.circle(-135, 17, 8, 0xfff1bd, 1).setStrokeStyle(2, 0x1b2430, 1);
-    this.title = sceneRef.add.bitmapText(-148, -43, 'pixel', 'NEXT RIVAL', 18).setOrigin(0, 0.5).setTint(0xffe58a);
-    this.rivalName = sceneRef.add.bitmapText(-148, -15, 'pixel', '', 22).setOrigin(0, 0.5).setTint(0xffffff);
-    this.stageText = sceneRef.add.bitmapText(78, -32, 'pixel', '', 17).setOrigin(1, 0.5).setTint(0x9df5cf);
+    // The stage rides the name's row, not the title's. "NEXT RIVAL" is ten
+    // glyphs of an all-caps bitmap font and eats almost the whole text column,
+    // so anything sharing that line printed straight through it. Rival names
+    // are three or four letters, which leaves the right-hand end free.
+    this.title = sceneRef.add.bitmapText(-148, -44, 'pixel', 'NEXT RIVAL', 16).setOrigin(0, 0.5).setTint(0xffe58a);
+    this.rivalName = sceneRef.add.bitmapText(-148, -14, 'pixel', '', 22).setOrigin(0, 0.5).setTint(0xffffff);
+    this.stageText = sceneRef.add.bitmapText(68, -12, 'pixel', '', 15).setOrigin(1, 0.5).setTint(0x9df5cf);
     this.distance = sceneRef.add.bitmapText(-34, 44, 'pixel', '', 16).setOrigin(0.5).setTint(0xbfdcff);
     this.avatar = sceneRef.add.image(126, -3, ATLAS_KEY, 'ninja_t1').setDisplaySize(70, 70);
-    this.beat = sceneRef.add.bitmapText(0, -43, 'pixel', '', 20).setOrigin(0.5).setTint(0xfff1bd).setVisible(false);
+    this.beat = sceneRef.add.bitmapText(0, -44, 'pixel', '', 20).setOrigin(0.5).setTint(0xfff1bd).setVisible(false);
     this.add([
       backing,
       avatarPlate,
@@ -87,6 +91,7 @@ export class RivalLadder extends Phaser.GameObjects.Container {
 
     if (!beaten) return;
     this.title.setVisible(false);
+    this.stageText.setVisible(false);
     this.beat.setText(`YOU PASSED ${beatenRival.name}!`).setAlpha(0).setVisible(true);
     this.sceneRef.tweens.add({
       targets: this.beat,
@@ -104,6 +109,7 @@ export class RivalLadder extends Phaser.GameObjects.Container {
         onComplete: () => {
           this.beat.setVisible(false);
           this.title.setVisible(true);
+          this.stageText.setVisible(true);
         },
       });
     });

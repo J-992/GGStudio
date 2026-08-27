@@ -8,6 +8,7 @@ import { ACHIEVEMENTS_ICON_KEY, ACHIEVEMENTS_ICON_PATH, REVEAL_ASSETS } from '..
 import { VFX_ANIMATION_ORDER, VFX_ANIMATIONS } from '../data/vfxAssets';
 import { stopPlatformLoading } from '../platform/platform';
 import { finishSplash, setSplashProgress } from '../splash';
+import { BOSS_STICKERS } from '../data/dojoStyles';
 
 export class BootScene extends Phaser.Scene {
   constructor() { super('BootScene'); }
@@ -49,6 +50,7 @@ export class BootScene extends Phaser.Scene {
       });
     }
     this.load.image('tutorial_hand', 'assets/tutorial-hand.webp');
+    for (const sticker of BOSS_STICKERS) this.load.image(sticker.textureKey, sticker.texturePath);
     for (const asset of Object.values(REVEAL_ASSETS)) this.load.image(asset.key, asset.path);
     // The atlas carries no trophy, and the achievements rail button must not
     // reuse the ascension star: two unrelated systems reading as one control.

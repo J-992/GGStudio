@@ -91,3 +91,17 @@ export function ninjaFlavorText(tier: number): string {
 export function bossFlavorText(appearanceIndex: number): string {
   return BOSS_FLAVOR[Math.floor(appearanceIndex)] ?? '';
 }
+
+/**
+ * The one line each boss modifier gets, the first time a player ever meets it.
+ *
+ * Written as an instruction, not a description: this banner is the only
+ * teaching these mechanics get, and "SHIELDED" alone says what the boss is
+ * without saying what to do about it. Kept to a handful of words because it
+ * plays over a live fight and nothing pauses for it.
+ */
+export const ARCHETYPE_LESSON: Readonly<Record<string, string>> = {
+  shielded: 'TAP THE BOSS TO BREAK THE GUARD',
+  enraged: 'KEEP MERGING OR IT HEALS',
+  greedy: 'BEAT THE CLOCK FOR TRIPLE COINS',
+};

@@ -3,6 +3,7 @@ import type { GameCore } from '../core/GameCore';
 import type { GameEvent } from '../core/EventBus';
 import { ATLAS_KEY } from '../render/atlasConfig';
 import { compactNumber, theme } from './theme';
+import type { DojoStyleDef } from '../data/dojoStyles';
 
 /** Compact, measured HUD. Each label owns a separate row and backing plate. */
 export class BossHud extends Phaser.GameObjects.Container {
@@ -58,6 +59,15 @@ export class BossHud extends Phaser.GameObjects.Container {
     this.shownHp += (this.targetHp - this.shownHp) * .18;
     this.fill.setSize(Math.max(1, (this.barWidth - 8) * Math.max(0, this.shownHp / this.maxHp)), 14);
     this.label.setText(`${compactNumber(this.shownHp)} / ${compactNumber(this.maxHp)}`);
+  }
+
+  applyDojoStyle(style: DojoStyleDef): void {
+    const crimson = style.id === 'crimson-dojo';
+    this.namePlate.setTint(crimson ? style.palette.plate : 0xffffff);
+    this.stagePlate.setTint(crimson ? style.palette.panel : 0x6d91b8);
+    this.barBack.setTint(crimson ? style.palette.frame : 0xffffff);
+    this.fill.setTint(crimson ? style.palette.vfx : 0xc94e4a);
+    this.stage.setTint(crimson ? style.palette.accentBright : 0xffe58a);
   }
 
   private handle(event: GameEvent, core: GameCore): void {

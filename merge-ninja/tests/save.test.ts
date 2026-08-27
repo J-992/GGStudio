@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BALANCE } from '../src/data/balance';
 import { GameCore } from '../src/core/GameCore';
+import { SaveSystem } from '../src/systems/SaveSystem';
 import type { StorageLike } from '../src/data/types';
 
 class FakeStorage implements StorageLike {
@@ -30,6 +31,24 @@ class ThrowingStorage implements StorageLike {
 
   removeItem(): void {}
 }
+
+
+/** A minimal, valid run slot at a given save version. */
+const legacyRun = (version: number): Record<string, unknown> => ({
+  version,
+  coins: 120,
+  board: [{ id: 1, tier: 4 }, null],
+  stage: 6,
+  bossHp: 40,
+  damageCoinRemainder: 0,
+  totalPurchases: 3,
+  highestTierEverOwned: 4,
+  playerHp: 150,
+  metrics: {
+        timePlayedMs: 0, purchases: 3, merges: 2, sells: 0,
+        highestTier: 4, bossDefeats: 1, boardFullCount: 0, coinsEarned: 0,
+      },
+});
 
 describe('save system', () => {
   it('round trips coins, board, stage, boss HP, purchases, and highest tier', () => {
@@ -134,6 +153,11 @@ describe('save system', () => {
     first.completeTutorial();
     const returning = new GameCore({ storage, now: () => 0 });
     expect(returning.tutorialCompleted).toBe(true);
+    expect(returning.powerupCoachCompleted).toBe(false);
+
+    returning.completePowerupCoach('shurikenFrenzy');
+    const coached = new GameCore({ storage, now: () => 0 });
+    expect(coached.powerupCoachCompleted).toBe(true);
   });
 
   it('migrates a legacy 50-tier save into the curated 29-tier roster', () => {
@@ -170,4 +194,80 @@ describe('save system', () => {
     restored.save();
     expect(JSON.parse(storage.getItem(BALANCE.save.key) ?? '{}').version).toBe(BALANCE.save.version);
   });
+
+  it('grants a pre-version-6 save the whole board rather than confiscating slots', () => {
+    const storage = new FakeStorage();
+    storage.setItem(BALANCE.save.key, JSON.stringify(legacyRun(5)));
+
+    const restored = new SaveSystem(storage).load();
+    expect(restored?.version).toBe(BALANCE.save.version);
+    expect(restored?.unlockedSlots).toBe(BALANCE.board.slots);
+    expect(restored?.debris).toEqual([]);
+    expect(restored?.draftPicks).toEqual([]);
+  });
+
+  it('grants the whole board to a version-6 save written before slot locking shipped', () => {
+    const storage = new FakeStorage();
+    storage.setItem(BALANCE.save.key, JSON.stringify(legacyRun(BALANCE.save.version)));
+
+    expect(new SaveSystem(storage).load()?.unlockedSlots).toBe(BALANCE.board.slots);
+  });
+
+  it('holds earned slots inside the board, never below the starting grant', () => {
+    const storage = new FakeStorage();
+    const load = (unlockedSlots: unknown): number | undefined => {
+      storage.setItem(BALANCE.save.key, JSON.stringify({ ...legacyRun(BALANCE.save.version), unlockedSlots }));
+      return new SaveSystem(storage).load()?.unlockedSlots;
+    };
+
+    expect(load(0)).toBe(BALANCE.slots.initial);
+    expect(load(BALANCE.board.slots + 5)).toBe(BALANCE.board.slots);
+    expect(load(BALANCE.slots.initial + 1.8)).toBe(BALANCE.slots.initial + 1);
+  });
+
+  it('drops debris that points nowhere, repeats a slot, or has no time left', () => {
+    const storage = new FakeStorage();
+    storage.setItem(
+      BALANCE.save.key,
+      JSON.stringify({
+        ...legacyRun(BALANCE.save.version),
+        debris: [
+          { slot: 3, msLeft: 4_000 },
+          { slot: 3, msLeft: 9_000 },
+          { slot: -1, msLeft: 5_000 },
+          { slot: BALANCE.board.slots, msLeft: 5_000 },
+          { slot: 5, msLeft: 0 },
+          { slot: 6, msLeft: BALANCE.debris.holdMs * 4 },
+        ],
+      }),
+    );
+
+    const debris = new SaveSystem(storage).load()?.debris ?? [];
+    expect(debris).toEqual([
+      { slot: 3, msLeft: 4_000 },
+      { slot: 6, msLeft: BALANCE.debris.holdMs },
+    ]);
+  });
+
+  it('never restores more debris than the board is allowed to carry at once', () => {
+    const storage = new FakeStorage();
+    storage.setItem(
+      BALANCE.save.key,
+      JSON.stringify({
+        ...legacyRun(BALANCE.save.version),
+        debris: Array.from({ length: BALANCE.board.slots }, (_, slot) => ({ slot, msLeft: 1_000 })),
+      }),
+    );
+
+    expect(new SaveSystem(storage).load()?.debris).toHaveLength(BALANCE.debris.maxConcurrent);
+  });
+
+  it('keeps taught boss archetypes in meta progression, dropping unknown ids', () => {
+    const storage = new FakeStorage();
+    const saves = new SaveSystem(storage);
+    saves.saveMeta({ ascensions: 0, archetypeSeen: ['shielded', 'enraged', 'shielded', 'nonsense'] });
+
+    expect(saves.loadMeta()?.archetypeSeen).toEqual(['shielded', 'enraged']);
+  });
 });
+

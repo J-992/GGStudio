@@ -56,7 +56,14 @@ describe('damage progression', () => {
       game.spawnTier(ninja.tier);
       const expectedTick = ninja.dps * (TICK / 1000);
       let guard = 0;
-      while (game.boss.boss.maxHealth < expectedTick * 4 && guard < 400) {
+      // Advance to a boss that is both big enough to absorb a whole tick and
+      // carrying no modifier: this asserts the raw DPS accounting contract,
+      // and a barrier or a regeneration tick is a different contract with its
+      // own tests in bossArchetypes.test.ts.
+      while (
+        (game.boss.boss.maxHealth < expectedTick * 4 || game.boss.archetype.id !== 'bare') &&
+        guard < 400
+      ) {
         game.skipEnemy();
         guard += 1;
       }

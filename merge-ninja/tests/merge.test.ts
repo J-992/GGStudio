@@ -173,12 +173,16 @@ describe('merge board', () => {
 
   it('can free a full one-of-each-tier board through the trash', () => {
     const game = newGame();
-    for (let tier = 1; tier <= BALANCE.board.slots; tier += 1) game.spawnTier(tier);
+    // A fresh run only owns its starting slots, so "full" means every slot the
+    // player has actually earned -- which is the board that can deadlock.
+    const usable = game.board.freeSlots.length;
+    for (let tier = 1; tier <= usable; tier += 1) game.spawnTier(tier);
+    const last = usable - 1;
 
     expect(game.board.firstEmpty()).toBeNull();
-    expect(game.drop(7, { kind: 'trash' })).toBe('sold');
-    expect(game.board.firstEmpty()).toBe(7);
-    expect(game.board.at(7)).toBeNull();
+    expect(game.drop(last, { kind: 'trash' })).toBe('sold');
+    expect(game.board.firstEmpty()).toBe(last);
+    expect(game.board.at(last)).toBeNull();
   });
 
   it('persists a swap once the dirty board flushes to the save slot', () => {

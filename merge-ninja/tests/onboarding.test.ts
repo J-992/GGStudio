@@ -32,13 +32,11 @@ describe('first-run onboarding', () => {
     expect(system.maybeSpawn(85_000)).toBe('shurikenFrenzy');
   });
 
-  it('keeps the opening safe, offers a powerup after the first merge, then restores danger', () => {
+  it('keeps the opening safe through the boss tap without forcing an early powerup', () => {
     const game = new GameCore({ storage: null, now: () => 0 });
     const offers: Extract<GameEvent, { type: 'powerupSpawned' }>[] = [];
-    let frenzyFinished = 0;
     let tutorialFinished = 0;
     game.events.on('powerupSpawned', (event) => offers.push(event));
-    game.events.on('coinFrenzyFinished', () => { frenzyFinished += 1; });
     game.events.on('tutorialCompleted', () => { tutorialFinished += 1; });
 
     game.grantCoins(100);
@@ -48,20 +46,10 @@ describe('first-run onboarding', () => {
 
     expect(game.buy()).not.toBeNull();
     expect(game.drop(0, { kind: 'slot', slot: 1 })).toBe('merged');
-    game.update(4_999);
+    game.update(30_000);
     expect(offers).toHaveLength(0);
     expect(game.playerHealth).toBe(game.playerMaxHealth);
 
-    game.update(1);
-    expect(offers).toHaveLength(1);
-    expect(offers[0]!.id).toBe('coinFrenzy');
-    expect(game.collectPowerup(offers[0]!.id)).toBe(true);
-    expect(game.coinFrenzyState.remaining).toBe(8);
-    expect(game.tutorialCompleted).toBe(false);
-    expect(game.tapBoss()).toBeGreaterThan(0);
-    expect(game.tutorialCompleted).toBe(false);
-    while (game.coinFrenzyState.remaining > 0) game.missCoinFrenzyCoin();
-    expect(frenzyFinished).toBe(1);
     expect(game.tapBoss()).toBeGreaterThan(0);
     expect(game.tutorialCompleted).toBe(true);
     expect(tutorialFinished).toBe(1);
@@ -72,7 +60,7 @@ describe('first-run onboarding', () => {
     expect(game.playerHealth).toBeLessThan(game.playerMaxHealth);
   });
 
-  it('re-arms the guided powerup and shield after a reload mid-tutorial', () => {
+  it('restores the shield and boss-tap lesson after a reload mid-tutorial', () => {
     const storage = new FakeStorage();
     const first = new GameCore({ storage, now: () => 0 });
     firstMerge(first);
@@ -84,8 +72,10 @@ describe('first-run onboarding', () => {
     const healthBeforeOffer = restored.playerHealth;
     restored.update(1_000);
 
-    expect(offers).toHaveLength(1);
-    expect(offers[0]!.id).toBe('coinFrenzy');
+    expect(offers).toHaveLength(0);
     expect(restored.playerHealth).toBe(healthBeforeOffer);
+    expect(restored.tutorialCompleted).toBe(false);
+    expect(restored.tapBoss()).toBeGreaterThan(0);
+    expect(restored.tutorialCompleted).toBe(true);
   });
 });

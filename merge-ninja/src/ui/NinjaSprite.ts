@@ -3,6 +3,7 @@ import { ninjaDef } from '../data/ninjas';
 import { FINAL_NINJA_TIER, ninjaBoardAnchorY, ninjaIdleFrameAt, ninjaScale } from '../data/presentation';
 import { FLAME_SHOGUN_TIER, ninjaCatalogPortrait } from '../render/atlasConfig';
 import { portraitTexture } from '../render/portraitTexture';
+import type { DojoStyleDef } from '../data/dojoStyles';
 
 /**
  * Where the ink actually sits inside the 128px character frame, measured from
@@ -29,6 +30,7 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
   homeX: number;
   homeY: number;
   private readonly pose: Phaser.GameObjects.Container;
+  private readonly cosmeticAura: Phaser.GameObjects.Ellipse;
   private readonly badgePlate: Phaser.GameObjects.NineSlice;
   private readonly sceneRef: Phaser.Scene;
   private hasFrameAnimation: boolean;
@@ -46,6 +48,11 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
     const art = portraitTexture(scene, def, ninjaCatalogPortrait(tier));
     this.hasFrameAnimation = art.animated;
     this.pose = new Phaser.GameObjects.Container(scene, 0, 0);
+    this.cosmeticAura = scene.add
+      .ellipse(0, -12, 92, 28, 0xffc85b, 0.22)
+      .setStrokeStyle(2, 0xffef9a, 0.65)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setVisible(false);
     this.image = scene.add.sprite(0, 0, art.key, art.frame);
     this.imageScale = ninjaScale(this.image.frame.width, this.image.frame.height, 128, tier);
     this.image
@@ -53,7 +60,7 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
       .setScale(this.imageScale)
       .setTint(def.artTint);
     this.pose.add(this.image);
-    this.add(this.pose);
+    this.add([this.cosmeticAura, this.pose]);
 
     // The tier chip sits outside the pose container so it neither bobs with the
     // swing nor shrinks with the roster scale: it is UI, and it has to stay
@@ -102,6 +109,16 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
       : ART.halfWidth;
     this.badgePlate.setPosition(badgeHalfWidth * scale - 16, -ART.bottom * scale - 16);
     this.badge.setPosition(this.badgePlate.x, this.badgePlate.y);
+  }
+
+  applyDojoStyle(style: DojoStyleDef): void {
+    const crimson = style.id === 'crimson-dojo';
+    this.cosmeticAura
+      .setVisible(crimson)
+      .setFillStyle(style.palette.ninjaAura, crimson ? 0.2 : 0)
+      .setStrokeStyle(2, style.palette.accentBright, crimson ? 0.72 : 0);
+    this.badgePlate.setTint(crimson ? style.palette.plate : 0xffffff);
+    this.badge.setTint(crimson ? 0xfff2c7 : 0xffffff);
   }
 
   /**

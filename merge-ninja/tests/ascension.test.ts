@@ -135,10 +135,12 @@ describe('ascension run integration', () => {
   it('boosts earned coins by the bonus curve', () => {
     const run = (ascensions: number): number => {
       const storage = new FakeStorage();
-      if (ascensions > 0) {
-        storage.setItem(BALANCE.save.metaKey, JSON.stringify({ ascensions }));
-      }
-      const game = new GameCore({ storage, now: () => 0 });
+      // Both runs get a meta slot, ascensions included: an absent slot marks a
+      // first-ever session, which suppresses the boss draft and would leave
+      // the two runs earning through different systems rather than the same
+      // one at two income rates. The fixed rng keeps the cards identical too.
+      storage.setItem(BALANCE.save.metaKey, JSON.stringify({ ascensions }));
+      const game = new GameCore({ storage, now: () => 0, rng: () => 0 });
       game.spawnTier(6);
       game.update(4_000);
       return game.economy.coins - BALANCE.economy.startCoins;

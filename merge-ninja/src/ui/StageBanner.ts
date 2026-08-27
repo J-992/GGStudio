@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { ATLAS_KEY } from '../render/atlasConfig';
 import { VFX_ANIMATIONS } from '../data/vfxAssets';
 import { theme } from './theme';
+import type { DojoStyleDef } from '../data/dojoStyles';
 
 /** How long the announcement holds at full strength before it clears. */
 const HOLD_MS = 1150;
@@ -84,6 +85,14 @@ export class StageBanner extends Phaser.GameObjects.Container {
     this.setPosition(a.x + a.w / 2, a.y + Math.round(a.h * 0.3));
     this.plate.setSize(width, 84);
     this.flash.setSize(width + 90, 96);
+  }
+
+  applyDojoStyle(style: DojoStyleDef): void {
+    const crimson = style.id === 'crimson-dojo';
+    this.plate.setTint(crimson ? style.palette.plate : 0xd9a441);
+    this.flash.setFillStyle(crimson ? style.palette.accentBright : 0xffe07a, crimson ? .18 : .14);
+    this.stageText.setTint(crimson ? 0xfff1c2 : 0xfff6dd);
+    this.rays.forEach((ray) => ray.setTint(crimson ? style.palette.accentBright : 0xffe07a));
   }
 
   /** Verification hook: the headline currently on the plate, if any. */

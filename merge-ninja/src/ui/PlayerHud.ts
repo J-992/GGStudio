@@ -3,6 +3,7 @@ import type { GameCore } from '../core/GameCore';
 import type { GameEvent } from '../core/EventBus';
 import { ATLAS_KEY } from '../render/atlasConfig';
 import { compactNumber, theme } from './theme';
+import type { DojoStyleDef } from '../data/dojoStyles';
 
 /**
  * The dojo's shared durability bar. It gives every boss swing a readable
@@ -54,6 +55,14 @@ export class PlayerHud extends Phaser.GameObjects.Container {
     const ratio = Math.max(0, Math.min(1, this.shownHp / this.maxHp));
     this.fill.setSize(Math.max(1, (this.barWidth - 8) * ratio), 12).setTint(this.healthColor(ratio));
     this.value.setText(`${compactNumber(this.shownHp)} / ${compactNumber(this.maxHp)}`);
+  }
+
+  applyDojoStyle(style: DojoStyleDef): void {
+    const crimson = style.id === 'crimson-dojo';
+    this.namePlate.setTint(crimson ? style.palette.panel : 0x567b58);
+    this.barBack.setTint(crimson ? style.palette.frame : 0xffffff);
+    this.nameText.setTint(crimson ? 0xfff1c2 : 0xeaf7e5);
+    this.tempo.setTint(crimson ? style.palette.accentBright : 0xffdf82);
   }
 
   private handle(event: GameEvent): void {

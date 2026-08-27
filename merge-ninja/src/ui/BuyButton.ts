@@ -3,6 +3,7 @@ import { ATLAS_KEY } from '../render/atlasConfig';
 import { compactNumber, theme } from './theme';
 import type { Fx } from '../effects/Fx';
 import type { Sfx } from '../audio/Sfx';
+import { CLASSIC_DOJO_STYLE, type DojoStyleDef } from '../data/dojoStyles';
 
 /** Minimum touch-target height for the buy button, in design pixels. */
 const MIN_HIT_HEIGHT = 96;
@@ -15,6 +16,7 @@ export class BuyButton extends Phaser.GameObjects.Container {
   private readonly coin: Phaser.GameObjects.Image;
   private renderState = '';
   private wasAvailable: boolean | null = null;
+  private style: DojoStyleDef = CLASSIC_DOJO_STYLE;
   constructor(scene: Phaser.Scene, onBuy: () => void, private readonly fx: Fx, private readonly sfx: Sfx) {
     const r = theme.layout.buy;
     super(scene, r.x, r.y); scene.add.existing(this).setDepth(8);
@@ -53,9 +55,14 @@ export class BuyButton extends Phaser.GameObjects.Container {
     this.wasAvailable = canBuy;
     const state = `${tier}:${cost}:${canBuy}`; if (this.renderState === state) return;
     this.renderState = state; this.buyLabel.setText(`BUY LV.${tier}`); this.costLabel.setText(compactNumber(cost));
-    this.buttonBody.setFillStyle(canBuy ? theme.colors.buy : theme.colors.buyDisabled);
-    this.buttonBody.setStrokeStyle(5, canBuy ? 0x14520f : 0x4a4f49);
+    this.buttonBody.setFillStyle(canBuy ? this.style.palette.buy : theme.colors.buyDisabled);
+    this.buttonBody.setStrokeStyle(5, canBuy ? this.style.palette.buyStroke : 0x4a4f49);
     if (becameAvailable) this.pulse();
+  }
+  applyDojoStyle(style: DojoStyleDef): void {
+    this.style = style;
+    this.renderState = '';
+    this.buttonSheen.setFillStyle(style.id === 'crimson-dojo' ? style.palette.accentBright : 0xffffff, style.id === 'crimson-dojo' ? .23 : .15);
   }
   relayout(): void {
     const r = theme.layout.buy;

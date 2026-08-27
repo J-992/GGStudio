@@ -13,6 +13,7 @@ import {
   ACHIEVEMENTS_ICON_PATH,
   REVEAL_ASSETS,
 } from '../src/render/revealAssets';
+import { BOSS_STICKERS } from '../src/data/dojoStyles';
 
 const ARENA_PATHS: Readonly<Record<string, string>> = {
   dojo_night_backdrop: 'assets/dojo-night-backdrop.webp',
@@ -49,6 +50,7 @@ describe('shipping asset manifest', () => {
       ...POWERUP_ORDER.map((id) => POWERUPS[id].iconPath),
       ...VFX_ANIMATION_ORDER.map((id) => VFX_ANIMATIONS[id].path),
       ...Object.values(REVEAL_ASSETS).map((asset) => asset.path),
+      ...BOSS_STICKERS.map((sticker) => sticker.texturePath),
       ...ARENA_THEMES.flatMap((arena) => [
         ARENA_PATHS[arena.backdropKey]!,
         ARENA_PATHS[arena.floorTextureKey]!,

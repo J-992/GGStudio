@@ -30,6 +30,13 @@ import { GameOverPanel } from '../ui/GameOverPanel';
 import { StageBanner } from '../ui/StageBanner';
 import { RivalLadder } from '../ui/RivalLadder';
 import { FirstRunTutorial } from '../ui/FirstRunTutorial';
+import { ContextualPowerupCoach } from '../ui/ContextualPowerupCoach';
+import { ArchetypePresenter } from '../arena/ArchetypePresenter';
+import { ARCHETYPES } from '../data/bossArchetypes';
+import { ARCHETYPE_LESSON } from '../data/flavorText';
+import { BoardCoach } from '../ui/BoardCoach';
+import { DraftCards } from '../ui/DraftCards';
+import { StickerEarned } from '../ui/StickerEarned';
 import { BALANCE } from '../data/balance';
 import { BOSS_COUNT } from '../data/enemies';
 import { previewSeedPlan } from '../data/devPreview';
@@ -48,6 +55,7 @@ import {
 } from '../platform/platform';
 import { shouldOfferCommercialBreak } from '../platform/adPolicy';
 import { RetentionFunnel } from '../platform/retentionFunnel';
+import type { DojoStyleDef } from '../data/dojoStyles';
 
 export class GameScene extends Phaser.Scene {
   /**
@@ -76,6 +84,11 @@ export class GameScene extends Phaser.Scene {
   private powerups!: PowerupPickups;
   private lowHealth!: LowHealthWarning;
   private tutorial!: FirstRunTutorial;
+  private powerupCoach!: ContextualPowerupCoach;
+  private stickerEarned!: StickerEarned;
+  private draftCards!: DraftCards;
+  private archetypes!: ArchetypePresenter;
+  private boardCoach!: BoardCoach;
   private gameOver!: GameOverPanel;
   private stageBanner!: StageBanner;
   private rivals!: RivalLadder;
@@ -168,6 +181,16 @@ export class GameScene extends Phaser.Scene {
     this.timeClock = new TimeClock(this, this.core, this.fx, this.sfx, () => this.modalOpen);
     this.potion = new HealthPotion(this, this.core, this.fx, this.sfx, () => this.modalOpen);
     this.powerups = new PowerupPickups(this, this.core, this.fx, this.sfx, () => this.modalOpen);
+    this.retention = new RetentionFunnel((event) => {
+      void reportPlatformMeasure(event.category, event.what, event.action);
+    });
+    if (!this.core.tutorialCompleted) {
+      this.retention.startTutorial(this.core.metrics.purchases, this.core.metrics.merges);
+    }
+    if (this.core.crimsonDojoProgress.have > 0 && !this.core.crimsonDojoProgress.complete) {
+      this.retention.startStickerPage();
+    }
+    this.core.events.onAny((event) => this.retention.handle(event, this.core.metrics.purchases));
     this.tutorial = new FirstRunTutorial(this, this.core, {
       buy: () => new Phaser.Math.Vector2(theme.layout.buy.x, theme.layout.buy.y),
       ninja: (slot) => {
@@ -175,28 +198,29 @@ export class GameScene extends Phaser.Scene {
         return new Phaser.Math.Vector2(pos.x, pos.y - 66 * theme.layout.slots.spriteScale);
       },
       boss: () => new Phaser.Math.Vector2(this.arena.boss.x, this.arena.boss.y),
-      powerup: (id) => {
+    });
+    this.powerupCoach = new ContextualPowerupCoach(
+      this,
+      this.core,
+      (id) => {
         const pos = this.powerups.posOf(id);
         return pos === null ? null : new Phaser.Math.Vector2(pos.x, pos.y);
       },
-      coin: () => {
-        const pos = this.powerups.liveRainCoins[0];
-        return pos === undefined ? null : new Phaser.Math.Vector2(pos.x, pos.y);
-      },
-    });
-    this.retention = new RetentionFunnel((event) => {
-      void reportPlatformMeasure(event.category, event.what, event.action);
-    });
-    if (!this.core.tutorialCompleted) this.retention.startTutorial();
-    this.core.events.onAny((event) => this.retention.handle(event, this.core.metrics.purchases));
+      () => this.retention.startPowerupLesson(),
+    );
     this.lowHealth = new LowHealthWarning(this);
     this.stageBanner = new StageBanner(this);
+    this.stickerEarned = new StickerEarned(this, this.core, this.sfx, () => this.pulseAlmanacButton());
+    this.draftCards = new DraftCards(this, this.core, this.fx, this.arenaVfx, this.sfx);
+    this.archetypes = new ArchetypePresenter(this, this.core, this.arena, this.arenaVfx, this.fx);
+    this.boardCoach = new BoardCoach(this, this.core, (slot) => this.board.slotPos(slot));
     this.settings = new SettingsPanel(this, this.sfx, () => this.restartRun());
     this.gameOver = new GameOverPanel(this, this.sfx, () => this.restartRun(), () => this.reviveFromRewardedAd());
     this.ascension = new AscensionButton(this, this.core, this.sfx);
     this.makeAlmanacButton();
     this.makeSettingsButton();
     this.makeAchievementsButton();
+    this.applyDojoStyle(this.core.equippedDojoStyle);
     this.syncFirstRunChrome();
 
     // The welcome-back reward was already credited to the wallet at load; the
@@ -265,6 +289,13 @@ export class GameScene extends Phaser.Scene {
       }
     });
     this.core.events.on('ascended', () => { void reportPlatformHappyTime(1); });
+    this.core.events.on('dojoStyleEquipped', (event) => {
+      this.applyDojoStyle(this.core.equippedDojoStyle, event.source === 'unlock');
+      if (event.source === 'unlock') {
+        this.stageBanner.announce('CRIMSON DOJO UNLOCKED!', 'GLOSSY BOSS SET COMPLETE', 0xfff1c2);
+        void reportPlatformHappyTime(1);
+      }
+    });
     // Routine stage changes stay in the HUD. Only authored chapter/rival
     // arrivals take over the arena, so forward progress feels meaningful
     // without interrupting the merge loop every few seconds.
@@ -272,6 +303,14 @@ export class GameScene extends Phaser.Scene {
       if (!isRivalMilestoneStage(event.stage)) return;
       const arenaTheme = themeForStage(event.stage);
       this.stageBanner.announce(arenaTheme.label.toUpperCase(), `RIVAL REACHED - STAGE ${event.stage}`, 0xfff6dd);
+    });
+    // One line, once per archetype per player, ever. Repeating it every eighth
+    // stage would turn the only lesson these mechanics get into chrome.
+    this.core.events.on('bossArchetype', (event) => {
+      if (!event.firstSeen) return;
+      const lesson = ARCHETYPE_LESSON[event.archetype];
+      if (lesson === undefined) return;
+      this.stageBanner.announce(ARCHETYPES[event.archetype].label, lesson, 0xfff1c2);
     });
     // An ascension restarts the run from stage 1, so it deserves the banner
     // more than the stage-1 spawn that follows it does.
@@ -467,6 +506,19 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * The book takes the hand-off when an earned seal lands on it: a single
+   * beat on the icon and its counter, so the player sees where the collectible
+   * went without the arena having to carry a permanent panel for it.
+   */
+  private pulseAlmanacButton(): void {
+    this.tweens.add({ targets: this.almanacButton, scale: 2.15, yoyo: true, duration: 180, ease: 'Sine.easeOut' });
+    this.tweens.add({ targets: this.almanacPlate, scaleX: 1.14, scaleY: 1.14, yoyo: true, duration: 180, ease: 'Sine.easeOut' });
+    this.almanacBadge.setTint(0xffffff);
+    this.time.delayedCall(420, () => this.almanacBadge.setTint(0xffe58a));
+    this.sfx.play('pickup');
+  }
+
   private layoutAlmanacButton(): void {
     const a = theme.layout.almanac;
     this.almanacPlate.setPosition(a.x, a.y);
@@ -644,8 +696,12 @@ export class GameScene extends Phaser.Scene {
     this.potion.relayout();
     this.powerups.relayout();
     this.tutorial.relayout();
+    this.powerupCoach.relayout();
     this.lowHealth.relayout();
     this.stageBanner.relayout();
+    this.stickerEarned.relayout();
+    this.draftCards.relayout();
+    this.boardCoach.relayout();
     this.rivals.relayout();
     this.ascension.relayout();
     this.layoutAlmanacButton();
@@ -676,28 +732,33 @@ export class GameScene extends Phaser.Scene {
     // The first tap is the hook, not a natural break. Report play immediately;
     // interstitial opportunities begin only after a completed run.
     this.playerStartedGameplay = true;
-    this.retention.startStage(this.core.boss.stage);
+    this.retention.startGameplay(this.core.boss.stage);
     this.syncGameplayReport();
   }
 
   override update(_time: number, dt: number): void {
     this.syncGameplayReport();
+    if (this.gameplayReported) this.retention.updateActive(dt);
     this.core.update(dt);
     this.timeClock.update(dt);
     this.potion.update(dt);
     this.powerups.update(dt);
     this.tutorial.update();
+    this.powerupCoach.update();
     this.syncFirstRunChrome();
     this.powerAuras.update(dt);
     this.lowHealth.setDanger(this.core.lowHealth);
+    this.lowHealth.setEnraged(this.core.bossEnraged);
     this.arena.update(dt);
     this.director.update(dt);
     this.gears.forEach(({ image, speed }) => {
       image.angle += speed * dt;
     });
+    this.draftCards.update();
+    this.archetypes.update(dt);
     this.hud.update();
     this.playerHud.update();
-    this.board.refreshExternalState();
+    this.board.refreshExternalState(dt);
     this.buy.refresh(this.core.buyTier, this.core.buyCost, this.core.canBuy);
     this.ascension.refresh();
     this.refreshAlmanacBadge();
@@ -719,6 +780,36 @@ export class GameScene extends Phaser.Scene {
     this.achievementsPlate.setVisible(visible);
     this.achievementsButton.setVisible(visible);
     this.achievementsBadge.setVisible(visible);
+    this.stickerEarned.setTutorialHidden(!visible);
+  }
+
+  private applyDojoStyle(style: DojoStyleDef, animate = false): void {
+    const crimson = style.id === 'crimson-dojo';
+    this.background.setTint(style.palette.backgroundTint);
+    this.arenaFrame.setTint(crimson ? style.palette.frame : 0xffffff);
+    this.almanacPlate.setTint(crimson ? style.palette.plate : theme.colors.matStraw);
+    this.settingsPlate.setTint(crimson ? style.palette.plate : theme.colors.matStraw);
+    this.achievementsPlate.setTint(crimson ? style.palette.plate : theme.colors.matStraw);
+    this.sectionTitles.forEach((title) => title.setTint(crimson ? style.palette.accentBright : 0xe9ece6));
+    this.board.applyDojoStyle(style);
+    this.buy.applyDojoStyle(style);
+    this.currency.applyDojoStyle(style);
+    this.hud.applyDojoStyle(style);
+    this.playerHud.applyDojoStyle(style);
+    this.stageBanner.applyDojoStyle(style);
+    this.stickerEarned.applyDojoStyle(style);
+    this.draftCards.applyDojoStyle(style);
+    this.archetypes.setDojoStyle(style);
+    this.lowHealth.applyDojoStyle(style);
+    this.almanac.applyDojoStyle(style);
+    this.arena.setDojoStyle(style);
+    this.director.setDojoStyle(style);
+    if (!animate) return;
+    const flash = this.add
+      .rectangle(theme.layout.width / 2, theme.layout.height / 2, theme.layout.width, theme.layout.height, style.palette.accentBright, .22)
+      .setDepth(305)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({ targets: flash, alpha: 0, duration: 720, ease: 'Quad.easeOut', onComplete: () => flash.destroy() });
   }
 
   private onBuy(): void {
@@ -769,6 +860,18 @@ export class GameScene extends Phaser.Scene {
       powerupHud: () => ({ active: this.core.powerups.activeEffects(), hud: this.core.powerups.hudState(), charges: this.core.powerups.wardCharges }),
       powerupActivate: (id: PowerupId) => this.core.collectPowerup(id),
       tutorialActive: () => this.tutorial.isActive,
+      powerupCoachActive: () => this.powerupCoach.isActive,
+      stickerEarned: () => this.stickerEarned.snapshot(),
+      draftHovered: () => this.draftCards.hoveredCard(),
+      draftCardRects: () => this.draftCards.cardRects().map((card) => ({
+        id: card.id,
+        angle: card.angle,
+        centre: this.toPage(card.x, card.y),
+        halfW: card.halfW * (this.game.canvas.getBoundingClientRect().width / theme.layout.width),
+        halfH: card.halfH * (this.game.canvas.getBoundingClientRect().height / theme.layout.height),
+      })),
+      equipDojoStyle: (id: 'classic' | 'crimson-dojo') => this.core.equipDojoStyle(id),
+      equippedDojoStyle: () => this.core.equippedDojoStyle.id,
       coinFrenzyCoins: () => this.powerups.liveRainCoins.map((coin) => this.toPage(coin.x, coin.y)),
       coinFrenzyState: () => this.core.coinFrenzyState,
       lowHealthWarning: () => this.lowHealth.isShowing,
@@ -788,6 +891,11 @@ export class GameScene extends Phaser.Scene {
       },
       almanacDebugTap: (kind: 'ninja' | 'boss', index: number) => this.almanac.debugTap(kind, index),
       almanacDetail: () => this.almanac.detailState(),
+      almanacStylesOpen: () => this.almanac.stylesOpen,
+      almanacStylesPos: () => {
+        const anchor = this.almanac.stylesAnchor();
+        return this.toPage(anchor.x, anchor.y);
+      },
       stageBannerVisible: () => this.stageBanner.visible,
       settingsOpen: () => this.settings.isOpen,
       openSettings: () => this.settings.show(),

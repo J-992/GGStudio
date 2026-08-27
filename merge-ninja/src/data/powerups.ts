@@ -63,8 +63,6 @@ export type PowerupDef = PowerupBase &
     | {
         readonly effect: 'coinRain';
         readonly coinCount: number;
-        /** Smaller, slower-to-read first-run sample before the full rare event. */
-        readonly tutorialCoinCount: number;
         readonly bossRewardDivisor: number;
       }
   );
@@ -144,7 +142,6 @@ export const POWERUPS: Readonly<Record<PowerupId, PowerupDef>> = {
     iconPath: 'assets/powerups/coin-frenzy.webp',
     effect: 'coinRain',
     coinCount: 36,
-    tutorialCoinCount: 8,
     // A perfect clear pays roughly six current-stage boss bonuses; because
     // coins can fall away, normal clears land below that headline payout.
     bossRewardDivisor: 6,

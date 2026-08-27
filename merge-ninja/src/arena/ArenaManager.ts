@@ -20,6 +20,7 @@ import {
 } from '../data/presentation';
 import { ArenaScenery } from './ArenaScenery';
 import { theme } from '../ui/theme';
+import { CLASSIC_DOJO_STYLE, type DojoStyleDef } from '../data/dojoStyles';
 
 /** Authored creature attack cadence: anticipation -> impact -> recovery. */
 const BOSS_EIGHT_FRAME_MS = [110, 100, 95, 85, 75, 90, 115, 150] as const;
@@ -52,20 +53,38 @@ export class ArenaManager {
   readonly actors: ArenaActor[] = [];
   readonly boss: Phaser.GameObjects.Sprite;
   private readonly bossAura: Phaser.GameObjects.Arc;
+  private readonly bossCrest: Phaser.GameObjects.Image;
   private readonly actorPool: Phaser.GameObjects.Sprite[] = [];
+  private readonly actorAuras: Phaser.GameObjects.Ellipse[] = [];
   private readonly maskShape: Phaser.GameObjects.Graphics;
   private bossFootInset = 0;
   private bossHasEntered = false;
   private entrancePresenter: BossEntrancePresenter | null = null;
+  private style: DojoStyleDef = CLASSIC_DOJO_STYLE;
   constructor(private readonly scene: Phaser.Scene, private readonly core: GameCore) {
     this.scenery = new ArenaScenery(scene, core.boss.stage);
     const a = theme.layout.arena;
     this.maskShape = scene.add.graphics().fillRect(a.x, a.y, a.w, a.h).setVisible(false);
     const mask = this.maskShape.createGeometryMask();
     for (let i = 0; i < 3; i += 1) {
+      this.actorAuras.push(
+        scene.add.ellipse(-200, -200, 94, 24, 0xffc85b, 0.16)
+          .setStrokeStyle(2, 0xffef9a, 0.58)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setVisible(false)
+          .setDepth(11)
+          .setMask(mask),
+      );
       this.actorPool.push(scene.add.sprite(-200, -200, ATLAS_KEY, 'ninja_t1').setVisible(false).setDepth(12));
     }
     this.bossAura = scene.add.circle(this.scenery.bossPlatform.x, this.scenery.bossPlatform.y - 105, 126, 0xd66ac5, .10).setDepth(10).setMask(mask);
+    this.bossCrest = scene.add
+      .image(this.scenery.bossPlatform.x, this.scenery.bossPlatform.y - 105, ATLAS_KEY, 'fx_ring')
+      .setTint(0xffc85b)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(0)
+      .setDepth(34)
+      .setMask(mask);
     this.boss = scene.add.sprite(this.scenery.bossPlatform.x, this.scenery.bossPlatform.y - 128, ATLAS_KEY, core.boss.boss.spriteKey).setDepth(35).setMask(mask);
     this.actorPool.forEach((sprite) => sprite.setMask(mask));
     this.sync();
@@ -83,6 +102,7 @@ export class ArenaManager {
       const ninja = owned[index];
       if (ninja === undefined) {
         sprite.setVisible(false);
+        this.actorAuras[index]?.setVisible(false);
         return;
       }
       const p = this.scenery.platforms[index % 3]!;
@@ -109,6 +129,10 @@ export class ArenaManager {
         .setTint(def.artTint)
         .setDepth(12)
         .setVisible(true);
+      this.actorAuras[index]
+        ?.setPosition(home.x, p.y - 7)
+        .setScale(Math.max(.72, Math.min(1.1, actorScale * 1.25)))
+        .setVisible(this.style.id === 'crimson-dojo');
       this.actors.push({ sprite, tier: ninja.tier, state: 'idle', home, scale: actorScale });
     });
     this.refreshBoss(false);
@@ -132,6 +156,11 @@ export class ArenaManager {
     const x = this.scenery.bossPlatform.x;
     const y = this.scenery.bossPlatform.y - nativeHeight * scale / 2 + this.bossFootInset * scale;
     this.boss.setScale(scale).setPosition(x, y).setAngle(0).setAlpha(1).setVisible(true).setDepth(40);
+    this.bossCrest
+      .setPosition(x, y)
+      .setScale(Math.max(1.2, Math.min(2.1, this.boss.displayHeight / 115)))
+      .setVisible(this.style.id === 'crimson-dojo')
+      .setAlpha(this.style.id === 'crimson-dojo' ? .28 : 0);
     this.bossAura
       .setPosition(x, y)
       .setRadius(Math.min(142, this.boss.displayHeight * .55))
@@ -187,6 +216,9 @@ export class ArenaManager {
         this.applyPose(this.boss, home, baseScale, -1, 1, pose);
       }
     }
+    if (this.bossCrest.visible) {
+      this.bossCrest.setPosition(this.boss.x, this.boss.y).setAngle(this.scene.time.now * .018);
+    }
   }
   relayout(): void { const a = theme.layout.arena; this.maskShape.clear().fillRect(a.x, a.y, a.w, a.h); this.scenery.relayout(); this.sync(); }
   bossHome(): Phaser.Math.Vector2 {
@@ -205,6 +237,18 @@ export class ArenaManager {
   }
   /** Scene wiring for the shared VFX pool, camera shake, and sfx bus. Pass null to detach. */
   attachBossEntrancePresenter(presenter: BossEntrancePresenter | null): void { this.entrancePresenter = presenter; }
+  setDojoStyle(style: DojoStyleDef): void {
+    this.style = style;
+    const crimson = style.id === 'crimson-dojo';
+    this.bossAura.setFillStyle(crimson ? style.palette.bossAura : 0xd66ac5);
+    this.bossCrest.setVisible(crimson).setTint(style.palette.accentBright).setAlpha(crimson ? .28 : 0);
+    this.actorAuras.forEach((aura, index) => {
+      aura
+        .setFillStyle(style.palette.ninjaAura, crimson ? .17 : 0)
+        .setStrokeStyle(2, style.palette.accentBright, crimson ? .62 : 0)
+        .setVisible(crimson && this.actorPool[index]?.visible === true);
+    });
+  }
   /**
    * Humanoids use transform choreography; creatures play their authored
    * anatomy-specific eight-frame strip. Both report impact on the strike pose.
@@ -355,7 +399,7 @@ export class ArenaManager {
     const ts = recipe.timingScale;
     const footY = this.scenery.bossPlatform.y;
     const drop = Math.max(230, this.boss.frame.height * baseScale * .95);
-    this.bossAura.setFillStyle(primary);
+    this.bossAura.setFillStyle(this.style.id === 'crimson-dojo' ? this.style.palette.bossAura : primary);
     // Landing payoff shared by every non-portal entrance: impact, shake, sound.
     const land = (): void => {
       this.fireGroundImpact(vfx, recipe, home.x, footY);

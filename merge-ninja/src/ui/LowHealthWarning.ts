@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import type { DojoStyleDef } from '../data/dojoStyles';
 import { theme } from './theme';
 
 /** Texture keys for the two one-pixel-wide gradients the border is built from. */
@@ -21,6 +22,10 @@ export class LowHealthWarning extends Phaser.GameObjects.Container {
   private readonly edges: Phaser.GameObjects.Image[];
   private pulse: Phaser.Tweens.Tween | null = null;
   private showing = false;
+  private danger = false;
+  private enraged = false;
+  /** Colour an enraged boss paints the edges. Follows the equipped dojo skin. */
+  private enrageTint = 0xd66ac5;
 
   constructor(private readonly sceneRef: Phaser.Scene) {
     super(sceneRef, 0, 0);
@@ -44,12 +49,38 @@ export class LowHealthWarning extends Phaser.GameObjects.Container {
 
   /** Drive straight from the model each frame; the widget owns no state. */
   setDanger(danger: boolean): void {
-    if (danger === this.showing) return;
-    this.showing = danger;
+    this.danger = danger;
+    this.sync();
+  }
+
+  /**
+   * An enraged boss lights the same edges, in the skin's own aura colour.
+   *
+   * Deliberately this widget rather than a second overlay: the player has
+   * already learned that a pulsing border means "the arena wants something
+   * from you", and inventing a second danger colour would spend that lesson
+   * to say the same thing twice. Low health still wins the colour when both
+   * are true, because that one is about losing the run.
+   */
+  setEnraged(enraged: boolean): void {
+    this.enraged = enraged;
+    this.sync();
+  }
+
+  applyDojoStyle(style: DojoStyleDef): void {
+    this.enrageTint = style.palette.bossAura;
+    if (this.showing && !this.danger) this.paint(this.enrageTint);
+  }
+
+  private sync(): void {
+    const wanted = this.danger || this.enraged;
+    if (wanted) this.paint(this.danger ? 0xff2d2d : this.enrageTint);
+    if (wanted === this.showing) return;
+    this.showing = wanted;
     this.pulse?.remove();
     this.pulse = null;
 
-    if (!danger) {
+    if (!wanted) {
       this.sceneRef.tweens.add({
         targets: this,
         alpha: 0,
@@ -62,12 +93,18 @@ export class LowHealthWarning extends Phaser.GameObjects.Container {
     this.setVisible(true).setAlpha(0);
     this.pulse = this.sceneRef.tweens.add({
       targets: this,
-      alpha: { from: 0.35, to: 1 },
-      duration: 520,
+      // An enraged boss breathes slower and dimmer than a dying line: it is a
+      // problem to solve, not a run about to end.
+      alpha: this.danger ? { from: 0.35, to: 1 } : { from: 0.18, to: 0.6 },
+      duration: this.danger ? 520 : 900,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
     });
+  }
+
+  private paint(tint: number): void {
+    for (const edge of this.edges) edge.setTint(tint);
   }
 
   relayout(): void {

@@ -1,5 +1,8 @@
 import { BALANCE } from '../data/balance';
+import { isArchetypeId } from '../data/bossArchetypes';
+import { isDraftCardId } from '../data/draftCards';
 import { BOSS_COUNT } from '../data/enemies';
+import { cleanStickerIds, isDojoStyleId, type DojoStyleId } from '../data/dojoStyles';
 import { normalizeBest } from './BestRun';
 import type { BestRun } from './BestRun';
 import type { SessionMetrics, StorageLike } from '../data/types';
@@ -21,6 +24,18 @@ export interface SaveState {
   seenBosses?: number[];
   /** Epoch ms of the last write; drives offline progress crediting. Version 4 saves omit it. */
   lastSavedAt?: number;
+  /**
+   * Board slots earned so far this run. Saves before version 6 predate slot
+   * locking, so they migrate to a fully unlocked board rather than having
+   * space taken back off a player mid-run.
+   */
+  unlockedSlots?: number;
+  /** Slots a boss swing has blocked, with the time each has left on it. */
+  debris?: Array<{ slot: number; msLeft: number }>;
+  /** Draft cards taken this run. Telemetry only; nothing reads it back into the sim. */
+  draftPicks?: string[];
+  /** Bosses still owing a card row off the cadence, from a `hotHand` card. */
+  bonusDraftBosses?: number;
   metrics: SessionMetrics;
 }
 
@@ -58,8 +73,25 @@ export interface MetaState {
   discoveredTiers?: number[];
   /** True once the full-roster fanfare has fired. It must never fire twice. */
   collectionCelebrated?: boolean;
-  /** True once the first-run buy, merge, and powerup coach has been completed. */
+  /** True once the first-run buy, merge, and boss-tap coach has been completed. */
   tutorialCompleted?: boolean;
+  /** True once the player caught the first naturally introduced powerup. */
+  powerupCoachCompleted?: boolean;
+  /** Board lessons already shown: locked slots, thrown debris. Lifetime. */
+  boardLessonsSeen?: string[];
+  /**
+   * Boss archetypes whose one-time introduction banner has already played.
+   *
+   * Lifetime, alongside the other "has this been taught" flags rather than in
+   * the run slot: dying is not a reason to re-explain a mechanic the player
+   * already learned, and the banner is the only teaching this game does for
+   * them.
+   */
+  archetypeSeen?: string[];
+  /** Lifetime boss seals collected from authored milestone victories. */
+  collectedStickerIds?: string[];
+  /** Player-selected cosmetic; GameCore checks that it is actually unlocked. */
+  equippedDojoStyle?: DojoStyleId;
 }
 
 /** Safely persists complete runs while treating browser storage as optional. */
@@ -99,7 +131,8 @@ export class SaveSystem {
 
     const state = value as Partial<SaveState>;
     return (
-      (state.version === 2 || state.version === 3 || state.version === 4 || state.version === BALANCE.save.version) &&
+      (state.version === 2 || state.version === 3 || state.version === 4 || state.version === 5 ||
+        state.version === BALANCE.save.version) &&
       typeof state.coins === 'number' &&
       Array.isArray(state.board) &&
       typeof state.stage === 'number' &&
@@ -122,6 +155,12 @@ export class SaveSystem {
    * tier 25 lands around the middle of the new ladder, while tier 50 becomes
    * the new final evolution. Version 2 predates the expanded 50-step ladder
    * and therefore uses its 12-tier scale. Version 5 only adds `lastSavedAt`.
+   *
+   * Version 6 adds slot locking, debris, and the draft. A pre-6 save is
+   * granted the whole board: locked slots are a pacing device for a fresh
+   * climb, and confiscating space from a run already in progress would read as
+   * a bug rather than as a mechanic. This runs on current-version saves too,
+   * so it is also where every version-6 field gets sanitised.
    */
   private migrateRoster(state: SaveState): SaveState {
     const previousTierCount = state.version === 2 ? 12 : state.version === 3 ? 50 : BALANCE.tiers.count;
@@ -138,8 +177,55 @@ export class SaveSystem {
       highestTierEverOwned: migrateTier(state.highestTierEverOwned),
       revealedTiers: state.revealedTiers?.map(migrateTier).filter((tier, index, all) => all.indexOf(tier) === index),
       seenBosses: state.seenBosses?.filter((identity) => Number.isInteger(identity) && identity >= 0 && identity < BOSS_COUNT),
+      unlockedSlots: state.version < 6 ? BALANCE.board.slots : this.cleanUnlockedSlots(state.unlockedSlots),
+      debris: state.version < 6 ? [] : this.cleanDebris(state.debris),
+      draftPicks: Array.isArray(state.draftPicks) ? state.draftPicks.filter(isDraftCardId) : [],
+      bonusDraftBosses: this.cleanCount(state.bonusDraftBosses, BALANCE.draft.hotHandBosses * 4),
       metrics: { ...state.metrics, highestTier: migrateTier(state.metrics.highestTier) },
     };
+  }
+
+  /**
+   * Never fewer than the starting grant, never more than the board holds.
+   *
+   * A missing field means the save was written before slot locking existed,
+   * whatever its version says, so it is granted the whole board for the same
+   * reason the version migration is: space is never taken back off a run in
+   * progress. Only a build that actually owns the mechanic writes the field.
+   */
+  /** A small non-negative counter, clamped so a hand-edited save cannot inflate it. */
+  private cleanCount(value: unknown, max: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(max, Math.floor(value)));
+  }
+
+  private cleanUnlockedSlots(value: unknown): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return BALANCE.board.slots;
+    return Math.max(BALANCE.slots.initial, Math.min(BALANCE.board.slots, Math.floor(value)));
+  }
+
+  /**
+   * Debris entries pointing at a real slot with time still on them.
+   *
+   * A duplicated slot would let two blockers share one cell and leave the
+   * board permanently short when only one of them cleared, so the first entry
+   * for a slot wins and the rest are dropped.
+   */
+  private cleanDebris(value: unknown): Array<{ slot: number; msLeft: number }> {
+    if (!Array.isArray(value)) return [];
+    const taken = new Set<number>();
+    const out: Array<{ slot: number; msLeft: number }> = [];
+    for (const entry of value) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      const { slot, msLeft } = entry as { slot?: unknown; msLeft?: unknown };
+      if (typeof slot !== 'number' || !Number.isInteger(slot)) continue;
+      if (slot < 0 || slot >= BALANCE.board.slots || taken.has(slot)) continue;
+      if (typeof msLeft !== 'number' || !Number.isFinite(msLeft) || msLeft <= 0) continue;
+      taken.add(slot);
+      out.push({ slot, msLeft: Math.min(BALANCE.debris.holdMs, msLeft) });
+      if (out.length >= BALANCE.debris.maxConcurrent) break;
+    }
+    return out;
   }
 
   /**
@@ -174,6 +260,17 @@ export class SaveSystem {
       state.discoveredTiers = this.cleanIndexList(meta.discoveredTiers, 1, BALANCE.tiers.count);
       if (meta.collectionCelebrated === true) state.collectionCelebrated = true;
       if (typeof meta.tutorialCompleted === 'boolean') state.tutorialCompleted = meta.tutorialCompleted;
+      if (typeof meta.powerupCoachCompleted === 'boolean') state.powerupCoachCompleted = meta.powerupCoachCompleted;
+      if (Array.isArray(meta.boardLessonsSeen)) {
+        state.boardLessonsSeen = [...new Set(
+          meta.boardLessonsSeen.filter((id): id is string => id === 'lockedSlots' || id === 'debris'),
+        )];
+      }
+      if (Array.isArray(meta.archetypeSeen)) {
+        state.archetypeSeen = [...new Set(meta.archetypeSeen.filter(isArchetypeId))];
+      }
+      if (Array.isArray(meta.collectedStickerIds)) state.collectedStickerIds = cleanStickerIds(meta.collectedStickerIds);
+      if (isDojoStyleId(meta.equippedDojoStyle)) state.equippedDojoStyle = meta.equippedDojoStyle;
       return state;
     } catch {
       return null;

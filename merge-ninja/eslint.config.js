@@ -3,7 +3,10 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**', 'verify-*.mjs', 'screenshots/**', 'assets-staging/**'] },
+  // `merge-ninja-poki-*` are unpacked upload bundles: built output that happens
+  // to sit in the working tree, and linting a Phaser bundle buries real findings
+  // under thousands of errors nothing can act on.
+  { ignores: ['dist/**', 'node_modules/**', 'verify-*.mjs', 'screenshots/**', 'assets-staging/**', 'merge-ninja-poki-*/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

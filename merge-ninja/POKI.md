@@ -61,6 +61,31 @@ anyway, so the stubs stay callable and quietly do nothing.
 | `captureError` | `src/main.ts`, on `error` and `unhandledrejection` |
 | `setDebug` | dev builds only — the call is tree-shaken out of production |
 | `rewardedBreak` | wired and unused; nothing in the game offers a video yet |
+| `measure` | `RetentionFunnel`, using the paired game-event schema below |
+
+### Game-event telemetry
+
+`RetentionFunnel` reports stable, session-deduplicated checkpoints through
+`PokiSDK.measure(category, what, action)`. Progress events use matching
+`start`/`complete`/`fail` actions; moving pickups use `visible`/`interact`.
+Single reach facts use the custom `reached` action.
+
+| Question | Events |
+| --- | --- |
+| Where does onboarding lose players? | `tutorial / onboarding`, `buy-1`, `buy-2`, `merge`, `boss-tap` |
+| Does the later contextual lesson work? | `tutorial / powerup-context` |
+| Are moving powerups seen and caught? | `powerup / <id> / visible|interact` |
+| Is Coin Frenzy itself completed? | `powerup-challenge / coin-frenzy / start|complete` |
+| How many active sessions survive the opening? | `session-time / 30s|60s|90s|120s|180s|300s / reached` |
+| Where does authored progression stop? | `stage / <milestone> / start|complete|fail` |
+| Do runs end or ascend? | `run / active / start|complete|fail` |
+| Are economy/board stalls common? | `friction / buy-no-coins|buy-board-full|board-full / reached` |
+| Does the stage 1/5/10 seal collection carry players to its reward? | `sticker-page / crimson-dojo / start|complete`, plus `sticker / crimson-dojo-1|2|3 / reached` |
+| Is the cosmetic reward noticed and deliberately used? | `dojo-style / crimson-dojo / visible`, `dojo-style / classic|crimson-dojo / interact` |
+
+The active-time checkpoints advance only while the same condition used for
+`gameplayStart` is true, so menus, reveals and the game-over screen cannot
+inflate the 30–300 second survival curve.
 
 ### Gameplay reporting
 
