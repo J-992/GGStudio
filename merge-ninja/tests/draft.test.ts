@@ -12,7 +12,7 @@ const rolls = (...values: number[]): (() => number) => {
 /** A run where every card in the pool can do something, so the draw is unconstrained. */
 const healthy = {
   boardHasFreeSlot: true, boardHasFighter: true, healthRatio: 1,
-  boardHasDebris: true, boardHasLockedSlot: true, bossHasTrick: true,
+  boardHasDebris: true, boardHasLockedSlot: true, bossHasTrick: true, canBreakthrough: true,
 };
 
 describe('draft draw', () => {
@@ -88,6 +88,7 @@ describe('draft draw', () => {
       [{ bossHasTrick: false }, 'disarm'],
       [{ boardHasFreeSlot: false }, 'echo'],
       [{ boardHasFighter: false }, 'echo'],
+      [{ canBreakthrough: false }, 'breakthrough'],
     ];
     for (const [state, forbidden] of cases) {
       for (let seed = 0; seed < 60; seed += 1) {

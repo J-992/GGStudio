@@ -50,20 +50,20 @@ export const CLASSIC_DOJO_STYLE: DojoStyleDef = {
   label: 'Classic Dojo',
   description: 'The original dojo colors.',
   palette: {
-    frame: 0xffffff,
-    panel: 0x8a5c3a,
-    panelDark: 0x2b1d12,
-    plate: 0xe8cf94,
-    accent: 0xd9a441,
-    accentBright: 0xffe58a,
+    frame: 0x9b6842,
+    panel: 0x5b2f21,
+    panelDark: 0x1d100d,
+    plate: 0x7c432b,
+    accent: 0xb9904d,
+    accentBright: 0xf0d38c,
     board: 0xffffff,
-    slot: 0xffffff,
-    slotActive: 0xffd23f,
-    buy: 0x45b93d,
-    buyStroke: 0x14520f,
+    slot: 0xe0bb78,
+    slotActive: 0x68d8ed,
+    buy: 0x7c4328,
+    buyStroke: 0xd0a65d,
     bossAura: 0xd66ac5,
-    ninjaAura: 0x66e6a8,
-    vfx: 0xffd35a,
+    ninjaAura: 0x62d8ed,
+    vfx: 0x62d8ed,
     backgroundTint: 0xffffff,
   },
 };
@@ -169,4 +169,3 @@ export function legacyStickerIdsForReachedStage(reachedStage: number): string[] 
   const reached = Math.max(1, Math.floor(reachedStage));
   return BOSS_STICKERS.filter((sticker) => sticker.stage < reached).map((sticker) => sticker.id);
 }
-

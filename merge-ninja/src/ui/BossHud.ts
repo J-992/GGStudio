@@ -9,6 +9,7 @@ import type { DojoStyleDef } from '../data/dojoStyles';
 export class BossHud extends Phaser.GameObjects.Container {
   private readonly fill: Phaser.GameObjects.NineSlice;
   private readonly label: Phaser.GameObjects.BitmapText;
+  private readonly status: Phaser.GameObjects.BitmapText;
   private readonly stage: Phaser.GameObjects.BitmapText;
   private readonly bossName: Phaser.GameObjects.BitmapText;
   private readonly namePlate: Phaser.GameObjects.NineSlice;
@@ -26,48 +27,53 @@ export class BossHud extends Phaser.GameObjects.Container {
     super(sceneRef, 0, 0); sceneRef.add.existing(this).setDepth(30);
     this.namePlate = sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'banner_name_9', 80, 24, 11, 11, 7, 7);
     this.stagePlate = sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'banner_name_9', 80, 24, 11, 11, 7, 7).setTint(0x6d91b8);
-    this.stage = sceneRef.add.bitmapText(0, 0, 'pixel', '', 14).setOrigin(.5).setTint(0xffe58a);
-    this.bossName = sceneRef.add.bitmapText(0, 0, 'pixel', '', 14).setOrigin(.5).setTint(0xffffff);
+    this.stage = sceneRef.add.bitmapText(0, 0, 'pixel', '', 12).setOrigin(.5).setTint(0xffe58a);
+    this.bossName = sceneRef.add.bitmapText(0, 0, 'pixel', '', 12).setOrigin(.5).setTint(0xf7ead1);
     this.barBack = sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'panel_frame_9', this.barWidth, 24, 8, 8, 8, 8);
     this.fill = sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'banner_name_9', this.barWidth - 8, 14, 11, 11, 7, 7).setOrigin(0, .5).setTint(0xc94e4a);
     this.tapDamageCut = sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'banner_name_9', 1, 14, 11, 11, 7, 7).setOrigin(0, .5).setVisible(false);
-    this.label = sceneRef.add.bitmapText(0, 0, 'pixel', '', 14).setOrigin(.5).setTint(0xffffff);
-    this.add([this.namePlate, this.stagePlate, this.barBack, this.fill, this.tapDamageCut, this.bossName, this.stage, this.label]);
+    this.label = sceneRef.add.bitmapText(0, 0, 'pixel', '', 11).setOrigin(.5).setTint(0xf7ead1);
+    this.status = sceneRef.add.bitmapText(0, 0, 'pixel', '', 10).setOrigin(.5).setTint(0xdab967);
+    this.add([this.namePlate, this.stagePlate, this.barBack, this.fill, this.tapDamageCut, this.bossName, this.stage, this.label, this.status]);
     core.events.onAny((event) => this.handle(event, core));
     this.setBoss(core);
+    this.status.setText(core.tempo.label);
   }
 
   relayout(): void {
     const a = theme.layout.arena;
     const centre = a.x + a.w / 2;
-    const top = a.y + 27;
+    // The physical ARENA plaque overlaps the bezel by 21px; the first HUD row
+    // begins below it so the stage can never disappear behind the sign.
+    const top = a.y + 34;
     const maxWidth = Math.max(150, a.w - 80);
     const nameWidth = Math.min(maxWidth, Math.ceil(this.bossName.width) + 30);
     const stageWidth = Math.min(maxWidth, Math.ceil(this.stage.width) + 30);
-    this.barWidth = Math.min(280, Math.max(156, a.w - 150));
-    this.stagePlate.setPosition(centre, top).setSize(stageWidth, 24);
+    this.barWidth = Math.min(238, Math.max(156, a.w - 190));
+    this.stagePlate.setPosition(centre, top).setSize(stageWidth, 20);
     this.stage.setPosition(centre, top);
-    this.namePlate.setPosition(centre, top + 28).setSize(nameWidth, 24);
-    this.bossName.setPosition(centre, top + 28);
-    this.barBack.setPosition(centre, top + 55).setSize(this.barWidth, 24);
-    this.fill.setPosition(centre - this.barWidth / 2 + 4, top + 55).setSize(Math.max(1, this.barWidth - 8), 14);
-    this.tapDamageCut.setPosition(centre - this.barWidth / 2 + 4, top + 55);
-    this.label.setPosition(centre, top + 55);
+    this.namePlate.setPosition(centre, top + 22).setSize(nameWidth, 20);
+    this.bossName.setPosition(centre, top + 22);
+    this.barBack.setPosition(centre, top + 44).setSize(this.barWidth, 18);
+    this.fill.setPosition(centre - this.barWidth / 2 + 4, top + 44).setSize(Math.max(1, this.barWidth - 8), 10);
+    this.tapDamageCut.setPosition(centre - this.barWidth / 2 + 4, top + 44);
+    this.label.setPosition(centre, top + 44);
+    this.status.setPosition(centre, top + 59);
   }
 
   override update(): void {
     this.shownHp += (this.targetHp - this.shownHp) * .18;
-    this.fill.setSize(Math.max(1, (this.barWidth - 8) * Math.max(0, this.shownHp / this.maxHp)), 14);
+    this.fill.setSize(Math.max(1, (this.barWidth - 8) * Math.max(0, this.shownHp / this.maxHp)), 10);
     this.label.setText(`${compactNumber(this.shownHp)} / ${compactNumber(this.maxHp)}`);
   }
 
   applyDojoStyle(style: DojoStyleDef): void {
-    const crimson = style.id === 'crimson-dojo';
-    this.namePlate.setTint(crimson ? style.palette.plate : 0xffffff);
-    this.stagePlate.setTint(crimson ? style.palette.panel : 0x6d91b8);
-    this.barBack.setTint(crimson ? style.palette.frame : 0xffffff);
-    this.fill.setTint(crimson ? style.palette.vfx : 0xc94e4a);
-    this.stage.setTint(crimson ? style.palette.accentBright : 0xffe58a);
+    this.namePlate.setTint(style.palette.panel);
+    this.stagePlate.setTint(style.palette.panelDark);
+    this.barBack.setTint(style.palette.frame);
+    this.fill.setTint(style.id === 'crimson-dojo' ? style.palette.vfx : theme.colors.danger);
+    this.stage.setTint(style.palette.accentBright);
+    this.status.setTint(style.palette.accent);
   }
 
   private handle(event: GameEvent, core: GameCore): void {
@@ -80,6 +86,7 @@ export class BossHud extends Phaser.GameObjects.Container {
     }
     if (event.type === 'bossDefeated') this.sceneRef.tweens.add({ targets: this, alpha: .25, duration: 160, yoyo: true });
     if (event.type === 'bossSpawned') this.setBoss(core);
+    if (event.type === 'tempoChanged') this.status.setText(event.label);
   }
 
   private setBoss(core: GameCore): void {
@@ -105,7 +112,7 @@ export class BossHud extends Phaser.GameObjects.Container {
     if (source === 'tap') this.tapColorStep += 1;
     this.tapDamageCut
       .setPosition(left + usableWidth * start, this.tapDamageCut.y)
-      .setSize(width, 14)
+      .setSize(width, 10)
       .setTint(color)
       .setAlpha(1)
       .setVisible(true);

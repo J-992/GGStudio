@@ -6,6 +6,7 @@ import { playVfx, vfxSource } from '../effects/vfxPlayback';
 import { NinjaSprite } from './NinjaSprite';
 import { TrashSlot, TRASH_PICKUP_RADIUS } from './TrashSlot';
 import { SlotOverlays } from './SlotOverlays';
+import { PanelChrome } from './PanelChrome';
 import { theme } from './theme';
 import type { Fx } from '../effects/Fx';
 import type { Sfx } from '../audio/Sfx';
@@ -24,6 +25,13 @@ const CLOUD_LAYERS = [
   { dx: 11, dy: 2, scale: 0.44, tint: 0x36322c },
   { dx: 0, dy: -12, scale: 0.4, tint: 0x59534a },
 ] as const;
+
+/**
+ * The tug a locked tile gives when it is pressed. Three short shudders across
+ * roughly a quarter second: long enough to be read as a refusal, short enough
+ * that a player mashing the board is never waiting on it.
+ */
+const LOCK_RATTLE = { shiftPx: 4, beatMs: 45, beats: 2, jolt: 1.07 } as const;
 
 const EMBER_TINTS = [0xffd23f, 0xff9d3c, 0xfff4a8] as const;
 /** Cool blue-white advertising a trade, against the gold that means merge. */
@@ -44,10 +52,11 @@ type SmokeRun = {
 
 /** A clipped 4x3 roster: the board model and the presentation now agree. */
 export class MergeBoard extends Phaser.GameObjects.Container {
-  private readonly boardFrame: Phaser.GameObjects.NineSlice;
+  private readonly boardFrame: PanelChrome;
   private readonly titlePlate: Phaser.GameObjects.NineSlice;
   private readonly title: Phaser.GameObjects.BitmapText;
   private readonly deck: Phaser.GameObjects.TileSprite;
+  private readonly padShadows: Phaser.GameObjects.Ellipse[] = [];
   private readonly pads: Phaser.GameObjects.Image[] = [];
   private readonly sprites = new Map<number, NinjaSprite>();
   private readonly contentMaskShape: Phaser.GameObjects.Graphics;
@@ -91,30 +100,34 @@ export class MergeBoard extends Phaser.GameObjects.Container {
     this.deck = sceneRef.add
       .tileSprite(b.x + b.w / 2, b.y + b.h / 2, b.w - 16, b.h - 16, 'dojo_roster_deck')
       .setDepth(2);
-    this.boardFrame = sceneRef.add
-      .nineslice(b.x + b.w / 2, b.y + b.h / 2, 'game', 'frame_bezel', b.w, b.h, 20, 20, 20, 20)
-      .setDepth(5);
+    this.boardFrame = new PanelChrome(sceneRef, b, 'MERGE BOARD', 5);
     this.titlePlate = sceneRef.add
-      .nineslice(b.x + b.w / 2, b.y + 28, 'game', 'banner_name_9', b.w - 42, 28, 11, 11, 7, 7)
+      .nineslice(b.x + b.w / 2, b.y + 39, 'game', 'banner_name_9', b.w - 52, 26, 11, 11, 7, 7)
+      .setTint(theme.colors.woodDark)
       .setDepth(6);
     this.title = sceneRef.add
-      .bitmapText(b.x + b.w / 2, b.y + 28, 'pixel', 'YOUR NINJAS', 14)
+      .bitmapText(b.x + b.w / 2, b.y + 39, 'pixel', 'YOUR NINJAS', 13)
       .setOrigin(0.5)
-      .setTint(0xffffff)
+      .setTint(0xf2dfaa)
       .setDepth(7);
     this.contentMaskShape = sceneRef.add.graphics().setVisible(false);
     this.contentMask = this.contentMaskShape.createGeometryMask();
-    this.add([this.deck, this.boardFrame, this.titlePlate, this.title]);
+    this.add([this.deck, this.titlePlate, this.title]);
 
     for (let slot = 0; slot < BALANCE.board.slots; slot += 1) {
       const p = this.slotPos(slot);
+      const shadow = sceneRef
+        .add.ellipse(p.x, p.y + 15, 78, 20, 0x070505, 0.34)
+        .setDepth(2.4);
       const pad = sceneRef
         .add.image(p.x, p.y + 6, 'game', 'tile_stone')
         .setScale(theme.layout.slots.tileScale)
         .setDepth(2.5);
+      this.padShadows.push(shadow);
       this.pads.push(pad);
-      this.add(pad);
+      this.add([shadow, pad]);
     }
+    this.refreshLockedPads();
     this.hoverOutline = sceneRef.add.graphics().setVisible(false).setDepth(4);
     this.add(this.hoverOutline);
     this.dragHint = sceneRef.add.container(0, 0, [
@@ -144,9 +157,9 @@ export class MergeBoard extends Phaser.GameObjects.Container {
     this.deck
       .setPosition(b.x + b.w / 2, b.y + b.h / 2)
       .setSize(b.w - 16, b.h - 16);
-    this.boardFrame.setPosition(b.x + b.w / 2, b.y + b.h / 2).setSize(b.w, b.h);
-    this.titlePlate.setPosition(b.x + b.w / 2, b.y + 28).setSize(b.w - 42, 28);
-    this.title.setPosition(b.x + b.w / 2, b.y + 28);
+    this.boardFrame.relayout(b);
+    this.titlePlate.setPosition(b.x + b.w / 2, b.y + 39).setSize(b.w - 52, 26);
+    this.title.setPosition(b.x + b.w / 2, b.y + 39);
     // Clip to the panel interior: below the title plate, in to the bezel. The
     // grid fills this box, so it must not stop short of the lower bezel.
     this.contentMaskShape.clear().fillRect(b.x + 22, b.y + 56, b.w - 44, b.h - 78);
@@ -154,6 +167,7 @@ export class MergeBoard extends Phaser.GameObjects.Container {
     this.pads.forEach((pad, slot) => {
       const p = this.slotPos(slot);
       pad.setPosition(p.x, p.y + 6).setScale(theme.layout.slots.tileScale);
+      this.padShadows[slot]?.setPosition(p.x, p.y + 15).setScale(theme.layout.slots.tileScale, theme.layout.slots.tileScale);
     });
     for (const [id, sprite] of this.sprites) {
       const slot = this.findSlot(id);
@@ -165,14 +179,30 @@ export class MergeBoard extends Phaser.GameObjects.Container {
     }
   }
 
+  /**
+   * A locked slot wears a different pad, not a decoration over the same one.
+   *
+   * Crossed bars drawn over the live ivory tile read as ornament: the stone
+   * underneath stayed exactly as warm and usable as its eleven neighbours, so
+   * nothing said the cell was shut. `slot_locked` is that same tile gone cold
+   * and chained, which is legible before any icon is read -- and being one
+   * texture swap on one image, it costs a frame nothing.
+   */
+  private refreshLockedPads(): void {
+    const locked = new Set(this.core.lockedSlots);
+    this.pads.forEach((pad, slot) => {
+      if (locked.has(slot)) pad.setTexture('slot_locked');
+      else pad.setTexture('game', 'tile_stone');
+    });
+  }
+
   applyDojoStyle(style: DojoStyleDef): void {
     this.style = style;
-    const crimson = style.id === 'crimson-dojo';
-    this.deck.setTint(crimson ? style.palette.board : 0xffffff);
-    this.boardFrame.setTint(crimson ? style.palette.frame : 0xffffff);
-    this.titlePlate.setTint(crimson ? style.palette.plate : 0xffffff);
-    this.title.setTint(crimson ? 0xfff1c2 : 0xffffff);
-    this.pads.forEach((pad) => pad.setTint(crimson ? style.palette.slot : 0xffffff));
+    this.deck.setTint(style.palette.board);
+    this.boardFrame.applyDojoStyle(style);
+    this.titlePlate.setTint(style.palette.panelDark);
+    this.title.setTint(style.id === 'crimson-dojo' ? 0xfff1c2 : 0xf2dfaa);
+    this.pads.forEach((pad) => pad.setTint(style.palette.slot));
     this.sprites.forEach((sprite) => sprite.applyDojoStyle(style));
     this.overlays.applyDojoStyle(style);
   }
@@ -182,6 +212,63 @@ export class MergeBoard extends Phaser.GameObjects.Container {
    * above its slot anchor, so hit-testing a radius around (x, y) meant tapping
    * the empty tile below a ninja picked it up while tapping its head did not.
    */
+  /**
+   * A press on a slot the run has not earned yet.
+   *
+   * Nothing else on the board can say no. A locked cell holds no character to
+   * pick up and accepts no drop, so a player testing one gets silence back,
+   * which reads as a game that has stopped responding rather than as a rule.
+   * The tile now tugs against its chain and the lock rattles; the caller pairs
+   * that with the coach card naming the stage that opens it.
+   *
+   * Returns the slot pressed, or null if the press was not on a locked one.
+   */
+  pressLocked(pointer: Phaser.Input.Pointer): number | null {
+    const radius = theme.layout.slots.radius;
+    for (const slot of this.core.lockedSlots) {
+      const at = this.slotPos(slot);
+      if (Phaser.Math.Distance.Between(pointer.x, pointer.y, at.x, at.y + 6) > radius) continue;
+      this.rattleLock(slot);
+      return slot;
+    }
+    return null;
+  }
+
+  /** Test seam: how far a pad has been shoved from its resting place. */
+  padOffset(slot: number): number {
+    const pad = this.pads[slot];
+    if (pad === undefined) return 0;
+    return pad.x - this.slotPos(slot).x;
+  }
+
+  private rattleLock(slot: number): void {
+    const pad = this.pads[slot];
+    if (pad === undefined) return;
+    const home = this.slotPos(slot);
+    const base = theme.layout.slots.tileScale;
+    this.sceneRef.tweens.killTweensOf(pad);
+    pad.setPosition(home.x, home.y + 6).setScale(base);
+    this.sfx.play('error');
+    this.sceneRef.tweens.add({
+      targets: pad,
+      x: home.x + LOCK_RATTLE.shiftPx,
+      duration: LOCK_RATTLE.beatMs,
+      ease: 'Sine.easeInOut',
+      yoyo: true,
+      repeat: LOCK_RATTLE.beats,
+      // The shudder ends wherever the last half-beat left it, so the tile is
+      // put back by hand rather than trusted to land home.
+      onComplete: () => pad.setPosition(home.x, home.y + 6).setScale(base),
+    });
+    this.sceneRef.tweens.add({
+      targets: pad,
+      scale: base * LOCK_RATTLE.jolt,
+      duration: LOCK_RATTLE.beatMs * 1.5,
+      ease: 'Quad.easeOut',
+      yoyo: true,
+    });
+  }
+
   beginDrag(pointer: Phaser.Input.Pointer): boolean {
     let candidate: NinjaSprite | null = null;
     let best = Number.POSITIVE_INFINITY;
@@ -249,6 +336,7 @@ export class MergeBoard extends Phaser.GameObjects.Container {
     this.feedbackKey = '';
     this.clearFeedback();
     if (result === 'rejected') {
+      this.sfx.play('error');
       this.sceneRef.tweens.add({
         targets: sprite,
         x: sprite.homeX,
@@ -262,7 +350,7 @@ export class MergeBoard extends Phaser.GameObjects.Container {
       });
     } else {
       sprite.setScale(1).setAngle(0);
-      this.sfx.play(trashHit ? 'sell' : 'drop');
+      this.sfx.play(result === 'swapped' ? 'swap' : trashHit ? 'sell' : 'drop');
     }
     sprite.setDepth(3);
     this.dragged = null;
@@ -553,16 +641,20 @@ export class MergeBoard extends Phaser.GameObjects.Container {
       this.finalizeSmoke(event.id, 'cancel');
       const sprite = this.sprites.get(event.id);
       if (sprite !== undefined) {
-        this.fx.mergeFlash(this.trash.x, this.trash.y);
         this.fx.coins(sprite.x, sprite.y, 4);
         this.sceneRef.tweens.add({
           targets: sprite,
           x: this.trash.x,
           y: this.trash.y + 20,
-          scale: 0,
+          scaleX: 0.12,
+          scaleY: 0.04,
           alpha: 0,
-          duration: 220,
+          angle: sprite.x < this.trash.x ? 16 : -16,
+          duration: 210,
+          ease: 'Cubic.easeIn',
           onComplete: () => {
+            this.fx.mergeFlash(this.trash.x, this.trash.y);
+            this.trash.consume();
             sprite.destroy();
             this.sprites.delete(event.id);
           },
@@ -571,6 +663,9 @@ export class MergeBoard extends Phaser.GameObjects.Container {
       this.boardFingerprint = this.fingerprint();
     } else if (event.type === 'stateLoaded') {
       this.syncFromCore();
+      this.refreshLockedPads();
+    } else if (event.type === 'slotUnlocked') {
+      this.refreshLockedPads();
     } else if (event.type === 'mergeHint') {
       for (const slot of event.slots) this.pulse(slot);
       if (this.core.metrics.merges === 0) this.showDragHint(event.slots[0], event.slots[1]);
@@ -607,15 +702,19 @@ export class MergeBoard extends Phaser.GameObjects.Container {
 
   private animateMerge(event: Extract<GameEvent, { type: 'ninjaMerged' }>): void {
     const target = this.slotPos(event.toSlot);
-    for (const id of event.consumedIds) {
+    for (const [index, id] of event.consumedIds.entries()) {
       const sprite = this.sprites.get(id);
       if (sprite !== undefined) {
         this.sceneRef.tweens.add({
           targets: sprite,
           x: target.x,
           y: target.y,
-          alpha: 0.15,
-          duration: 150,
+          scaleX: 0.68,
+          scaleY: 1.16,
+          angle: index === 0 ? 8 : -8,
+          alpha: 0.2,
+          duration: 175,
+          ease: 'Cubic.easeIn',
           onComplete: () => {
             sprite.destroy();
             this.sprites.delete(id);
@@ -623,14 +722,25 @@ export class MergeBoard extends Phaser.GameObjects.Container {
         });
       }
     }
-    this.sceneRef.time.delayedCall(155, () => this.fx.mergeFlash(target.x, target.y), undefined, this);
-    this.sceneRef.time.delayedCall(245, () => {
+    this.sceneRef.time.delayedCall(135, () => this.fx.mergeFlash(target.x, target.y), undefined, this);
+    this.sceneRef.time.delayedCall(225, () => {
       this.fx.merge(target.x, target.y, event.result.tier);
       if (this.style.id === 'crimson-dojo') this.embers(target.x, target.y - 30, 9);
       this.sfx.play('merge', event.result.tier);
       const result = this.make(event.result.id, event.result.tier, event.toSlot, true);
-      result.setScale(1.5);
-      this.sceneRef.tweens.add({ targets: result, scale: 1, duration: 360, ease: 'Back.easeOut' });
+      result.setScale(1.36, 0.82).setAlpha(0.2).setY(target.y - 8);
+      this.sceneRef.tweens.add({
+        targets: result,
+        scaleX: 1,
+        scaleY: 1,
+        alpha: 1,
+        y: target.y,
+        duration: 330,
+        ease: 'Back.easeOut',
+      });
+      if (event.result.tier >= 5) {
+        this.sceneRef.time.delayedCall(80, () => this.fx.mergeFlash(target.x, target.y), undefined, this);
+      }
       if (event.result.tier >= 5) this.fx.shake(event.result.tier >= 8 ? 0.011 : 0.006, 130);
       this.escalateForChain(target.x, target.y);
     });

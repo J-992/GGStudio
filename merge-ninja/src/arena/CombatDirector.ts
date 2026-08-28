@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import type { GameEvent } from '../core/EventBus';
 import type { Sfx } from '../audio/Sfx';
-import { ninjaDef } from '../data/ninjas';
+import { ninjaDef, ninjaVfxStyle } from '../data/ninjas';
 import { ninjaCatalogPortrait } from '../render/atlasConfig';
 import {
   NINJA_BASIC_FOUR_FRAME,
@@ -17,6 +17,7 @@ import { VFXManager } from '../effects/VFXManager';
 import { ArenaManager, type ArenaActor } from './ArenaManager';
 import { compactNumber } from '../ui/theme';
 import { CLASSIC_DOJO_STYLE, type DojoStyleDef } from '../data/dojoStyles';
+import type { AttackTrailKind } from '../effects/TrailSystem';
 
 /**
  * Rhythm-driven choreography. GameCore owns damage; this class gives every
@@ -41,6 +42,9 @@ export class CombatDirector {
   /** A short visible history makes a rapid tap streak read as a rising combo. */
   private readonly tapComboLabels: Phaser.GameObjects.BitmapText[] = [];
   private tapComboLabelCursor = 0;
+  /** Reusable over-boss blades make a Frenzy hit read as a physical impact. */
+  private readonly embeddedFrenzyShurikens: Phaser.GameObjects.Image[] = [];
+  private embeddedFrenzyCursor = 0;
   private style: DojoStyleDef = CLASSIC_DOJO_STYLE;
 
   constructor(private readonly scene: Phaser.Scene, private readonly arena: ArenaManager, private readonly vfx: VFXManager, private readonly fx: Fx, private readonly sfx: Sfx) {
@@ -49,6 +53,13 @@ export class CombatDirector {
         // Above the boss (depth 40) and the arena HUD (depth 30), so a fast
         // streak never disappears behind the character art on a small phone.
         scene.add.bitmapText(-100, -100, 'pixel', '', 18).setOrigin(.5).setDepth(60).setVisible(false),
+      );
+    }
+    for (let index = 0; index < 10; index += 1) {
+      this.embeddedFrenzyShurikens.push(
+        scene.add.image(-100, -100, 'powerup_shuriken_frenzy')
+          .setDepth(46)
+          .setVisible(false),
       );
     }
   }
@@ -81,6 +92,7 @@ export class CombatDirector {
         this.reactBoss(this.lowBoss ? 2 : 1);
       }
     }
+    if (event.type === 'shurikenFrenzyVolley') this.launchFrenzyVolley(event.stage, event.shurikens);
     if (event.type === 'bossAttack') this.bossAttack(event.damage, this.arena.pick(Math.floor(this.scene.time.now / 190)));
     if (event.type === 'ninjaMerged') this.mergePayoff(event.result.tier);
     if (event.type === 'bossDefeated') this.defeat(event.reward);
@@ -88,6 +100,7 @@ export class CombatDirector {
       // Entrance VFX are recipe-driven per identity inside ArenaManager now;
       // anything fired here would double up or contradict a skyFall/eruption.
       this.bossActionCount = 0;
+      this.clearEmbeddedFrenzyShurikens();
       this.arena.refreshBoss(true);
     }
     if (event.type === 'ninjaSpawned') {
@@ -108,6 +121,77 @@ export class CombatDirector {
     this.fx.gain(boss.x, boss.y - boss.displayHeight * 0.3, 'MERGE STRIKE!');
     this.fx.shake(0.006, 100);
     this.sfx.play('strongHit');
+  }
+
+  /**
+   * Frenzy is a real volley, not a token spinner: each blade leaves the ninja
+   * line, targets the boss body, then makes contact before feedback plays.
+   * The stage guard prevents a projectile fired at a dying boss from hitting
+   * the next one during its entrance.
+   */
+  private launchFrenzyVolley(stage: number, shurikens: number): void {
+    const boss = this.arena.boss;
+    if (!boss.visible || this.arena.bossDef().stage !== stage) return;
+    const shooter = this.arena.highest();
+    const count = Math.max(1, Math.floor(shurikens));
+    for (let index = 0; index < count; index += 1) {
+      this.scene.time.delayedCall(index * 86, () => {
+        if (!boss.active || !boss.visible || this.arena.bossDef().stage !== stage) return;
+        const lane = index - (count - 1) / 2;
+        const source = new Phaser.Math.Vector2(
+          shooter?.sprite.x ?? boss.x - boss.displayWidth * .86,
+          (shooter?.sprite.y ?? boss.y + boss.displayHeight * .12) + lane * 11,
+        );
+        const target = new Phaser.Math.Vector2(
+          boss.x + Phaser.Math.FloatBetween(-.24, .14) * boss.displayWidth,
+          boss.y + Phaser.Math.FloatBetween(-.22, .2) * boss.displayHeight,
+        );
+        this.vfx.projectile('shuriken', source, target, 0xff6b57, () => {
+          if (!boss.active || !boss.visible || this.arena.bossDef().stage !== stage) return;
+          this.frenzyImpact(target.x, target.y);
+        });
+      });
+    }
+  }
+
+  /** Arrival feedback belongs at the end of the projectile tween, never launch. */
+  private frenzyImpact(x: number, y: number): void {
+    const boss = this.arena.boss;
+    this.vfx.impact(x, y, 0xffd4c7);
+    this.vfx.sparks(x, y, 0xff6b57, 5);
+    this.embedFrenzyShuriken(x, y);
+    this.flashBossHit();
+    // Attacks, entrances and defeat poses own the boss body; otherwise a
+    // clean sharp recoil confirms that the blades landed.
+    if (!this.scene.tweens.isTweening(boss)) this.reactBoss(1);
+  }
+
+  /** Code-native hit frames: an embedded blade stays on the body briefly. */
+  private embedFrenzyShuriken(x: number, y: number): void {
+    const blade = this.embeddedFrenzyShurikens[this.embeddedFrenzyCursor]!;
+    this.embeddedFrenzyCursor = (this.embeddedFrenzyCursor + 1) % this.embeddedFrenzyShurikens.length;
+    this.scene.tweens.killTweensOf(blade);
+    blade
+      .setPosition(x, y)
+      .setTint(0xffe1d7)
+      .setScale(0.36)
+      .setAngle(Phaser.Math.Between(-40, 40))
+      .setAlpha(1)
+      .setVisible(true);
+    this.scene.tweens.add({
+      targets: blade,
+      alpha: 0,
+      duration: 720,
+      ease: 'Quad.easeIn',
+      onComplete: () => blade.setVisible(false),
+    });
+  }
+
+  private clearEmbeddedFrenzyShurikens(): void {
+    for (const blade of this.embeddedFrenzyShurikens) {
+      this.scene.tweens.killTweensOf(blade);
+      blade.setVisible(false);
+    }
   }
 
   private intensity(): number { return this.forcedHigh || this.lowBoss ? 3 : Math.random() < .18 ? 2 : 1; }
@@ -393,9 +477,38 @@ export class CombatDirector {
     const color = this.style.id === 'crimson-dojo'
       ? (special ? this.style.palette.accentBright : this.style.palette.vfx)
       : def.vfx.color;
+    const trailFrom = new Phaser.Math.Vector2(
+      actor.sprite.x - actor.sprite.displayWidth * 0.32,
+      actor.sprite.y - actor.sprite.displayHeight * 0.12,
+    );
+    this.vfx.attackTrail(trailFrom, new Phaser.Math.Vector2(hitX, hitY), color, this.trailKind(actor.tier), special || intensity >= 2);
     if (special) this.ninjaSpecial(def.combat.style, hitX, hitY, color, intensity);
     else this.ninjaBasic(def.combat.style, actor, hitX, hitY, color, intensity);
     this.vfx.sparks(hitX + 7, hitY, color, special ? 7 + intensity : 2 + intensity);
+    if (special || intensity >= 2) {
+      this.fx.hitStop(special ? 55 : 34);
+    }
+  }
+
+  private trailKind(tier: number): AttackTrailKind {
+    switch (ninjaVfxStyle(tier)) {
+      case 'tide':
+      case 'frost':
+        return 'water';
+      case 'scarlet':
+      case 'sun':
+      case 'dawn':
+        return 'fire';
+      case 'storm':
+        return 'lightning';
+      case 'umbral':
+      case 'eclipse':
+      case 'astral':
+      case 'rune':
+        return 'shadow';
+      default:
+        return 'blade';
+    }
   }
 
   private ninjaBasic(style: CombatStyle, actor: ArenaActor, hitX: number, hitY: number, color: number, intensity: number): void {

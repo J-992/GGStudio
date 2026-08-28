@@ -73,7 +73,11 @@ export class SettingsPanel extends Phaser.GameObjects.Container {
     // A press that starts on the shade and ends there is a tap outside the
     // panel. Releasing there after dragging a slider off its track is not.
     this.shade.on('pointerdown', () => { this.pressedOnShade = true; });
-    this.shade.on('pointerup', () => { if (this.pressedOnShade && this.dragging === null) this.hide(); });
+    this.shade.on('pointerup', () => {
+      if (!this.pressedOnShade || this.dragging !== null) return;
+      this.sfx.play('click');
+      this.hide();
+    });
 
     this.add([this.shade, this.backing, this.panel, this.titlePlate, this.title, this.closeButton]);
 

@@ -16,7 +16,7 @@ import { FX_FRAMES } from '../render/atlasConfig';
 
 export type DraftCardId =
   | 'purse' | 'focus'
-  | 'recruit' | 'drill'
+  | 'recruit' | 'breakthrough' | 'drill'
   | 'bounty' | 'wager' | 'hotHand'
   | 'mend' | 'ward'
   | 'edge' | 'barrage'
@@ -46,6 +46,8 @@ export type DraftIcon =
   /** A standalone texture BootScene already loads for a pickup. */
   | { readonly kind: 'texture'; readonly key: string }
   | { readonly kind: 'ninja' }
+  /** The exact unseen fighter `breakthrough` will grant. */
+  | { readonly kind: 'breakthrough' }
   | { readonly kind: 'weakest' }
   | { readonly kind: 'strongest' }
   | { readonly kind: 'boss' };
@@ -83,6 +85,11 @@ export const DRAFT_CARDS: Readonly<Record<DraftCardId, DraftCardDef>> = {
     id: 'recruit', shape: 'tempo', label: 'RECRUIT',
     blurb: 'A FIGHTER JOINS YOU',
     icon: { kind: 'ninja' }, weight: 10,
+  },
+  breakthrough: {
+    id: 'breakthrough', shape: 'tempo', label: 'SECRET ART',
+    blurb: 'TWO TIERS ABOVE YOUR BEST',
+    icon: { kind: 'breakthrough' }, weight: 2,
   },
   drill: {
     id: 'drill', shape: 'tempo', label: 'DRILL',
@@ -160,7 +167,7 @@ export const DRAFT_CARDS: Readonly<Record<DraftCardId, DraftCardDef>> = {
 
 export const DRAFT_CARD_ORDER: readonly DraftCardId[] = [
   'purse', 'focus',
-  'recruit', 'drill',
+  'recruit', 'breakthrough', 'drill',
   'bounty', 'wager', 'hotHand',
   'mend', 'ward',
   'edge', 'barrage',
@@ -216,11 +223,14 @@ export interface DraftDrawState {
   readonly boardHasLockedSlot: boolean;
   /** False against a bare boss, which is the only time `disarm` has no trick to take. */
   readonly bossHasTrick: boolean;
+  /** False when fewer than two undiscovered roster tiers remain. */
+  readonly canBreakthrough: boolean;
 }
 
 /** Cards that cannot do anything useful in the state the run is actually in. */
 function eligible(id: DraftCardId, state: DraftDrawState): boolean {
   if (id === 'recruit') return state.boardHasFreeSlot;
+  if (id === 'breakthrough') return state.boardHasFreeSlot && state.canBreakthrough;
   if (id === 'drill') return state.boardHasFighter;
   if (id === 'echo') return state.boardHasFreeSlot && state.boardHasFighter;
   if (id === 'sweep') return state.boardHasDebris;

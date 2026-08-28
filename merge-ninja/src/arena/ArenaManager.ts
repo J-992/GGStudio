@@ -55,7 +55,9 @@ export class ArenaManager {
   private readonly bossAura: Phaser.GameObjects.Arc;
   private readonly bossCrest: Phaser.GameObjects.Image;
   private readonly actorPool: Phaser.GameObjects.Sprite[] = [];
+  private readonly actorShadows: Phaser.GameObjects.Ellipse[] = [];
   private readonly actorAuras: Phaser.GameObjects.Ellipse[] = [];
+  private readonly bossShadow: Phaser.GameObjects.Ellipse;
   private readonly maskShape: Phaser.GameObjects.Graphics;
   private bossFootInset = 0;
   private bossHasEntered = false;
@@ -67,6 +69,11 @@ export class ArenaManager {
     this.maskShape = scene.add.graphics().fillRect(a.x, a.y, a.w, a.h).setVisible(false);
     const mask = this.maskShape.createGeometryMask();
     for (let i = 0; i < 3; i += 1) {
+      this.actorShadows.push(
+        scene.add.ellipse(-200, -200, 72, 17, 0x050609, 0.34)
+          .setDepth(11)
+          .setMask(mask),
+      );
       this.actorAuras.push(
         scene.add.ellipse(-200, -200, 94, 24, 0xffc85b, 0.16)
           .setStrokeStyle(2, 0xffef9a, 0.58)
@@ -77,7 +84,8 @@ export class ArenaManager {
       );
       this.actorPool.push(scene.add.sprite(-200, -200, ATLAS_KEY, 'ninja_t1').setVisible(false).setDepth(12));
     }
-    this.bossAura = scene.add.circle(this.scenery.bossPlatform.x, this.scenery.bossPlatform.y - 105, 126, 0xd66ac5, .10).setDepth(10).setMask(mask);
+    this.bossShadow = scene.add.ellipse(-200, -200, 120, 24, 0x040507, 0.42).setDepth(33).setMask(mask);
+    this.bossAura = scene.add.circle(this.scenery.bossPlatform.x, this.scenery.bossPlatform.y - 105, 96, 0xd66ac5, .07).setDepth(10).setMask(mask);
     this.bossCrest = scene.add
       .image(this.scenery.bossPlatform.x, this.scenery.bossPlatform.y - 105, ATLAS_KEY, 'fx_ring')
       .setTint(0xffc85b)
@@ -102,6 +110,7 @@ export class ArenaManager {
       const ninja = owned[index];
       if (ninja === undefined) {
         sprite.setVisible(false);
+        this.actorShadows[index]?.setVisible(false);
         this.actorAuras[index]?.setVisible(false);
         return;
       }
@@ -132,7 +141,10 @@ export class ArenaManager {
       this.actorAuras[index]
         ?.setPosition(home.x, p.y - 7)
         .setScale(Math.max(.72, Math.min(1.1, actorScale * 1.25)))
-        .setVisible(this.style.id === 'crimson-dojo');
+        .setFillStyle(this.style.id === 'crimson-dojo' ? this.style.palette.ninjaAura : def.vfx.color, this.style.id === 'crimson-dojo' ? .17 : .07)
+        .setStrokeStyle(2, this.style.id === 'crimson-dojo' ? this.style.palette.accentBright : def.vfx.color, this.style.id === 'crimson-dojo' ? .62 : .28)
+        .setVisible(this.style.id === 'crimson-dojo' || ninja.tier >= 8);
+      this.actorShadows[index]?.setVisible(true);
       this.actors.push({ sprite, tier: ninja.tier, state: 'idle', home, scale: actorScale });
     });
     this.refreshBoss(false);
@@ -163,10 +175,11 @@ export class ArenaManager {
       .setAlpha(this.style.id === 'crimson-dojo' ? .28 : 0);
     this.bossAura
       .setPosition(x, y)
-      .setRadius(Math.min(142, this.boss.displayHeight * .55))
+      .setRadius(Math.min(96, this.boss.displayHeight * .4))
       .setScale(1)
-      .setAlpha(.15)
+      .setAlpha(.07)
       .setVisible(true);
+    this.bossShadow.setVisible(true);
     if (slide || !this.bossHasEntered) {
       this.bossHasEntered = true;
       this.enterBossFromPortal();
@@ -219,6 +232,7 @@ export class ArenaManager {
     if (this.bossCrest.visible) {
       this.bossCrest.setPosition(this.boss.x, this.boss.y).setAngle(this.scene.time.now * .018);
     }
+    this.updateGroundShadows();
   }
   relayout(): void { const a = theme.layout.arena; this.maskShape.clear().fillRect(a.x, a.y, a.w, a.h); this.scenery.relayout(); this.sync(); }
   bossHome(): Phaser.Math.Vector2 {
@@ -243,10 +257,12 @@ export class ArenaManager {
     this.bossAura.setFillStyle(crimson ? style.palette.bossAura : 0xd66ac5);
     this.bossCrest.setVisible(crimson).setTint(style.palette.accentBright).setAlpha(crimson ? .28 : 0);
     this.actorAuras.forEach((aura, index) => {
+      const actor = this.actors[index];
+      const accent = actor === undefined ? style.palette.ninjaAura : ninjaDef(actor.tier).vfx.color;
       aura
-        .setFillStyle(style.palette.ninjaAura, crimson ? .17 : 0)
-        .setStrokeStyle(2, style.palette.accentBright, crimson ? .62 : 0)
-        .setVisible(crimson && this.actorPool[index]?.visible === true);
+        .setFillStyle(crimson ? style.palette.ninjaAura : accent, crimson ? .17 : .07)
+        .setStrokeStyle(2, crimson ? style.palette.accentBright : accent, crimson ? .62 : .28)
+        .setVisible(this.actorPool[index]?.visible === true && (crimson || (actor?.tier ?? 0) >= 8));
     });
   }
   /**
@@ -369,16 +385,37 @@ export class ArenaManager {
 
   private startBossAuraPulse(): void {
     this.scene.tweens.killTweensOf(this.bossAura);
-    this.bossAura.setScale(1).setAlpha(.15);
+    this.bossAura.setScale(1).setAlpha(.07);
     this.scene.tweens.add({
       targets: this.bossAura,
-      alpha: .21,
-      scale: 1.07,
+      alpha: .11,
+      scale: 1.045,
       duration: 940,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
     });
+  }
+
+  /** Correlated foot shadows keep every root-motion pose tied to the floor. */
+  private updateGroundShadows(): void {
+    this.actors.forEach((actor, index) => {
+      const shadow = this.actorShadows[index];
+      const platform = this.scenery.platforms[index % this.scenery.platforms.length];
+      if (shadow === undefined || platform === undefined) return;
+      const lift = Math.max(0, platform.y - (actor.sprite.y + actor.sprite.displayHeight * (1 - actor.sprite.originY)));
+      const air = Phaser.Math.Clamp(lift / 90, 0, 0.7);
+      shadow
+        .setPosition(actor.sprite.x, platform.y + 3)
+        .setDisplaySize(Math.max(42, actor.sprite.displayWidth * (0.64 - air * .18)), 16 - air * 5)
+        .setAlpha(0.34 - air * .16)
+        .setVisible(actor.sprite.visible);
+    });
+    this.bossShadow
+      .setPosition(this.boss.x, this.scenery.bossPlatform.y + 4)
+      .setDisplaySize(Math.max(72, Math.min(176, this.boss.displayWidth * .68)), Math.max(16, Math.min(27, this.boss.displayHeight * .1)))
+      .setAlpha(this.boss.visible ? .4 : 0)
+      .setVisible(this.boss.visible);
   }
 
   /**

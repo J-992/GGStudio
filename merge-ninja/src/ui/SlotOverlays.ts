@@ -12,20 +12,20 @@ type SlotPos = (slot: number) => { x: number; y: number };
 const THROW_MS = 420;
 
 /**
- * Everything drawn over a board cell the player cannot use: debris a boss
- * threw, and slots not yet earned.
+ * Everything drawn over a board cell a boss has taken away, plus the ring that
+ * marks which locked slot opens next.
  *
- * The two are deliberately opposite in weight. Debris is thin, jittering and
- * wears a draining ring; a lock is heavy, still and nailed down. A player must
- * never mistake a twelve-second problem for a four-stage goal, and colour
- * alone would not carry that -- so the difference is in the drawing.
+ * Debris and locks are deliberately opposite in weight, because a player must
+ * never mistake a twelve-second problem for a four-stage goal. Debris is thin,
+ * jittering and wears a draining ring. A lock is heavy and still -- and it is
+ * not drawn here at all: it lives in the pad texture `MergeBoard` swaps in, so
+ * the cold chained stone reads as shut before any overlay is noticed.
  *
- * All of it is `Graphics`, which means it re-tints for free when the dojo skin
+ * What is left is `Graphics`, which re-tints for free when the dojo skin
  * changes and costs nothing to download. The thrown shuriken is the existing
  * `fx_star` frame, spun and darkened.
  */
 export class SlotOverlays extends Phaser.GameObjects.Container {
-  private readonly plankLayer: Phaser.GameObjects.Graphics;
   private readonly ringLayer: Phaser.GameObjects.Graphics;
   /** One embedded shuriken per blocked slot, keyed by slot. */
   private readonly shurikens = new Map<number, Phaser.GameObjects.Image>();
@@ -45,9 +45,8 @@ export class SlotOverlays extends Phaser.GameObjects.Container {
     super(sceneRef, 0, 0);
     sceneRef.add.existing(this).setDepth(3.5);
     this.style = core.equippedDojoStyle;
-    this.plankLayer = sceneRef.add.graphics();
     this.ringLayer = sceneRef.add.graphics();
-    this.add([this.plankLayer, this.ringLayer]);
+    this.add(this.ringLayer);
 
     core.events.on('debrisLanded', (event) => this.throwAt(event.slot));
     core.events.on('debrisCleared', (event) => this.shatter(event.slot, event.cause));
@@ -70,27 +69,19 @@ export class SlotOverlays extends Phaser.GameObjects.Container {
   }
 
   private redraw(): void {
-    const planks = this.plankLayer.clear();
     const rings = this.ringLayer.clear();
     const p = this.style.palette;
     const radius = theme.layout.slots.radius;
 
-    for (const slot of this.core.lockedSlots) {
-      const at = this.slotPos(slot);
-      const next = this.core.nextUnlockSlot === slot;
-      // Heavy, static, nailed shut: a goal, not a timer. Nothing about it
-      // moves, which is the whole contrast with debris.
-      this.drawPlanks(planks, at.x, at.y, radius * 0.9, 15, p.panel, p.panelDark, 0.85);
-      for (const angle of [Math.PI / 5, -Math.PI / 5]) {
-        for (const end of [-1, 1]) {
-          planks.fillStyle(p.panelDark, 0.9);
-          planks.fillCircle(at.x + Math.cos(angle) * radius * 0.9 * end, at.y + Math.sin(angle) * radius * 0.9 * end, 3);
-        }
-      }
-      if (!next) continue;
+    // The lock itself is the pad's own art now -- `MergeBoard` swaps a locked
+    // slot to the chained tile -- so nothing is drawn over a locked cell here
+    // except the ring marking which one opens next.
+    const next = this.core.nextUnlockSlot;
+    if (next !== null) {
+      const at = this.slotPos(next);
       const pulse = 0.35 + (Math.sin(this.glow) + 1) / 2 * 0.4;
-      rings.lineStyle(4, p.accent, pulse);
-      rings.strokeCircle(at.x, at.y, radius * 0.94);
+      rings.lineStyle(3, this.style.id === 'crimson-dojo' ? p.accent : theme.colors.water, pulse * 0.82);
+      rings.strokeCircle(at.x, at.y, radius * 0.76);
     }
 
     // Debris keeps the silhouette of the thing that made it: the shuriken that
@@ -130,30 +121,6 @@ export class SlotOverlays extends Phaser.GameObjects.Container {
     this.add(blade);
     this.shurikens.set(slot, blade);
     return blade;
-  }
-
-  private drawPlanks(
-    g: Phaser.GameObjects.Graphics,
-    x: number,
-    y: number,
-    half: number,
-    thickness: number,
-    fill: number,
-    stroke: number,
-    strokeAlpha: number,
-  ): void {
-    for (const angle of [Math.PI / 5, -Math.PI / 5]) {
-      const dx = Math.cos(angle) * half;
-      const dy = Math.sin(angle) * half;
-      if (strokeAlpha > 0) {
-        // Drawn under the plank, a shade wider, so each board reads as a solid
-        // object with an edge rather than a flat stroke of colour.
-        g.lineStyle(thickness + 5, stroke, strokeAlpha);
-        g.lineBetween(x - dx, y - dy, x + dx, y + dy);
-      }
-      g.lineStyle(thickness, fill, 0.98);
-      g.lineBetween(x - dx, y - dy, x + dx, y + dy);
-    }
   }
 
   /**

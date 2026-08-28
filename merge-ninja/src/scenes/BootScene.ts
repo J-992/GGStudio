@@ -37,6 +37,7 @@ export class BootScene extends Phaser.Scene {
     this.load.image('arena_cloud_bank', 'assets/arena-cloud-bank.webp');
     for (const art of bootThemeArt(resume)) this.load.image(art.key, art.path);
     this.load.image('dojo_roster_deck', 'assets/dojo-roster-deck.webp');
+    this.load.image('slot_locked', 'assets/slot-locked.webp');
     for (const id of POWERUP_ORDER) {
       const powerup = POWERUPS[id];
       this.load.image(powerup.iconTexture, powerup.iconPath);

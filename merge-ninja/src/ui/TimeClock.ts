@@ -162,7 +162,7 @@ export class TimeClock extends Phaser.GameObjects.Container {
     this.live = false;
 
     this.core.startTimeBoost(CLOCK.multiplier, CLOCK.boostMs);
-    this.sfx.play('newTier');
+    this.sfx.play('timer');
     this.fx.mergeFlash(this.x, this.y);
     this.scatter();
     this.sceneRef.tweens.killTweensOf(this.halo);

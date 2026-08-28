@@ -24,12 +24,12 @@ export class PlayerHud extends Phaser.GameObjects.Container {
   constructor(private readonly sceneRef: Phaser.Scene, core: GameCore) {
     super(sceneRef, 0, 0);
     sceneRef.add.existing(this).setDepth(31);
-    this.namePlate = sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'banner_name_9', 112, 22, 11, 11, 7, 7).setTint(0x567b58);
+    this.namePlate = sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'banner_name_9', 100, 18, 11, 11, 7, 7).setTint(0x355843);
     this.barBack = sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'panel_frame_9', this.barWidth, 20, 8, 8, 8, 8);
     this.fill = sceneRef.add.nineslice(0, 0, ATLAS_KEY, 'banner_name_9', this.barWidth - 8, 12, 11, 11, 7, 7).setOrigin(0, .5);
-    this.nameText = sceneRef.add.bitmapText(0, 0, 'pixel', 'NINJA LINE', 14).setOrigin(.5).setTint(0xeaf7e5);
-    this.value = sceneRef.add.bitmapText(0, 0, 'pixel', '', 14).setOrigin(.5).setTint(0xffffff);
-    this.tempo = sceneRef.add.bitmapText(0, 0, 'pixel', '', 14).setOrigin(0, .5).setTint(0xffdf82);
+    this.nameText = sceneRef.add.bitmapText(0, 0, 'pixel', 'NINJA LINE', 12).setOrigin(.5).setTint(0xeaf7e5);
+    this.value = sceneRef.add.bitmapText(0, 0, 'pixel', '', 11).setOrigin(.5).setTint(0xf7ead1);
+    this.tempo = sceneRef.add.bitmapText(0, 0, 'pixel', '', 11).setOrigin(0, .5).setTint(0xffdf82);
     this.add([this.namePlate, this.barBack, this.fill, this.nameText, this.value, this.tempo]);
     this.setHealth(core.playerHealth, core.playerMaxHealth, false);
     this.tempo.setText(core.tempo.label);
@@ -39,30 +39,29 @@ export class PlayerHud extends Phaser.GameObjects.Container {
 
   relayout(): void {
     const a = theme.layout.arena;
-    this.barWidth = theme.layout.landscape ? 166 : 176;
-    const left = a.x + 48;
-    const y = a.y + 102;
-    this.namePlate.setPosition(left + 56, y).setSize(112, 22);
-    this.nameText.setPosition(left + 56, y);
-    this.barBack.setPosition(left + this.barWidth / 2, y + 22).setSize(this.barWidth, 20);
-    this.fill.setPosition(left + 4, y + 22).setSize(Math.max(1, this.barWidth - 8), 12);
-    this.value.setPosition(left + this.barWidth / 2, y + 22);
-    this.tempo.setPosition(left + this.barWidth + 10, y + 22);
+    this.barWidth = theme.layout.landscape ? 146 : 158;
+    const left = a.x + 28;
+    const y = a.y + 86;
+    this.namePlate.setPosition(left + 50, y).setSize(100, 18);
+    this.nameText.setPosition(left + 50, y);
+    this.barBack.setPosition(left + this.barWidth / 2, y + 19).setSize(this.barWidth, 17);
+    this.fill.setPosition(left + 4, y + 19).setSize(Math.max(1, this.barWidth - 8), 9);
+    this.value.setPosition(left + this.barWidth / 2, y + 19);
+    this.tempo.setPosition(left + this.barWidth + 9, y + 19);
   }
 
   override update(): void {
     this.shownHp += (this.targetHp - this.shownHp) * .22;
     const ratio = Math.max(0, Math.min(1, this.shownHp / this.maxHp));
-    this.fill.setSize(Math.max(1, (this.barWidth - 8) * ratio), 12).setTint(this.healthColor(ratio));
+    this.fill.setSize(Math.max(1, (this.barWidth - 8) * ratio), 9).setTint(this.healthColor(ratio));
     this.value.setText(`${compactNumber(this.shownHp)} / ${compactNumber(this.maxHp)}`);
   }
 
   applyDojoStyle(style: DojoStyleDef): void {
-    const crimson = style.id === 'crimson-dojo';
-    this.namePlate.setTint(crimson ? style.palette.panel : 0x567b58);
-    this.barBack.setTint(crimson ? style.palette.frame : 0xffffff);
-    this.nameText.setTint(crimson ? 0xfff1c2 : 0xeaf7e5);
-    this.tempo.setTint(crimson ? style.palette.accentBright : 0xffdf82);
+    this.namePlate.setTint(style.id === 'crimson-dojo' ? style.palette.panel : 0x355843);
+    this.barBack.setTint(style.palette.frame);
+    this.nameText.setTint(style.id === 'crimson-dojo' ? 0xfff1c2 : 0xeaf7e5);
+    this.tempo.setTint(style.palette.accentBright);
   }
 
   private handle(event: GameEvent): void {

@@ -86,7 +86,7 @@ describe('screen-filling layout', () => {
       const l = configureLayout(width, height, ZERO);
       const content = Math.min(l.height, 1420);
       if (l.height <= content) return;
-      const topBand = l.arena.y - 18; // arena starts at backdrop + pad
+      const topBand = l.arena.y - 34; // physical title plaque occupies the added top clearance
       // The stack ends one pad short of the content edge (the tuned design's
       // trailing breathing room), so the lower band runs 18px deeper.
       const bottomBand = l.height - (l.bottom.y + l.bottom.h) - 18;
@@ -186,10 +186,10 @@ describe('screen-filling layout', () => {
 
     expect(l.landscape).toBe(false);
     expect(l.width).toBe(720);
-    expect(l.arena).toEqual({ x: 18, y: 18, w: 684, h: 540 });
-    expect(l.board).toEqual({ x: 18, y: 576, w: 684, h: 420 });
+    expect(l.arena).toEqual({ x: 18, y: 34, w: 684, h: 531 });
+    expect(l.board).toEqual({ x: 18, y: 583, w: 684, h: 413 });
     expect(l.bottom).toEqual({ x: 18, y: 1014, w: 684, h: 172 });
-    expect(l.slots.startY).toBe(758);
+    expect(l.slots.startY).toBe(763);
     expect(l.buy.y).toBe(1100);
   });
 
@@ -198,7 +198,7 @@ describe('screen-filling layout', () => {
 
     expect(l.landscape).toBe(true);
     expect(l.width).toBe(1440);
-    expect(l.arena).toEqual({ x: 24, y: 76, w: 735, h: 440 });
+    expect(l.arena).toEqual({ x: 24, y: 58, w: 735, h: 460 });
     expect(l.board.x).toBe(785);
     expect(l.board.w).toBe(631);
     expect(l.slots.startX).toBe(918);
@@ -243,7 +243,7 @@ describe('safe-area insets', () => {
   it('leaves the pinned compositions untouched at zero insets', () => {
     const portrait = configureLayout(720, 1204, ZERO);
     expect(portrait.bottom).toEqual({ x: 18, y: 1014, w: 684, h: 172 });
-    expect(portrait.arena.y).toBe(18);
+    expect(portrait.arena.y).toBe(34);
 
     const landscape = configureLayout(1440, 590, ZERO);
     expect(landscape.arena.x).toBe(24);

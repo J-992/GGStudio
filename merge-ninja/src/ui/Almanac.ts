@@ -448,6 +448,7 @@ export class Almanac extends Phaser.GameObjects.Container {
 
   private dismiss(): void {
     if (!this.pressedOnShade) return;
+    this.sfx.play('click');
     this.hide();
   }
 

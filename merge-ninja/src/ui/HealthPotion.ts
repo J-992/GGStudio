@@ -132,7 +132,7 @@ export class HealthPotion extends Phaser.GameObjects.Container {
     this.live = false;
 
     const healed = this.core.healPlayer(Math.ceil(this.core.playerMaxHealth * POTION.healRatio));
-    this.sfx.play('merge');
+    this.sfx.play('heal');
     this.fx.mergeFlash(this.x, this.y);
     this.scatter();
     this.showHealText(healed);

@@ -15,12 +15,12 @@ interface Lesson {
 const LESSONS: readonly Lesson[] = [
   {
     id: 'lockedSlots',
-    title: 'BOARDED-UP SLOTS',
+    title: 'LOCKED SLOTS',
     copy: (core) => {
       const stage = core.nextUnlockStage;
       return stage === null
         ? 'EVERY SLOT IS OPEN'
-        : `BEAT STAGE ${stage} TO PRY ONE OPEN`;
+        : `BEAT STAGE ${stage} TO UNLOCK ONE`;
     },
   },
   {
@@ -75,8 +75,8 @@ export class BoardCoach extends Phaser.GameObjects.Container {
   get isActive(): boolean { return this.visible; }
 
   /** Test seam: which lesson is on screen, if any. */
-  snapshot(): { visible: boolean; title: string } {
-    return { visible: this.visible, title: this.title.text };
+  snapshot(): { visible: boolean; title: string; copy: string } {
+    return { visible: this.visible, title: this.title.text, copy: this.copy.text };
   }
 
   relayout(): void {
@@ -100,11 +100,29 @@ export class BoardCoach extends Phaser.GameObjects.Container {
     if (event.type === 'debrisLanded') this.show('debris', event.slot);
   }
 
+  /**
+   * The same lesson, on demand, however many times the player asks for it.
+   *
+   * `show` fires once ever by design: the onboarding funnel says unprompted
+   * tutorial cards are where players leave. A tap on a locked slot is not
+   * unprompted -- it is the question this card answers -- so answering it again
+   * costs nothing and beats leaving the tap silent.
+   */
+  remind(id: BoardLessonId, slot: number): void {
+    if (this.visible || this.core.isGameOver) return;
+    this.core.completeBoardLesson(id);
+    this.render(id, slot);
+  }
+
   private show(id: BoardLessonId, slot: number): void {
     if (this.core.boardLessonSeen(id) || this.core.isGameOver) return;
+    this.core.completeBoardLesson(id);
+    this.render(id, slot);
+  }
+
+  private render(id: BoardLessonId, slot: number): void {
     const lesson = LESSONS.find((entry) => entry.id === id);
     if (lesson === undefined) return;
-    this.core.completeBoardLesson(id);
 
     this.title.setText(lesson.title);
     this.copy.setText(lesson.copy(this.core));

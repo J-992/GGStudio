@@ -5,15 +5,15 @@ import { compactNumber, theme } from './theme';
 import { CLASSIC_DOJO_STYLE, type DojoStyleDef } from '../data/dojoStyles';
 
 /** Crisper wallet coin: the 22px atlas frame drawn at x2.5 inside the plate. */
-const ICON_SCALE = 2.5;
+const ICON_SCALE = 2;
 /** Icon half-width at native 22px, scaled for the crisp draw. */
 const ICON_HALF = 11 * ICON_SCALE;
 /** Label starts just past the enlarged coin, so the two never crowd. */
-const TEXT_OFFSET = Math.ceil(ICON_HALF * 2) + 13;
-const FONT_SIZE = 16;
+const TEXT_OFFSET = Math.ceil(ICON_HALF * 2) + 12;
+const FONT_SIZE = 14;
 const PAD_X = 13;
 const PAD_Y = 7;
-const PLATE_RADIUS = 10;
+const PLATE_RADIUS = 7;
 const HOP_MS = 105;
 const SETTLE_MS = 190;
 const NORMAL_HOP_PX = 5;

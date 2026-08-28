@@ -6,12 +6,14 @@ import {
   type VfxAnimationId,
 } from '../data/vfxAssets';
 import { theme } from '../ui/theme';
+import { TrailSystem, type AttackTrailKind } from './TrailSystem';
 
 /** Bounded reusable arena-only effects. The mask is the hard board-readability boundary. */
 export class VFXManager {
   private readonly root: Phaser.GameObjects.Container;
   private readonly maskShape: Phaser.GameObjects.Graphics;
   private readonly pool: Phaser.GameObjects.Sprite[] = [];
+  private readonly trails: TrailSystem;
   private cursor = 0;
 
   constructor(private readonly scene: Phaser.Scene) {
@@ -26,6 +28,7 @@ export class VFXManager {
       )
       .setVisible(false);
     this.root.setMask(this.maskShape.createGeometryMask());
+    this.trails = new TrailSystem(scene, this.root);
     for (let i = 0; i < 64; i += 1) {
       const sprite = scene.add
         .sprite(-100, -100, VFX_ANIMATIONS.merge.textureKey, 0)
@@ -33,6 +36,20 @@ export class VFXManager {
       this.pool.push(sprite);
       this.root.add(sprite);
     }
+  }
+
+  attackTrail(
+    from: Phaser.Math.Vector2,
+    to: Phaser.Math.Vector2,
+    color: number,
+    kind: AttackTrailKind,
+    strong = false,
+  ): void {
+    this.trails.emit(from, to, color, kind, strong);
+  }
+
+  update(dtMs: number): void {
+    this.trails.update(dtMs);
   }
 
   slash(
@@ -131,6 +148,7 @@ export class VFXManager {
     from: Phaser.Math.Vector2,
     to: Phaser.Math.Vector2,
     color = 0xffffff,
+    onImpact?: () => void,
   ): void {
     const fx =
       kind === 'coin'
@@ -154,6 +172,7 @@ export class VFXManager {
       fx,
       { x: to.x, y: to.y, angle: 540, alpha: 0, scale: fx.scaleX * 0.72 },
       300,
+      onImpact,
     );
   }
 
@@ -313,12 +332,16 @@ export class VFXManager {
     fx: Phaser.GameObjects.Sprite,
     properties: object,
     duration: number,
+    onComplete?: () => void,
   ): void {
     this.scene.tweens.add({
       targets: fx,
       ...properties,
       duration,
-      onComplete: () => fx.stop().setVisible(false),
+      onComplete: () => {
+        fx.stop().setVisible(false);
+        onComplete?.();
+      },
     });
   }
 }

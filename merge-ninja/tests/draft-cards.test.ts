@@ -83,6 +83,31 @@ describe('board-shape cards', () => {
   });
 });
 
+describe('tempo-shape cards', () => {
+  it('secret art grants a ninja exactly two tiers above the best unlocked tier', () => {
+    const game = started();
+    game.spawnTier(5);
+    const discovered: number[] = [];
+    game.events.on('newTierDiscovered', (event) => discovered.push(event.tier));
+
+    game.takeDraftCardForTest('breakthrough');
+
+    expect(game.board.slots.some((ninja) => ninja?.tier === 7)).toBe(true);
+    expect(game.progression.highestTierEverOwned).toBe(7);
+    expect(discovered).toEqual([7]);
+  });
+
+  it('secret art clamps safely at the final roster tier', () => {
+    const game = started();
+    game.spawnTier(BALANCE.tiers.count - 1);
+
+    game.takeDraftCardForTest('breakthrough');
+
+    expect(game.board.slots.some((ninja) => ninja?.tier === BALANCE.tiers.count)).toBe(true);
+    expect(game.progression.highestTierEverOwned).toBe(BALANCE.tiers.count);
+  });
+});
+
 describe('counter-shape cards', () => {
   it('disarm strips the boss modifier and leaves the next boss its own', () => {
     const game = started();

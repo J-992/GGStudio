@@ -53,35 +53,61 @@ type Layout = {
 };
 
 const colors = {
-  background: 0x101822,
+  background: 0x090d14,
+  backgroundNavy: 0x0d1522,
+  charcoal: 0x151922,
+  woodDark: 0x24130f,
+  wood: 0x5c3021,
+  woodLight: 0x8c5635,
+  brass: 0xb58a43,
+  brassHighlight: 0xf0d28a,
+  parchment: 0xe3c98c,
+  parchmentLight: 0xf2dfaa,
+  parchmentInk: 0x3b2517,
+  arenaBlue: 0x5c91bd,
+  water: 0x62d8ed,
+  positive: 0x68d5a6,
+  special: 0x9d6bea,
+  danger: 0xc94b46,
   skyTop: 0x8fd3f0,
   skyHorizon: 0xcfeaf5,
   groundEarth: 0xd9a86c,
   groundShade: 0xb9843f,
-  matStraw: 0xe8cf94,
-  matBorder: 0xc9a25f,
+  matStraw: 0xd7b66f,
+  matBorder: 0xb58a43,
   bambooLight: 0x6fbf52,
   bambooDark: 0x4f9c3a,
   bannerRed: 0xd64541,
   bannerDark: 0xb3332f,
-  board: 0xa5714a,
-  plankLine: 0x8a5c3a,
-  slot: 0xc99a6b,
-  slotStroke: 0x8a5c3a,
-  bottomBar: 0x7d5233,
-  panel: 0x8a5c3a,
-  slotActive: 0xffd23f,
-  text: '#ffffff',
+  board: 0x69402b,
+  plankLine: 0x3e2118,
+  slot: 0xd4af69,
+  slotStroke: 0x78502f,
+  bottomBar: 0x2a1713,
+  panel: 0x4d281d,
+  slotActive: 0x70d8ef,
+  text: '#f7ead1',
   textDark: '#2b2118',
-  muted: '#2b2118',
-  coin: 0xffd23f,
-  buy: 0x45b93d,
-  buyDisabled: 0x8d968c,
-  trash: 0xd64541,
+  muted: '#bca98b',
+  coin: 0xf2c44f,
+  buy: 0x7c4328,
+  buyDisabled: 0x4b4039,
+  trash: 0xb84a43,
   health: 0x57c94e,
   enemyHealth: 0xd64541,
   shadow: 0x2b1d12,
 } as const;
+
+/** Shared spatial and motion language for UI components and game feedback. */
+const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
+const motion = {
+  pressMs: 90,
+  hoverMs: 120,
+  fastMs: 180,
+  standardMs: 280,
+  slowMs: 460,
+} as const;
+const radii = { small: 4, medium: 8, large: 12 } as const;
 
 const font = {
   tiny: '17px sans-serif',
@@ -91,9 +117,19 @@ const font = {
   big: '17px sans-serif',
 } as const;
 
-export const theme: { colors: typeof colors; font: typeof font; layout: Layout } = {
+export const theme: {
+  colors: typeof colors;
+  font: typeof font;
+  spacing: typeof spacing;
+  motion: typeof motion;
+  radii: typeof radii;
+  layout: Layout;
+} = {
   colors,
   font,
+  spacing,
+  motion,
+  radii,
   layout: {
     width: 720,
     height: 1204,
@@ -162,7 +198,7 @@ const DESIGN_WIDTH = { portrait: 720, landscape: 1440 } as const;
  */
 const CANVAS = {
   portrait: { minHeight: 860, maxHeight: 2000, maxContent: 1420 },
-  landscape: { minHeight: 520, maxHeight: 1400, maxContent: 720 },
+  landscape: { minHeight: 520, maxHeight: 1400, maxContent: 770 },
 } as const;
 
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
@@ -272,11 +308,12 @@ export function configureLayout(viewWidth: number, viewHeight: number, insets: S
     const left = Math.round(insets.left * scaleUp);
     const right = Math.round(insets.right * scaleUp);
 
-    const bottom = { x: 785 - right, y: top + content - 83, w: 631, h: 70 };
-    const board = { x: 785 - right, y: top + 76, w: 631, h: bottom.y - (top + 76) - 11 };
+    const panelY = top + 58;
+    const bottom = { x: 785 - right, y: top + content - 72, w: 631, h: 62 };
+    const board = { x: 785 - right, y: panelY, w: 631, h: bottom.y - panelY - 10 };
     // The arena gives up exactly the padded amount on both sides so the gap
     // between it and the roster column stays at the tuned 26px.
-    const arena = { x: 24 + left, y: top + 76, w: Math.max(1, 735 - left - right), h: content - 150 };
+    const arena = { x: 24 + left, y: panelY, w: Math.max(1, 735 - left - right), h: board.h + 10 };
     const railY = bottom.y + bottom.h / 2;
     const rows = slotRows(board.y, board.h, 0.1571, 0.2333);
 
@@ -287,9 +324,9 @@ export function configureLayout(viewWidth: number, viewHeight: number, insets: S
       arena,
       board,
       bottom,
-      charScale: 0.78,
-      arenaNinjaHeight: 96,
-      bossHeight: 196,
+      charScale: 0.74,
+      arenaNinjaHeight: 92,
+      bossHeight: 184,
       enemy: { x: 615, y: Math.round(arena.y + arena.h * 0.6182) },
       champion: { x: 305, y: Math.round(arena.y + arena.h * 0.7409) },
       groundY: Math.round(arena.y + arena.h * 0.8545),
@@ -303,14 +340,14 @@ export function configureLayout(viewWidth: number, viewHeight: number, insets: S
         startY: rows.startY,
         gapX: 122,
         gapY: rows.gapY,
-        radius: 56, snapRadius: 74, spriteScale: 0.78, tileScale: 1.2,
+        radius: 52, snapRadius: 74, spriteScale: 0.7, tileScale: 1.06,
       },
       buy: { x: 1126 - right, y: railY, w: 232, h: 60 },
       trash: { x: 1368 - right, y: railY, radius: 27 },
-      almanac: { x: 831 - right, y: board.y + 62 },
-      settings: { x: 887 - right, y: board.y + 62 },
-      achievements: { x: 943 - right, y: board.y + 62 },
-      ascension: { x: 999 - right, y: board.y + 62 },
+      almanac: { x: 831 - right, y: board.y + 70 },
+      settings: { x: 887 - right, y: board.y + 70 },
+      achievements: { x: 943 - right, y: board.y + 70 },
+      ascension: { x: 999 - right, y: board.y + 70 },
       coin: { x: 825 - right, y: railY },
     });
   } else {
@@ -326,12 +363,13 @@ export function configureLayout(viewWidth: number, viewHeight: number, insets: S
     const top = topInset + Math.round(Math.max(0, availH - content) / 2);
 
     const pad = 18;
+    const topPad = 34;
     const railH = Math.round(clamp(content * 0.143, 132, 190));
-    const stack = content - pad * 4 - railH;
+    const stack = content - topPad - pad * 3 - railH;
     // The grid is the one panel that cannot be squeezed: on a short canvas the
     // arena gives up the room instead, since a cropped stage still reads fine.
     const boardH = Math.max(Math.round(stack * 0.4375), MIN_BOARD_HEIGHT);
-    const arena = { x: pad, y: top + pad, w: 684, h: stack - boardH };
+    const arena = { x: pad, y: top + topPad, w: 684, h: stack - boardH };
     const board = { x: pad, y: arena.y + arena.h + pad, w: 684, h: boardH };
     const bottom = { x: pad, y: board.y + board.h + pad, w: 684, h: railH };
     const railY = bottom.y + bottom.h / 2;
@@ -344,9 +382,9 @@ export function configureLayout(viewWidth: number, viewHeight: number, insets: S
       arena,
       board,
       bottom,
-      charScale: 0.8,
-      arenaNinjaHeight: 108,
-      bossHeight: 212,
+      charScale: 0.76,
+      arenaNinjaHeight: 102,
+      bossHeight: 198,
       enemy: { x: 510, y: Math.round(arena.y + arena.h * 0.637) },
       champion: { x: 272, y: Math.round(arena.y + arena.h * 0.7481) },
       groundY: Math.round(arena.y + arena.h * 0.9),
@@ -360,14 +398,14 @@ export function configureLayout(viewWidth: number, viewHeight: number, insets: S
         startY: rows.startY,
         gapX: 128,
         gapY: rows.gapY,
-        radius: 62, snapRadius: 74, spriteScale: 0.78, tileScale: 1.25,
+        radius: 58, snapRadius: 74, spriteScale: 0.72, tileScale: 1.12,
       },
       buy: { x: 382, y: railY, w: 230, h: 92 },
       trash: { x: 628, y: railY, radius: 34 },
-      almanac: { x: 70, y: board.y + 62 },
-      settings: { x: 132, y: board.y + 62 },
-      achievements: { x: 194, y: board.y + 62 },
-      ascension: { x: 256, y: board.y + 62 },
+      almanac: { x: 70, y: board.y + 70 },
+      settings: { x: 132, y: board.y + 70 },
+      achievements: { x: 194, y: board.y + 70 },
+      ascension: { x: 256, y: board.y + 70 },
       coin: { x: 90, y: railY },
     });
   }

@@ -215,7 +215,7 @@ describe('PowerupSystem gating', () => {
     expect(refire).toBe('shurikenFrenzy');
   });
 
-  it('lets overdue defs surface one per poll cycle after a long gate', () => {
+  it('releases overdue defs one at a time after a long gate', () => {
     let open = false;
     const sys = new PowerupSystem([frenzyDef(), smokeDef()], {
       rng: seededRng(11),
@@ -231,8 +231,29 @@ describe('PowerupSystem gating', () => {
       const id = sys.maybeSpawn(400_000);
       if (id !== null) drained.push(id);
     }
-    // Both overdue defs eventually surface, each exactly once.
-    expect(drained.sort()).toEqual(['shurikenFrenzy', 'smokeBomb']);
+    // The first overdue pickup is offered now; other ids wait for a full
+    // readable pickup window instead of popping in as a pack.
+    expect(drained).toEqual(['shurikenFrenzy']);
+    expect(sys.maybeSpawn(418_100)).toBe('smokeBomb');
+  });
+
+  it('separates overdue offers by a full readable pickup window', () => {
+    let open = false;
+    const sys = new PowerupSystem([frenzyDef(), smokeDef()], {
+      rng: seededRng(12),
+      canSpawn: () => open,
+    });
+    // Simulate a long modal/ad hold: both definitions are overdue when the
+    // board becomes interactive again.
+    sys.update(400_000);
+    expect(sys.maybeSpawn(400_000)).toBeNull();
+
+    open = true;
+    expect(sys.maybeSpawn(400_000)).toBe('shurikenFrenzy');
+    // A second token must not enter while the first can still be read/caught.
+    expect(sys.maybeSpawn(400_001)).toBeNull();
+    expect(sys.maybeSpawn(417_999)).toBeNull();
+    expect(sys.maybeSpawn(418_000)).toBe('smokeBomb');
   });
 });
 
@@ -303,6 +324,22 @@ describe('PowerupSystem stack policies', () => {
     // Third is refused as a new instance; policy refreshes nothing for extend.
     sys.activate('luckyCharm');
     expect(sys.activeEffects()).toHaveLength(2);
+  });
+});
+
+describe('Shuriken Frenzy presentation signals', () => {
+  it('emits a targeted opening volley and recurring volleys only while Frenzy is active', () => {
+    const game = new GameCore({ storage: null, now: () => 0 });
+    const volleys: Extract<import('../src/core/EventBus').GameEvent, { type: 'shurikenFrenzyVolley' }>[] = [];
+    game.events.on('shurikenFrenzyVolley', (event) => volleys.push(event));
+
+    expect(game.collectPowerup('shurikenFrenzy')).toBe(true);
+    expect(volleys).toEqual([{ type: 'shurikenFrenzyVolley', stage: 1, shurikens: 5 }]);
+
+    game.update(899);
+    expect(volleys).toHaveLength(1);
+    game.update(1);
+    expect(volleys.at(-1)).toEqual({ type: 'shurikenFrenzyVolley', stage: 1, shurikens: 3 });
   });
 });
 

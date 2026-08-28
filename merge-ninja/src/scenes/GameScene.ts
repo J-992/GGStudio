@@ -9,6 +9,7 @@ import { BossHud } from '../ui/BossHud';
 import { PlayerHud } from '../ui/PlayerHud';
 import { BuyButton } from '../ui/BuyButton';
 import { CurrencyDisplay } from '../ui/CurrencyDisplay';
+import { PanelChrome } from '../ui/PanelChrome';
 import { DebugPanel } from '../ui/DebugPanel';
 import { MergeBoard } from '../ui/MergeBoard';
 import { TrashSlot } from '../ui/TrashSlot';
@@ -17,6 +18,7 @@ import { ATLAS_KEY } from '../render/atlasConfig';
 import { ACHIEVEMENTS_ICON_KEY } from '../render/revealAssets';
 import { Fx } from '../effects/Fx';
 import { Sfx } from '../audio/Sfx';
+import { musicTrackForStage } from '../audio/Music';
 import { NinjaReveal } from '../ui/NinjaReveal';
 import { Almanac } from '../ui/Almanac';
 import { AchievementToast } from '../ui/AchievementToast';
@@ -104,9 +106,7 @@ export class GameScene extends Phaser.Scene {
   private background!: Phaser.GameObjects.Image;
   private arenaVfx!: VFXManager;
   private powerAuras!: PowerupAuras;
-  private arenaFrame!: Phaser.GameObjects.NineSlice;
-  private back!: Phaser.GameObjects.Image;
-  private readonly sectionTitles: Phaser.GameObjects.BitmapText[] = [];
+  private arenaFrame!: PanelChrome;
   private readonly gears: Array<{ image: Phaser.GameObjects.Image; speed: number }> = [];
   private boughtOnce = false;
   /** True when this create came from Settings' Restart, not from a boot. */
@@ -128,6 +128,9 @@ export class GameScene extends Phaser.Scene {
 
   init(data?: { restarted?: boolean }): void {
     this.core = new GameCore({});
+    // Sfx survives scene restarts, so select the saved run's act before the
+    // next player gesture starts (or continues) the procedural soundtrack.
+    this.sfx.setMusicTrack(musicTrackForStage(this.core.boss.stage));
     this.boughtOnce = false;
     this.playerStartedGameplay = false;
     this.restarted = data?.restarted === true;
@@ -148,7 +151,6 @@ export class GameScene extends Phaser.Scene {
     this.background = this.add.image(theme.layout.width / 2, theme.layout.height / 2, 'dojo_night_backdrop').setDepth(-2);
     this.layoutScreenBackground();
     this.makeBackdrop();
-    this.makeSectionTitles();
 
     this.fx = new Fx(this, this.sfx);
     this.arena = new ArenaManager(this, this.core);
@@ -174,7 +176,7 @@ export class GameScene extends Phaser.Scene {
     this.fx.setCoinTarget(() => new Phaser.Math.Vector2(this.currency.x, this.currency.y));
     this.buy = new BuyButton(this, () => this.onBuy(), this.fx, this.sfx);
     this.debug = new DebugPanel(this, this.core, (value) => this.director.setForceHigh(value));
-    this.reveal = new NinjaReveal(this, this.core);
+    this.reveal = new NinjaReveal(this, this.core, this.sfx);
     this.almanac = new Almanac(this, this.core, this.sfx);
     this.achievementsPanel = new AchievementsPanel(this, this.core, this.sfx);
     this.achievementToast = new AchievementToast(this);
@@ -253,7 +255,15 @@ export class GameScene extends Phaser.Scene {
       if (this.potion.tryCollect(pointer)) { this.startGameplayOnInteraction(); return; }
       if (this.powerups.tryCollect(pointer)) { this.startGameplayOnInteraction(); return; }
       if (this.arena.containsBossPoint(pointer.x, pointer.y) && this.core.tapBoss() > 0) { this.startGameplayOnInteraction(); return; }
-      if (this.board.beginDrag(pointer)) { this.startGameplayOnInteraction(); this.core.notePlayerAction(); }
+      if (this.board.beginDrag(pointer)) { this.startGameplayOnInteraction(); this.core.notePlayerAction(); return; }
+      // Pressing a slot the run has not earned is a question, so it gets the
+      // lesson naming the stage that opens it -- not just the tile's rattle.
+      // Not while the opening tutorial still owns the screen, though: stacking
+      // a second card on that one is the clutter the first playtest called out.
+      const lockedSlot = this.board.pressLocked(pointer);
+      if (lockedSlot === null) return;
+      this.startGameplayOnInteraction();
+      if (!this.tutorial.isActive && !this.tutorial.visible) this.boardCoach.remind('lockedSlots', lockedSlot);
     });
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       if (!this.modalOpen) this.board.moveDrag(pointer);
@@ -288,7 +298,11 @@ export class GameScene extends Phaser.Scene {
         });
       }
     });
-    this.core.events.on('ascended', () => { void reportPlatformHappyTime(1); });
+    this.core.events.on('ascended', () => {
+      this.sfx.setMusicTrack('dojo');
+      this.sfx.play('ascend');
+      void reportPlatformHappyTime(1);
+    });
     this.core.events.on('dojoStyleEquipped', (event) => {
       this.applyDojoStyle(this.core.equippedDojoStyle, event.source === 'unlock');
       if (event.source === 'unlock') {
@@ -300,6 +314,8 @@ export class GameScene extends Phaser.Scene {
     // arrivals take over the arena, so forward progress feels meaningful
     // without interrupting the merge loop every few seconds.
     this.core.events.on('bossSpawned', (event) => {
+      this.sfx.setMusicTrack(musicTrackForStage(event.stage));
+      this.sfx.play(isRivalMilestoneStage(event.stage) ? 'stage' : 'bossIntro');
       if (!isRivalMilestoneStage(event.stage)) return;
       const arenaTheme = themeForStage(event.stage);
       this.stageBanner.announce(arenaTheme.label.toUpperCase(), `RIVAL REACHED - STAGE ${event.stage}`, 0xfff6dd);
@@ -334,7 +350,14 @@ export class GameScene extends Phaser.Scene {
       // open; without this the row it belongs to would stay greyed out.
       if (this.achievementsPanel.isOpen) this.achievementsPanel.refresh();
     });
-    this.core.events.on('gameOver', (event) => this.gameOver.show(event));
+    this.core.events.on('gameOver', (event) => {
+      this.sfx.setMusicTrack('results');
+      this.gameOver.show(event);
+    });
+    this.core.events.on('mergeComboRewarded', (event) => this.sfx.play('combo', event.count));
+    this.core.events.on('powerupExpired', () => this.sfx.play('powerupMiss'));
+    this.core.events.on('powerupWardBlocked', () => this.sfx.play('shield'));
+    this.core.events.on('bossAttack', () => this.sfx.play('attack'));
     this.core.events.on('boardFull', () => {
       this.buy.pulse();
       this.board.pulseMergeable();
@@ -342,6 +365,7 @@ export class GameScene extends Phaser.Scene {
     // A broke tap used to be completely silent: the click played, nothing
     // happened, and the button read as broken. Say how much is missing.
     this.core.events.on('purchaseRejected', (event) => {
+      this.sfx.play('error');
       if (event.reason !== 'coins') return;
       const shortfall = Math.max(1, this.core.buyCost - this.core.economy.coins);
       this.buy.reject(compactNumber(shortfall));
@@ -392,34 +416,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private makeSectionTitles(): void {
-    const arenaTitle = this.add
-      .bitmapText(0, 0, 'pixel', 'ARENA', 14)
-      .setOrigin(0.5)
-      .setTint(0xe9ece6)
-      .setDepth(60);
-    const rosterTitle = this.add
-      .bitmapText(0, 0, 'pixel', 'MERGE BOARD', 14)
-      .setOrigin(0.5)
-      .setTint(0xe9ece6)
-      .setDepth(60);
-    this.sectionTitles.push(arenaTitle, rosterTitle);
-    this.layoutSectionTitles();
-  }
-
-  private layoutSectionTitles(): void {
-    const [arenaTitle, rosterTitle] = this.sectionTitles;
-    const a = theme.layout.arena;
-    const b = theme.layout.board;
-    const y = Math.max(18, a.y - 37);
-    arenaTitle?.setPosition(a.x + a.w / 2, y);
-    rosterTitle?.setPosition(b.x + b.w / 2, y);
-    // Stacked portrait puts both panels on the same centre line, where the two
-    // captions printed on top of each other. The board carries its own title
-    // plate, so the roster caption only earns its place in landscape.
-    rosterTitle?.setVisible(theme.layout.landscape);
-  }
-
   /** Reveal, almanac, achievements, settings and game over take the screen; none leak drags. */
   private get modalOpen(): boolean {
     return this.reveal.isShowing || this.almanac.isOpen || this.achievementsPanel.isOpen
@@ -455,6 +451,8 @@ export class GameScene extends Phaser.Scene {
     const rewarded = await requestPlatformRewardedBreak();
     if (!rewarded || !this.core.reviveFromRewardedAd()) return false;
     this.gameOver.hide();
+    this.sfx.setMusicTrack(musicTrackForStage(this.core.boss.stage));
+    this.sfx.play('heal');
     return true;
   }
 
@@ -465,12 +463,12 @@ export class GameScene extends Phaser.Scene {
     // neighbours on the rail sit in a frame -- the row reads as one set of
     // controls instead of two styles.
     this.almanacPlate = this.add
-      .nineslice(a.x, a.y, ATLAS_KEY, 'banner_name_9', 56, 56, 11, 11, 7, 7)
-      .setTint(theme.colors.matStraw)
+      .nineslice(a.x, a.y, ATLAS_KEY, 'banner_name_9', 46, 46, 11, 11, 7, 7)
+      .setTint(theme.colors.woodLight)
       .setDepth(8);
     this.almanacButton = this.add
       .image(a.x, a.y, ATLAS_KEY, 'icon_book')
-      .setScale(1.7)
+      .setScale(1.35)
       .setDepth(9)
       .setInteractive(new Phaser.Geom.Rectangle(-6, -6, 38, 38), Phaser.Geom.Rectangle.Contains);
     this.almanacButton.on('pointerdown', () => {
@@ -481,7 +479,7 @@ export class GameScene extends Phaser.Scene {
     // A quiet progress counter under the book: informational, never urgent --
     // no red, no pulse, no timer. It only ever grows.
     this.almanacBadge = this.add
-      .bitmapText(a.x, a.y + 26, 'pixel', '', 14)
+      .bitmapText(a.x, a.y + 21, 'pixel', '', 11)
       .setOrigin(0.5, 0)
       .setTint(0xffe58a)
       .setDepth(9);
@@ -523,7 +521,7 @@ export class GameScene extends Phaser.Scene {
     const a = theme.layout.almanac;
     this.almanacPlate.setPosition(a.x, a.y);
     this.almanacButton.setPosition(a.x, a.y);
-    this.almanacBadge.setPosition(a.x, a.y + 26);
+    this.almanacBadge.setPosition(a.x, a.y + 21);
   }
 
   /**
@@ -535,14 +533,14 @@ export class GameScene extends Phaser.Scene {
   private makeSettingsButton(): void {
     const s = theme.layout.settings;
     this.settingsPlate = this.add
-      .nineslice(s.x, s.y, ATLAS_KEY, 'banner_name_9', 56, 56, 11, 11, 7, 7)
-      .setTint(theme.colors.matStraw)
+      .nineslice(s.x, s.y, ATLAS_KEY, 'banner_name_9', 46, 46, 11, 11, 7, 7)
+      .setTint(theme.colors.woodLight)
       .setDepth(8);
     this.settingsButton = this.add
       .image(s.x, s.y, ATLAS_KEY, 'prop_gear_small_a')
       // A near-white warm multiply keeps the cog's dark silhouette but lets
       // it pop against the light plate instead of sinking into the deck.
-      .setScale(1.25)
+      .setScale(1.02)
       .setTint(0xfff6dd)
       .setDepth(9)
       // Covers the 56px plate with a little margin (scale 1.25 turns this
@@ -581,12 +579,12 @@ export class GameScene extends Phaser.Scene {
   private makeAchievementsButton(): void {
     const a = theme.layout.achievements;
     this.achievementsPlate = this.add
-      .nineslice(a.x, a.y, ATLAS_KEY, 'banner_name_9', 56, 56, 11, 11, 7, 7)
-      .setTint(theme.colors.matStraw)
+      .nineslice(a.x, a.y, ATLAS_KEY, 'banner_name_9', 46, 46, 11, 11, 7, 7)
+      .setTint(theme.colors.woodLight)
       .setDepth(8);
     this.achievementsButton = this.add
       .image(a.x, a.y, ACHIEVEMENTS_ICON_KEY)
-      .setScale(1.4)
+      .setScale(1.12)
       .setDepth(9)
       // Same fix as the settings gear: written relative to the icon's own
       // native 30x30 frame, not centred at 0 -- see that comment for why.
@@ -600,7 +598,7 @@ export class GameScene extends Phaser.Scene {
     // The same quiet counter the almanac carries: it only ever grows, and it
     // is the one place a player can see how much is left to try.
     this.achievementsBadge = this.add
-      .bitmapText(a.x, a.y + 26, 'pixel', '', 14)
+      .bitmapText(a.x, a.y + 21, 'pixel', '', 11)
       .setOrigin(0.5, 0)
       .setTint(0xffe58a)
       .setDepth(9);
@@ -617,7 +615,7 @@ export class GameScene extends Phaser.Scene {
     const a = theme.layout.achievements;
     this.achievementsPlate.setPosition(a.x, a.y);
     this.achievementsButton.setPosition(a.x, a.y);
-    this.achievementsBadge.setPosition(a.x, a.y + 26);
+    this.achievementsBadge.setPosition(a.x, a.y + 21);
   }
 
   private makeBackdrop(): void {
@@ -650,18 +648,13 @@ export class GameScene extends Phaser.Scene {
 
   private makeArenaChrome(): void {
     const a = theme.layout.arena;
-    this.arenaFrame = this.add
-      .nineslice(a.x + a.w / 2, a.y + a.h / 2, ATLAS_KEY, 'frame_bezel', a.w, a.h, 20, 20, 20, 20)
-      .setDepth(50);
-    this.back = this.add.image(a.x + a.w - 28, a.y + 34, ATLAS_KEY, 'btn_back').setDepth(51).setInteractive();
-    this.back.on('pointerdown', () => this.sfx.play('click'));
+    this.arenaFrame = new PanelChrome(this, a, 'ARENA', 50);
     this.layoutArenaChrome();
   }
 
   private layoutArenaChrome(): void {
     const a = theme.layout.arena;
-    this.arenaFrame.setPosition(a.x + a.w / 2, a.y + a.h / 2).setSize(a.w, a.h);
-    this.back.setPosition(a.x + a.w - 28, a.y + 34);
+    this.arenaFrame.relayout(a);
   }
 
   /**
@@ -674,7 +667,6 @@ export class GameScene extends Phaser.Scene {
    */
   private onResize(): void {
     this.layoutScreenBackground();
-    this.layoutSectionTitles();
     this.layoutBackdrop();
     this.layoutArenaChrome();
     this.arena.relayout();
@@ -747,6 +739,7 @@ export class GameScene extends Phaser.Scene {
     this.powerupCoach.update();
     this.syncFirstRunChrome();
     this.powerAuras.update(dt);
+    this.arenaVfx.update(dt);
     this.lowHealth.setDanger(this.core.lowHealth);
     this.lowHealth.setEnraged(this.core.bossEnraged);
     this.arena.update(dt);
@@ -784,18 +777,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   private applyDojoStyle(style: DojoStyleDef, animate = false): void {
-    const crimson = style.id === 'crimson-dojo';
     this.background.setTint(style.palette.backgroundTint);
-    this.arenaFrame.setTint(crimson ? style.palette.frame : 0xffffff);
-    this.almanacPlate.setTint(crimson ? style.palette.plate : theme.colors.matStraw);
-    this.settingsPlate.setTint(crimson ? style.palette.plate : theme.colors.matStraw);
-    this.achievementsPlate.setTint(crimson ? style.palette.plate : theme.colors.matStraw);
-    this.sectionTitles.forEach((title) => title.setTint(crimson ? style.palette.accentBright : 0xe9ece6));
+    this.arenaFrame.applyDojoStyle(style);
+    this.almanacPlate.setTint(style.palette.plate);
+    this.settingsPlate.setTint(style.palette.plate);
+    this.achievementsPlate.setTint(style.palette.plate);
     this.board.applyDojoStyle(style);
     this.buy.applyDojoStyle(style);
     this.currency.applyDojoStyle(style);
     this.hud.applyDojoStyle(style);
     this.playerHud.applyDojoStyle(style);
+    this.rivals.applyDojoStyle(style);
     this.stageBanner.applyDojoStyle(style);
     this.stickerEarned.applyDojoStyle(style);
     this.draftCards.applyDojoStyle(style);
@@ -845,6 +837,12 @@ export class GameScene extends Phaser.Scene {
       rank: () => this.core.rank,
       best: () => this.core.best,
       achievementProgress: () => this.core.achievementProgress,
+      lockedSlotPos: () => this.core.lockedSlots.map((slot) => {
+        const at = this.board.slotPos(slot);
+        return { slot, ...this.toPage(at.x, at.y + 6) };
+      }),
+      lockedPadOffset: (slot: number) => this.board.padOffset(slot),
+      coachCard: () => this.boardCoach.snapshot(),
       clockLive: () => this.timeClock.isLive,
       spawnClock: () => this.timeClock.forceSpawn(),
       clockPos: () => this.toPage(this.timeClock.x, this.timeClock.y),
@@ -897,6 +895,9 @@ export class GameScene extends Phaser.Scene {
         return this.toPage(anchor.x, anchor.y);
       },
       stageBannerVisible: () => this.stageBanner.visible,
+      /** The rival scroll's fixed roll: the only part of it on screen while shut. */
+      rivalScrollPos: () => this.toPage(this.rivals.x, this.rivals.y),
+      rivalScrollOpen: () => this.rivals.unfurlAmount(),
       settingsOpen: () => this.settings.isOpen,
       openSettings: () => this.settings.show(),
       settingsButtonPos: () => this.toPage(theme.layout.settings.x, theme.layout.settings.y),

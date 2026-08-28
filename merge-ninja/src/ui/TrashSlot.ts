@@ -14,6 +14,7 @@ const GLOW_TINT = 0xff5a4d;
 
 export class TrashSlot extends Phaser.GameObjects.Container {
   private readonly trashBody: Phaser.GameObjects.Image;
+  private readonly plate: Phaser.GameObjects.Arc;
   /** Red ring behind the bin that breathes while a drag hovers it. */
   private readonly glowRing: Phaser.GameObjects.Sprite;
   private glowTween: Phaser.Tweens.Tween | null = null;
@@ -24,9 +25,11 @@ export class TrashSlot extends Phaser.GameObjects.Container {
     const r = theme.layout.trash;
     super(scene, r.x, r.y);
     scene.add.existing(this).setDepth(8);
+    this.plate = scene.add.circle(0, 0, r.radius, theme.colors.woodDark, 0.9)
+      .setStrokeStyle(2, theme.colors.brass, 0.62);
     this.glowRing = scene.add.sprite(0, 0, VFX_ANIMATIONS.shockwave.textureKey, 0).setTint(GLOW_TINT).setAlpha(0).setScale(0.3);
-    this.trashBody = scene.add.image(0, 0, ATLAS_KEY, 'icon_trash').setScale(2);
-    this.add([this.glowRing, this.trashBody]);
+    this.trashBody = scene.add.image(0, 0, ATLAS_KEY, 'icon_trash').setScale(1.55).setAlpha(0.76);
+    this.add([this.plate, this.glowRing, this.trashBody]);
     this.setSize(r.radius * 2, r.radius * 2).setInteractive();
   }
 
@@ -38,7 +41,8 @@ export class TrashSlot extends Phaser.GameObjects.Container {
   setTrashActive(active: boolean): void {
     if (this.hovered === active) return;
     this.hovered = active;
-    this.trashBody.setTint(active ? GLOW_TINT : 0xffffff);
+    this.trashBody.setTint(active ? GLOW_TINT : 0xffffff).setAlpha(active ? 1 : 0.76);
+    this.plate.setStrokeStyle(active ? 3 : 2, active ? GLOW_TINT : theme.colors.brass, active ? 1 : 0.62);
     if (active) {
       this.glowTween?.remove();
       this.wobbleTween?.remove();
@@ -70,8 +74,51 @@ export class TrashSlot extends Phaser.GameObjects.Container {
     }
   }
 
+  /**
+   * A short, self-contained sell response. The bin reacts after the dragged
+   * ninja reaches it, so deleting feels deliberate without turning this
+   * secondary control into another permanent source of motion.
+   */
+  consume(): void {
+    this.glowTween?.remove();
+    this.wobbleTween?.remove();
+    this.glowTween = null;
+    this.wobbleTween = null;
+    this.hovered = false;
+    this.glowRing.stop().setFrame(0).setTint(GLOW_TINT).setAlpha(0.75).setScale(0.24);
+    this.trashBody.setTint(GLOW_TINT).setAlpha(1).setAngle(0).setScale(1.55);
+    this.plate.setStrokeStyle(3, GLOW_TINT, 1);
+    this.scene.tweens.add({
+      targets: this,
+      scaleX: { from: 1.08, to: 1 },
+      scaleY: { from: 0.88, to: 1 },
+      duration: 190,
+      ease: 'Back.easeOut',
+    });
+    this.scene.tweens.add({
+      targets: this.glowRing,
+      alpha: 0,
+      scale: 0.46,
+      duration: 210,
+      ease: 'Cubic.easeOut',
+    });
+    this.scene.tweens.add({
+      targets: this.trashBody,
+      angle: { from: -8, to: 0 },
+      scaleX: { from: 1.72, to: 1.55 },
+      scaleY: { from: 1.3, to: 1.55 },
+      duration: 210,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.trashBody.clearTint().setAlpha(0.76);
+        this.plate.setStrokeStyle(2, theme.colors.brass, 0.62);
+      },
+    });
+  }
+
   relayout(): void {
     this.setPosition(theme.layout.trash.x, theme.layout.trash.y);
     this.setSize(theme.layout.trash.radius * 2, theme.layout.trash.radius * 2);
+    this.plate.setRadius(theme.layout.trash.radius);
   }
 }

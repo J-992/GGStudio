@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUDIO_STORAGE_KEY, Sfx } from '../src/audio/Sfx';
+import { AUDIO_STORAGE_KEY, SFX_NAMES, Sfx } from '../src/audio/Sfx';
 import type { StorageLike } from '../src/data/types';
 
 class FakeStorage implements StorageLike {
@@ -88,5 +88,16 @@ describe('audio settings', () => {
   it('plays nothing before a gesture has unlocked the context', () => {
     const sfx = new Sfx({ storage: new FakeStorage() });
     expect(() => sfx.play('click')).not.toThrow();
+  });
+
+  it('remembers an act change made before the first audio gesture', () => {
+    const sfx = new Sfx({ storage: new FakeStorage() });
+    sfx.setMusicTrack('storm');
+    expect(sfx.musicTrack).toBe('storm');
+  });
+
+  it('ships a broad, duplicate-free gameplay cue palette', () => {
+    expect(SFX_NAMES.length).toBeGreaterThanOrEqual(20);
+    expect(new Set(SFX_NAMES).size).toBe(SFX_NAMES.length);
   });
 });

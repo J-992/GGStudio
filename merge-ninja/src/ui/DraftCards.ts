@@ -202,7 +202,7 @@ export class DraftCards extends Phaser.GameObjects.Container {
         onComplete: () => this.flip(card, index),
       });
     });
-    this.sfx.play('drop');
+    this.sfx.play('card');
   }
 
   /**
@@ -222,7 +222,7 @@ export class DraftCards extends Phaser.GameObjects.Container {
       onComplete: () => {
         card.back.setVisible(false);
         card.front.setVisible(true);
-        this.sfx.play('pickup');
+        this.sfx.play('card');
         this.sceneRef.tweens.add({
           targets: card.root,
           scaleX: 1,
@@ -293,7 +293,7 @@ export class DraftCards extends Phaser.GameObjects.Container {
       });
     });
 
-    this.sfx.play(picked === 'bounty' ? 'newTier' : 'merge');
+    this.sfx.play(picked === 'bounty' ? 'newTier' : 'powerup');
     this.sceneRef.time.delayedCall(700, () => { if (this.live.length === 0) this.setVisible(false); });
   }
 
@@ -572,9 +572,9 @@ export class DraftCards extends Phaser.GameObjects.Container {
   /**
    * Card art, drawn entirely from textures already in memory.
    *
-   * `recruit` shows the fighter it will actually hand over and `bounty` shows
-   * the boss it is betting on, so neither card needs a number to say what it
-   * does -- and neither costs a byte of download.
+   * Fighter cards show the ninja they will actually hand over and `bounty`
+   * shows the boss it is betting on, so the art stays truthful to the effect
+   * without adding a byte of download.
    */
   private buildIcon(icon: DraftCardDefIcon, stage: number, glyph: number): Phaser.GameObjects.Image {
     if (icon.kind === 'weakest') {
@@ -603,6 +603,13 @@ export class DraftCards extends Phaser.GameObjects.Container {
     }
     if (icon.kind === 'ninja') {
       const tier = Math.min(BALANCE.tiers.count, this.core.buyTier + BALANCE.draft.recruitTierBonus);
+      return this.sceneRef.add.image(0, 0, ATLAS_KEY, ninjaFrame(tier)).setDisplaySize(ICON_SIZE, ICON_SIZE);
+    }
+    if (icon.kind === 'breakthrough') {
+      const tier = Math.min(
+        BALANCE.tiers.count,
+        this.core.progression.highestTierEverOwned + BALANCE.draft.breakthroughTierBonus,
+      );
       return this.sceneRef.add.image(0, 0, ATLAS_KEY, ninjaFrame(tier)).setDisplaySize(ICON_SIZE, ICON_SIZE);
     }
     if (icon.kind === 'boss') {

@@ -130,13 +130,23 @@ export const BALANCE = {
      * player can see coming -- and it can afford to matter more when it lands.
      */
     everyStages: 5,
-    autoPickMs: 4_000,
+    /**
+     * Ten seconds, not four.
+     *
+     * Four was enough to tap a card but not to *read* three of them, and the
+     * board-reading cards (`sweep`, `openMat`, `echo`) need a glance at the mat
+     * before the choice makes any sense. The fight keeps running underneath the
+     * offer, so a longer window costs the player nothing but their attention.
+     */
+    autoPickMs: 10_000,
     /** The card about to be taken pulses for this long first, so it never feels stolen. */
     autoPickWarnMs: 500,
     /** `purse` pays this multiple of the boss reward just earned. */
     purseMultiplier: 1.6,
     /** `recruit` spawns this far above the current buy tier. */
     recruitTierBonus: 1,
+    /** `breakthrough` jumps beyond the highest tier the player has ever owned. */
+    breakthroughTierBonus: 2,
     /** `bounty` multiplies the next boss reward, but only if it dies in time. */
     bountyWindowMs: 20_000,
     bountyMultiplier: 3,

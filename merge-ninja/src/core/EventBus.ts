@@ -62,6 +62,8 @@ export type GameEvent =
   /** A powerup token entered the arena lane; travelMs is its crossing window. */
   | { type: 'powerupSpawned'; id: PowerupId; travelMs: number }
   | { type: 'powerupCollected'; id: PowerupId }
+  /** Frenzy projectiles are presentation-timed, but are anchored to this exact boss stage. */
+  | { type: 'shurikenFrenzyVolley'; stage: number; shurikens: number }
   | { type: 'powerupExpired'; id: PowerupId }
   /** The last Coin Frenzy target was either caught or missed. */
   | { type: 'coinFrenzyFinished' }

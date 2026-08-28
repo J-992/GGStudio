@@ -57,6 +57,10 @@ export interface PowerupSnapshot {
   /** Wall-clock stamp from the injectable `now`, telemetry only. */
   readonly savedAtMs: number;
   readonly visibleClockMs: number;
+  /** Shared launch gate; keeps restored overdue offers from arriving as a pack. */
+  readonly nextSpawnEligibleAtMs?: number;
+  /** The id that set the launch gate; its own cadence remains independent. */
+  readonly lastSpawnedId?: PowerupId | null;
   readonly schedules: ReadonlyArray<{ id: PowerupId; nextSpawnAtMs: number }>;
   readonly effects: ReadonlyArray<{
     id: PowerupId;
@@ -99,6 +103,15 @@ export interface PowerupSystemOptions {
 const clampFiniteMs = (value: number): number =>
   Number.isFinite(value) ? Math.max(0, value) : 0;
 
+/**
+ * A token stays readable/catchable for roughly 12--14 seconds. Keep the next
+ * offer offscreen until the prior token has had a complete, distinct moment.
+ * This is simulation state instead of a presentation delay so a modal, scene
+ * rebuild, or a faster renderer can never collapse several overdue offers
+ * into one visual burst.
+ */
+const MIN_OFFER_SEPARATION_MS = 18_000;
+
 export class PowerupSystem {
   private readonly defs: Map<PowerupId, PowerupDef>;
   private readonly order: readonly PowerupId[];
@@ -109,6 +122,10 @@ export class PowerupSystem {
 
   /** Internal monotonic visible-play clock; advanced ONLY by update(). */
   private visibleClockMs = 0;
+  /** Absolute visible-play time at which a different pickup may next launch. */
+  private nextSpawnEligibleAtMs = 0;
+  /** The last launched id; its own cadence stays independent of the shared gate. */
+  private lastSpawnedId: PowerupId | null = null;
 
   constructor(defs: readonly PowerupDef[], opts: PowerupSystemOptions = {}) {
     this.defs = new Map();
@@ -172,12 +189,20 @@ export class PowerupSystem {
       const rt = this.runtime.get(id);
       const def = this.defs.get(id);
       if (!rt || !def || rt.nextSpawnAtMs > this.visibleClockMs) continue;
+      // A definition keeps its own cadence. The global gate only holds back
+      // *different* overdue offers, which is what stops a mixed pickup pack
+      // after a modal without rewriting a def's configured respawn window.
+      if (id !== this.lastSpawnedId && this.visibleClockMs < this.nextSpawnEligibleAtMs) continue;
       // Lateness is discarded on purpose: the fresh window starts now, so a
       // long gate yields a single catch-up spawn, never a burst.
       const chance = def.cadence.spawnChance;
       const offered = chance === undefined || this.rollUnit() < Math.max(0, Math.min(1, chance));
       rt.nextSpawnAtMs = this.visibleClockMs + this.rollGapMs(def);
-      if (offered) return id;
+      if (offered) {
+        this.nextSpawnEligibleAtMs = this.visibleClockMs + MIN_OFFER_SEPARATION_MS;
+        this.lastSpawnedId = id;
+        return id;
+      }
     }
     return null;
   }
@@ -239,6 +264,11 @@ export class PowerupSystem {
   /** Product of every live DPS multiplier; 1 when none are running. */
   get dpsMultiplier(): number {
     return this.foldEffects('dpsMultiplier', (acc, e) => acc * e.factor);
+  }
+
+  /** Whether this precise definition currently has a live effect instance. */
+  isActive(id: PowerupId): boolean {
+    return (this.runtime.get(id)?.live.length ?? 0) > 0;
   }
 
   /** Product of every live coin multiplier; 1 when none are running. */
@@ -331,6 +361,8 @@ export class PowerupSystem {
   /** Back to a pristine first-ever session: schedules reset, effects wiped. */
   clear(): void {
     this.visibleClockMs = 0;
+    this.nextSpawnEligibleAtMs = 0;
+    this.lastSpawnedId = null;
     this.resetSchedules();
   }
 
@@ -349,7 +381,15 @@ export class PowerupSystem {
       schedules.push({ id, nextSpawnAtMs: rt.nextSpawnAtMs });
       for (const e of rt.live) effects.push({ id, remainingMs: e.remainingMs, factor: e.factor, charges: e.charges });
     }
-    return { version: 1, savedAtMs: Math.floor(this.now()), visibleClockMs: this.visibleClockMs, schedules, effects };
+    return {
+      version: 1,
+      savedAtMs: Math.floor(this.now()),
+      visibleClockMs: this.visibleClockMs,
+      nextSpawnEligibleAtMs: this.nextSpawnEligibleAtMs,
+      lastSpawnedId: this.lastSpawnedId,
+      schedules,
+      effects,
+    };
   }
 
   /**
@@ -361,6 +401,8 @@ export class PowerupSystem {
     const raw = snapshot as Partial<PowerupSnapshot> & Record<string, unknown>;
     if (raw.version !== 1 || typeof raw.visibleClockMs !== 'number') return false;
     if (!Array.isArray(raw.schedules) || !Array.isArray(raw.effects)) return false;
+    if (raw.nextSpawnEligibleAtMs !== undefined && typeof raw.nextSpawnEligibleAtMs !== 'number') return false;
+    if (raw.lastSpawnedId !== undefined && raw.lastSpawnedId !== null && !this.defs.has(raw.lastSpawnedId as PowerupId)) return false;
     const schedules = new Map<PowerupId, number>();
     for (const entry of raw.schedules) {
       if (
@@ -392,6 +434,8 @@ export class PowerupSystem {
     }
     // All-or-nothing applied: state is only mutated once every entry parsed.
     this.visibleClockMs = Math.max(0, raw.visibleClockMs);
+    this.nextSpawnEligibleAtMs = clampFiniteMs(raw.nextSpawnEligibleAtMs ?? 0);
+    this.lastSpawnedId = (raw.lastSpawnedId as PowerupId | null | undefined) ?? null;
     for (const [id, rt] of this.runtime) {
       const next = schedules.get(id);
       if (next !== undefined) rt.nextSpawnAtMs = next;
@@ -436,6 +480,8 @@ export class PowerupSystem {
 
   private resetSchedules(): void {
     this.runtime.clear();
+    this.nextSpawnEligibleAtMs = 0;
+    this.lastSpawnedId = null;
     for (const id of this.order) {
       const def = this.defs.get(id);
       if (!def) continue;

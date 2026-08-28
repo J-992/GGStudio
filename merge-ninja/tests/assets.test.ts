@@ -1,4 +1,4 @@
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ARENA_THEMES } from '../src/data/arenaThemes';
@@ -62,6 +62,25 @@ describe('shipping asset manifest', () => {
       const path = resolve(process.cwd(), 'public', file);
       expect(existsSync(path), `missing ${file}`).toBe(true);
       expect(statSync(path).size, `empty ${file}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('ships all three selectable loading screens with their inline previews', () => {
+    const screens = JSON.parse(
+      readFileSync(resolve(process.cwd(), 'src/splash-screens.json'), 'utf8'),
+    ) as Array<{ id: string; aspect: number; track: Record<string, number> }>;
+    expect(screens.map((screen) => screen.id)).toEqual(['1', '2', '3']);
+    for (const screen of screens) {
+      expect(screen.aspect).toBeCloseTo(9 / 16, 3);
+      for (const value of Object.values(screen.track)) {
+        expect(value).toBeGreaterThan(0);
+        expect(value).toBeLessThan(1);
+      }
+      const art = resolve(process.cwd(), `public/assets/loading-splash-${screen.id}.webp`);
+      const preview = resolve(process.cwd(), `src/splash-inline-${screen.id}.b64`);
+      expect(existsSync(art), `missing splash ${screen.id}`).toBe(true);
+      expect(statSync(art).size, `empty splash ${screen.id}`).toBeGreaterThan(0);
+      expect(readFileSync(preview, 'utf8').trim().length, `empty splash preview ${screen.id}`).toBeGreaterThan(100);
     }
   });
 });

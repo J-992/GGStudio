@@ -65,12 +65,12 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
     // The tier chip sits outside the pose container so it neither bobs with the
     // swing nor shrinks with the roster scale: it is UI, and it has to stay
     // legible at every board size.
-    this.badgePlate = scene.add.nineslice(0, 0, 'game', 'banner_name_9', 38, 24, 11, 11, 7, 7);
+    this.badgePlate = scene.add.nineslice(0, 0, 'game', 'banner_name_9', 34, 20, 11, 11, 7, 7);
     // Two-digit tiers need a wider flat section or the digits ride up onto
     // the nine-slice's rounded caps ('29' measures 24px against 16px of
     // stretched middle at the default 38px plate).
-    this.badgePlate.width = String(tier).length > 1 ? 48 : 38;
-    this.badge = scene.add.bitmapText(0, 0, 'pixel', String(tier), 14).setOrigin(0.5);
+    this.badgePlate.width = String(tier).length > 1 ? 42 : 34;
+    this.badge = scene.add.bitmapText(0, 0, 'pixel', String(tier), 12).setOrigin(0.5).setTint(0xf7ead1);
     this.add([this.badgePlate, this.badge]);
 
     this.setSize(130, 130);
@@ -107,7 +107,7 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
     const badgeHalfWidth = this.tier === FINAL_NINJA_TIER
       ? this.image.frame.width * this.imageScale / 2
       : ART.halfWidth;
-    this.badgePlate.setPosition(badgeHalfWidth * scale - 16, -ART.bottom * scale - 16);
+    this.badgePlate.setPosition(badgeHalfWidth * scale - 15, -ART.bottom * scale - 13);
     this.badge.setPosition(this.badgePlate.x, this.badgePlate.y);
   }
 
@@ -117,8 +117,8 @@ export class NinjaSprite extends Phaser.GameObjects.Container {
       .setVisible(crimson)
       .setFillStyle(style.palette.ninjaAura, crimson ? 0.2 : 0)
       .setStrokeStyle(2, style.palette.accentBright, crimson ? 0.72 : 0);
-    this.badgePlate.setTint(crimson ? style.palette.plate : 0xffffff);
-    this.badge.setTint(crimson ? 0xfff2c7 : 0xffffff);
+    this.badgePlate.setTint(crimson ? style.palette.plate : 0x6f3326);
+    this.badge.setTint(0xf7ead1);
   }
 
   /**

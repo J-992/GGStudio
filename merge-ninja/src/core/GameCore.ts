@@ -42,6 +42,9 @@ const freshMetrics = (): SessionMetrics => ({
   bossDefeats: 0, boardFullCount: 0, coinsEarned: 0,
 });
 
+/** Frenzy gets one readable three-blade volley per beat, never a frame-rate spray. */
+const SHURIKEN_FRENZY_VOLLEY_MS = 900;
+
 /** Coordinates the board economy and the background boss spectacle. */
 export class GameCore {
   readonly events = new EventBus();
@@ -99,6 +102,8 @@ export class GameCore {
   private coinFrenzyRemaining = 0;
   /** Frozen at activation so one rain never changes value halfway through. */
   private coinFrenzyValue = 0;
+  /** Time bank for Frenzy's tangible projectiles, frozen with the live board. */
+  private shurikenFrenzyVolleyMs = 0;
   private playerHp: number = BALANCE.player.baseHealth;
   private activeTempoId = 'opening';
   private readonly now: () => number;
@@ -286,6 +291,7 @@ export class GameCore {
       this.markDirty();
     });
     this.powerups.update(live);
+    this.updateShurikenFrenzyVolleys(live);
     const spawnedPowerup: PowerupId | null = this.powerups.maybeSpawn(this.metrics.timePlayedMs);
     if (spawnedPowerup !== null) {
       this.events.emit({ type: 'powerupSpawned', id: spawnedPowerup, travelMs: POWERUPS[spawnedPowerup].travelMs });
@@ -586,7 +592,7 @@ export class GameCore {
     const order = [preferred ?? eligible[0]!, ...eligible];
     for (const id of order) {
       if (!this.powerups.activate(id)) continue;
-      this.events.emit({ type: 'powerupCollected', id });
+      this.announcePowerupCollected(id);
       this.events.emit({ type: 'mergeComboRewarded', id, count, source });
       this.markDirty();
       return;
@@ -713,6 +719,7 @@ export class GameCore {
     this.board.clear(); this.economy.coins = BALANCE.economy.startCoins; this.totalPurchases = 0;
     this.progression.highestTierEverOwned = 1; Object.assign(this.metrics, freshMetrics()); this.damageCoinRemainder = 0;
     this.powerups.clear();
+    this.shurikenFrenzyVolleyMs = 0;
     // Session luck does not survive a reset, and neither does a bet: carrying
     // a bounty or a live `edge` into a fresh stage-1 board would pay it out
     // against the easiest boss in the game.
@@ -769,9 +776,29 @@ export class GameCore {
         this.coinFrenzyRemaining = def.coinCount;
         this.coinFrenzyValue = coinFrenzyCoinValue(this.boss.stage);
       }
-      this.events.emit({ type: 'powerupCollected', id });
+      this.announcePowerupCollected(id);
     }
     return applied;
+  }
+
+  /** Announces a pickup and turns Frenzy's multiplier into visible, timed hits. */
+  private announcePowerupCollected(id: PowerupId): void {
+    this.events.emit({ type: 'powerupCollected', id });
+    if (id !== 'shurikenFrenzy') return;
+    this.shurikenFrenzyVolleyMs = 0;
+    this.events.emit({ type: 'shurikenFrenzyVolley', stage: this.boss.stage, shurikens: 5 });
+  }
+
+  /** Emits at most one volley per frame so a resumed tab cannot spray a backlog. */
+  private updateShurikenFrenzyVolleys(liveMs: number): void {
+    if (!this.powerups.isActive('shurikenFrenzy') || this.boss.defeated || this.over) {
+      this.shurikenFrenzyVolleyMs = 0;
+      return;
+    }
+    this.shurikenFrenzyVolleyMs += Math.max(0, liveMs);
+    if (this.shurikenFrenzyVolleyMs < SHURIKEN_FRENZY_VOLLEY_MS) return;
+    this.shurikenFrenzyVolleyMs = 0;
+    this.events.emit({ type: 'shurikenFrenzyVolley', stage: this.boss.stage, shurikens: 3 });
   }
   /** Credit exactly one visible rain coin. Returns zero for stale/double taps. */
   collectCoinFrenzyCoin(): number {
@@ -868,6 +895,7 @@ export class GameCore {
         boardHasDebris: this.debris.all.length > 0,
         boardHasLockedSlot: this.unlockedSlots < BALANCE.board.slots,
         bossHasTrick: this.boss.archetype.id !== 'bare',
+        canBreakthrough: this.progression.highestTierEverOwned <= BALANCE.tiers.count - BALANCE.draft.breakthroughTierBonus,
       },
       this.rng,
     );
@@ -992,6 +1020,18 @@ export class GameCore {
       case 'recruit':
         this.spawnTier(Math.min(BALANCE.tiers.count, this.buyTier + BALANCE.draft.recruitTierBonus));
         break;
+      case 'breakthrough': {
+        const tier = Math.min(
+          BALANCE.tiers.count,
+          this.progression.highestTierEverOwned + BALANCE.draft.breakthroughTierBonus,
+        );
+        const wasNew = tier > this.progression.highestTierEverOwned;
+        const ninja = this.spawnTier(tier);
+        if (ninja !== null && wasNew) {
+          this.events.emit({ type: 'newTierDiscovered', tier, name: ninjaDef(tier).name });
+        }
+        break;
+      }
       case 'drill':
         this.promoteWeakest(BALANCE.draft.drillCount);
         break;
@@ -1421,6 +1461,7 @@ export class GameCore {
     if (this.over) return;
     this.over = true;
     this.powerups.clear();
+    this.shurikenFrenzyVolleyMs = 0;
     this.coinFrenzyRemaining = 0; this.coinFrenzyValue = 0;
     // The record board is written before the run slot is deleted, so a defeat
     // that set a personal best still leaves the player with something.

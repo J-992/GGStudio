@@ -8,6 +8,7 @@ import type { RevealNinjaRig } from '../render/revealAssets';
 import { playVfx, vfxSource } from '../effects/vfxPlayback';
 import { portraitTexture } from '../render/portraitTexture';
 import { theme } from './theme';
+import type { Sfx } from '../audio/Sfx';
 
 const BEAT = { charge: 140, burst: 620, settle: 760 } as const;
 const EXIT_MS = 220;
@@ -104,7 +105,7 @@ export class NinjaReveal extends Phaser.GameObjects.Container {
   private raySquash = 0.7;
   private haloBaseScale = 1;
 
-  constructor(private readonly sceneRef: Phaser.Scene, private readonly core: GameCore) {
+  constructor(private readonly sceneRef: Phaser.Scene, private readonly core: GameCore, private readonly sfx: Sfx) {
     super(sceneRef, 0, 0);
     sceneRef.add.existing(this).setDepth(500).setVisible(false);
     const l = theme.layout;
@@ -337,7 +338,7 @@ export class NinjaReveal extends Phaser.GameObjects.Container {
     this.after(BEAT.charge, () => this.charge());
     this.after(BEAT.burst, () => this.burst());
     this.after(BEAT.settle, () => this.settle());
-    this.after(this.drama.holdMs, () => this.dismiss());
+    this.after(this.drama.holdMs, () => this.dismiss(false));
   }
 
   private powerLine(tier: number): string {
@@ -461,8 +462,9 @@ export class NinjaReveal extends Phaser.GameObjects.Container {
     });
   }
 
-  dismiss(): void {
+  dismiss(playCue = true): void {
     if (this.current === null || this.dismissing) return;
+    if (playCue) this.sfx.play('click');
     this.dismissing = true;
     this.clearScheduled();
     const token = this.exitToken + 1;

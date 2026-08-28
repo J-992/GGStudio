@@ -292,7 +292,7 @@ export class PowerupPickups extends Phaser.GameObjects.Container {
   private onCollected(id: PowerupId): void {
     const flight = this.flights.get(id);
     const def = POWERUPS[id];
-    this.sfx.play('newTier');
+    this.sfx.play('powerup');
     if (flight !== undefined && flight.root.visible) {
       this.fx.mergeFlash(flight.root.x, flight.root.y);
       this.scatter(flight);
