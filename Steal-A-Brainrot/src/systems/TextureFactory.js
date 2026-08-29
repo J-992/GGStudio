@@ -11,8 +11,6 @@ const TextureFactory = {
 
   generateAll(scene) {
     CREATURES.forEach((def) => this.creature(scene, def));
-    Object.keys(ENEMIES).forEach((id) => this.enemy(scene, id, ENEMIES[id]));
-    Object.keys(BOSSES).forEach((id) => this.enemy(scene, id, BOSSES[id]));
     this.props(scene);
   },
 
@@ -686,25 +684,7 @@ const TextureFactory = {
     g.fillStyle(0xffffff, 1); g.fillTriangle(0, 0, 30, 0, 15, 22);
     g.generateTexture('arrow', 30, 22); g.destroy();
 
-    // Tutorial hand: a cartoon fist with the index finger pointing DOWN, so it
-    // can hover above whatever the tutorial wants tapped. Drawn at 2x (96x116)
-    // and scaled down at use, so a big on-screen hand still has clean edges.
-    g = this._g(scene);
-    const SKIN = 0xffcc80, LINE = 0x4e342e, CUFF = 0x42a5f5;
-    // sleeve cuff at the top
-    g.fillStyle(CUFF, 1); g.fillRoundedRect(18, 4, 60, 26, 10);
-    g.lineStyle(6, LINE, 1); g.strokeRoundedRect(18, 4, 60, 26, 10);
-    // fist
-    g.fillStyle(SKIN, 1); g.fillRoundedRect(16, 24, 64, 52, 20);
-    g.lineStyle(6, LINE, 1); g.strokeRoundedRect(16, 24, 64, 52, 20);
-    // knuckle creases, so the fist does not read as a blob
-    g.lineStyle(4, LINE, 0.55);
-    g.beginPath(); g.moveTo(60, 38); g.lineTo(76, 38); g.strokePath();
-    g.beginPath(); g.moveTo(60, 52); g.lineTo(76, 52); g.strokePath();
-    // index finger pointing down
-    g.fillStyle(SKIN, 1); g.fillRoundedRect(30, 66, 26, 44, 12);
-    g.lineStyle(6, LINE, 1); g.strokeRoundedRect(30, 66, 26, 44, 12);
-    g.generateTexture('hand', 96, 116); g.destroy();
+    this.propHand(scene);
 
     // 5-point star (merge bursts, star pips)
     g = this._g(scene);
@@ -778,123 +758,79 @@ const TextureFactory = {
     g.lineStyle(3, 0xffffff, 0.5);
     g.beginPath(); g.arc(2, 13, 8, -1.0, 1.0, false); g.strokePath();
     g.generateTexture('pr_wave', 20, 28); g.destroy();
+
+    // pea shot (the default lane bullet)
+    g = this._g(scene);
+    g.fillStyle(0x66bb6a, 1); g.fillEllipse(9, 9, 16, 16);
+    g.fillStyle(0xa5d6a7, 1); g.fillEllipse(6, 6, 6, 6);
+    g.lineStyle(2, 0x2e7d32, 1); g.strokeEllipse(9, 9, 16, 16);
+    g.generateTexture('pr_pea', 18, 18); g.destroy();
+
+    // slowing goo blob
+    g = this._g(scene);
+    g.fillStyle(0x4fc3f7, 1); g.fillEllipse(10, 10, 18, 16);
+    g.fillStyle(0x81d4fa, 1); g.fillEllipse(7, 7, 7, 6);
+    g.lineStyle(2, 0x0277bd, 1); g.strokeEllipse(10, 10, 18, 16);
+    g.generateTexture('pr_goo', 20, 20); g.destroy();
+
+    // brainz token (the sun): a glowing pink brain
+    g = this._g(scene);
+    g.fillStyle(0xff80ab, 0.35); g.fillEllipse(24, 22, 46, 42);
+    g.fillStyle(0xf48fb1, 1); g.fillEllipse(15, 22, 22, 26);
+    g.fillEllipse(33, 22, 22, 26);
+    g.fillStyle(0xf8bbd0, 1); g.fillEllipse(13, 16, 12, 10);
+    g.fillEllipse(31, 15, 12, 9);
+    g.lineStyle(3, 0xc2185b, 0.9);
+    g.strokeEllipse(15, 22, 22, 26); g.strokeEllipse(33, 22, 22, 26);
+    g.lineStyle(2, 0xc2185b, 0.6);
+    g.beginPath(); g.arc(15, 22, 6, -2.4, 0.6, false); g.strokePath();
+    g.beginPath(); g.arc(33, 24, 6, -2.8, 0.4, false); g.strokePath();
+    g.generateTexture('brainz', 48, 44); g.destroy();
+
+    // the lane-saving moped (faces right; it rides the lane when triggered)
+    g = this._g(scene);
+    g.fillStyle(0x111111, 1); g.fillEllipse(14, 36, 16, 16); g.fillEllipse(50, 36, 16, 16);
+    g.fillStyle(0x9e9e9e, 1); g.fillEllipse(14, 36, 8, 8); g.fillEllipse(50, 36, 8, 8);
+    g.fillStyle(0xd32f2f, 1);
+    g.fillRoundedRect(8, 22, 40, 12, 6);
+    g.fillRoundedRect(38, 12, 16, 16, 5);
+    g.fillStyle(0xb71c1c, 1); g.fillRoundedRect(10, 14, 20, 8, 4);
+    g.lineStyle(4, 0x455a64, 1);
+    g.beginPath(); g.moveTo(52, 14); g.lineTo(58, 4); g.strokePath();
+    g.fillStyle(0xffe082, 1); g.fillEllipse(56, 20, 7, 7);
+    g.generateTexture('moped', 64, 46); g.destroy();
+
+    // shovel (dig up a unit)
+    g = this._g(scene);
+    g.lineStyle(7, 0x8d6e63, 1);
+    g.beginPath(); g.moveTo(20, 6); g.lineTo(20, 30); g.strokePath();
+    g.fillStyle(0x6d4c41, 1); g.fillRoundedRect(11, 0, 18, 8, 4);
+    g.fillStyle(0xb0bec5, 1);
+    g.fillRoundedRect(9, 28, 22, 22, 6);
+    g.fillTriangle(9, 44, 31, 44, 20, 56);
+    g.lineStyle(2, 0x546e7a, 1); g.strokeRoundedRect(9, 28, 22, 22, 6);
+    g.generateTexture('shovel', 40, 58); g.destroy();
   },
 
-  // ------------------------------------------------------------- enemies
-  // Meme-food blobs with angry faces. Same convention as creatures: drawn on
-  // their own canvas, feet on the bottom edge, displayed with origin(0.5, 1).
-  enemy(scene, id, def) {
-    const key = 'en_' + id;
-    if (scene.textures.exists(key)) scene.textures.remove(key);
-    const W = 96, H = 96, g = this._g(scene);
-    const draw = this.ENEMY_BODIES[id] || this.ENEMY_BODIES.pizza;
-    draw.call(this, g, def, W, H);
-    g.generateTexture(key, W, H);
-    g.destroy();
+  // The pointing hand (fallback for assets/ui/tutorial-hand.webp).
+  propHand(scene) {
+    const g = this._g(scene);
+      const SKIN = 0xffcc80, LINE = 0x4e342e, CUFF = 0x42a5f5;
+      // sleeve cuff at the top
+      g.fillStyle(CUFF, 1); g.fillRoundedRect(18, 4, 60, 26, 10);
+      g.lineStyle(6, LINE, 1); g.strokeRoundedRect(18, 4, 60, 26, 10);
+      // fist
+      g.fillStyle(SKIN, 1); g.fillRoundedRect(16, 24, 64, 52, 20);
+      g.lineStyle(6, LINE, 1); g.strokeRoundedRect(16, 24, 64, 52, 20);
+      // knuckle creases, so the fist does not read as a blob
+      g.lineStyle(4, LINE, 0.55);
+      g.beginPath(); g.moveTo(60, 38); g.lineTo(76, 38); g.strokePath();
+      g.beginPath(); g.moveTo(60, 52); g.lineTo(76, 52); g.strokePath();
+      // index finger pointing down
+      g.fillStyle(SKIN, 1); g.fillRoundedRect(30, 66, 26, 44, 12);
+      g.lineStyle(6, LINE, 1); g.strokeRoundedRect(30, 66, 26, 44, 12);
+      g.generateTexture('hand', 96, 116); g.destroy();
   },
 
-  _angryEyes(g, x1, x2, y, r) {
-    [x1, x2].forEach((x) => {
-      g.fillStyle(0xffffff, 1); g.fillEllipse(x, y, r * 2, r * 2);
-      g.fillStyle(0x111111, 1); g.fillEllipse(x + r * 0.2, y + r * 0.15, r, r);
-    });
-    g.lineStyle(4, 0x111111, 1);
-    g.lineBetween(x1 - r, y - r * 1.2, x1 + r * 0.7, y - r * 0.4);
-    g.lineBetween(x2 + r, y - r * 1.2, x2 - r * 0.7, y - r * 0.4);
-  },
-
-  _stubbyLegs(g, cx, count, top, color) {
-    for (let i = 0; i < count; i++) {
-      const lx = cx + (i - (count - 1) / 2) * 18;
-      g.fillStyle(color, 1);
-      g.fillRoundedRect(lx - 5, top, 10, 92 - top, 5);
-    }
-  },
-
-  ENEMY_BODIES: {
-    pizza(g, def) {
-      this._stubbyLegs(g, 48, 2, 76, 0x8d6e63);
-      // a fat slice, point down
-      g.fillStyle(0xffb74d, 1); g.fillTriangle(14, 20, 82, 20, 48, 78);
-      g.lineStyle(4, 0xbf360c, 1); g.strokeTriangle(14, 20, 82, 20, 48, 78);
-      g.fillStyle(0xffcc80, 1); g.fillRoundedRect(10, 10, 76, 16, 8);
-      g.lineStyle(4, 0xbf360c, 1); g.strokeRoundedRect(10, 10, 76, 16, 8);
-      g.fillStyle(0xd32f2f, 1);
-      g.fillEllipse(36, 36, 13, 13); g.fillEllipse(60, 34, 12, 12); g.fillEllipse(48, 54, 11, 11);
-      this._angryEyes(g, 38, 58, 30, 5);
-    },
-    espresso(g, def) {
-      this._stubbyLegs(g, 48, 2, 78, 0x4e342e);
-      g.fillStyle(0xfafafa, 1); g.fillRoundedRect(20, 26, 52, 52, { tl: 6, tr: 6, bl: 20, br: 20 });
-      g.lineStyle(4, 0x4e342e, 1); g.strokeRoundedRect(20, 26, 52, 52, { tl: 6, tr: 6, bl: 20, br: 20 });
-      // handle
-      g.lineStyle(6, 0xfafafa, 1); g.beginPath(); g.arc(74, 48, 12, -1.2, 1.2, false); g.strokePath();
-      g.lineStyle(3, 0x4e342e, 1); g.beginPath(); g.arc(74, 48, 12, -1.2, 1.2, false); g.strokePath();
-      // coffee + steam
-      g.fillStyle(0x6d4c41, 1); g.fillEllipse(46, 30, 44, 12);
-      g.lineStyle(3, 0xb0bec5, 1);
-      g.beginPath(); g.moveTo(38, 20); g.lineTo(42, 10); g.strokePath();
-      g.beginPath(); g.moveTo(54, 20); g.lineTo(58, 8); g.strokePath();
-      this._angryEyes(g, 38, 56, 48, 6);
-      g.lineStyle(4, 0x4e342e, 1);
-      g.beginPath(); g.arc(47, 66, 8, Math.PI + 0.4, -0.4, false); g.strokePath();
-    },
-    croissant(g, def) {
-      this._stubbyLegs(g, 48, 2, 74, 0x8d6e63);
-      const c = 0xd7a86e, dk = 0x8d5524;
-      g.fillStyle(c, 1);
-      g.fillEllipse(48, 46, 60, 34);
-      g.fillEllipse(20, 38, 26, 24); g.fillEllipse(76, 38, 26, 24);
-      g.lineStyle(4, dk, 1);
-      g.strokeEllipse(48, 46, 60, 34);
-      g.lineBetween(34, 30, 30, 58); g.lineBetween(48, 28, 48, 62); g.lineBetween(62, 30, 66, 58);
-      this._angryEyes(g, 40, 58, 40, 5);
-    },
-    banana(g, def) {
-      this._stubbyLegs(g, 48, 2, 78, 0x8d6e63);
-      g.fillStyle(0xffe135, 1);
-      g.beginPath(); g.arc(48, 18, 34, 0.35, Math.PI - 0.35, false);
-      g.arc(48, 30, 22, Math.PI - 0.5, 0.5, true);
-      g.closePath(); g.fillPath();
-      g.lineStyle(4, 0x8d6e63, 1);
-      g.beginPath(); g.arc(48, 18, 34, 0.35, Math.PI - 0.35, false); g.strokePath();
-      g.fillStyle(0x6d4c41, 1); g.fillRect(14, 20, 8, 10); g.fillRect(76, 20, 8, 10);
-      this._angryEyes(g, 40, 58, 42, 5);
-    },
-    pasta(g, def) {
-      this._stubbyLegs(g, 48, 3, 80, 0xbf8f30);
-      // a writhing noodle mound
-      g.fillStyle(0xfff176, 1); g.fillEllipse(48, 52, 72, 52);
-      g.lineStyle(4, 0xf9a825, 1);
-      for (let i = 0; i < 4; i++) {
-        g.beginPath();
-        g.arc(28 + i * 14, 38 + (i % 2) * 10, 12, 0, Math.PI * 1.4, false);
-        g.strokePath();
-      }
-      g.strokeEllipse(48, 52, 72, 52);
-      // meatball hat
-      g.fillStyle(0x8d6e63, 1); g.fillEllipse(48, 22, 26, 22);
-      g.lineStyle(3, 0x5d4037, 1); g.strokeEllipse(48, 22, 26, 22);
-      this._angryEyes(g, 38, 60, 50, 6);
-    },
-    megaEspresso(g, def) {
-      // the boss: an espresso MACHINE with legs
-      this._stubbyLegs(g, 48, 3, 82, 0x263238);
-      g.fillStyle(0x455a64, 1); g.fillRoundedRect(10, 8, 76, 74, 10);
-      g.lineStyle(4, 0x263238, 1); g.strokeRoundedRect(10, 8, 76, 74, 10);
-      g.fillStyle(0x37474f, 1); g.fillRoundedRect(18, 16, 60, 20, 6);
-      g.fillStyle(0xffb300, 1); g.fillEllipse(26, 26, 8, 8);
-      g.fillStyle(0xef5350, 1); g.fillEllipse(40, 26, 8, 8);
-      // portafilter grin
-      g.fillStyle(0x263238, 1); g.fillRoundedRect(30, 62, 36, 12, 6);
-      g.fillStyle(0xfafafa, 1);
-      for (let i = 0; i < 4; i++) g.fillTriangle(33 + i * 8, 62, 39 + i * 8, 62, 36 + i * 8, 70);
-      this._angryEyes(g, 36, 60, 48, 7);
-      // steam
-      g.lineStyle(3, 0xb0bec5, 1);
-      g.beginPath(); g.moveTo(22, 8); g.lineTo(26, -2); g.strokePath();
-      g.beginPath(); g.moveTo(70, 8); g.lineTo(74, 0); g.strokePath();
-    },
-  },
 };
 window.TextureFactory = TextureFactory;

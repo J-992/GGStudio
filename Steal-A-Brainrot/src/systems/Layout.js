@@ -5,6 +5,9 @@
 // LAYOUT is mutated in place: everything holds a reference to the same object
 // and reads it live, so configureLayout() followed by relayout() calls is the
 // entire resize story.
+//
+// The lawn keeps horizontal lanes in BOTH orientations (enemies always march
+// right-to-left); portrait just gets narrower cells and taller lanes.
 const LAYOUT = {};
 
 function configureLayout(viewW, viewH) {
@@ -21,88 +24,55 @@ function configureLayout(viewW, viewH) {
   LAYOUT.landscape = landscape;
 
   // ---- HUD band across the top ----
-  const hudH = 76;
+  const hudH = 60;
   LAYOUT.hud = { x: 0, y: 0, w: width, h: hudH, pad: 12 };
 
-  if (landscape) {
-    // Battlefield fills the left ~62%; bench + machine stack in a right column.
-    const pad = 10;
-    const fieldW = Math.round((width - pad * 3) * 0.62);
-    const field = { x: pad, y: hudH + 8, w: fieldW, h: height - hudH - 8 - pad };
-    LAYOUT.field = field;
+  // ---- card bar (seed packets + shovel) right under the HUD ----
+  const slots = CFG.TEAM.size + 1;          // +1 for the shovel
+  const cardH = landscape ? 96 : 92;
+  const cardW = Math.min(landscape ? 118 : 96, (width - 20 - slots * 6) / slots);
+  const barW = slots * (cardW + 6);
+  LAYOUT.cards = {
+    x: Math.round((width - barW) / 2), y: hudH + 4,
+    w: barW, h: cardH + 10, cardW, cardH, gap: 6,
+  };
+  LAYOUT.cards.slotX = (i) => LAYOUT.cards.x + i * (cardW + 6) + cardW / 2;
+  LAYOUT.cards.slotY = LAYOUT.cards.y + 5 + cardH / 2;
 
-    const colX = field.x + field.w + pad;
-    const colW = width - colX - pad;
-
-    // bench: 4 cols x 2 rows at the top of the column
-    const bCell = Math.min(colW / 4, 128);
-    LAYOUT.bench = {
-      x: colX, y: field.y, w: colW, rows: 2, cols: 4,
-      cell: bCell, h: bCell * 2 + 16,
-    };
-
-    const machTop = LAYOUT.bench.y + LAYOUT.bench.h + 14;
-    const machH = Math.min(240, height - machTop - 120);
-    LAYOUT.machine = { x: colX, y: machTop, w: colW - 96, h: machH };
-    LAYOUT.trash = { x: width - pad - 42, y: machTop + machH - 42, r: 40 };
-  } else {
-    // Portrait: battlefield top ~57% of the content, bench + machine below.
-    const pad = 8;
-    const contentTop = hudH + 6;
-    const fieldH = Math.round((height - contentTop - pad) * 0.57);
-    const field = { x: pad, y: contentTop, w: width - pad * 2, h: fieldH };
-    LAYOUT.field = field;
-
-    const benchTop = field.y + field.h + 10;
-    const bCell = Math.min((width - pad * 2) / 4, 150);
-    LAYOUT.bench = {
-      x: pad, y: benchTop, w: width - pad * 2, rows: 2, cols: 4,
-      cell: bCell, h: bCell * 2 + 12,
-    };
-
-    const machTop = LAYOUT.bench.y + LAYOUT.bench.h + 10;
-    const machH = Math.max(120, height - machTop - pad);
-    LAYOUT.machine = { x: pad, y: machTop, w: width - pad * 2 - 104, h: machH };
-    LAYOUT.trash = { x: width - pad - 46, y: machTop + machH / 2, r: 42 };
-  }
-
-  // ---- battlefield internals ----
-  // 3 lanes (rows); the 3x3 unit grid sits on the left ~42% of the field,
-  // enemies spawn off the right edge and march to the base line on the left.
-  const f = LAYOUT.field;
-  f.laneH = f.h / 3;
-  f.gridLeft = f.x + f.w * 0.05;
-  f.gridW = f.w * 0.42;
-  f.colW = f.gridW / 3;
-  f.baseX = f.x + 14;                    // enemies crossing this cost a life
-  f.spawnX = f.x + f.w + 46;             // just off the right edge
+  // ---- the lawn ----
+  const pad = 6;
+  const top = LAYOUT.cards.y + LAYOUT.cards.h + 6;
+  const fieldW = width - pad * 2;
+  const mowerW = Math.round(landscape ? 54 : 46);     // moped strip left of col 0
+  const rightGap = 8;                                  // sliver before the spawn edge
+  const colW = (fieldW - mowerW - rightGap) / CFG.GRID.cols;
+  const avail = height - top - pad;
+  const laneH = Math.min(avail / CFG.GRID.lanes, colW * 2.35);
+  // tall phones leave space over: bias the lawn slightly up, the backdrop
+  // (Lawn._drawBoard) fills the rest so nothing reads as dead canvas
+  const spare = Math.max(0, avail - laneH * CFG.GRID.lanes);
+  const f = {
+    x: pad, y: top + Math.round(spare * 0.42), w: fieldW, h: laneH * CFG.GRID.lanes,
+    laneH, colW, mowerW,
+    gridX: pad + mowerW,
+    bgTop: top,
+  };
+  LAYOUT.field = f;
   f.right = f.x + f.w;
-  f.laneY = (lane) => f.y + f.laneH * (lane + 0.55);
+  f.spawnX = f.right + 40;                 // just off the right edge
+  f.laneY = (lane) => f.y + laneH * (lane + 1) - laneH * 0.14;   // feet line
+  f.colX = (col) => f.gridX + colW * (col + 0.5);
+  f.laneAt = (y) => Math.floor((y - f.y) / laneH);
+  f.colAt = (x) => Math.floor((x - f.gridX) / colW);
 
-  // How big a unit stands, derived from the tighter of cell width / lane height.
-  LAYOUT.unitH = Math.round(Math.min(f.laneH * 0.62, f.colW * 0.92, 118));
-  LAYOUT.benchUnitH = Math.round(Math.min(LAYOUT.bench.cell * 0.66, 96));
-  LAYOUT.enemyH = Math.round(LAYOUT.unitH * 0.82);
+  // How big things stand on the lawn.
+  LAYOUT.unitH = Math.round(Math.min(laneH * 0.8, colW * 1.15, 128));
+  LAYOUT.enemyH = Math.round(LAYOUT.unitH * 0.98);
 
-  // Enemy speeds are authored against a ~620px lane; longer lanes walk faster
+  // Enemy speeds are authored against a ~620px walk; longer lawns walk faster
   // so crossing time (the real difficulty) stays put across orientations.
-  LAYOUT.combatScale = (f.right - f.baseX) / 620;
+  LAYOUT.combatScale = (f.spawnX - f.gridX) / 620;
 }
-
-// Position of any board slot: 0..8 battlefield (row-major, row = lane),
-// 9..16 bench.
-LAYOUT.slotPos = function (slot) {
-  const f = LAYOUT.field;
-  if (slot < 9) {
-    const row = Math.floor(slot / 3), col = slot % 3;
-    return { x: f.gridLeft + f.colW * (col + 0.5), y: f.laneY(row) };
-  }
-  const b = LAYOUT.bench;
-  const i = slot - 9;
-  const row = Math.floor(i / b.cols), col = i % b.cols;
-  const x0 = b.x + (b.w - b.cell * b.cols) / 2;
-  return { x: x0 + b.cell * (col + 0.5), y: b.y + b.cell * (row + 0.5) };
-};
 
 // A default so LAYOUT is never empty (the check harness boots without a window).
 configureLayout(720, 1280);

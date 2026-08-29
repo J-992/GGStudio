@@ -1,17 +1,17 @@
-// One idea at a time: pull -> pull again -> merge -> deploy -> defend. The
-// gacha rig (GachaSystem) guarantees the first two pulls are the same common,
-// so the first merge is never left to luck. The pointing hand and the step
-// card are the whole UI; the world is never frozen.
+// The level-1 script, one idea at a time: plant a shooter -> tap brainz ->
+// plant the money elephant -> survive. The pointing hand (Derek's merge-ninja
+// asset, assets/ui/tutorial-hand.webp) and a step card are the whole UI; the
+// world is never frozen, the waves are just held back until the first plant.
 class TutorialSystem {
-  static ORDER = ['pull', 'pull2', 'merge', 'deploy', 'battle'];
+  static ORDER = ['plant', 'collect', 'producer', 'battle'];
 
   constructor(scene, director) {
     this.scene = scene;
     this.director = director;
-    this.active = !SaveSys.data.tutorialDone;
+    this.active = !SaveSys.data.tutorialDone && scene.levelN === 1;
 
     this.hand = scene.add.image(0, 0, 'hand').setDepth(1050).setVisible(false);
-    this.hand.setScale(CFG.ART.handH / 116 * 0.8);
+    this.hand.setScale(TextureFactory.scaleFor(scene, 'hand', CFG.ART.handH));
     this.card = scene.add.text(0, 0, '', {
       fontFamily: 'Arial Black, Arial', fontSize: '19px', color: '#ffffff',
       stroke: '#000000', strokeThickness: 5, align: 'center',
@@ -21,8 +21,7 @@ class TutorialSystem {
     this._handTween = null;
 
     if (this.active) {
-      const saved = SaveSys.data.tutorialStep;
-      this.step = TutorialSystem.ORDER.indexOf(saved) !== -1 ? saved : 'pull';
+      this.step = 'plant';
       this._enter(this.step);
     } else {
       this.step = null;
@@ -32,46 +31,40 @@ class TutorialSystem {
 
   _enter(step) {
     this.step = step;
-    SaveSys.data.tutorialStep = step;
-    SaveSys.save();
     this.director.holdPrep = step !== 'battle';
     this._stopHand();
 
-    const m = LAYOUT.machine;
-    const machineBtn = { x: m.x + m.w / 2, y: m.y + m.h - 40 };
-
     switch (step) {
-      case 'pull':
-        this._say('TAP THE MACHINE\nTO GET A BRAINROT!');
-        this._pointAt(machineBtn.x, machineBtn.y);
-        break;
-      case 'pull2':
-        this._say('PULL AGAIN!');
-        this._pointAt(machineBtn.x, machineBtn.y);
-        break;
-      case 'merge': {
-        this._say('SAME + SAME = STRONGER!\nDrag them together!');
-        const pair = this.scene.board.mergePair();
-        if (pair) this._dragDemo(pair[0], pair[1]);
+      case 'plant': {
+        this._say('PLANT TRIPPI TROPPI\nON THE LAWN!');
+        const i = this.scene.cards.indexOf('trippi');
+        const from = this.scene.cards.cardPos(i === -1 ? 0 : i);
+        const f = LAYOUT.field;
+        this._dragDemo(from, { x: f.colX(2), y: f.laneY(2) - f.laneH * 0.3 });
         break;
       }
-      case 'deploy': {
-        this._say('PUT HIM ON\nTHE BATTLEFIELD!');
-        const unit = this.scene.board.allUnits()[0];
-        const from = unit ? unit.slot : 9;
-        // aim at the centre field slot, or the first empty one if taken
-        let to = 4;
-        if (this.scene.board.at(4)) {
-          for (let i = 0; i < BoardModel.FIELD; i++) {
-            if (!this.scene.board.at(i)) { to = i; break; }
-          }
-        }
-        this._dragDemo(from, to);
+      case 'collect': {
+        this._say('TAP THE BRAINZ\nTO COLLECT THEM!');
+        // a guaranteed token to point at, right in the middle
+        if (this.scene.energy.tokens.length === 0) this.scene.energy.spawnSky(3, 4);
+        const t = this.scene.energy.tokens[0];
+        if (t) this._pointAt(t.root.x, t.root.y);
+        break;
+      }
+      case 'producer': {
+        this._say('PLANT COCOFANTO!\nHE MAKES BRAINZ!');
+        const i = this.scene.cards.indexOf('cocofanto');
+        const from = this.scene.cards.cardPos(i === -1 ? 0 : i);
+        const f = LAYOUT.field;
+        // behind the shooter, in the lane it defends
+        this._dragDemo(from, { x: f.colX(0), y: f.laneY(2) - f.laneH * 0.3 });
         break;
       }
       case 'battle':
-        this._say('DEFEND THE BASE!');
-        this._stopHand();
+        this._say('STOP THE EVIL BRAINROTS!');
+        this.scene.time.delayedCall(3500, () => {
+          if (this.step === 'battle' && this.active) this.card.setVisible(false);
+        });
         break;
     }
     this._layoutCard();
@@ -95,13 +88,12 @@ class TutorialSystem {
     });
   }
 
-  _dragDemo(fromSlot, toSlot) {
+  _dragDemo(a, b) {
     this._stopHand();
-    const a = LAYOUT.slotPos(fromSlot), b = LAYOUT.slotPos(toSlot);
-    this.hand.setVisible(true).setPosition(a.x + 16, a.y - 30);
+    this.hand.setVisible(true).setPosition(a.x + 16, a.y - 20);
     this._handTween = this.scene.tweens.add({
       targets: this.hand,
-      x: b.x + 16, y: b.y - 30,
+      x: b.x + 16, y: b.y - 20,
       duration: 900, delay: 300, repeat: -1, repeatDelay: 500, ease: 'Quad.easeInOut',
     });
   }
@@ -113,36 +105,30 @@ class TutorialSystem {
 
   // ---- hooks from the rest of the game ----
 
-  onPull() {
+  onPlant(id) {
     if (!this.active) return;
-    if (this.step === 'pull') this._enter('pull2');
-    else if (this.step === 'pull2') this._enter('merge');
+    if (this.step === 'plant') this._enter('collect');
+    else if (this.step === 'producer' && id === 'cocofanto') this._enter('battle');
   }
 
-  onMerge() {
+  onCollect() {
     if (!this.active) return;
-    if (this.step === 'merge') this._enter('deploy');
-  }
-
-  onDeploy() {
-    if (!this.active) return;
-    if (this.step === 'deploy') this._enter('battle');
+    if (this.step === 'collect') this._enter('producer');
   }
 
   onBattleStart() {
     if (!this.active) return;
-    if (this.step === 'battle') this._say('DEFEND THE BASE!');
+    if (this.step === 'battle') this._say('STOP THE EVIL BRAINROTS!');
   }
 
   onVictory() {
     if (!this.active) return;
     this.active = false;
     SaveSys.data.tutorialDone = true;
-    SaveSys.data.tutorialStep = null;
     SaveSys.save();
     this._stopHand();
     this.card.setVisible(false);
-    this.scene.fx.banner('YOU GOT IT!', '#ffd54f', 'Pull, merge, conquer!');
+    this.scene.fx.banner('LAWN DEFENDED!', '#ffd54f', 'Time to grow the squad!');
     Poki.happyTime(0.8);
   }
 

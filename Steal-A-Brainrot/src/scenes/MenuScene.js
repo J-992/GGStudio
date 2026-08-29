@@ -33,7 +33,7 @@ class MenuScene extends Phaser.Scene {
       fontFamily: 'Arial Black, Arial', fontSize: LAYOUT.landscape ? '84px' : '64px',
       color: '#ffd54f', stroke: '#000000', strokeThickness: 10,
     }).setOrigin(0.5);
-    const title2 = this.add.text(W / 2, H * 0.26 + (LAYOUT.landscape ? 78 : 60), 'MERGE CLASH', {
+    const title2 = this.add.text(W / 2, H * 0.26 + (LAYOUT.landscape ? 78 : 60), 'DEFENSE', {
       fontFamily: 'Arial Black, Arial', fontSize: LAYOUT.landscape ? '56px' : '44px',
       color: '#80deea', stroke: '#000000', strokeThickness: 8,
     }).setOrigin(0.5);
@@ -48,9 +48,9 @@ class MenuScene extends Phaser.Scene {
     this.tweens.add({ targets: play, scale: { from: 1, to: 1.06 }, duration: 600, yoyo: true, repeat: -1 });
     r.add(play);
 
-    const found = SaveSys.data.discovered.length;
+    const owned = SaveSys.data.unlocked.length;
     const sub = this.add.text(W / 2, H * 0.62 + 70,
-      '\u{1F4D6} ' + found + ' / ' + CREATURES.length + ' brainrots found', {
+      '\u{1F9E0} ' + owned + ' / ' + CREATURES.length + ' brainrots recruited · level ' + SaveSys.data.level, {
         fontFamily: 'Arial, sans-serif', fontSize: '18px', color: '#b0bec5',
       }).setOrigin(0.5);
     r.add(sub);
@@ -76,7 +76,8 @@ class MenuScene extends Phaser.Scene {
     AudioSys.ensure();
     AudioSys.setMuted(SaveSys.data.muted);
     AudioSys.sfx('tick');
-    this.scene.start('Game');
+    if (SaveSys.data.tutorialDone) this.scene.start('HQ');
+    else this.scene.start('Game', { level: 1, team: SaveSys.data.team.slice() });
   }
 }
 window.MenuScene = MenuScene;

@@ -1,30 +1,33 @@
-// Coins + tickets, the game's only two currencies (design rule). Coins feed
-// the Brainrot Machine; tickets come from bosses and buy guaranteed rare pulls.
+// The two currencies, kept deliberately apart:
+//   brainz -- in-level only, produced by Cocofanto and the sky, spent planting
+//   coins  -- meta, paid by dead evil brainrots, banked ONLY on victory,
+//             spent in the shop between levels
 class Economy {
   constructor() {
-    this.coins = 0;
-    this.tickets = 0;
+    this.energy = 0;                  // brainz
+    this.pendingCoins = 0;            // this level's kill money, banked on win
   }
 
-  canAfford(n) { return this.coins >= n; }
+  canAfford(n) { return this.energy >= n; }
 
   spend(n) {
     if (!this.canAfford(n)) return false;
-    this.coins -= n;
+    this.energy -= n;
     return true;
   }
 
-  earn(n) {
-    this.coins += n;
-    SaveSys.addStat('coinsEarned', n);
-  }
+  earnEnergy(n) { this.energy += n; }
 
-  earnTickets(n) { this.tickets += n; }
+  earnCoins(n) { this.pendingCoins += n; }
 
-  spendTicket() {
-    if (this.tickets < 1) return false;
-    this.tickets -= 1;
-    return true;
+  // victory: move the level's take into the persistent wallet
+  bank(bonus) {
+    const total = this.pendingCoins + (bonus || 0);
+    SaveSys.data.coins += total;
+    SaveSys.addStat('coinsEarned', total);
+    SaveSys.save();
+    this.pendingCoins = 0;
+    return total;
   }
 }
 window.Economy = Economy;

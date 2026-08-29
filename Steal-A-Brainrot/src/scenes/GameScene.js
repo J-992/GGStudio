@@ -1,51 +1,55 @@
-// Orchestration: builds every system, owns the drop() intent table, forwards
-// raw pointer events to the board, gates Poki gameplay reporting on real
-// player input, and drives the per-frame update order.
+// Orchestration: builds every system, owns the place/dig rules, forwards raw
+// pointer events (brainz taps beat cards beat the lawn), gates Poki gameplay
+// reporting on real player input, and drives the per-frame update order.
 class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
+
+  init(data) {
+    this.levelN = (data && data.level) || SaveSys.data.level || 1;
+    this.teamIds = ((data && data.team) || SaveSys.data.team).slice(0, CFG.TEAM.size);
+  }
 
   create() {
     this.modalOpen = false;
     this.playerStartedGameplay = false;
     this._gameplayReported = false;
-    this._saveTimer = 0;
 
     this.cameras.main.setBackgroundColor('#101a30');
 
+    const recipe = LEVELS[Math.min(this.levelN, LEVELS.length) - 1];
+
     this.fx = new Effects(this);
     this.economy = new Economy();
-    this.board = new BoardModel();
+    this.economy.energy = recipe.startEnergy != null ? recipe.startEnergy : CFG.ENERGY.start;
 
-    // restore the run
-    const run = SaveSys.data.run;
-    this.economy.coins = run.coins != null ? run.coins : CFG.ECON.startCoins;
-    this.economy.tickets = run.tickets || 0;
-    this.board.load(run.board);
-    this.board.allUnits().forEach((u) => { SaveSys.discover(u.id); SaveSys.bestStar(u.id, u.star); });
-
-    this.gacha = new GachaSystem(this.board, this.economy);
-    this.boardUI = new BoardUI(this, this.board);
-    this.combat = new CombatSystem(this, this.board, this.economy);
+    this.lawn = new Lawn(this, recipe.lanes);
+    this.energy = new EnergySystem(this, this.economy);
+    this.combat = new CombatSystem(this, this.lawn, this.economy, this.energy);
     this.hud = new HUD(this, this.economy);
-    this.machineUI = new MachineUI(this, this.gacha, this.economy);
-    this.braindex = new Braindex(this);
-    this.director = new StageDirector(this, this.combat, this.economy, this.hud);
+    this.cards = new CardBar(this, this.teamIds, this.economy);
+    this.director = new WaveDirector(this, this.combat, this.economy, this.hud);
     this.tutorial = new TutorialSystem(this, this.director);
 
-    this.machineUI.onResult = (result) => this.applyGachaResult(result);
-    this.combat.onKill = () => this.machineUI.refresh();
+    this.energy.onCollect = () => { if (this.tutorial) this.tutorial.onCollect(); };
 
     // ---- input: raw pointer events, no drag plugin ----
     this.input.addPointer(2);
     this.input.on('pointerdown', (p) => {
       AudioSys.ensure();
       if (this.modalOpen) return;
-      if (this.machineUI.handlePointerDown(p)) return;
-      if (this.boardUI.beginDrag(p)) this.startGameplayOnInteraction();
+      if (this.energy.tryCollect(p)) { this.startGameplayOnInteraction(); return; }
+      if (this.cards.handleDown(p)) { this.startGameplayOnInteraction(); return; }
+      const intent = this.cards.fieldTap(p);
+      if (intent) this.applyIntent(intent);
     });
-    this.input.on('pointermove', (p) => { if (!this.modalOpen) this.boardUI.moveDrag(p); });
-    this.input.on('pointerup', (p) => { if (!this.modalOpen) this.boardUI.endDrag(p); });
-    this.input.on('pointerupoutside', (p) => { if (!this.modalOpen) this.boardUI.endDrag(p); });
+    this.input.on('pointermove', (p) => { if (!this.modalOpen) this.cards.moveDrag(p); });
+    const up = (p) => {
+      if (this.modalOpen) return;
+      const intent = this.cards.handleUp(p);
+      if (intent) this.applyIntent(intent);
+    };
+    this.input.on('pointerup', up);
+    this.input.on('pointerupoutside', up);
 
     this._onResize = () => this.relayoutAll();
     this.scale.on('resize', this._onResize);
@@ -54,106 +58,46 @@ class GameScene extends Phaser.Scene {
       Poki.gameplayStop();
     });
 
-    this.director.startStage(run.stage || 1);
+    this.director.startLevel(this.levelN);
     AudioSys.setMusic('normal');
   }
 
-  // ------------------------------------------------------- drop intents
-  // merge -> swap -> move -> sell; a max-star pair trades places instead of
-  // refusing silently.
+  // ------------------------------------------------------- intents
 
-  drop(fromSlot, target) {
-    const unit = this.board.at(fromSlot);
-    if (!unit) return 'rejected';
-
-    if (target.kind === 'trash') {
-      const def = CREATURES_BY_ID[unit.id];
-      const price = Units.sellPrice(def, unit.star);
-      this.board.remove(fromSlot);
-      this.economy.earn(price);
-      this.boardUI.sellAnim(unit.uid, price);
-      this.machineUI.refresh();
-      return 'sold';
+  applyIntent(intent) {
+    if (intent.kind === 'dig') {
+      if (this.lawn.dig(intent.lane, intent.col)) {
+        this.cards.clearSelection();
+        this.startGameplayOnInteraction();
+      }
+      return;
     }
-
-    const to = target.slot;
-    if (to < 0 || to >= BoardModel.SIZE || to === fromSlot) return 'rejected';
-    const other = this.board.at(to);
-
-    if (!other) {
-      this.board.move(fromSlot, to);
-      if (this.board.isField(to) && this.tutorial) this.tutorial.onDeploy();
-      return 'moved';
-    }
-
-    if (other.id !== unit.id || other.star !== unit.star) {
-      this.board.swap(fromSlot, to);
-      if (this.board.isField(to) && this.tutorial) this.tutorial.onDeploy();
-      return 'swapped';
-    }
-
-    const merged = this.board.merge(fromSlot, to);
-    if (!merged) {
-      // both already at max star
-      this.board.swap(fromSlot, to);
-      return 'swapped';
-    }
-
-    SaveSys.addStat('merges');
-    SaveSys.bestStar(merged.result.id, merged.result.star);
-    if (merged.result.star >= CFG.STAR.max) SaveSys.addStat('fiveStars');
-    this.boardUI.animateMerge(fromSlot, to, merged.consumedUids, merged.result);
-    if (this.tutorial) this.tutorial.onMerge();
-    Poki.happyTime(merged.result.star >= 4 ? 0.8 : 0.5);
-    this.machineUI.refresh();
-    return 'merged';
+    this.tryPlace(intent.card, intent.lane, intent.col);
   }
 
-  // ------------------------------------------------------- gacha results
+  tryPlace(cardIdx, lane, col) {
+    const card = this.cards.cards[cardIdx];
+    if (!card) return false;
+    const def = card.def;
 
-  applyGachaResult(result) {
-    const m = LAYOUT.machine;
-    const mx = m.x + m.w / 2, my = m.y + m.h / 2;
-
-    if (result.coins) {
-      this.economy.earn(result.coins);
-      const t = this.hud.coinTarget();
-      this.fx.coinBurst(mx, my, 10);
-      this.fx.coinFly(mx, my, t.x, t.y, () => this.hud.bumpCoins());
-      this.fx.floatText(mx, my - 30, '+' + HUD.money(result.coins), '#ffe082', 24);
+    if (!this.lawn.canPlace(lane, col)) {
+      AudioSys.sfx('denied');
+      return false;
     }
-    if (result.kind === 'jackpot') {
-      this.fx.banner('JACKPOT!', '#ffd54f');
-      this.fx.confetti(mx, my, 30);
-    }
-    if (result.kind === 'double' && result.defs.length > 1) {
-      this.fx.banner('DOUBLE!', '#80deea');
-    }
-
-    result.defs.forEach((def) => {
-      const slot = this.board.firstEmptyBench();
-      if (slot === -1) return;   // guarded upstream; never drop one silently
-      const unit = this.board.spawn(def.id, 1, slot);
-      this.boardUI.spawnAnim(unit);
-      const isNew = SaveSys.discover(def.id);
-      SaveSys.bestStar(def.id, 1);
-      const rc = RARITIES[def.rarity];
-      const colorStr = '#' + rc.color.toString(16).padStart(6, '0');
-      if (isNew) {
-        this.fx.banner('NEW! ' + def.name.toUpperCase(), colorStr, rc.name);
-        AudioSys.sfx(rc.tier >= 4 ? 'legendary' : 'reveal');
-        Poki.happyTime(rc.tier >= 4 ? 1 : 0.6);
-      } else if (rc.tier >= 4) {
-        this.fx.banner(def.name.toUpperCase() + '!', colorStr);
-        AudioSys.sfx('legendary');
-        Poki.happyTime(1);
+    if (!this.cards.isReady(cardIdx)) {
+      AudioSys.sfx('denied');
+      if (!this.economy.canAfford(def.cost)) {
+        this.fx.floatText(LAYOUT.field.colX(col), LAYOUT.field.laneY(lane) - 40, 'NEED MORE BRAINZ!', '#ff8a80', 18);
       }
-    });
+      return false;
+    }
 
-    this.machineUI.refresh();
-    // the merge/deploy hand can only aim once the units actually exist
-    if (this.tutorial && this.tutorial.active) this.tutorial.relayout();
-    this.snapshot();
+    this.economy.spend(def.cost);
+    this.lawn.place(def.id, lane, col);
+    this.cards.startCooldown(cardIdx);
+    this.startGameplayOnInteraction();
+    if (this.tutorial) this.tutorial.onPlant(def.id);
+    return true;
   }
 
   // ------------------------------------------------------- poki gating
@@ -182,32 +126,22 @@ class GameScene extends Phaser.Scene {
     if (!this.modalOpen) {
       const combatDt = dt * this.fx.timeScale();
       const st = this.director.state;
-      if (st === 'wave' || st === 'boss' || st === 'gap') this.combat.update(combatDt);
+      if (st === 'wave' || st === 'boss' || st === 'prep') this.combat.update(combatDt);
+      this.energy.update(dt);
+      this.cards.update(dt);
       this.director.update(dt);
     }
 
-    this.boardUI.update(time);
     this.hud.refresh();
     this.syncGameplayReport();
-
     SaveSys.addStat('playMs', dt);
-    this._saveTimer += dt;
-    if (this._saveTimer >= CFG.SAVE_EVERY_MS) {
-      this._saveTimer = 0;
-      this.snapshot();
-    }
-  }
-
-  snapshot() {
-    SaveSys.snapshotRun(this.economy, this.board, this.director.stage);
   }
 
   relayoutAll() {
-    this.boardUI.relayout();
+    this.lawn.relayout();
     this.combat.relayout();
     this.hud.relayout();
-    this.machineUI.relayout();
-    this.braindex.relayout();
+    this.cards.relayout();
     this.director.relayout();
     if (this.tutorial) this.tutorial.relayout();
   }

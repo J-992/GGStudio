@@ -20,6 +20,7 @@
     "cr_trulimero": "sprites/cr_trulimero.png",
     "cr_tungtung": "sprites/cr_tungtung.png",
     "cr_udin": "sprites/cr_udin.png",
-    "cr_vacca": "sprites/cr_vacca.png"
+    "cr_vacca": "sprites/cr_vacca.png",
+    "hand": "ui/tutorial-hand.webp"
   }
 }

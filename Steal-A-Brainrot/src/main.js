@@ -23,7 +23,7 @@ Poki.init().then(() => {
     // Some embedded webviews never deliver requestAnimationFrame; ?settimeout
     // switches Phaser to its timer loop so the game still runs there.
     fps: { forceSetTimeOut: /settimeout/.test(window.location.search) },
-    scene: [BootScene, MenuScene, GameScene],
+    scene: [BootScene, MenuScene, HQScene, GameScene],
   });
 });
 
@@ -41,8 +41,4 @@ window.addEventListener('resize', () => {
   }, 120);
 });
 
-window.addEventListener('beforeunload', () => {
-  const scene = window.game && window.game.scene ? window.game.scene.getScene('Game') : null;
-  if (scene && scene.scene.isActive()) scene.snapshot();
-  else SaveSys.save();
-});
+window.addEventListener('beforeunload', () => SaveSys.save());

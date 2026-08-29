@@ -1,15 +1,15 @@
-# Brainrot Merge Clash
+# Brainrot Defense
 
-A lightweight, highly addictive merge + wave-defense game for Poki: pull
-Italian brainrot characters from the Brainrot Machine, merge duplicates into
-5-star monsters, place them on a 3x3 battlefield and let them shred waves of
-walking pizzas, angry espressos and pasta monsters. Phaser 3, responsive
-portrait AND landscape, no backend, no login.
+A Plants-vs-Zombies-style lane defense for Poki: plant Italian brainrot
+characters on a 6-lane lawn, tap the brainz that Cocofanto Elefanto trumpets
+out, and stop the EVIL brainrots marching in from the right. Phaser 3,
+responsive portrait AND landscape, no backend, no login.
 
 The roster is the Italian brainrot meme cast — Tralalero Tralala, Bombardiro
 Crocodilo, Tung Tung Tung Sahur, Ballerina Cappuccina, La Vacca Saturno
-Saturnita and friends — 20 of them across 7 rarities, drawn from real character
-artwork. See the licensing note at the bottom before shipping.
+Saturnita and friends — 20 of them across 7 rarities, drawn from real
+character artwork. The enemies are the same cast gone bad: dark-tinted
+mirror versions of the sprites. See the licensing note at the bottom.
 
 ## Run it
 
@@ -25,23 +25,45 @@ placeholders, so the game runs from any static server with zero assets. Add
 
 ## The loop
 
-1. **Pull** the Brainrot Machine (coins): a capsule bounces through a mini
-   plinko and reveals a brainrot — rarity ceremonies scale from a simple pop
-   to a machine-shaking legendary reveal. Machine can also pay out coins,
-   doubles, rare capsules and jackpots.
-2. **Merge** two identical same-star brainrots by dragging them together:
-   star up (max 5), each star multiplies damage x2.4 — a merge is always a
-   +20% board upgrade over the pair it consumed.
-3. **Deploy** onto the 3x3 battlefield (rows = lanes). Units auto-attack by
-   archetype: dash, slam, spin, airstrike, rapid, snipe, knockback, orbit.
-4. **Defend**: enemies march right-to-left; 3 lives per stage. 10 authored
-   stages, boss every 5th (MEGA ESPRESSO), endless scaling after stage 10.
-5. Bosses pay **tickets** — a ticket buys a guaranteed rare-or-better pull.
-6. Fill the **BRAINDEX**: every brainrot, its best star level, silhouettes
-   for the undiscovered.
+1. **Plant** brainrots from the card bar onto the 6x9 lawn — drag a card to a
+   cell, or tap the card then the cell. Every card shows its brainz cost and
+   recharges after use. The shovel digs mistakes back up.
+2. **Collect brainz** (the PvZ sun): Cocofanto Elefanto pops out 25 every 7s,
+   the sky drops a freebie on a timer, untapped tokens fade. All planting is
+   paid in brainz; brainz die with the level.
+3. **Defend**: evil brainrots walk right-to-left and chew whatever they hit.
+   Every active lane has a one-shot **moped** parked on the left — the
+   lawnmower. A breach with the moped spent loses the level.
+4. **Earn coins**: every kill pays coins, banked when the level is won (plus
+   a clear bonus). Coins persist.
+5. **Shop & squad (HQ)**: between levels, buy new brainrots with coins and
+   pick a squad of up to 6 for the next level. Locked brainrots show as
+   silhouettes with price tags.
+6. 10 authored levels — level 1 is the tutorial on a two-lane lawn, EVIL TUNG
+   TUNG minibosses from level 5, MEGA BOMBARDIRO boss at 10, endless scaling
+   after.
 
-Drag to an occupied slot swaps; same-star pairs merge; the trash bin sells.
-A max-star pair trades places instead of refusing silently.
+## The roster (roles)
+
+Every brainrot has one obvious job, PvZ-style:
+
+- **producer** — Cocofanto Elefanto, the money elephant (the sunflower)
+- **shooter** — Trippi (peashooter), Boneca (knockback), Octopussini (slow
+  goo), Orangutini (double shot), Bobritto (gatling), Patapim (pierces the
+  whole lane), Chimpanzini (banana barrage), Tralalero (mythic shredder)
+- **wall** — Troppa Trippa, 1600 hp of tripe
+- **mine** — Burbaloni bellyflop trap, arms then one-shots a pack
+- **melee** — Trulimero spin, Tung Tung Tung Sahur's bat
+- **lobber** — Lirili (slowing splash), Girafa (melon-pult), Bombardiro
+  (bombs the densest pack anywhere)
+- **ring** — Ballerina, Udin (knockback drums), La Vacca (secret, grinds
+  everything near her)
+- **sniper** — Cappuccino Assassino, blades the beefiest enemy on the lawn
+
+`tools/check.mjs` enforces the data contract: valid roles and stats, free
+starters that cover the tutorial (producer + shooter), shop prices that climb
+with rarity, level recipes that only reference real enemies and active lanes,
+and sane zone geometry in both orientations.
 
 ## Controls
 
@@ -52,10 +74,10 @@ game from the menu).
 
 `src/systems/Layout.js` derives a design resolution from the window aspect
 (720-wide portrait, 1440-wide landscape), Phaser FITs it, and every widget
-re-anchors in `relayout()` when the window resizes or rotates. Portrait:
-battlefield top ~57%, bench + machine below (the design doc split). Landscape:
-battlefield left ~62%, bench + machine in a right column. Enemy speed scales
-with lane length so crossing time is constant across orientations.
+re-anchors in `relayout()` when the window resizes or rotates. Lanes stay
+horizontal in both orientations; enemy speed scales with lawn length so
+crossing time is constant. The tutorial hand is the merge-ninja pointing hand
+(`assets/ui/tutorial-hand.webp`), with a procedural fallback.
 
 ## Poki SDK
 
@@ -64,50 +86,45 @@ absent or blocked, so the game is fully playable off-platform.
 
 - `gameLoadingStart/Finished` around boot; `gameplayStart/Stop` gated on the
   first real player input (never the first frame), and paused by any modal
-- **Interstitial**: only on NEXT STAGE / RETRY transitions, never before the
-  first stage — the first tap is the hook, not a natural break
-- **Rewarded**: the defeat-screen revive (one per stage); nothing requires an ad
-- `happyTime` on merges, rare pulls, boss kills and stage clears
+- **Interstitial**: only on RETRY / back-to-HQ transitions, never around the
+  tutorial's first clear — the first tap is the hook, not a natural break
+- **Rewarded**: the defeat-screen lawn-clear revive (one per level); nothing
+  requires an ad
+- `happyTime` on boss kills and level clears
 
 ## Save data
 
-`localStorage` under `brainrot-merge-clash-v1`. Meta (braindex, best stars,
-stats, tutorial, settings) never lives inside the run snapshot, so a future
-"restart progress" can wipe the run without touching the collection. The run
-(coins, tickets, stage, machine pulls, full board) is written every 8s and on
-exit; defeat never wipes the board.
+`localStorage` under `brainrot-defense-v1`. Coins, the unlocked roster, the
+last squad, the next level, tutorial flag, mute and stats. Levels are short,
+so there is no mid-level snapshot — a reload restarts the level.
 
 ## Structure
 
 ```
-src/Config.js            all balance constants (stars, machine odds, stage scaling)
+src/Config.js            all balance constants (grid, brainz, waves, ads)
 src/systems/Layout.js    responsive zone geometry (the only screen-size authority)
-src/data/creatures.js    20 brainrots + rarities + 8 attack archetypes
-src/data/enemies.js      5 enemies + bosses
-src/data/stages.js       10 authored stage recipes
+src/data/creatures.js    20 brainrots: roles, costs, hp, shop prices
+src/data/enemies.js      7 evil brainrots + the boss (tinted roster sprites)
+src/data/levels.js       10 authored level recipes
 src/systems/             Save, Audio (procedural), Poki, Textures, Effects
-src/game/                Economy, BoardModel, Gacha, Combat, StageDirector,
-                         BoardUI, MachineUI, Braindex, Tutorial, HUD
-src/scenes/              Boot -> Menu -> Game
+src/game/                Economy, Lawn, EnergySystem, CardBar, Combat,
+                         WaveDirector, Tutorial, HUD
+src/scenes/              Boot -> Menu -> HQ (squad + shop) <-> Game
 tools/                   check.mjs (data + Poki gate), build-poki.mjs, packaging
-assets/                  manifest.json + rendered creature sprites
+assets/                  manifest.json + rendered creature sprites + the hand
 ```
 
-The board is data (`BoardModel`: one flat 17-slot array, 0-8 battlefield,
-9-16 bench); `BoardUI` mirrors it and never owns gameplay state. A merge
-destroys both unit ids and mints a new one, which is what drives the
-destroy-and-respawn merge animation. `tools/check.mjs` enforces the design
-rules: dps must climb with rarity, a merge must beat the pair it consumed,
-every 5th stage carries a boss, and both orientations must produce
-non-overlapping zones.
+The lawn is data (`Lawn.grid[lane][col]`); sprites hang off each unit and
+never own gameplay state. Enemies stop and chew when a unit blocks their
+mouth, mines detonate on contact, mopeds ride the lane once.
 
 ## Art
 
-The 20 creatures are real rendered sprites from `art/source/` (352x352,
-feet on the bottom edge, loaded via `assets/manifest.json`); any key that
-fails to load falls back to its procedural placeholder in
-`TextureFactory.BODIES`. Enemies are drawn procedurally (`ENEMY_BODIES`) and
-can be upgraded to real art later through the same manifest path (`en_<id>`).
+The 20 creatures are real rendered sprites from `art/source/` (352x352, feet
+on the bottom edge, loaded via `assets/manifest.json`); any key that fails to
+load falls back to its procedural placeholder in `TextureFactory.BODIES`.
+Enemies reuse the same sprites flipped and dark-tinted, so new enemy types
+are one data entry.
 
 ```bash
 node tools/import-art.mjs --apply     # rebuild creature sprites from art/source/

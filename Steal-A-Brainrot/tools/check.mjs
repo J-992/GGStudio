@@ -55,10 +55,10 @@ failures.push(...errors);
 
 //  --------------------------------------------------------------- creatures
 
-const { CFG, CREATURES, RARITIES, ARCHETYPES, ENEMIES, BOSSES, STAGES, LAYOUT, configureLayout, Poki } = data;
+const { CFG, CREATURES, CREATURES_BY_ID, RARITIES, ENEMIES, BOSSES, LEVELS, LAYOUT, configureLayout, Poki, Units } = data;
 
-if (!CFG || !CREATURES || !RARITIES || !ARCHETYPES || !ENEMIES || !BOSSES || !STAGES) {
-  if (errors.length === 0) fail('CFG, CREATURES, RARITIES, ARCHETYPES, ENEMIES, BOSSES or STAGES are not defined.');
+if (!CFG || !CREATURES || !RARITIES || !ENEMIES || !BOSSES || !LEVELS) {
+  if (errors.length === 0) fail('CFG, CREATURES, RARITIES, ENEMIES, BOSSES or LEVELS are not defined.');
   done();
 }
 
@@ -68,84 +68,121 @@ if (Poki && Poki.ready) fail('Poki.ready is true with no SDK present; the wrappe
 
 if (CREATURES.length < 20) fail(`expected at least 20 creatures, found ${CREATURES.length}.`);
 
+const ROLES = new Set(['producer', 'shooter', 'lobber', 'melee', 'ring', 'sniper', 'wall', 'mine']);
 const ids = new Set();
 
 for (const c of CREATURES) {
   const where = `creature ${c.id} (${c.name})`;
 
-  if (ids.has(c.id)) fail(`${where}: duplicate id -- the braindex and save data key off it.`);
+  if (ids.has(c.id)) fail(`${where}: duplicate id -- the shop and save data key off it.`);
   ids.add(c.id);
 
-  if (!RARITIES[c.rarity]) { fail(`${where}: unknown rarity "${c.rarity}".`); continue; }
-  if (!(CFG.RARITY_WEIGHTS[c.rarity] > 0)) fail(`${where}: rarity "${c.rarity}" has no gacha weight, so the machine never dispenses it.`);
-  if (!ARCHETYPES[c.archetype]) fail(`${where}: unknown archetype "${c.archetype}" -- it would stand on the field and never attack.`);
-  if (!(c.baseDamage > 0)) fail(`${where}: baseDamage must be positive.`);
-  if (!(c.attackSpeed > 0)) fail(`${where}: attackSpeed must be positive.`);
-  if (!(c.sellValue > 0)) fail(`${where}: sellValue must be positive.`);
+  if (!RARITIES[c.rarity]) fail(`${where}: unknown rarity "${c.rarity}".`);
+  if (!ROLES.has(c.role)) fail(`${where}: unknown role "${c.role}" -- it would stand on the lawn doing nothing.`);
+  if (!(c.cost > 0)) fail(`${where}: brainz cost must be positive.`);
+  if (!(c.hp > 0)) fail(`${where}: hp must be positive -- everything can be chewed.`);
+  if (!(c.cooldownMs > 0)) fail(`${where}: card cooldown must be positive.`);
+  if (!(c.price >= 0)) fail(`${where}: shop price must be >= 0 (0 = starter).`);
+
+  if (c.role === 'producer' && !(c.produceMs > 0 && c.produceAmount > 0)) {
+    fail(`${where}: a producer needs produceMs and produceAmount.`);
+  }
+  if (['shooter', 'lobber', 'melee', 'ring', 'sniper', 'mine'].includes(c.role)) {
+    if (!(c.damage > 0)) fail(`${where}: damage must be positive.`);
+  }
+  if (['shooter', 'lobber', 'melee', 'ring', 'sniper'].includes(c.role)) {
+    if (!(c.attackSpeed > 0)) fail(`${where}: attackSpeed must be positive.`);
+  }
+  if (c.role === 'shooter' && !c.projectile) fail(`${where}: a shooter needs a projectile texture.`);
+  if (['lobber', 'ring', 'mine'].includes(c.role) && !(c.radius > 0)) fail(`${where}: role "${c.role}" needs a radius.`);
+  if (c.role === 'mine' && !(c.armMs > 0)) fail(`${where}: a mine needs an arming time.`);
 }
 
-//  Power has to climb with rarity, or pulling a rare is a lie. Compared tier
-//  against tier (1-star dps = damage x speed) so reordering within a tier
-//  stays free.
+//  The starters are the level-1 squad: they must exist, be free, and cover
+//  the tutorial script (a producer to teach brainz, a shooter to teach lanes).
+const starters = CREATURES.filter((c) => c.price === 0);
+if (starters.length < 3) fail(`only ${starters.length} starters (price 0); the default squad needs at least 3.`);
+if (!starters.some((c) => c.role === 'producer')) fail('no free producer -- the tutorial cannot teach the economy.');
+if (!starters.some((c) => c.role === 'shooter')) fail('no free shooter -- the tutorial cannot teach the lanes.');
+
+//  Buying into a higher rarity has to buy more power for the money to mean
+//  anything: within the shop, each tier's cheapest entry must cost more than
+//  the tier below's dearest.
 const byTier = new Map();
-
 for (const c of CREATURES) {
+  if (c.price === 0) continue;
   const t = RARITIES[c.rarity].tier;
-  const dps = c.baseDamage * c.attackSpeed;
   const cur = byTier.get(t) || { min: Infinity, max: -Infinity };
-  byTier.set(t, { min: Math.min(cur.min, dps), max: Math.max(cur.max, dps) });
+  byTier.set(t, { min: Math.min(cur.min, c.price), max: Math.max(cur.max, c.price) });
 }
-
 const tiers = [...byTier.keys()].sort((a, b) => a - b);
-
 for (let i = 1; i < tiers.length; i++) {
   const lo = byTier.get(tiers[i - 1]);
   const hi = byTier.get(tiers[i]);
-  if (hi.min <= lo.max) fail(`tier ${tiers[i]} bottoms out at ${hi.min.toFixed(1)} dps, not above tier ${tiers[i - 1]}'s top ${lo.max.toFixed(1)}.`);
+  if (hi.min <= lo.max) fail(`shop tier ${tiers[i]} starts at $${hi.min}, not above tier ${tiers[i - 1]}'s top $${lo.max}.`);
 }
 
-//  A merge must always be an upgrade, never a doubling: 2 units become 1 at
-//  dmgGrowth x, so dmgGrowth/2 is the board-power multiplier per merge.
-if (CFG.STAR.max !== 5) fail(`CFG.STAR.max is ${CFG.STAR.max}; the game and its art are authored for 5.`);
-if (!(CFG.STAR.dmgGrowth / 2 > 1)) fail(`CFG.STAR.dmgGrowth ${CFG.STAR.dmgGrowth} makes a merge a downgrade (needs > 2).`);
+//  ---------------------------------------------------------------- enemies
 
-//  ----------------------------------------------------------------- stages
-
-if (STAGES.length < 10) fail(`expected at least 10 stages, found ${STAGES.length}.`);
-
-STAGES.forEach((st, i) => {
-  const where = `stage ${st.stage || i + 1}`;
-  if (!Array.isArray(st.waves) || st.waves.length < 1 || st.waves.length > 5) {
-    fail(`${where}: needs 1..5 waves.`);
-    return;
+for (const [id, e] of [...Object.entries(ENEMIES), ...Object.entries(BOSSES)]) {
+  const where = `enemy ${id} (${e.name})`;
+  if (!CREATURES_BY_ID[e.base]) fail(`${where}: base "${e.base}" is not a creature -- it has no sprite to wear.`);
+  if (!(e.hp > 0) || !(e.speed > 0) || !(e.bite > 0) || !(e.coins > 0)) {
+    fail(`${where}: hp, speed, bite and coins must all be positive.`);
   }
-  for (const w of st.waves) {
+}
+
+//  ----------------------------------------------------------------- levels
+
+if (LEVELS.length < 10) fail(`expected at least 10 levels, found ${LEVELS.length}.`);
+
+let prevReward = 0;
+LEVELS.forEach((lv, i) => {
+  const where = `level ${lv.level || i + 1}`;
+  if (!Array.isArray(lv.lanes) || lv.lanes.length < 1) fail(`${where}: needs active lanes.`);
+  for (const l of lv.lanes || []) {
+    if (!(l >= 0 && l < CFG.GRID.lanes)) fail(`${where}: lane ${l} is off the ${CFG.GRID.lanes}-lane lawn.`);
+  }
+  if (!Array.isArray(lv.waves) || lv.waves.length < 1 || lv.waves.length > 5) fail(`${where}: needs 1..5 waves.`);
+  for (const w of lv.waves || []) {
     for (const sp of w.spawns || []) {
       if (!ENEMIES[sp.enemy]) fail(`${where}: wave spawns unknown enemy "${sp.enemy}".`);
       if (!(sp.n > 0) || !(sp.everyMs > 0)) fail(`${where}: spawn group needs positive n and everyMs.`);
+      if (sp.lane !== undefined && !lv.lanes.includes(sp.lane)) fail(`${where}: spawn pinned to inactive lane ${sp.lane}.`);
     }
   }
-  if (st.boss && !BOSSES[st.boss]) fail(`${where}: unknown boss "${st.boss}".`);
-  const n = st.stage || i + 1;
-  if (n % CFG.STAGE.bossEveryN === 0 && !st.boss) fail(`${where}: every ${CFG.STAGE.bossEveryN}th stage must carry a boss.`);
+  if (lv.boss && !BOSSES[lv.boss]) fail(`${where}: unknown boss "${lv.boss}".`);
+  if (!(lv.reward > 0)) fail(`${where}: needs a positive coin reward.`);
+  if (lv.reward < prevReward) fail(`${where}: reward ${lv.reward} pays less than the level before it.`);
+  prevReward = lv.reward;
 });
+
+//  Level 1 is the tutorial: a teaching lawn (not all lanes), and enough
+//  starting brainz to plant the starter shooter immediately.
+const l1 = LEVELS[0];
+if (l1.lanes.length >= CFG.GRID.lanes) fail('level 1 opens every lane; the tutorial needs a smaller lawn.');
+const starterShooter = starters.find((c) => c.role === 'shooter');
+if (starterShooter && !(l1.startEnergy >= starterShooter.cost)) {
+  fail(`level 1 starts with ${l1.startEnergy} brainz; the tutorial's first plant costs ${starterShooter.cost}.`);
+}
 
 //  ----------------------------------------------------------------- layout
 
-//  Both orientations have to produce sane, non-overlapping zones.
+//  Both orientations have to produce sane zones in the right vertical order.
 for (const [vw, vh] of [[390, 844], [1280, 720]]) {
   configureLayout(vw, vh);
   const where = `layout ${vw}x${vh}`;
-  const f = LAYOUT.field, b = LAYOUT.bench, m = LAYOUT.machine;
-  if (!f || !b || !m) { fail(`${where}: zones missing.`); continue; }
-  if (f.y < LAYOUT.hud.h) fail(`${where}: battlefield runs under the HUD.`);
-  for (const [name, r] of [['field', f], ['bench', b], ['machine', m]]) {
-    if (r.x < 0 || r.y < 0 || r.x + r.w > LAYOUT.width || r.y + r.h > LAYOUT.height) {
+  const f = LAYOUT.field, cb = LAYOUT.cards;
+  if (!f || !cb) { fail(`${where}: zones missing.`); continue; }
+  if (cb.y < LAYOUT.hud.h) fail(`${where}: the card bar runs under the HUD.`);
+  if (f.y < cb.y + cb.h) fail(`${where}: the lawn runs under the card bar.`);
+  for (const [name, r] of [['field', f], ['cards', cb]]) {
+    if (r.x < 0 || r.y < 0 || r.x + r.w > LAYOUT.width || r.y + r.h > LAYOUT.height + 1) {
       fail(`${where}: ${name} zone runs off the canvas.`);
     }
   }
-  const overlap = !(f.x + f.w <= b.x || b.x + b.w <= f.x || f.y + f.h <= b.y || b.y + b.h <= f.y);
-  if (overlap) fail(`${where}: battlefield and bench overlap.`);
+  if (!(f.colW > 30)) fail(`${where}: lawn cells are ${f.colW.toFixed(1)}px wide -- too small to tap.`);
+  if (!(f.laneH > 40)) fail(`${where}: lanes are ${f.laneH.toFixed(1)}px tall -- too small to read.`);
 }
 
 //  --------------------------------------------------------------------- art
@@ -163,14 +200,10 @@ if (existsSync(manifestPath)) {
   }
 
   //  A sprite for a creature that no longer exists is dead weight in the build.
-  const known = new Set([
-    ...CREATURES.map((c) => `cr_${c.id}`),
-    ...Object.keys(ENEMIES).map((id) => `en_${id}`),
-    ...Object.keys(BOSSES).map((id) => `en_${id}`)
-  ]);
+  const known = new Set([...CREATURES.map((c) => `cr_${c.id}`), 'hand']);
 
   for (const key of Object.keys(manifest.sprites || {})) {
-    if (!known.has(key)) fail(`the manifest ships ${key}, which matches no creature, enemy or boss.`);
+    if (!known.has(key)) fail(`the manifest ships ${key}, which matches no creature (or the tutorial hand).`);
   }
 }
 
@@ -321,4 +354,4 @@ await checkHostileSdk('SDK whose init rejects', (calls) => ({
 
 if (failures.length > 0) done();
 
-console.log(`\n  OK -- ${sources.length} scripts boot, ${CREATURES.length} creatures across ${tiers.length} tiers validate.\n`);
+console.log(`\n  OK -- ${sources.length} scripts boot, ${CREATURES.length} brainrots and ${LEVELS.length} levels validate.\n`);
