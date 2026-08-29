@@ -31,6 +31,7 @@ import {
   initPokiForBoot,
   pokiCommercialBreak,
   pokiHappyTime,
+  pokiMeasure,
   setPokiGameplayActive,
   startPokiLoading,
   stopPokiLoading,
@@ -58,6 +59,11 @@ interface GamePlatform {
   commercialBreak: () => Promise<boolean>;
   /** Flag a moment the player enjoyed. `intensity` is 0..1. */
   happyTime: (intensity: number) => Promise<boolean>;
+  /**
+   * One retention-funnel checkpoint. See `funnel.ts` for the vocabulary; this
+   * seam only decides whether the portal has anywhere to put it.
+   */
+  measure: (category: string, what: string, action: string) => Promise<boolean>;
 }
 
 const NOT_SUPPORTED = (): Promise<boolean> => Promise.resolve(false);
@@ -76,6 +82,10 @@ const crazyGamesPlatform: GamePlatform = {
   // translation of the Poki call. Left off deliberately.
   commercialBreak: NOT_SUPPORTED,
   happyTime: NOT_SUPPORTED,
+  // CrazyGames has no game-events API — nothing on their SDK corresponds to
+  // Poki's `measure`. The funnel's other sink (Vercel) carries these instead,
+  // which is also where the numbers are actually read.
+  measure: NOT_SUPPORTED,
 };
 
 const pokiPlatform: GamePlatform = {
@@ -91,6 +101,7 @@ const pokiPlatform: GamePlatform = {
   submitScore: NOT_SUPPORTED,
   commercialBreak: pokiCommercialBreak,
   happyTime: pokiHappyTime,
+  measure: pokiMeasure,
 };
 
 /**
@@ -112,6 +123,7 @@ const nonePlatform: GamePlatform = {
   submitScore: NOT_SUPPORTED,
   commercialBreak: NOT_SUPPORTED,
   happyTime: NOT_SUPPORTED,
+  measure: NOT_SUPPORTED,
 };
 
 function selectPlatform(): GamePlatform {
@@ -178,4 +190,19 @@ export function requestPlatformCommercialBreak(): Promise<boolean> {
 
 export function reportPlatformHappyTime(intensity: number): Promise<boolean> {
   return activePlatform.happyTime(intensity);
+}
+
+/**
+ * Hand the portal one retention-funnel checkpoint.
+ *
+ * Deliberately fire-and-forget for the caller's sake: this is called from
+ * screen transitions and from the frame loop, and neither may wait on a
+ * network round trip or care whether the portal took it.
+ */
+export function measurePlatformFunnel(
+  category: string,
+  what: string,
+  action: string,
+): void {
+  void activePlatform.measure(category, what, action).catch(() => undefined);
 }

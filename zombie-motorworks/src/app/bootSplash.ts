@@ -8,6 +8,8 @@
  * mounting the app into a bare DOM all end up here with no splash to talk to.
  */
 
+import { funnel } from './funnel.ts';
+
 interface BootSplashDriver {
   set(fraction: number, label?: string): void;
   done(): void;
@@ -57,6 +59,14 @@ export const BOOT_ARENA_SPAN: readonly [number, number] = [0.86, 1];
 export function reportBootStage(stage: BootStage): void {
   const { at, label } = BOOT_STAGES[stage];
   driver()?.set(at, label);
+  // The boot bar is also the first half of the retention funnel: the gap
+  // between `scriptsReady` and `modeReady` is every player who closed the tab
+  // rather than wait out a cold load, and they are invisible in every other
+  // measure the game takes. Recorded here rather than at each call site so a
+  // stage can never be added to the bar and forgotten by the funnel. The
+  // funnel buffers until its sink is connected, which is why this costs the
+  // boot path one dependency-free module and no network.
+  funnel.bootStage(stage);
 }
 
 /**

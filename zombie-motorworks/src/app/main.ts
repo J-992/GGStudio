@@ -42,6 +42,10 @@ async function boot(): Promise<void> {
   physicsReady.catch(() => undefined);
 
   const platform = await import('./platform.ts');
+  // The portal seam exists now, so the retention funnel can have its real
+  // sinks. Everything recorded before this — the boot stages above — was
+  // buffered and is replayed on connection.
+  (await import('./funnelSink.ts')).connectFunnel();
   // Give the SDK a head start before the module graph is fetched. The result is
   // deliberately discarded: it reports whether init won a short race, which is
   // not the same question as whether the loading bracket below should run.

@@ -73,6 +73,7 @@ import type {
 import { buildWaveTimeline, type WaveTimeline } from '../core/waveTimeline.ts';
 import { randomSeed } from '../core/rng.ts';
 import { badgeStore } from '../app/badgeStore.ts';
+import { funnel } from '../app/funnel.ts';
 import {
   getMusicVolume,
   getSfxVolume,
@@ -2142,6 +2143,7 @@ export class SurvivalMode {
 
   private setSettingsOpen(open: boolean): void {
     if (this.disposed || this.phase === 'gameOver') return;
+    if (open) funnel.friction('pause');
     this.settingsOpen = open;
     this.settingsOverlay.hidden = !open;
     this.settingsEyebrow.textContent = `Wave ${this.currentWave}`;
@@ -2337,6 +2339,7 @@ export class SurvivalMode {
 
   private onResetWave(): void {
     if (this.disposed) return;
+    funnel.friction('reset-wave');
     this.discardPendingWaveRewards();
     this.damageNumbers?.clear();
     this.callbacks.onResetWave(this.currentRunState());
@@ -2349,6 +2352,9 @@ export class SurvivalMode {
    */
   private onReturnToGarage(): void {
     if (this.disposed || this.phase === 'gameOver') return;
+    funnel.friction(
+      this.mode.midRunGarage ? 'bench-trip' : 'garage-mid-wave',
+    );
     this.damageNumbers?.clear();
     // A sandbox bench trip is not an abandoned wave: the loop is build, test,
     // change something, test again, and rewinding to the wave's start would
@@ -3256,6 +3262,7 @@ export class SurvivalMode {
   }
 
   private startCurrentWave(): void {
+    funnel.startWave(this.currentWave);
     this.phase = 'active';
     this.countdownOverlay.style.display = 'none';
     playSfx('waveStart');
@@ -3430,7 +3437,14 @@ export class SurvivalMode {
     this.addPendingWaveKillReward(
       Number.isSafeInteger(reward) && reward > 0 ? reward : 0,
     );
+    // An endless run rolls straight from one wave into the next without ever
+    // passing through `startCurrentWave`, so the funnel is told here instead.
+    // Both halves matter: without the clear, the wave the player actually died
+    // on would be the only one ever reported, and without the start, that
+    // death would be filed against a wave nobody was recorded as reaching.
+    funnel.completeWave(wave);
     this.setCurrentWave(wave + 1);
+    funnel.startWave(wave + 1);
     this.showWaveBanner(wave + 1);
   }
 
@@ -3454,6 +3468,7 @@ export class SurvivalMode {
 
   private onWaveComplete(wave: number, reward: number): void {
     if (this.phase === 'gameOver') return;
+    funnel.completeWave(wave);
     if (wave !== this.currentWave) this.setCurrentWave(wave);
     // Resolve the completed physics step before paying the clear bonus. If the
     // final zombie and vehicle die together, destruction wins consistently and
@@ -3633,6 +3648,7 @@ export class SurvivalMode {
    * the Garage holding.
    */
   private celebrateFirstPlayWave(): void {
+    funnel.enterScreen('first-play-victory');
     // Re-entry guard: the debug kill-all and the fixed step can both land on a
     // clear, and replaying the entrance would restart the fireworks over a card
     // the player is already reading.
@@ -3682,6 +3698,7 @@ export class SurvivalMode {
 
   /** The celebration's Survival button: hand the player to the rig picker. */
   private leaveFirstPlayWave(): void {
+    funnel.firstPlayExit('survival');
     this.firstPlayVictory?.hide();
     const payload = this.clearedWavePayload();
     this.callbacks.onBuildPhase(
@@ -3823,6 +3840,10 @@ export class SurvivalMode {
 
   private queueGameOver(pendingMoneyDiscarded = 0): void {
     if (this.pendingTransition !== null || this.phase === 'gameOver') return;
+    // The wave the rig died on, which is the whole difficulty curve in one
+    // number. The run itself is closed by `App`, on the way out of the
+    // game-over card.
+    funnel.failWave(this.currentWave);
     fadeOutDriveSfx();
     // A coach mid-lesson would otherwise hold the frame frozen behind the
     // game-over card, since the freeze outranks the phase in `update`.
@@ -6147,6 +6168,11 @@ export class SurvivalMode {
     this.waveClearCard.hide();
     this.resetWaveStats();
     this.waves.startWave(this.currentWave);
+    // This seam inlines its own version of `startCurrentWave`, so the funnel
+    // has to be told here too — otherwise a seam-driven session records the
+    // wave it died on with no matching start, which is exactly the unmatched
+    // pair the whole vocabulary exists to prevent.
+    funnel.startWave(this.currentWave);
     this.syncGameplayActivity();
   }
 

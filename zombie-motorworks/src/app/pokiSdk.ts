@@ -28,6 +28,7 @@ interface PokiSdk {
     beforeAd?: () => void,
   ) => Promise<unknown> | undefined | void;
   happyTime?: (intensity: number) => void;
+  measure?: (category: string, what: string, action: string) => void;
   captureError?: (error: unknown) => void;
 }
 
@@ -337,6 +338,31 @@ export async function pokiHappyTime(intensity: number): Promise<boolean> {
   if (sdk?.happyTime === undefined) return false;
   try {
     sdk.happyTime(clamped);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One retention-funnel checkpoint, sent to Poki Game Events.
+ *
+ * Poki's dashboard pairs these into Started / Completed / Failed / Left
+ * columns by `action`, which is why `funnel.ts` is so strict about only ever
+ * emitting matched shapes — an unmatched action shows up there as a column of
+ * zeroes rather than as an error.
+ */
+export async function pokiMeasure(
+  category: string,
+  what: string,
+  action: string,
+): Promise<boolean> {
+  // Same rule as the gameplay reports: nothing may be sent during an ad.
+  if (adInFlight || !(await initPoki())) return false;
+  const sdk = currentSdk();
+  if (sdk?.measure === undefined) return false;
+  try {
+    sdk.measure(category, what, action);
     return true;
   } catch {
     return false;

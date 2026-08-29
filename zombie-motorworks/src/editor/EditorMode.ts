@@ -18,6 +18,7 @@ import { CELL_SIZE, GRID_MAX, GRID_MIN } from '../core/types.ts';
 import { PART_CATALOG, getPartDef } from '../core/parts.ts';
 import { buildOccupancy, getPart, nextPartId } from '../core/blueprint.ts';
 import { canPlacePart, validateBlueprint } from '../core/placement.ts';
+import { funnel } from '../app/funnel.ts';
 import { planRebuild, type RebuildPlan } from '../core/rebuild.ts';
 import { recommendUpgrade } from '../core/upgradeAdvice.ts';
 import { upgradeStars, upgradeStepFor } from '../core/partUpgrades.ts';
@@ -522,23 +523,23 @@ export class EditorMode {
         },
         onTestDrive: () => {
           const report = validateBlueprint(this.bp, getPartDef);
-          if (report.errors.length === 0) {
-            if (this.tutorialActive) {
-              localStorage.setItem(TUTORIAL_DONE_KEY, '1');
-              this.stopTutorial();
-            }
-            this.onTestDrive(this.bp);
+          if (report.errors.length > 0) return;
+          funnel.garage('test-drive');
+          if (this.tutorialActive) {
+            localStorage.setItem(TUTORIAL_DONE_KEY, '1');
+            this.stopTutorial();
           }
+          this.onTestDrive(this.bp);
         },
         onFightZombies: () => {
           const report = validateBlueprint(this.bp, getPartDef);
-          if (report.errors.length === 0) {
-            if (this.tutorialActive) {
-              localStorage.setItem(TUTORIAL_DONE_KEY, '1');
-              this.stopTutorial();
-            }
-            this.onFightZombies(this.bp);
+          if (report.errors.length > 0) return;
+          funnel.garage('deploy');
+          if (this.tutorialActive) {
+            localStorage.setItem(TUTORIAL_DONE_KEY, '1');
+            this.stopTutorial();
           }
+          this.onFightZombies(this.bp);
         },
         onStartTutorial: () => this.startTutorial(),
         onConfigChange: (partId, key, value) =>
@@ -806,6 +807,7 @@ export class EditorMode {
     this.tutorialOverlay?.dispose();
     this.tutorialOverlay = null;
     this.tutorialActive = true;
+    funnel.tourStart();
     this.tutorialOverlay = new TutorialOverlay(
       this.ui.root,
       this.ui,
@@ -818,10 +820,27 @@ export class EditorMode {
   }
 
   stopTutorial(): void {
+    if (this.tutorialActive) this.reportTourExit();
     this.tutorialOverlay?.dispose();
     this.tutorialOverlay = null;
     this.tutorialActive = false;
     this.ui.highlightPaletteButton(null);
+  }
+
+  /**
+   * Record how far the tour got before it closed.
+   *
+   * Reached the last step, so the player performed buy, attach and fight: a
+   * completion. Anything earlier is the step they were standing on when they
+   * dismissed it, which is the one worth rewriting.
+   */
+  private reportTourExit(): void {
+    const index = this.tutorialOverlay?.index ?? 0;
+    if (index >= GARAGE_TOUR_STEPS.length - 1) {
+      funnel.tourComplete();
+      return;
+    }
+    funnel.tourAbandoned(GARAGE_TOUR_STEPS[index]?.id ?? String(index));
   }
 
   private tourSnapshot(): ReturnType<typeof garageTourSnapshot> {
@@ -1636,6 +1655,7 @@ export class EditorMode {
       return false;
     }
     this.refreshProfile();
+    funnel.garage('part-bought');
     this.ui.setStatus(`Bought ${def.name} (-$${def.cost})`);
     this.onSfx('purchase');
     return true;
@@ -1958,6 +1978,7 @@ export class EditorMode {
         cmds.length > 1 ? batchCommand('symmetric place', cmds) : cmds[0],
       )
     ) {
+      funnel.garage('part-placed');
       this.onSfx('place');
       if ((this.inventory()[part.defId] ?? 0) > 0) {
         // Keep the hotbar item armed so repeated clicks keep building with it.
@@ -2540,10 +2561,21 @@ export class EditorMode {
         `Locked parts: ${locked.map((defId) => getPartDef(defId).name).join(', ')}`,
       );
     }
-    this.ui.setTestDriveEnabled(
+    const deployable =
       validation.errors.length === 0 &&
-        locked.length === 0 &&
-        this.bp.parts.length > 0,
+      locked.length === 0 &&
+      this.bp.parts.length > 0;
+    // The first moment this player had a rig the game would actually accept.
+    //
+    // The Fight button is *disabled* until then rather than silently refusing,
+    // so there is no click to count — which makes this the only place the
+    // difference between "could not build a working rig" and "built one and
+    // did not press Fight" is visible. Read against `screen:garage:start` and
+    // `garage:deploy`, those are two very different leaks with two very
+    // different fixes.
+    if (deployable) funnel.garage('rig-ready');
+    this.ui.setTestDriveEnabled(
+      deployable,
       blockedBy,
     );
     this.refreshOverlays();

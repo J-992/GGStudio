@@ -17,6 +17,7 @@ routing, `ARCHITECTURE.md` for design rationale, and
 | Wave composition/tuning    | `src/survival/WaveManager.ts`, `src/survival/zombies/zombieConfig.ts` | `unit/waves.test.ts`, `unit/zombie-balance.test.ts`       |
 | Survival phase behavior    | `src/survival/SurvivalMode.ts`                                        | `tests/runloop.spec.ts`, `tests/failure.spec.ts`, `tests/combat.spec.ts`               |
 | Portal platform state      | `src/app/platform.ts`                                                 | `unit/platform.test.ts`, `unit/crazygames-sdk.test.ts`, `unit/poki-sdk.test.ts`        |
+| Retention funnel vocabulary | `src/app/funnel.ts`                                                  | `unit/funnel.test.ts`                                                                  |
 | Browser verification Seam  | `src/app/App.ts` (`debugSeam`), `tests/seam.ts`                       | affected Playwright specs                                                              |
 
 ## Portal Platform Contract
@@ -57,7 +58,8 @@ released after a cooldown so later gameplay, score, or ad calls can retry.
   Concurrent offers collapse into the one break, and the game holds no ad timer
   of its own — frequency belongs to the portal.
 - A capability a portal does not have resolves false and changes nothing:
-  Poki has no `submitScore`, CrazyGames has no `commercialBreak` or `happyTime`.
+  Poki has no `submitScore`, CrazyGames has no `commercialBreak` or `happyTime`. CrazyGames also has no `measure`; only Poki has anywhere to put a
+  funnel checkpoint, and the funnel's other sink carries it everywhere else.
 - Every SDK/network failure is non-fatal, including CrazyGames' disabled
   environment and a Poki `init()` rejected by an ad blocker — the latter leaves
   the SDK marked available, because its methods stay callable and simply no-op.
@@ -420,3 +422,31 @@ Before merging a cross-Module change, check the affected items:
 - debug Seam compatibility and focused Playwright coverage
 - `npm run context:generate` when TypeScript structure changed
 - `npm run context:check`, unit tests, lint, build, and relevant browser tests
+
+## Retention Funnel Contract
+
+`src/app/funnel.ts` owns the vocabulary; `src/app/funnelSink.ts` owns where the
+measures go. The recorder imports nothing — no DOM, storage, SDK, or timer — so
+the whole funnel is testable without a browser, and importing it costs a cold
+boot one dependency-free module.
+
+- A measure is `category:what:action`. Progress is `start` then exactly one of
+  `complete`, `fail`, or `abandon`; a one-off fact is `reached`. An unmatched
+  `start` makes a portal's Started/Completed/Failed columns meaningless, which
+  is why every path that opens a wave or a run has to close it.
+- Every checkpoint is deduplicated by its full key for the life of the session,
+  and a session is capped at `RetentionFunnel.maxEventsPerSession`. The funnel
+  measures what fraction of players reached a point, never how many times.
+- Wave labels come from `waveLabel`: exact through wave 12, exact on the round
+  milestones, banded above that. The label set is fixed, so an endless run
+  cannot grow it.
+- The funnel buffers until `connectFunnel` attaches its sinks, then replays.
+  This is what lets `reportBootStage` record the boot funnel before the portal
+  seam has been loaded.
+- Sinks are best-effort and isolated. A blocked script, a missing portal, or a
+  throwing sink is swallowed: nothing here may reach a caller mid-frame.
+- Ownership of the call sites: `App` reports screens, runs, and the frame
+  clock; `SurvivalMode` reports wave start, clear, and failure, plus in-wave
+  friction; `EditorMode` reports the garage's own verbs and the guided tour.
+  `App.setGameplayActive` is the single source for both the portal's gameplay
+  state and the funnel's active-play clock.

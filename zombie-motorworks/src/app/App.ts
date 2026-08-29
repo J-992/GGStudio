@@ -8,6 +8,7 @@
  */
 
 import * as THREE from 'three';
+import { funnel } from './funnel.ts';
 import type {
   PartConfig,
   PlacedPart,
@@ -649,6 +650,25 @@ export class App {
    * overlaps the module fetches boot is already doing. Callers with nothing
    * in flight can omit it and this starts the handshake itself.
    */
+  /**
+   * Whether a wave is actually running, as opposed to a menu, the garage, a
+   * pause, or a result card.
+   *
+   * The portal is told this already; the retention funnel needs the same fact
+   * to separate time spent playing from time spent deciding, and a session
+   * measured the portal's way is the one that can be compared against a
+   * portal's own numbers. Mirrored here rather than read back out of
+   * `platform.ts`, because a build with no portal reports nothing and would
+   * leave the funnel with no clock at all.
+   */
+  private gameplayActive = false;
+
+  /** Report gameplay state to both the portal and the funnel's clock. */
+  private setGameplayActive(active: boolean): void {
+    this.gameplayActive = active;
+    setPlatformGameplayActive(active);
+  }
+
   async start(physicsReady?: Promise<void>): Promise<void> {
     // Everything down to the frame loop is physics-free, so it happens before
     // the wait rather than after it: by the time the engine lands the canvas is
@@ -720,8 +740,17 @@ export class App {
     }
     reportBootStage('modeReady');
 
+    let lastFrameMs = performance.now();
     const loop = (): void => {
       requestAnimationFrame(loop);
+      const nowMs = performance.now();
+      // Fed from here rather than from a mode's own update, because the funnel
+      // has to keep counting on the title and in the garage — a player sitting
+      // on a screen doing nothing is precisely the case worth catching — and
+      // only `App` sees every screen. `playing` is the same fact the portal is
+      // told: a live wave, not a menu, a pause, or a result card.
+      funnel.tick(nowMs - lastFrameMs, this.gameplayActive);
+      lastFrameMs = nowMs;
       // Every mode's `update` ends in a draw, and drawing into a lost context
       // is at best wasted work and at worst a flood of GL errors. Holding the
       // whole update also freezes simulation for the duration, which is what a
@@ -756,6 +785,12 @@ export class App {
   private async holdBootSplashForArena(): Promise<void> {
     const survival = this.survival;
     if (survival === null) return;
+    // Only a first boot gets here, and this is the longest wait of the lot:
+    // everything after `modeReady` is the arena being built behind a bar. The
+    // gap between the two stages is every new player who never saw a zombie —
+    // which is why it is reported from inside the branch that actually waits
+    // rather than after it, where a title-screen boot would report an arena
+    // load that never happened.
     const playable = survival.whenPlayable();
     let live = true;
     void playable.then(() => {
@@ -773,6 +808,7 @@ export class App {
     };
     tick();
     await playable;
+    funnel.bootStage('arenaReady');
   }
 
   /**
@@ -797,6 +833,11 @@ export class App {
     if (this.checkpoint === null) return;
     if (!this.writeRunSave('wave')) return;
 
+    // A banked run is not a lost one, but it is a session that ended here, and
+    // the wave it ended on is the number worth having.
+    funnel.garage('save-and-quit');
+    funnel.endRun('abandon');
+
     this.flushProfile();
     this.survival?.dispose();
     this.survival = null;
@@ -815,6 +856,8 @@ export class App {
     this.editor.persistGarage();
     this.flushProfile();
     if (!this.writeRunSave('build')) return;
+    funnel.garage('save-and-quit');
+    funnel.endRun('abandon');
     this.editor.dispose();
     // `update()` has no disposed guard, so a retained editor would keep
     // rendering its emptied scene over the title screen every frame.
@@ -873,6 +916,10 @@ export class App {
   }
 
   private openEditor(): void {
+    // Before the editor is built, not after: its first analysis pass reports
+    // whether the rig is deployable, and that fact belongs inside the garage
+    // visit it describes rather than ahead of it.
+    funnel.enterScreen('garage');
     this.disposeTitle();
     this.chamber?.dispose();
     this.chamber = null;
@@ -926,12 +973,13 @@ export class App {
     // between levels as a gameplay break however much time is spent in it.
     // Reporting it as play would also mean gameplay never stopped at a wave
     // end, which is the first thing a platform integration review checks.
-    setPlatformGameplayActive(false);
+    this.setGameplayActive(false);
   }
 
   private showTitle(hasSave = this.hasStoredSave()): void {
     if (this.activeRun && this.inBuildPhase) return;
-    setPlatformGameplayActive(false);
+    funnel.enterScreen('title');
+    this.setGameplayActive(false);
     stopGarageMusic();
     this.disposeTitle();
     this.title = new TitleScreen(
@@ -1083,6 +1131,10 @@ export class App {
    * of what it carries is unlocked or granted — it is never theirs.
    */
   private beginFirstRun(): void {
+    // Named apart from `campaign` on purpose: the tutorial wave is a different
+    // funnel from a run the player chose, and averaging the two hides which of
+    // them is losing people.
+    funnel.startMode('first-play');
     this.resetToStarterRig();
     this.startRun(
       buildFirstPlayBlueprint(),
@@ -1103,6 +1155,7 @@ export class App {
    * anything. Only `beginFirstRun` above skips ahead.
    */
   private beginNewGame(): void {
+    funnel.startMode('campaign');
     this.leaveSandboxMode();
     this.resetToStarterRig();
     this.openEditor();
@@ -1129,6 +1182,7 @@ export class App {
     ) as PlayerProfile;
     this.profileSealed = true;
     this.activeModeId = modeId;
+    funnel.startMode(modeId);
 
     const mode = getGameMode(modeId);
     // A fresh default profile, so every Daily attempt starts from the same
@@ -1249,12 +1303,18 @@ export class App {
    * nothing.
    */
   private beginCreativeFromFirstPlay(): void {
+    // The other door out of the same celebration, and just as much a finished
+    // tutorial as the Survival one. What is abandoned is the campaign run the
+    // wave belonged to, which `beginCreativeRun` files under Creative instead.
+    funnel.firstPlayExit('creative');
+    funnel.endRun('complete');
     runSaveStore.clear();
     this.pendingIsNewGame = false;
     this.beginCreativeRun();
   }
 
   private beginContinueGame(): void {
+    funnel.startMode('campaign');
     this.disposeTitle();
     this.resetSessionState();
     const loaded = this.loadCurrentBlueprint();
@@ -1328,7 +1388,8 @@ export class App {
       this.openEditor(),
     );
     this.chamber.resize(this.root.clientWidth, this.root.clientHeight);
-    setPlatformGameplayActive(true);
+    funnel.enterScreen('chamber');
+    this.setGameplayActive(true);
   }
 
   /**
@@ -1428,7 +1489,8 @@ export class App {
   }
 
   private enterSurvival(bp: VehicleBlueprint, run: RunState): void {
-    setPlatformGameplayActive(true);
+    funnel.enterScreen('survival');
+    this.setGameplayActive(true);
     stopGarageMusic();
     this.editor?.persistGarage();
     this.bp = bp;
@@ -1482,8 +1544,18 @@ export class App {
           this.activeRun = { wave: state.wave };
           this.persistRunCheckpoint('wave');
         },
-        onBuildPhase: (state, survivingPartIds, partHp, kills, score) =>
-          this.enterBuildPhase(state, survivingPartIds, partHp, kills, score),
+        onBuildPhase: (state, survivingPartIds, partHp, kills, score) => {
+          // Taking the Survival door out of the tutorial celebration. The
+          // tutorial is finished, not walked out of, and the run it started
+          // carries on from wave two as an ordinary campaign run — so the
+          // funnel hands over here too, rather than filing sixty waves of
+          // campaign play under `first-play`.
+          if (firstPlay) {
+            funnel.endRun('complete');
+            funnel.startMode('campaign');
+          }
+          this.enterBuildPhase(state, survivingPartIds, partHp, kills, score);
+        },
         onFirstPlayCreative: () => this.beginCreativeFromFirstPlay(),
         onWaveCheckpoint: (state, survivingPartIds, partHp, kills, score) => {
           this.commitClearedWaveCheckpoint(
@@ -1515,7 +1587,7 @@ export class App {
           this.markProfileDirty();
         },
         onSaveAndQuit: () => this.saveAndQuitRun(),
-        onGameplayActiveChanged: (active) => setPlatformGameplayActive(active),
+        onGameplayActiveChanged: (active) => this.setGameplayActive(active),
         onResumeFromPause: () => this.breakBeforeGameplay(),
       },
     );
@@ -1604,6 +1676,12 @@ export class App {
     score: number,
     kills: number,
   ): RunOutcome {
+    // Closed here rather than on the card's buttons: this is the one point
+    // both doors out of a game over pass through, and a run whose ending was
+    // only recorded by the door the player happened to press would go missing
+    // for every player who closed the tab while reading their score.
+    funnel.enterScreen('game-over');
+    funnel.endRun('fail');
     const mode = getGameMode(this.activeModeId);
     const at = Date.now();
     if (mode.id === 'daily') {
@@ -1703,6 +1781,7 @@ export class App {
 
   /** Leave a run without finishing it: no score recorded, no reset. */
   private abandonRun(): void {
+    funnel.endRun('abandon');
     runSaveStore.clear();
     this.flushProfile();
     if (this.checkpoint !== null) {
@@ -2203,6 +2282,9 @@ export class App {
         this.chamber?.debugSetSimPaused(paused);
         this.survival?.debugSetSimPaused(paused);
       },
+      // Every retention checkpoint this session has reported, so the funnel
+      // can be verified by playing rather than by waiting on a dashboard.
+      funnelLog: () => funnel.debugLog(),
       telemetry: () => this.chamber?.debugTelemetry(),
       survivalTelemetry: () => this.survival?.debugTelemetry() ?? null,
       profile: () => ({
