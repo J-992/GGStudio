@@ -1,11 +1,27 @@
 // Juice central: floating numbers, coin bursts, sparks, confetti, camera
-// shake and the big center-screen announcement banners. Everything is short
-// tweened sprites — no particle emitters to manage.
+// shake, hit-stop/slow-mo and the big center-screen announcement banners.
+// Everything is short tweened sprites -- no particle emitters to manage.
 class Effects {
   constructor(scene) {
     this.scene = scene;
     this._bannerBusy = false;
     this._bannerQueue = [];
+    this._hitUntil = 0;
+    this._slowUntil = 0;
+    this._slowScale = 1;
+  }
+
+  // ---- combat time control -------------------------------------------
+  // GameScene multiplies the combat dt by timeScale() every frame. Wall-clock
+  // timestamps, so a stretched scene clock can never strand the game slow
+  // (the merge-ninja hit-stop lesson).
+  hitStop(ms) { this._hitUntil = Math.max(this._hitUntil, Date.now() + ms); }
+  slowMo(scale, ms) { this._slowScale = scale; this._slowUntil = Date.now() + ms; }
+  timeScale() {
+    const now = Date.now();
+    if (now < this._hitUntil) return 0;
+    if (now < this._slowUntil) return this._slowScale;
+    return 1;
   }
 
   floatText(x, y, str, color, size) {
@@ -32,7 +48,7 @@ class Effects {
     }
   }
 
-  // one coin arcs from the world to the HUD cash counter
+  // one coin arcs from the world to the HUD coin counter
   coinFly(x, y, tx, ty, onArrive) {
     const c = this.scene.add.image(x, y, 'coin').setDepth(950);
     this.scene.tweens.add({
@@ -50,6 +66,21 @@ class Effects {
         targets: s, x: x + Math.cos(a) * d, y: y + Math.sin(a) * d,
         alpha: { from: 1, to: 0 }, angle: Math.random() * 360,
         duration: 400 + Math.random() * 300, onComplete: () => s.destroy(),
+      });
+    }
+  }
+
+  // gold stars flying out of a merge
+  starBurst(x, y, n) {
+    for (let i = 0; i < (n || 8); i++) {
+      const s = this.scene.add.image(x, y, 'star').setDepth(905)
+        .setTint(0xffd54f).setScale(0.4 + Math.random() * 0.6);
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4, d = 40 + Math.random() * 80;
+      this.scene.tweens.add({
+        targets: s, x: x + Math.cos(a) * d, y: y + Math.sin(a) * d + 20,
+        alpha: { from: 1, to: 0 }, angle: Math.random() * 360 - 180,
+        duration: 550 + Math.random() * 350, ease: 'Quad.easeOut',
+        onComplete: () => s.destroy(),
       });
     }
   }
@@ -86,14 +117,26 @@ class Effects {
     this.scene.cameras.main.flash(220, c.red, c.green, c.blue);
   }
 
-  // squash & stretch a sprite briefly
+  // Squash & stretch a sprite briefly.
+  //
+  // The resting scale is remembered on the target rather than read at the
+  // moment of the call, so rapid repeat squashes cannot compound the scale
+  // (that is what once made the cash counter grow without end).
   squash(target, amount) {
     const a = amount || 0.22;
-    const sx = target.scaleX, sy = target.scaleY;
-    this.scene.tweens.add({
+    const live = target._sqTween;
+    if (live) {
+      this.scene.tweens.remove(live);
+    } else {
+      target._sqX = target.scaleX;
+      target._sqY = target.scaleY;
+    }
+    const sx = target._sqX, sy = target._sqY;
+    target.setScale(sx, sy);
+    target._sqTween = this.scene.tweens.add({
       targets: target, scaleX: sx * (1 + a), scaleY: sy * (1 - a),
       duration: 90, yoyo: true, ease: 'Quad.easeOut',
-      onComplete: () => { target.setScale(sx, sy); },
+      onComplete: () => { target.setScale(sx, sy); target._sqTween = null; },
     });
   }
 
@@ -107,9 +150,9 @@ class Effects {
     if (this._bannerBusy || this._bannerQueue.length === 0) return;
     this._bannerBusy = true;
     const { str, colorStr, subStr } = this._bannerQueue.shift();
-    const cx = CFG.W / 2, cy = CFG.H * 0.32;
+    const cx = LAYOUT.width / 2, cy = LAYOUT.height * 0.3;
     const t = this.scene.add.text(cx, cy, str, {
-      fontFamily: 'Arial Black, Arial', fontSize: '52px',
+      fontFamily: 'Arial Black, Arial', fontSize: LAYOUT.landscape ? '52px' : '42px',
       color: colorStr || '#ffffff', stroke: '#000000', strokeThickness: 8,
     }).setOrigin(0.5).setDepth(980).setScale(0.2);
     let sub = null;

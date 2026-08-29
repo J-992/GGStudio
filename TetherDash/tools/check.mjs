@@ -16,6 +16,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { createContext, runInContext } from 'node:vm';
 
 import { boot } from './boot.mjs';
 
@@ -125,6 +126,78 @@ for (const level of LEVELS) {
     if (b.y > 2.2) fail(`${where}: bolt at z=${b.z.toFixed(1)} floats too high to collect (y=${b.y}).`);
   }
 }
+
+//  ------------------------------------------------------------------ poki
+
+/**
+ * Poki's inspector fails a build that never fires gameplayStart, and the way to
+ * lose it is not to forget the call -- it is to make it while `PokiSDK.init()`
+ * is still pending. The game boots on a race with a 5s timeout, so a slow SDK
+ * means the menu, the first level and its gameplayStart can all happen before
+ * the wrapper is ready. Those calls have to be replayed, in order, on init.
+ */
+async function checkLateInit() {
+  const calls = [];
+  let resolveInit;
+  const record = (name) => () => calls.push(name);
+
+  //  The wrapper alone, on a page where the SDK exists but is slow to answer.
+  //  Not the shared boot stub: that one boots the whole game and deliberately
+  //  has no PokiSDK on its window.
+  const sandbox = {
+    setTimeout, Date, Math, JSON, Object, Promise,
+    location: { hostname: 'games.poki.com', search: '' },
+    AudioSys: { stopTension() {}, suspend() {}, resume() {} },
+    PokiSDK: {
+      init: () => new Promise((res) => { resolveInit = res; }),
+      setDebug() {},
+      gameLoadingStart: record('gameLoadingStart'),
+      gameLoadingFinished: record('gameLoadingFinished'),
+      gameplayStart: record('gameplayStart'),
+      gameplayStop: record('gameplayStop')
+    }
+  };
+  sandbox.window = sandbox;
+
+  const context = createContext(sandbox);
+
+  try {
+    runInContext(readFileSync(join(ROOT, 'src/systems/PokiSDK.js'), 'utf8'), context, { filename: 'src/systems/PokiSDK.js' });
+  } catch (err) {
+    fail(`src/systems/PokiSDK.js does not load on its own: ${err.message}`);
+    return;
+  }
+
+  const poki = sandbox.Poki;
+
+  if (!poki) {
+    fail('PokiSDK.js leaves no window.Poki -- a `const` at the top of a classic script is not a window property.');
+    return;
+  }
+
+  poki.init();
+  poki.loadingFinished();   // the boot scene does not wait for the SDK
+  poki.gameplayStart();     // ...and neither does the player
+  resolveInit();
+  await new Promise((res) => setTimeout(res, 0));
+
+  const sent = calls.join(', ') || 'nothing';
+
+  if (!calls.includes('gameplayStart')) {
+    fail(`a gameplayStart fired before the SDK was ready never reached it (sent: ${sent}).`);
+  } else if (!calls.includes('gameLoadingFinished')) {
+    fail(`gameLoadingFinished fired before the SDK was ready never reached it (sent: ${sent}).`);
+  } else if (calls.indexOf('gameLoadingFinished') > calls.indexOf('gameplayStart')) {
+    fail(`gameplayStart reached the SDK before gameLoadingFinished (sent: ${sent}).`);
+  }
+
+  const before = calls.length;
+  poki.gameplayStart();     // a repeat is not a second session
+  await new Promise((res) => setTimeout(res, 0));
+  if (calls.length !== before) fail('a repeated gameplayStart was forwarded to the SDK twice.');
+}
+
+await checkLateInit();
 
 //  ------------------------------------------------------------------ done
 

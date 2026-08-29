@@ -1,22 +1,22 @@
-// localStorage persistence. Holds permanent progression (rebirths, collection,
-// stats, settings) plus a snapshot of the current run so a reload puts the
-// player back where they were. Bots always re-roll fresh.
+// localStorage persistence. Everything is meta now -- levels are short, so a
+// reload mid-level just restarts the level. Coins, the unlocked roster, the
+// last squad and the next level to play are the whole progression.
 const SaveSys = {
   data: null,
 
   defaults() {
+    const starters = ['cocofanto', 'trippi', 'troppa'];
     return {
-      rebirths: 0,
-      discovered: [],          // creature ids the player has owned at least once
       muted: false,
       tutorialDone: false,
-      best: { cash: 0, income: 0, steals: 0 },
+      coins: CFG.ECON.startCoins,
+      unlocked: starters.slice(),
+      team: starters.slice(),      // last squad used (ids, <= CFG.TEAM.size)
+      level: 1,                    // next level to play
       stats: {
-        sessions: 0, playMs: 0, bought: 0, stolen: 0, robbed: 0,
-        rares: 0, rebirths: 0, events: 0, cashEarned: 0,
+        sessions: 0, playMs: 0, kills: 0, planted: 0,
+        levelsCleared: 0, coinsEarned: 0, bought: 0,
       },
-      // current-run snapshot
-      run: null,               // { cash, creatures:[ids], upgrades:{id:lvl} }
     };
   },
 
@@ -25,8 +25,16 @@ const SaveSys = {
       const raw = localStorage.getItem(CFG.SAVE_KEY);
       const parsed = raw ? JSON.parse(raw) : {};
       this.data = Object.assign(this.defaults(), parsed);
-      this.data.best = Object.assign(this.defaults().best, parsed.best || {});
       this.data.stats = Object.assign(this.defaults().stats, parsed.stats || {});
+      // one corrupt field costs only itself
+      const known = (id) => !!CREATURES_BY_ID[id];
+      const starters = this.defaults().unlocked;
+      const unlocked = Array.isArray(this.data.unlocked) ? this.data.unlocked.filter(known) : [];
+      this.data.unlocked = [...new Set([...starters, ...unlocked])];
+      const team = Array.isArray(this.data.team) ? this.data.team.filter((id) => known(id) && this.data.unlocked.includes(id)) : [];
+      this.data.team = (team.length ? team : starters.slice()).slice(0, CFG.TEAM.size);
+      this.data.level = Math.max(1, Math.floor(this.data.level) || 1);
+      this.data.coins = Math.max(0, Math.floor(this.data.coins) || 0);
     } catch (e) {
       this.data = this.defaults();
     }
@@ -37,27 +45,17 @@ const SaveSys = {
     try { localStorage.setItem(CFG.SAVE_KEY, JSON.stringify(this.data)); } catch (e) { /* full/blocked */ }
   },
 
-  discover(id) {
-    if (this.data.discovered.indexOf(id) === -1) {
-      this.data.discovered.push(id);
+  unlock(id) {
+    if (this.data.unlocked.indexOf(id) === -1) {
+      this.data.unlocked.push(id);
       this.save();
-      return true;    // newly discovered
+      return true;
     }
     return false;
   },
 
   addStat(key, n) {
     this.data.stats[key] = (this.data.stats[key] || 0) + (n === undefined ? 1 : n);
-  },
-
-  snapshotRun(cash, creatureIds, upgrades) {
-    this.data.run = { cash: Math.floor(cash), creatures: creatureIds, upgrades };
-    this.save();
-  },
-
-  clearRun() {
-    this.data.run = null;
-    this.save();
   },
 };
 window.SaveSys = SaveSys;

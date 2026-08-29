@@ -1,139 +1,149 @@
-// The whole game lives in one compact 1280x720 screen. This scene builds the
-// world, wires the managers together, and runs the update loop.
+// Orchestration: builds every system, owns the place/dig rules, forwards raw
+// pointer events (brainz taps beat cards beat the lawn), gates Poki gameplay
+// reporting on real player input, and drives the per-frame update order.
 class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
 
-  create() {
-    this.upgrades = {};                       // temporary upgrade levels, reset on rebirth
-    this.physics.world.setBounds(0, 0, CFG.W, CFG.H);
+  init(data) {
+    this.levelN = (data && data.level) || SaveSys.data.level || 1;
+    this.teamIds = ((data && data.team) || SaveSys.data.team).slice(0, CFG.TEAM.size);
+  }
 
-    this._drawGround();
+  create() {
+    this.modalOpen = false;
+    this.playerStartedGameplay = false;
+    this._gameplayReported = false;
+
+    this.cameras.main.setBackgroundColor('#101a30');
+
+    const recipe = LEVELS[Math.min(this.levelN, LEVELS.length) - 1];
 
     this.fx = new Effects(this);
-    this.creatures = new CreatureManager(this);
-    this.bases = new BaseManager(this);
-    this.economy = new EconomyManager(this);
-    this.conveyor = new ConveyorManager(this);
-    this.steal = new StealSystem(this);
-    this.inputMgr = new InputManager(this);
-    this.player = new PlayerController(this);
-    this.bots = CFG.BOTS.map((b) => new BotController(this, b));
-    this.eventMgr = new EventManager(this);
-    this.rebirth = new RebirthSystem(this);
-    this.tutorial = new TutorialSystem(this);
-    this.hud = new HUD(this);
+    this.economy = new Economy();
+    this.economy.energy = recipe.startEnergy != null ? recipe.startEnergy : CFG.ENERGY.start;
 
-    // upgrade station prop
-    this.add.image(CFG.UPGRADE_STATION.x, CFG.UPGRADE_STATION.y, 'station')
-      .setDepth(CFG.UPGRADE_STATION.y - 40);
-    this.add.text(CFG.UPGRADE_STATION.x, CFG.UPGRADE_STATION.y - 58, 'UPGRADES', {
-      fontFamily: 'Arial Black, Arial', fontSize: '15px', color: '#80cbc4',
-      stroke: '#000000', strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(860);
+    this.lawn = new Lawn(this, recipe.lanes);
+    this.energy = new EnergySystem(this, this.economy);
+    this.combat = new CombatSystem(this, this.lawn, this.economy, this.energy);
+    this.hud = new HUD(this, this.economy);
+    this.cards = new CardBar(this, this.teamIds, this.economy);
+    this.director = new WaveDirector(this, this.combat, this.economy, this.hud);
+    this.tutorial = new TutorialSystem(this, this.director);
 
-    // physics: only the player collides with walls and (locked) gates
-    this.physics.add.collider(this.player.sprite, this.bases.walls);
-    for (const id in this.bases.gates) {
-      this.physics.add.collider(this.player.sprite, this.bases.gates[id]);
-    }
+    this.energy.onCollect = () => { if (this.tutorial) this.tutorial.onCollect(); };
 
-    this._restoreRun();
-    this._seedBots();
-
-    // visible income: a coin flies from a random creature to the counter
-    this.time.addEvent({
-      delay: CFG.COIN_FLY_EVERY, loop: true, callback: () => this._coinPop(),
+    // ---- input: raw pointer events, no drag plugin ----
+    this.input.addPointer(2);
+    this.input.on('pointerdown', (p) => {
+      AudioSys.ensure();
+      if (this.modalOpen) return;
+      if (this.energy.tryCollect(p)) { this.startGameplayOnInteraction(); return; }
+      if (this.cards.handleDown(p)) { this.startGameplayOnInteraction(); return; }
+      const intent = this.cards.fieldTap(p);
+      if (intent) this.applyIntent(intent);
     });
-    // autosave
-    this.time.addEvent({ delay: CFG.SAVE_EVERY_MS, loop: true, callback: () => this.snapshot() });
+    this.input.on('pointermove', (p) => { if (!this.modalOpen) this.cards.moveDrag(p); });
+    const up = (p) => {
+      if (this.modalOpen) return;
+      const intent = this.cards.handleUp(p);
+      if (intent) this.applyIntent(intent);
+    };
+    this.input.on('pointerup', up);
+    this.input.on('pointerupoutside', up);
 
-    this._sessionT = 0;
-    AudioSys.setMusic('normal');
-    Poki.gameplayStart();
-    this.events.on('shutdown', () => {
+    this._onResize = () => this.relayoutAll();
+    this.scale.on('resize', this._onResize);
+    this.events.once('shutdown', () => {
+      this.scale.off('resize', this._onResize);
       Poki.gameplayStop();
-      AudioSys.setMusic(null);
-      this.snapshot();
     });
+
+    this.director.startLevel(this.levelN);
+    AudioSys.setMusic('normal');
   }
 
-  _drawGround() {
-    const g = this.add.graphics().setDepth(0);
-    g.fillStyle(0x33691e, 1);
-    g.fillRect(0, 0, CFG.W, CFG.H);
-    // mottled grass patches
-    const rnd = new Phaser.Math.RandomDataGenerator(['brainrot']);
-    g.fillStyle(0x558b2f, 0.5);
-    for (let i = 0; i < 60; i++) {
-      g.fillEllipse(rnd.between(0, CFG.W), rnd.between(0, CFG.H), rnd.between(30, 90), rnd.between(16, 40));
+  // ------------------------------------------------------- intents
+
+  applyIntent(intent) {
+    if (intent.kind === 'dig') {
+      if (this.lawn.dig(intent.lane, intent.col)) {
+        this.cards.clearSelection();
+        this.startGameplayOnInteraction();
+      }
+      return;
     }
-    // worn path around the conveyor
-    g.fillStyle(0x795548, 0.25);
-    g.fillRect(0, CFG.CONVEYOR_Y - 60, CFG.W, 120);
+    this.tryPlace(intent.card, intent.lane, intent.col);
   }
 
-  botById(id) { return this.bots.find((b) => b.id === id); }
+  tryPlace(cardIdx, lane, col) {
+    const card = this.cards.cards[cardIdx];
+    if (!card) return false;
+    const def = card.def;
 
-  _restoreRun() {
-    const run = SaveSys.data.run;
-    if (!run) return;
-    this.economy.cash.player = run.cash || CFG.START_CASH;
-    Object.assign(this.upgrades, run.upgrades || {});
-    this.bases.refreshPedestals('player');
-    (run.creatures || []).forEach((id) => {
-      const def = CREATURES_BY_ID[id];
-      if (def) this.creatures.placeDirect(def, 'player');
-    });
+    if (!this.lawn.canPlace(lane, col)) {
+      AudioSys.sfx('denied');
+      return false;
+    }
+    if (!this.cards.isReady(cardIdx)) {
+      AudioSys.sfx('denied');
+      if (!this.economy.canAfford(def.cost)) {
+        this.fx.floatText(LAYOUT.field.colX(col), LAYOUT.field.laneY(lane) - 40, 'NEED MORE BRAINZ!', '#ff8a80', 18);
+      }
+      return false;
+    }
+
+    this.economy.spend(def.cost);
+    this.lawn.place(def.id, lane, col);
+    this.cards.startCooldown(cardIdx);
+    this.startGameplayOnInteraction();
+    if (this.tutorial) this.tutorial.onPlant(def.id);
+    return true;
   }
 
-  // every bot opens with one cheap creature so the map is never empty (and the
-  // tutorial always has something to steal)
-  _seedBots() {
-    const commons = CREATURES.filter((c) => c.rarity === 'common');
-    this.bots.forEach((b, i) => {
-      this.creatures.placeDirect(commons[i % commons.length], b.id);
-    });
+  // ------------------------------------------------------- poki gating
+  // The SDK event must follow an actual game interaction, never the first
+  // frame; opening any modal reads as a gameplay pause.
+
+  startGameplayOnInteraction() {
+    if (this.playerStartedGameplay) return;
+    this.playerStartedGameplay = true;
+    this.syncGameplayReport();
   }
 
-  _coinPop() {
-    const own = this.creatures.creaturesOf('player').filter((c) => c.state === 'pedestal');
-    if (own.length === 0) return;
-    const cr = own[Math.floor(Math.random() * own.length)];
-    this.fx.floatText(cr.x, cr.y - 60, '+$' + Math.floor(cr.def.income * this.economy.mult('player')), '#ffe082', 14);
-    this.fx.coinFly(cr.x, cr.y - 40, 30, 26, () => AudioSys.sfx('coin'));
+  syncGameplayReport() {
+    const active = this.playerStartedGameplay && !this.modalOpen && !Poki.adPlaying;
+    if (active === this._gameplayReported) return;
+    this._gameplayReported = active;
+    if (active) Poki.gameplayStart();
+    else Poki.gameplayStop();
   }
 
-  snapshot() {
-    SaveSys.addStat('playMs', this._sessionT);
-    this._sessionT = 0;
-    const ids = this.creatures.creaturesOf('player')
-      .filter((c) => c.state !== 'carried' || true)   // carried ones still belong to the player
-      .map((c) => c.def.id);
-    SaveSys.snapshotRun(this.economy.cash.player, ids, this.upgrades);
-  }
+  // ------------------------------------------------------- frame
 
   update(time, delta) {
-    const dtSec = Math.min(delta, 100) / 1000;
-    this._sessionT += delta;
+    const dt = Math.min(delta, 100);
 
-    this.inputMgr.update();
-    if (this.inputMgr.lockJust) this.hud.tryLock();
-    if (this.inputMgr.collectionJust) this.hud.toggleCollection();
+    if (!this.modalOpen) {
+      const combatDt = dt * this.fx.timeScale();
+      const st = this.director.state;
+      if (st === 'wave' || st === 'boss' || st === 'prep') this.combat.update(combatDt);
+      this.energy.update(dt);
+      this.cards.update(dt);
+      this.director.update(dt);
+    }
 
-    this.player.update(time, dtSec);
-    for (const b of this.bots) b.update(time, dtSec);
-    this.conveyor.update(time, dtSec);
-    this.creatures.update(time, dtSec);
-    this.steal.update(time);
-    this.bases.update(time);
-    this.economy.update(dtSec);
-    this.eventMgr.update(time);
-    this.rebirth.update(time);
-    this.tutorial.update(time);
-    this.hud.update(time);
+    this.hud.refresh();
+    this.syncGameplayReport();
+    SaveSys.addStat('playMs', dt);
+  }
 
-    // chase music whenever the player is robbing or being robbed
-    AudioSys.setMusic(this.steal.playerInChase() ? 'chase' : 'normal');
+  relayoutAll() {
+    this.lawn.relayout();
+    this.combat.relayout();
+    this.hud.relayout();
+    this.cards.relayout();
+    this.director.relayout();
+    if (this.tutorial) this.tutorial.relayout();
   }
 }
 window.GameScene = GameScene;

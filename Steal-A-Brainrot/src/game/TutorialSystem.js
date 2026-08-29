@@ -1,88 +1,139 @@
-// First-run tutorial delivered through play, not menus: buy → collect →
-// steal → escape, each step pointed at by a bouncing arrow. Skipped entirely
-// once completed (saved).
+// The level-1 script, one idea at a time: plant a shooter -> tap brainz ->
+// plant the money elephant -> survive. The pointing hand (Derek's merge-ninja
+// asset, assets/ui/tutorial-hand.webp) and a step card are the whole UI; the
+// world is never frozen, the waves are just held back until the first plant.
 class TutorialSystem {
-  constructor(scene) {
+  static ORDER = ['plant', 'collect', 'producer', 'battle'];
+
+  constructor(scene, director) {
     this.scene = scene;
-    this.step = SaveSys.data.tutorialDone ? 'done' : 'buy';
-    this.arrow = scene.add.image(-100, -100, 'arrow').setTint(0xffee58).setDepth(945).setVisible(false);
-    scene.tweens.add({ targets: this.arrow, y: '+=10', duration: 320, yoyo: true, repeat: -1 });
-    this._collectUntil = 0;
-    this._announced = null;
-  }
+    this.director = director;
+    this.active = !SaveSys.data.tutorialDone && scene.levelN === 1;
 
-  objective() {
-    switch (this.step) {
-      case 'buy': return 'BUY A WEIRDO — walk to the belt, press SPACE';
-      case 'collect': return 'COLLECT CASH — your weirdo prints money!';
-      case 'steal': return 'STEAL ONE! Sneak into a rival base, HOLD SPACE';
-      case 'escape': return 'RUN! RUN! RUN! Get back to YOUR base!';
-      default: return null;
+    this.hand = scene.add.image(0, 0, 'hand').setDepth(1050).setVisible(false);
+    this.hand.setScale(TextureFactory.scaleFor(scene, 'hand', CFG.ART.handH));
+    this.card = scene.add.text(0, 0, '', {
+      fontFamily: 'Arial Black, Arial', fontSize: '19px', color: '#ffffff',
+      stroke: '#000000', strokeThickness: 5, align: 'center',
+      backgroundColor: '#00000088', padding: { x: 14, y: 8 },
+    }).setOrigin(0.5).setDepth(1050).setVisible(false);
+
+    this._handTween = null;
+
+    if (this.active) {
+      this.step = 'plant';
+      this._enter(this.step);
+    } else {
+      this.step = null;
+      this.director.holdPrep = false;
     }
   }
 
-  _point(x, y) {
-    this.arrow.setVisible(true);
-    this.arrow.x = x;
-    if (Math.abs(this.arrow.y - y) > 26) this.arrow.y = y;
-  }
+  _enter(step) {
+    this.step = step;
+    this.director.holdPrep = step !== 'battle';
+    this._stopHand();
 
-  _announce(key, text, color) {
-    if (this._announced === key) return;
-    this._announced = key;
-    this.scene.fx.banner(text, color || '#ffee58');
-  }
-
-  update(time) {
-    const s = this.scene;
-    if (this.step === 'done') { this.arrow.setVisible(false); return; }
-
-    if (this.step === 'buy') {
-      this._announce('buy', 'BUY A WEIRDO!');
-      let target = null;
-      for (const cr of s.creatures.onBelt()) {
-        if (cr.x > 60 && cr.x < CFG.W - 120 && s.economy.canAfford('player', cr.def.price) &&
-            (!target || cr.def.price < target.def.price)) target = cr;
+    switch (step) {
+      case 'plant': {
+        this._say('PLANT TRIPPI TROPPI\nON THE LAWN!');
+        const i = this.scene.cards.indexOf('trippi');
+        const from = this.scene.cards.cardPos(i === -1 ? 0 : i);
+        const f = LAYOUT.field;
+        this._dragDemo(from, { x: f.colX(2), y: f.laneY(2) - f.laneH * 0.3 });
+        break;
       }
-      if (target) this._point(target.x, target.y - 110); else this.arrow.setVisible(false);
-      if (s.creatures.creaturesOf('player').length > 0) {
-        this.step = 'collect';
-        this._collectUntil = time + 5000;
+      case 'collect': {
+        this._say('TAP THE BRAINZ\nTO COLLECT THEM!');
+        // a guaranteed token to point at, right in the middle
+        if (this.scene.energy.tokens.length === 0) this.scene.energy.spawnSky(3, 4);
+        const t = this.scene.energy.tokens[0];
+        if (t) this._pointAt(t.root.x, t.root.y);
+        break;
       }
-    } else if (this.step === 'collect') {
-      this._announce('collect', 'COLLECT CASH!', '#b9f6ca');
-      const own = s.creatures.creaturesOf('player')[0];
-      if (own) this._point(own.x, own.y - 110); else this.arrow.setVisible(false);
-      if (time > this._collectUntil) this.step = 'steal';
-    } else if (this.step === 'steal') {
-      this._announce('steal', 'STEAL ONE!', '#ff8a80');
-      let target = null, bd = 1e9;
-      for (const cr of s.creatures.list) {
-        if (cr.state !== 'pedestal' || cr.owner === 'player' || s.bases.isLocked(cr.owner)) continue;
-        const d = Phaser.Math.Distance.Between(s.player.x, s.player.y, cr.x, cr.y);
-        if (d < bd) { bd = d; target = cr; }
+      case 'producer': {
+        this._say('PLANT COCOFANTO!\nHE MAKES BRAINZ!');
+        const i = this.scene.cards.indexOf('cocofanto');
+        const from = this.scene.cards.cardPos(i === -1 ? 0 : i);
+        const f = LAYOUT.field;
+        // behind the shooter, in the lane it defends
+        this._dragDemo(from, { x: f.colX(0), y: f.laneY(2) - f.laneH * 0.3 });
+        break;
       }
-      if (target) this._point(target.x, target.y - 110); else this.arrow.setVisible(false);
-      if (s.player.carrying) { this.step = 'escape'; this._announced = null; }
-    } else if (this.step === 'escape') {
-      this._announce('escape', 'RUN! RUN! RUN!', '#ff8a80');
-      const e = s.bases.entranceOutside('player');
-      this._point(e.x, e.y - 30);
-      if (!s.player.carrying) {
-        if (s.creatures.creaturesOf('player').length > 1 || SaveSys.data.stats.stolen > 0) {
-          // made it home — full fantasy complete
-          this.step = 'done';
-          SaveSys.data.tutorialDone = true;
-          SaveSys.save();
-          this.arrow.setVisible(false);
-          s.fx.banner("YOU'RE A NATURAL MENACE!", '#69f0ae', 'Upgrade, steal, and REBIRTH to grow');
-          Poki.happyTime(1);
-        } else {
-          this.step = 'steal';   // got caught: try again
-          this._announced = null;
-        }
-      }
+      case 'battle':
+        this._say('STOP THE EVIL BRAINROTS!');
+        this.scene.time.delayedCall(3500, () => {
+          if (this.step === 'battle' && this.active) this.card.setVisible(false);
+        });
+        break;
     }
+    this._layoutCard();
+  }
+
+  _say(text) {
+    this.card.setText(text).setVisible(true);
+  }
+
+  _layoutCard() {
+    if (!this.card.visible) return;
+    const f = LAYOUT.field;
+    this.card.setPosition(f.x + f.w / 2, f.y + f.h - 40);
+  }
+
+  _pointAt(x, y) {
+    this._stopHand();
+    this.hand.setVisible(true).setPosition(x + 20, y - 70);
+    this._handTween = this.scene.tweens.add({
+      targets: this.hand, y: y - 46, duration: 420, yoyo: true, repeat: -1, ease: 'Quad.easeInOut',
+    });
+  }
+
+  _dragDemo(a, b) {
+    this._stopHand();
+    this.hand.setVisible(true).setPosition(a.x + 16, a.y - 20);
+    this._handTween = this.scene.tweens.add({
+      targets: this.hand,
+      x: b.x + 16, y: b.y - 20,
+      duration: 900, delay: 300, repeat: -1, repeatDelay: 500, ease: 'Quad.easeInOut',
+    });
+  }
+
+  _stopHand() {
+    if (this._handTween) { this._handTween.stop(); this._handTween = null; }
+    this.hand.setVisible(false);
+  }
+
+  // ---- hooks from the rest of the game ----
+
+  onPlant(id) {
+    if (!this.active) return;
+    if (this.step === 'plant') this._enter('collect');
+    else if (this.step === 'producer' && id === 'cocofanto') this._enter('battle');
+  }
+
+  onCollect() {
+    if (!this.active) return;
+    if (this.step === 'collect') this._enter('producer');
+  }
+
+  onBattleStart() {
+    if (!this.active) return;
+    if (this.step === 'battle') this._say('STOP THE EVIL BRAINROTS!');
+  }
+
+  onVictory() {
+    if (!this.active) return;
+    this.active = false;
+    SaveSys.data.tutorialDone = true;
+    SaveSys.save();
+    this._stopHand();
+    this.card.setVisible(false);
+    this.scene.fx.banner('LAWN DEFENDED!', '#ffd54f', 'Time to grow the squad!');
+    Poki.happyTime(0.8);
+  }
+
+  relayout() {
+    if (this.active && this.step) this._enter(this.step);
   }
 }
 window.TutorialSystem = TutorialSystem;

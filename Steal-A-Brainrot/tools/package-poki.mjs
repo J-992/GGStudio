@@ -32,7 +32,7 @@ import { readGame } from '../../scripts/poki/config.mjs';
 import { bytes, preflight } from '../../scripts/poki/preflight.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const ZIP = join(ROOT, 'steal-the-brainrot-poki.zip');
+const ZIP = join(ROOT, 'brainrot-factory-poki.zip');
 
 const game = readGame(join(ROOT, 'poki.json'));
 const dist = resolve(game.buildPath);

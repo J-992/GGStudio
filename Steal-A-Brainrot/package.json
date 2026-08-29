@@ -2,7 +2,7 @@
   "name": "steal-the-brainrot",
   "version": "0.1.0",
   "private": true,
-  "description": "Italian brainrot arcade tycoon for Poki. No bundler: classic scripts, vendored Phaser.",
+  "description": "Brainrot Defense - a PvZ-style lane defense with the Italian brainrot cast, built for Poki",
   "type": "module",
   "scripts": {
     "dev": "npx -y http-server . -p 8091 -c-1 -o",

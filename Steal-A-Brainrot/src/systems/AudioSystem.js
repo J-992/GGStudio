@@ -1,12 +1,13 @@
-// All audio is synthesized with WebAudio — zero audio assets to load. One
-// small step sequencer supplies background music with a swappable "chase"
-// pattern, and sfx() plays short synthesized stingers.
+// All audio is synthesized with WebAudio -- zero audio assets to load. One
+// small step sequencer supplies background music ('normal' between waves,
+// 'battle' during them, 'boss' for boss stages), and sfx() plays short
+// synthesized stingers.
 const AudioSys = {
   ctx: null,
   master: null,
   musicGain: null,
   muted: false,
-  _musicMode: null,       // 'normal' | 'chase' | null
+  _musicMode: null,       // 'normal' | 'battle' | 'boss' | null
   _seqTimer: null,
   _step: 0,
 
@@ -73,47 +74,58 @@ const AudioSys = {
     switch (name) {
       case 'coin':
         this._tone(1320, 0.07, 'square', 0.12); this._tone(1760, 0.09, 'square', 0.10, 0.06); break;
-      case 'buy':
-        this._tone(523, 0.08, 'square', 0.2); this._tone(659, 0.08, 'square', 0.2, 0.07);
-        this._tone(784, 0.14, 'square', 0.2, 0.14); break;
-      case 'denied':
-        this._tone([300, 180], 0.18, 'sawtooth', 0.18); break;
-      case 'rare':
+      case 'pull':       // machine button pressed
+        this._tone([300, 640], 0.14, 'square', 0.2); this._tone(180, 0.1, 'square', 0.16, 0.1); break;
+      case 'bounce':     // capsule pings off a peg
+        this._tone(880 + Math.random() * 400, 0.05, 'square', 0.1); break;
+      case 'capsule':    // capsule lands, cracks open
+        this._noise(0.08, 0.22); this._tone([500, 900], 0.12, 'triangle', 0.2, 0.04); break;
+      case 'reveal':     // rare+ glow
         this._tone(880, 0.1, 'triangle', 0.25); this._tone(1109, 0.1, 'triangle', 0.25, 0.09);
         this._tone(1319, 0.22, 'triangle', 0.25, 0.18); break;
       case 'legendary':
         [523, 659, 784, 1047, 1319].forEach((f, i) => this._tone(f, 0.16, 'square', 0.22, i * 0.08));
         this._noise(0.3, 0.08, 0.4); break;
-      case 'alarm':
-        this._tone([700, 950], 0.16, 'sawtooth', 0.2); this._tone([700, 950], 0.16, 'sawtooth', 0.2, 0.2); break;
-      case 'grab':
-        this._tone([200, 500], 0.12, 'square', 0.22); break;
-      case 'slap':
-        this._noise(0.1, 0.35); this._tone([400, 90], 0.16, 'square', 0.3, 0.01); break;
-      case 'escape':
-        [392, 523, 659, 784].forEach((f, i) => this._tone(f, 0.12, 'square', 0.24, i * 0.07));
-        this._tone(1047, 0.3, 'square', 0.24, 0.3); break;
-      case 'caught':
-        this._tone([500, 120], 0.35, 'sawtooth', 0.25); this._noise(0.15, 0.2); break;
-      case 'upgrade':
-        this._tone(440, 0.08, 'triangle', 0.25); this._tone(587, 0.08, 'triangle', 0.25, 0.07);
-        this._tone(880, 0.16, 'triangle', 0.25, 0.14); break;
-      case 'rebirth':
-        [262, 330, 392, 523, 659, 784, 1047].forEach((f, i) => this._tone(f, 0.2, 'triangle', 0.22, i * 0.09));
-        this._noise(0.5, 0.1, 0.6); break;
-      case 'lock':
-        this._tone([600, 200], 0.12, 'square', 0.22); this._tone(150, 0.1, 'square', 0.25, 0.1); break;
-      case 'unlock':
-        this._tone([200, 600], 0.14, 'square', 0.18); break;
-      case 'event':
+      case 'merge':
+        [262, 330, 392, 523, 659, 784, 1047].forEach((f, i) => this._tone(f, 0.14, 'triangle', 0.22, i * 0.06));
+        this._noise(0.4, 0.1, 0.42); break;
+      case 'pickup':     // drag begins
+        this._tone([260, 420], 0.08, 'square', 0.14); break;
+      case 'place':      // unit dropped on a slot
+        this._tone([420, 260], 0.09, 'square', 0.16); break;
+      case 'swap':
+        this._tone(392, 0.06, 'square', 0.14); this._tone(523, 0.08, 'square', 0.14, 0.05); break;
+      case 'sell':
+        this._tone([700, 240], 0.16, 'sawtooth', 0.16); this._tone(1320, 0.08, 'square', 0.12, 0.14); break;
+      case 'denied':
+        this._tone([300, 180], 0.18, 'sawtooth', 0.18); break;
+      case 'shoot':
+        this._tone([900, 400], 0.06, 'square', 0.08); break;
+      case 'hit':
+        this._noise(0.05, 0.16); this._tone([300, 140], 0.07, 'square', 0.14, 0.01); break;
+      case 'boom':       // slam / airstrike splash
+        this._noise(0.2, 0.3); this._tone([180, 50], 0.3, 'sawtooth', 0.26, 0.02); break;
+      case 'kill':
+        this._tone([600, 1200], 0.1, 'square', 0.14); break;
+      case 'hurt':       // enemy reached the base, life lost
+        this._tone([400, 90], 0.3, 'sawtooth', 0.3); this._noise(0.16, 0.24); break;
+      case 'wave':       // wave banner
         this._tone(659, 0.1, 'square', 0.22); this._tone(659, 0.1, 'square', 0.22, 0.12);
         this._tone(880, 0.2, 'square', 0.24, 0.24); break;
+      case 'victory':
+        [392, 523, 659, 784].forEach((f, i) => this._tone(f, 0.12, 'square', 0.24, i * 0.07));
+        this._tone(1047, 0.3, 'square', 0.24, 0.3); break;
+      case 'defeat':
+        this._tone([500, 120], 0.5, 'sawtooth', 0.25); this._noise(0.2, 0.2); break;
+      case 'boss':       // boss entrance
+        this._tone([80, 160], 0.4, 'sawtooth', 0.3); this._tone([80, 160], 0.4, 'sawtooth', 0.3, 0.45);
+        this._noise(0.3, 0.2, 0.9); break;
       case 'tick':
         this._tone(990, 0.03, 'square', 0.08); break;
     }
   },
 
-  // ---- music: a tiny 16-step sequencer, ~132bpm ----
+  // ---- music: a tiny 16-step sequencer ----
   // Patterns: [bass note, arp note] per step (0 = rest), as note offsets from A2.
   _patterns: {
     normal: {
@@ -121,10 +133,15 @@ const AudioSys = {
       arp:  [12, 0, 16, 0, 19, 0, 16, 0, 15, 0, 19, 0, 17, 0, 22, 24],
       stepMs: 130, bassVol: 0.16, arpVol: 0.07,
     },
-    chase: {
+    battle: {
       bass: [0, 0, 1, 1, 0, 0, 3, 3, 0, 0, 1, 1, 5, 5, 3, 1],
       arp:  [12, 15, 13, 16, 12, 15, 18, 15, 12, 15, 13, 16, 19, 15, 18, 13],
-      stepMs: 95, bassVol: 0.18, arpVol: 0.09,
+      stepMs: 105, bassVol: 0.18, arpVol: 0.09,
+    },
+    boss: {
+      bass: [0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 1, 6, 6, 5, 3],
+      arp:  [12, 0, 13, 0, 12, 0, 15, 13, 12, 0, 13, 0, 18, 0, 17, 15],
+      stepMs: 90, bassVol: 0.2, arpVol: 0.1,
     },
   },
 

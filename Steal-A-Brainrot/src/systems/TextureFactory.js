@@ -11,8 +11,6 @@ const TextureFactory = {
 
   generateAll(scene) {
     CREATURES.forEach((def) => this.creature(scene, def));
-    this.character(scene, 'player', 0x26c6da, 0x00838f);
-    CFG.BOTS.forEach((b) => this.character(scene, 'tex_' + b.id, b.color, 0x263238));
     this.props(scene);
   },
 
@@ -686,54 +684,153 @@ const TextureFactory = {
     g.fillStyle(0xffffff, 1); g.fillTriangle(0, 0, 30, 0, 15, 22);
     g.generateTexture('arrow', 30, 22); g.destroy();
 
-    // gates: hazard-striped bars, horizontal + vertical
-    const gap = CFG.ENTRANCE_GAP;
-    g = this._g(scene);
-    g.fillStyle(0x37474f, 1); g.fillRoundedRect(0, 0, gap, 14, 4);
-    for (let x = 4; x < gap - 8; x += 18) { g.fillStyle(0xffb300, 1); g.fillRect(x, 3, 10, 8); }
-    g.generateTexture('gate_h', gap, 14); g.destroy();
-    g = this._g(scene);
-    g.fillStyle(0x37474f, 1); g.fillRoundedRect(0, 0, 14, gap, 4);
-    for (let y = 4; y < gap - 8; y += 18) { g.fillStyle(0xffb300, 1); g.fillRect(3, y, 8, 10); }
-    g.generateTexture('gate_v', 14, gap); g.destroy();
+    this.propHand(scene);
 
-    // conveyor belt tile (scrolled via tileSprite)
+    // 5-point star (merge bursts, star pips)
     g = this._g(scene);
-    g.fillStyle(0x37474f, 1); g.fillRect(0, 0, 64, 52);
-    g.fillStyle(0x263238, 1); g.fillRect(0, 0, 64, 6); g.fillRect(0, 46, 64, 6);
-    g.lineStyle(4, 0x546e7a, 1);
-    g.lineBetween(8, 42, 24, 26); g.lineBetween(24, 26, 8, 10);
-    g.lineBetween(40, 42, 56, 26); g.lineBetween(56, 26, 40, 10);
-    g.generateTexture('belt', 64, 52); g.destroy();
+    g.fillStyle(0xffffff, 1);
+    (() => {
+      const cx = 16, cy = 17, R = 15, r = 6.2;
+      const pts = [];
+      for (let i = 0; i < 10; i++) {
+        const rad = i % 2 === 0 ? R : r;
+        const a = -Math.PI / 2 + (i * Math.PI) / 5;
+        pts.push({ x: cx + Math.cos(a) * rad, y: cy + Math.sin(a) * rad });
+      }
+      g.fillPoints(pts, true);
+    })();
+    g.generateTexture('star', 32, 34); g.destroy();
 
-    // upgrade station
+    // heart (lives)
     g = this._g(scene);
-    g.fillStyle(0x455a64, 1); g.fillRoundedRect(6, 14, 72, 62, 10);
-    g.fillStyle(0x26a69a, 1); g.fillRoundedRect(14, 22, 56, 30, 8);
-    g.fillStyle(0xb2dfdb, 1); g.fillRoundedRect(20, 28, 44, 18, 6);
-    g.fillStyle(0xffb300, 1); g.fillEllipse(28, 64, 12, 12); g.fillEllipse(56, 64, 12, 12);
-    g.generateTexture('station', 84, 84); g.destroy();
+    g.fillStyle(0xef5350, 1);
+    g.fillEllipse(11, 11, 18, 18); g.fillEllipse(25, 11, 18, 18);
+    g.fillTriangle(2, 15, 34, 15, 18, 34);
+    g.generateTexture('heart', 36, 36); g.destroy();
 
-    // rebirth portal
+    // gacha capsule (two-tone pill)
     g = this._g(scene);
-    g.lineStyle(8, 0x7c4dff, 1); g.strokeEllipse(48, 48, 76, 76);
-    g.lineStyle(5, 0xb388ff, 1); g.strokeEllipse(48, 48, 54, 54);
-    g.fillStyle(0x311b92, 0.85); g.fillEllipse(48, 48, 44, 44);
-    g.fillStyle(0xd1c4e9, 1); g.fillEllipse(48, 48, 14, 14);
-    g.generateTexture('portal', 96, 96); g.destroy();
+    g.fillStyle(0xffffff, 1); g.fillEllipse(26, 26, 46, 46);
+    g.fillStyle(0xef5350, 1);
+    g.beginPath(); g.arc(26, 26, 23, Math.PI, 0, false); g.fillPath();
+    g.lineStyle(4, 0x263238, 1); g.strokeEllipse(26, 26, 46, 46);
+    g.lineStyle(3, 0x263238, 1); g.lineBetween(4, 26, 48, 26);
+    g.generateTexture('capsule', 52, 52); g.destroy();
 
-    // touch controls
+    // trash bin (sell target)
     g = this._g(scene);
-    g.fillStyle(0xffffff, 0.14); g.fillEllipse(60, 60, 116, 116);
-    g.lineStyle(3, 0xffffff, 0.35); g.strokeEllipse(60, 60, 116, 116);
-    g.generateTexture('joyBase', 120, 120); g.destroy();
+    g.fillStyle(0x546e7a, 1); g.fillRoundedRect(10, 18, 44, 46, 6);
+    g.fillStyle(0x455a64, 1); g.fillRect(6, 10, 52, 10);
+    g.fillRect(24, 4, 16, 8);
+    g.lineStyle(3, 0x263238, 1);
+    g.strokeRoundedRect(10, 18, 44, 46, 6); g.strokeRect(6, 10, 52, 10);
+    g.lineBetween(22, 26, 22, 56); g.lineBetween(32, 26, 32, 56); g.lineBetween(42, 26, 42, 56);
+    g.generateTexture('trash', 64, 68); g.destroy();
+
+    // slot pad (board tiles; tinted per zone)
     g = this._g(scene);
-    g.fillStyle(0xffffff, 0.4); g.fillEllipse(28, 28, 52, 52);
-    g.generateTexture('joyKnob', 56, 56); g.destroy();
+    g.fillStyle(0xffffff, 0.10); g.fillRoundedRect(2, 2, 92, 92, 16);
+    g.lineStyle(3, 0xffffff, 0.28); g.strokeRoundedRect(2, 2, 92, 92, 16);
+    g.generateTexture('slotPad', 96, 96); g.destroy();
+
+    // ---- projectiles ----
     g = this._g(scene);
-    g.fillStyle(0xffffff, 0.16); g.fillEllipse(52, 52, 100, 100);
-    g.lineStyle(4, 0xffffff, 0.4); g.strokeEllipse(52, 52, 100, 100);
-    g.generateTexture('btnA', 104, 104); g.destroy();
+    g.fillStyle(0xffe135, 1);
+    g.beginPath(); g.arc(14, 4, 12, 0.3, Math.PI - 0.3, false); g.fillPath();
+    g.lineStyle(3, 0x8d6e63, 1);
+    g.beginPath(); g.arc(14, 4, 12, 0.3, Math.PI - 0.3, false); g.strokePath();
+    g.generateTexture('pr_banana', 28, 20); g.destroy();
+
+    g = this._g(scene);
+    g.fillStyle(0xeceff1, 1); g.fillTriangle(0, 5, 22, 0, 22, 10);
+    g.fillStyle(0x8d6e63, 1); g.fillRect(22, 2, 7, 6);
+    g.generateTexture('pr_blade', 30, 10); g.destroy();
+
+    g = this._g(scene);
+    g.fillStyle(0x37474f, 1); g.fillEllipse(12, 14, 22, 20);
+    g.fillStyle(0x263238, 1); g.fillRect(9, 2, 6, 5);
+    g.fillStyle(0xffb300, 1); g.fillEllipse(15, 3, 5, 5);
+    g.generateTexture('pr_bomb', 26, 26); g.destroy();
+
+    g = this._g(scene);
+    g.lineStyle(4, 0xffffff, 0.9);
+    g.beginPath(); g.arc(6, 13, 10, -1.1, 1.1, false); g.strokePath();
+    g.lineStyle(3, 0xffffff, 0.5);
+    g.beginPath(); g.arc(2, 13, 8, -1.0, 1.0, false); g.strokePath();
+    g.generateTexture('pr_wave', 20, 28); g.destroy();
+
+    // pea shot (the default lane bullet)
+    g = this._g(scene);
+    g.fillStyle(0x66bb6a, 1); g.fillEllipse(9, 9, 16, 16);
+    g.fillStyle(0xa5d6a7, 1); g.fillEllipse(6, 6, 6, 6);
+    g.lineStyle(2, 0x2e7d32, 1); g.strokeEllipse(9, 9, 16, 16);
+    g.generateTexture('pr_pea', 18, 18); g.destroy();
+
+    // slowing goo blob
+    g = this._g(scene);
+    g.fillStyle(0x4fc3f7, 1); g.fillEllipse(10, 10, 18, 16);
+    g.fillStyle(0x81d4fa, 1); g.fillEllipse(7, 7, 7, 6);
+    g.lineStyle(2, 0x0277bd, 1); g.strokeEllipse(10, 10, 18, 16);
+    g.generateTexture('pr_goo', 20, 20); g.destroy();
+
+    // brainz token (the sun): a glowing pink brain
+    g = this._g(scene);
+    g.fillStyle(0xff80ab, 0.35); g.fillEllipse(24, 22, 46, 42);
+    g.fillStyle(0xf48fb1, 1); g.fillEllipse(15, 22, 22, 26);
+    g.fillEllipse(33, 22, 22, 26);
+    g.fillStyle(0xf8bbd0, 1); g.fillEllipse(13, 16, 12, 10);
+    g.fillEllipse(31, 15, 12, 9);
+    g.lineStyle(3, 0xc2185b, 0.9);
+    g.strokeEllipse(15, 22, 22, 26); g.strokeEllipse(33, 22, 22, 26);
+    g.lineStyle(2, 0xc2185b, 0.6);
+    g.beginPath(); g.arc(15, 22, 6, -2.4, 0.6, false); g.strokePath();
+    g.beginPath(); g.arc(33, 24, 6, -2.8, 0.4, false); g.strokePath();
+    g.generateTexture('brainz', 48, 44); g.destroy();
+
+    // the lane-saving moped (faces right; it rides the lane when triggered)
+    g = this._g(scene);
+    g.fillStyle(0x111111, 1); g.fillEllipse(14, 36, 16, 16); g.fillEllipse(50, 36, 16, 16);
+    g.fillStyle(0x9e9e9e, 1); g.fillEllipse(14, 36, 8, 8); g.fillEllipse(50, 36, 8, 8);
+    g.fillStyle(0xd32f2f, 1);
+    g.fillRoundedRect(8, 22, 40, 12, 6);
+    g.fillRoundedRect(38, 12, 16, 16, 5);
+    g.fillStyle(0xb71c1c, 1); g.fillRoundedRect(10, 14, 20, 8, 4);
+    g.lineStyle(4, 0x455a64, 1);
+    g.beginPath(); g.moveTo(52, 14); g.lineTo(58, 4); g.strokePath();
+    g.fillStyle(0xffe082, 1); g.fillEllipse(56, 20, 7, 7);
+    g.generateTexture('moped', 64, 46); g.destroy();
+
+    // shovel (dig up a unit)
+    g = this._g(scene);
+    g.lineStyle(7, 0x8d6e63, 1);
+    g.beginPath(); g.moveTo(20, 6); g.lineTo(20, 30); g.strokePath();
+    g.fillStyle(0x6d4c41, 1); g.fillRoundedRect(11, 0, 18, 8, 4);
+    g.fillStyle(0xb0bec5, 1);
+    g.fillRoundedRect(9, 28, 22, 22, 6);
+    g.fillTriangle(9, 44, 31, 44, 20, 56);
+    g.lineStyle(2, 0x546e7a, 1); g.strokeRoundedRect(9, 28, 22, 22, 6);
+    g.generateTexture('shovel', 40, 58); g.destroy();
   },
+
+  // The pointing hand (fallback for assets/ui/tutorial-hand.webp).
+  propHand(scene) {
+    const g = this._g(scene);
+      const SKIN = 0xffcc80, LINE = 0x4e342e, CUFF = 0x42a5f5;
+      // sleeve cuff at the top
+      g.fillStyle(CUFF, 1); g.fillRoundedRect(18, 4, 60, 26, 10);
+      g.lineStyle(6, LINE, 1); g.strokeRoundedRect(18, 4, 60, 26, 10);
+      // fist
+      g.fillStyle(SKIN, 1); g.fillRoundedRect(16, 24, 64, 52, 20);
+      g.lineStyle(6, LINE, 1); g.strokeRoundedRect(16, 24, 64, 52, 20);
+      // knuckle creases, so the fist does not read as a blob
+      g.lineStyle(4, LINE, 0.55);
+      g.beginPath(); g.moveTo(60, 38); g.lineTo(76, 38); g.strokePath();
+      g.beginPath(); g.moveTo(60, 52); g.lineTo(76, 52); g.strokePath();
+      // index finger pointing down
+      g.fillStyle(SKIN, 1); g.fillRoundedRect(30, 66, 26, 44, 12);
+      g.lineStyle(6, LINE, 1); g.strokeRoundedRect(30, 66, 26, 44, 12);
+      g.generateTexture('hand', 96, 116); g.destroy();
+  },
+
 };
 window.TextureFactory = TextureFactory;

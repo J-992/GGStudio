@@ -383,6 +383,9 @@ class GameScene extends Phaser.Scene {
   showPause() {
     this.paused = true;
     AudioSys.setTension(0);
+    // A pause is not play time, and Poki wants the pair around it: the session
+    // ends here and a fresh one starts on RESUME.
+    Poki.gameplayStop();
     const W = CFG.GAME_W, H = CFG.GAME_H;
     const items = [];
     items.push(this.add.rectangle(W / 2, H / 2, W, H, 0x33334d, 0.55).setDepth(190).setInteractive());
@@ -393,6 +396,9 @@ class GameScene extends Phaser.Scene {
     const close = () => {
       items.forEach((o) => o.destroy());
       this.paused = false;
+      // ...unless the run is already over: the results panel is not gameplay,
+      // and the pause button is still reachable behind it.
+      if (!this.finished) Poki.gameplayStart();
     };
     items.push(Effects.button(this, W / 2, H / 2 - 30, 240, 56, 'RESUME', close, { depth: 191 }));
     items.push(Effects.button(this, W / 2, H / 2 + 42, 240, 52, 'RETRY',
