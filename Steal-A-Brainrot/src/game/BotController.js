@@ -1,7 +1,8 @@
 // AI rivals. Each bot runs a small state machine (idle/shop/raid/flee/chase)
 // driven by four personality dials: agg (raiding), greed (buying), def
-// (locking), risk (how close to danger it will operate). Bots skip wall
-// physics but always path through base entrances, so movement looks right.
+// (locking), risk (how close to danger it will operate). Bots ignore physics
+// and walk straight at their target; bases are open on every side, so that is
+// also what a player does.
 class BotController {
   constructor(scene, cfg) {
     this.scene = scene;
@@ -24,13 +25,16 @@ class BotController {
 
     const home = scene.bases.entranceInside(this.id);
     this.sprite = scene.add.image(home.x, home.y, 'tex_' + this.id);
-    this.baseScale = TextureFactory.scaleFor(scene, 'tex_' + this.id, CFG.CHARACTER_H);
+    this.baseScale = TextureFactory.scaleFor(scene, 'tex_' + this.id, CFG.CHARACTER_H) * CFG.BOT_SCALE;
     this.sprite.setScale(this.baseScale);
-    this.shadow = scene.add.image(home.x, home.y + 32, 'shadow').setDepth(2).setScale(1.2);
-    this.nameText = scene.add.text(home.x, home.y - 52, this.name, {
-      fontFamily: 'Arial', fontSize: '13px', color: '#ffffff',
+    // rivals sit back visually: smaller, dimmer, and labelled as CPU
+    this.sprite.setTint(0xbdbdbd);
+    this.shadow = scene.add.image(home.x, home.y + 32, 'shadow').setDepth(2).setScale(1.0).setAlpha(0.8);
+    this.nameText = scene.add.text(home.x, home.y - 52, this.name + '  (CPU)', {
+      fontFamily: 'Arial', fontSize: '12px', color: '#e0e0e0',
       stroke: '#000000', strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(925).setAlpha(0.9);
+    }).setOrigin(0.5).setDepth(925).setAlpha(0.8);
+    this.stunFx = scene.fx.makeStunFx(scene);
     this._bobT = Math.random() * 10;
   }
 
@@ -45,7 +49,7 @@ class BotController {
   speed() {
     let v = CFG.BOT_SPEED * (0.92 + 0.12 * this.p.risk);
     if (this.carrying) v *= CFG.CARRY_SLOW;
-    if (this.state === 'chase') v *= 1.22;      // owners are furious
+    if (this.state === 'chase') v *= CFG.BOT_CHASE_MULT;   // owners are furious
     if (this.scene.eventMgr && this.scene.eventMgr.active === 'tiny') v *= 1.45;
     return v;
   }
@@ -73,8 +77,10 @@ class BotController {
     const s = this.scene;
     this.thinkAt = time + 700 + Math.random() * 700;
 
-    // lock the base sometimes (never with an intruder inside — no free jails)
-    if (Math.random() < this.p.def * 0.12 && !s.bases.isLocked(this.id) &&
+    // lock the base sometimes (never with an intruder inside — no free jails,
+    // and never while the tutorial is telling the player to rob somebody)
+    if (!(s.tutorial && s.tutorial.blocksBotLocks()) &&
+        Math.random() < this.p.def * 0.12 && !s.bases.isLocked(this.id) &&
         s.creatures.creaturesOf(this.id).length > 0 && !this._intruderInside()) {
       s.bases.lock(this.id, CFG.BOT_LOCK_DUR_MS);
     }
@@ -104,7 +110,7 @@ class BotController {
         const owner = cr.owner === 'player' ? s.player : s.botById(cr.owner);
         const ownerHome = owner && s.bases.contains(cr.owner, owner.x, owner.y);
         if (ownerHome && Math.random() > this.p.risk) continue;
-        const val = cr.def.income * (this.id === 'bot4' ? RARITIES[cr.def.rarity].tier + 1 : 1);
+        const val = cr.income * (this.id === 'bot4' ? RARITIES[cr.def.rarity].tier + 1 : 1);
         if (val > bestVal) { bestVal = val; raid = cr; }
       }
     }
@@ -117,7 +123,7 @@ class BotController {
       this.state = 'raid';
       this.raidTarget = raid;
       this.grabAt = 0;
-      this.waypoints = this._routeTo(raid.x, raid.y, raid.owner);
+      this.waypoints = this._routeTo(raid.x, raid.y);
       // don't gang up on the player: each bot waits a while between attempts
       if (raid.owner === 'player') {
         this.raidPlayerCdUntil = time + 30000 + (1 - this.p.agg) * 30000 + Math.random() * 15000;
@@ -128,7 +134,7 @@ class BotController {
       const wx = r.x + 30 + Math.random() * (r.width - 60);
       const wy = r.y + 40 + Math.random() * (r.height - 60);
       this.state = 'idle';
-      this.waypoints = this._routeTo(wx, wy, this.id);
+      this.waypoints = this._routeTo(wx, wy);
     }
   }
 
@@ -138,29 +144,10 @@ class BotController {
     return actors.some((a) => s.bases.contains(this.id, a.x, a.y));
   }
 
-  _myBase() {
-    const s = this.scene;
-    for (const id in CFG.BASES) if (s.bases.contains(id, this.x, this.y)) return id;
-    return null;
-  }
-
-  // waypoints that respect entrances: leave the current base first, then enter
-  // the target's base through its door
-  _routeTo(tx, ty, targetBaseId) {
-    const s = this.scene;
-    const wps = [];
-    const cur = this._myBase();
-    const tgt = targetBaseId && s.bases.contains(targetBaseId, tx, ty) ? targetBaseId : null;
-    if (cur && cur !== tgt) {
-      wps.push(s.bases.entranceInside(cur));
-      wps.push(s.bases.entranceOutside(cur));
-    }
-    if (tgt && tgt !== cur) {
-      wps.push(s.bases.entranceOutside(tgt));
-      wps.push(s.bases.entranceInside(tgt));
-    }
-    wps.push({ x: tx, y: ty });
-    return wps;
+  // Bases are open on every side, so there is no door to route through any
+  // more -- a bot just walks at what it wants.
+  _routeTo(tx, ty) {
+    return [{ x: tx, y: ty }];
   }
 
   // ---------- per-frame ----------
@@ -173,9 +160,14 @@ class BotController {
       this.sprite.x += this.knockVx * dtSec;
       this.sprite.y += this.knockVy * dtSec;
       this.knockVx *= 0.92; this.knockVy *= 0.92;
+      this.sprite.setTint(0x9e9e9e);
+      this.sprite.setAngle(Math.sin(time / 60) * 14);
       this._syncAttachments(tiny);
+      s.fx.updateStunFx(this.stunFx, this, time, this.y - (tiny ? 36 : 52));
       return;
     }
+    this.sprite.setTint(0xbdbdbd);
+    s.fx.updateStunFx(this.stunFx, this, time, this.y - (tiny ? 36 : 52));
 
     if (this.carrying && this.state !== 'flee') {
       this.state = 'flee';
@@ -196,7 +188,7 @@ class BotController {
 
   _routeToHomeCenter() {
     const b = CFG.BASES[this.id];
-    return this._routeTo(b.x, b.y + 10, this.id);
+    return this._routeTo(b.x, b.y + 10);
   }
 
   _updateShop(time, dtSec) {

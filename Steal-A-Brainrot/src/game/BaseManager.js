@@ -1,17 +1,26 @@
-// Bases: floors, walls (physical for the player), entrance gates, pedestals,
-// and the lock/cooldown state machine for all six bases.
+// Bases: floors, pedestals, and the lock/cooldown state machine for all six.
+//
+// Bases are OPEN. There are no walls and no doorway -- you walk in from any
+// side, at any point. The old layout put a single 96px gap in a solid ring,
+// which meant lining yourself up with an invisible slot before you could rob
+// anybody, and that lineup was most of the difficulty.
+//
+// Locking is what closes a base now, and because entry is omnidirectional the
+// lock has to be a full perimeter fence rather than one gate. Only the player
+// collides with it; bots have never used wall physics and instead refuse to
+// target a locked base in their planner.
 const PLAYER_BASE_COLORS = [0x00695c, 0x283593, 0x6a1b9a, 0xad1457, 0xbf360c, 0xf57f17, 0x1b5e20];
 
 class BaseManager {
   constructor(scene) {
     this.scene = scene;
-    this.walls = scene.physics.add.staticGroup();
-    this.gates = {};        // id -> gate image (with static body)
-    this.lockState = {};    // id -> { locked, until, cdUntil }
-    this.pedestalImgs = {}; // id -> [images]
-    this.floors = {};       // id -> rounded-rect graphics
-    this.lockTexts = {};    // id -> countdown text
-    this._slotCache = {};
+    this.barriers = scene.physics.add.staticGroup();   // solid only while locked
+    this.barrierParts = {};  // id -> [4 rects]
+    this.fences = {};        // id -> graphics ring drawn while locked
+    this.lockState = {};     // id -> { locked, until, cdUntil }
+    this.pedestalImgs = {};  // id -> [images]
+    this.floors = {};        // id -> rounded-rect graphics
+    this.lockTexts = {};     // id -> countdown text
 
     for (const id in CFG.BASES) this._build(id);
   }
@@ -26,7 +35,7 @@ class BaseManager {
   contains(id, x, y) { return Phaser.Geom.Rectangle.Contains(this.rect(id), x, y); }
 
   floorColor(id) {
-    if (id === 'player') return PLAYER_BASE_COLORS[SaveSys.data.rebirths % PLAYER_BASE_COLORS.length];
+    if (id === 'player') return PLAYER_BASE_COLORS[0];
     return TextureFactory.shade(CFG.BOTS.find((b) => b.id === id).color, 0.45);
   }
 
@@ -47,37 +56,21 @@ class BaseManager {
       stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5, 0).setAlpha(0.75).setDepth(5);
 
-    // walls: full sides except the entrance side, which gets two flanking stubs
-    const T = 12, gap = CFG.ENTRANCE_GAP;
-    const addWall = (x, y, w, h) => {
-      const w1 = s.add.rectangle(x, y, w, h, 0x000000, 0);
-      this.walls.add(w1);
-    };
-    const sides = { top: false, bottom: false, left: false, right: false };
-    sides[b.entrance] = true;
-    // top
-    if (!sides.top) addWall(b.x, r.y, b.w + T, T);
-    else this._flank(addWall, b.x, r.y, b.w, gap, true);
-    // bottom
-    if (!sides.bottom) addWall(b.x, r.bottom, b.w + T, T);
-    else this._flank(addWall, b.x, r.bottom, b.w, gap, true);
-    // left
-    if (!sides.left) addWall(r.x, b.y, T, b.h + T);
-    else this._flank(addWall, r.x, b.y, b.h, gap, false);
-    // right
-    if (!sides.right) addWall(r.right, b.y, T, b.h + T);
-    else this._flank(addWall, r.right, b.y, b.h, gap, false);
+    // Perimeter barrier: four static bars around the whole rect, inert until
+    // the base is locked. Built once and toggled, so locking costs nothing.
+    const T = 14;
+    const parts = [
+      s.add.rectangle(b.x, r.y, b.w + T, T, 0x000000, 0),           // top
+      s.add.rectangle(b.x, r.bottom, b.w + T, T, 0x000000, 0),      // bottom
+      s.add.rectangle(r.x, b.y, T, b.h + T, 0x000000, 0),           // left
+      s.add.rectangle(r.right, b.y, T, b.h + T, 0x000000, 0),       // right
+    ];
+    parts.forEach((p) => { this.barriers.add(p); p.body.enable = false; });
+    this.barrierParts[id] = parts;
 
-    // gate at the entrance
-    const ep = this.entrance(id);
-    const horiz = b.entrance === 'top' || b.entrance === 'bottom';
-    const gate = s.add.image(ep.x, ep.y, horiz ? 'gate_h' : 'gate_v').setDepth(ep.y + 8);
-    s.physics.add.existing(gate, true);
-    gate.setVisible(false);
-    gate.body.enable = false;
-    this.gates[id] = gate;
+    this.fences[id] = s.add.graphics().setDepth(r.bottom + 6).setVisible(false);
 
-    this.lockTexts[id] = s.add.text(ep.x, ep.y - 22, '', {
+    this.lockTexts[id] = s.add.text(b.x, r.y - 18, '', {
       fontFamily: 'Arial Black, Arial', fontSize: '14px', color: '#ffd54f',
       stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(870);
@@ -86,19 +79,7 @@ class BaseManager {
     this.refreshPedestals(id);
   }
 
-  _flank(addWall, cx, cy, len, gap, horiz) {
-    const seg = (len - gap) / 2;
-    if (horiz) {
-      addWall(cx - gap / 2 - seg / 2, cy, seg + 12, 12);
-      addWall(cx + gap / 2 + seg / 2, cy, seg + 12, 12);
-    } else {
-      addWall(cx, cy - gap / 2 - seg / 2, 12, seg + 12);
-      addWall(cx, cy + gap / 2 + seg / 2, 12, seg + 12);
-    }
-  }
-
   _drawFloor(id) {
-    const b = this._cfg(id);
     const r = this.rect(id);
     const g = this.floors[id];
     g.clear();
@@ -111,7 +92,20 @@ class BaseManager {
 
   redrawPlayerFloor() { this._drawFloor('player'); }
 
-  // entrance center point on the base edge; `out`/`in` points offset from it
+  // hazard-striped ring, drawn only while the base is shut
+  _drawFence(id) {
+    const r = this.rect(id);
+    const g = this.fences[id];
+    g.clear();
+    g.lineStyle(9, 0x37474f, 1);
+    g.strokeRoundedRect(r.x, r.y, r.width, r.height, 14);
+    g.lineStyle(5, 0xffb300, 1);
+    g.strokeRoundedRect(r.x, r.y, r.width, r.height, 14);
+  }
+
+  // ---------- approach points ----------
+  // Cosmetic now that every side is open: where the player spawns, and where
+  // the tutorial's hand points when it says "get home".
   entrance(id) {
     const b = this._cfg(id);
     const r = this.rect(id);
@@ -140,8 +134,7 @@ class BaseManager {
   // ---------- slots ----------
   slotCount(id) {
     if (id !== 'player') return CFG.BOT_SLOTS;
-    return Math.min(CFG.MAX_SLOTS,
-      CFG.PLAYER_SLOTS + SaveSys.data.rebirths * CFG.REBIRTH_SLOT_BONUS + (this.scene.upgrades.slot || 0));
+    return Math.min(CFG.MAX_SLOTS, CFG.PLAYER_SLOTS + (this.scene.upgrades.slot || 0));
   }
 
   slotPos(id, idx) {
@@ -152,7 +145,7 @@ class BaseManager {
       return { x: r.x + 62 + col * 86, y: r.y + 72 + row * 58 };
     }
     const col = idx % 3, row = Math.floor(idx / 3);
-    const nearTop = b.entrance === 'bottom';   // keep pedestals away from the door
+    const nearTop = b.entrance === 'bottom';   // keep pedestals off the busy edge
     const y0 = nearTop ? r.y + 46 : r.y + 62;
     return { x: r.x + 48 + col * ((b.w - 96) / 2), y: y0 + row * 52 };
   }
@@ -187,20 +180,29 @@ class BaseManager {
     return CFG.LOCK_DUR_MS + (this.scene.upgrades.lock || 0) * 5000;
   }
 
-  lock(id, durMs) {
+  // `paid` locks bought at the upgrade station skip the cooldown gate and do
+  // not start a new one -- that is precisely what the cash is buying.
+  lock(id, durMs, paid) {
     if (this.locksDisabled()) return false;
     const st = this.lockState[id];
     if (st.locked) return false;
-    if (id === 'player' && this.scene.time.now < st.cdUntil) return false;
+    if (id === 'player' && !paid && this.scene.time.now < st.cdUntil) return false;
     st.locked = true;
     st.until = this.scene.time.now + durMs;
-    if (id === 'player') st.cdUntil = st.until + CFG.LOCK_CD_MS;
-    const gate = this.gates[id];
-    gate.setVisible(true).setAlpha(0);
-    gate.body.enable = true;
-    this.scene.tweens.add({ targets: gate, alpha: 1, duration: 180 });
-    this.scene.fx.ringPulse(gate.x, gate.y, 0xffb300, 1.3);
-    if (id === 'player') { AudioSys.sfx('lock'); this.scene.fx.floatText(gate.x, gate.y - 24, 'LOCKED!', '#ffd54f', 20); }
+    if (id === 'player' && !paid) st.cdUntil = st.until + CFG.LOCK_CD_MS;
+
+    this.barrierParts[id].forEach((p) => { p.body.enable = true; });
+    this._drawFence(id);
+    const fence = this.fences[id];
+    fence.setVisible(true).setAlpha(0);
+    this.scene.tweens.add({ targets: fence, alpha: 1, duration: 180 });
+
+    const r = this.rect(id);
+    this.scene.fx.ringPulse(this._cfg(id).x, r.centerY, 0xffb300, 2.4);
+    if (id === 'player') {
+      AudioSys.sfx('lock');
+      this.scene.fx.floatText(this._cfg(id).x, r.y - 30, 'LOCKED!', '#ffd54f', 20);
+    }
     return true;
   }
 
@@ -208,11 +210,15 @@ class BaseManager {
     const st = this.lockState[id];
     if (!st.locked) return;
     st.locked = false;
-    const gate = this.gates[id];
-    gate.body.enable = false;
-    this.scene.tweens.add({ targets: gate, alpha: 0, duration: 180, onComplete: () => gate.setVisible(false) });
+    this.barrierParts[id].forEach((p) => { p.body.enable = false; });
+    const fence = this.fences[id];
+    this.scene.tweens.add({ targets: fence, alpha: 0, duration: 180,
+      onComplete: () => fence.setVisible(false) });
     this.lockTexts[id].setText('');
-    if (id === 'player') { AudioSys.sfx('unlock'); this.scene.fx.floatText(gate.x, gate.y - 24, 'BASE OPEN', '#ffffff', 16); }
+    if (id === 'player') {
+      AudioSys.sfx('unlock');
+      this.scene.fx.floatText(this._cfg(id).x, this.rect(id).y - 30, 'BASE OPEN', '#ffffff', 16);
+    }
   }
 
   forceUnlockAll() { for (const id in this.lockState) this.unlock(id); }

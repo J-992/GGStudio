@@ -43,10 +43,9 @@ class MenuScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-SPACE', () => this._start());
     this.input.keyboard.on('keydown-ENTER', () => this._start());
 
-    const rb = SaveSys.data.rebirths;
-    if (rb > 0 || SaveSys.data.discovered.length > 0) {
+    if (SaveSys.data.discovered.length > 0) {
       this.add.text(W / 2, H / 2 + 190,
-        '⭐ Rebirth x' + rb + '   ·   📖 ' + SaveSys.data.discovered.length + '/' + CREATURES.length + ' found', {
+        '📖 ' + SaveSys.data.discovered.length + '/' + CREATURES.length + ' found', {
         fontFamily: 'Arial', fontSize: '18px', color: '#ffe082',
         stroke: '#000000', strokeThickness: 3,
       }).setOrigin(0.5);

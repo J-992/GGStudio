@@ -98,7 +98,7 @@ const AudioSys = {
       case 'upgrade':
         this._tone(440, 0.08, 'triangle', 0.25); this._tone(587, 0.08, 'triangle', 0.25, 0.07);
         this._tone(880, 0.16, 'triangle', 0.25, 0.14); break;
-      case 'rebirth':
+      case 'merge':
         [262, 330, 392, 523, 659, 784, 1047].forEach((f, i) => this._tone(f, 0.2, 'triangle', 0.22, i * 0.09));
         this._noise(0.5, 0.1, 0.6); break;
       case 'lock':

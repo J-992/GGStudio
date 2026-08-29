@@ -1,5 +1,5 @@
 // Cash per owner, income accrual, and every income multiplier (upgrades,
-// rebirth, events, rewarded frenzy) resolved in one place.
+// events, rewarded frenzy) resolved in one place.
 class EconomyManager {
   constructor(scene) {
     this.scene = scene;
@@ -15,7 +15,6 @@ class EconomyManager {
     if (ownerId === 'player') {
       const upg = this.scene.upgrades.income || 0;
       m *= 1 + 0.25 * upg;
-      m *= 1 + CFG.REBIRTH_INCOME_BONUS * SaveSys.data.rebirths;
       if (this.scene.time.now < this.frenzyUntil) m *= CFG.FRENZY_MULT;
     }
     return m;
@@ -24,7 +23,7 @@ class EconomyManager {
   incomePerSec(ownerId) {
     let base = 0;
     this.scene.creatures.creaturesOf(ownerId).forEach((c) => {
-      if (c.state === 'pedestal' || c.state === 'transit' || c.state === 'returning') base += c.def.income;
+      if (c.state === 'pedestal' || c.state === 'transit' || c.state === 'returning') base += c.income;
     });
     return base * this.mult(ownerId);
   }
@@ -32,7 +31,7 @@ class EconomyManager {
   update(dtSec) {
     for (const id in this.cash) {
       let inc = this.incomePerSec(id);
-      if (id !== 'player') inc += CFG.BOT_TRICKLE * (1 + SaveSys.data.rebirths * 0.5);
+      if (id !== 'player') inc += CFG.BOT_TRICKLE;
       this._acc[id] += inc * dtSec;
       const whole = Math.floor(this._acc[id]);
       if (whole > 0) {

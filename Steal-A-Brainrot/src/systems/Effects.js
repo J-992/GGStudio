@@ -69,6 +69,33 @@ class Effects {
     }
   }
 
+  // Three seconds of no control needs to be legible, or it reads as a freeze.
+  // Stars orbit the head and a countdown says when you get to move again.
+  makeStunFx(scene) {
+    const stars = scene.add.text(0, 0, '✦ ✦ ✦', {
+      fontFamily: 'Arial Black, Arial', fontSize: '18px', color: '#ffee58',
+      stroke: '#000000', strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(938).setVisible(false);
+    const count = scene.add.text(0, 0, '', {
+      fontFamily: 'Arial Black, Arial', fontSize: '15px', color: '#ff8a80',
+      stroke: '#000000', strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(938).setVisible(false);
+    return { stars, count };
+  }
+
+  updateStunFx(fx, actor, time, headY) {
+    const left = actor.stunnedUntil - time;
+    const on = left > 0;
+    fx.stars.setVisible(on);
+    fx.count.setVisible(on);
+    if (!on) return;
+    const t = time / 160;
+    fx.stars.setPosition(actor.x + Math.cos(t) * 10, headY - 6 + Math.sin(t * 2) * 4);
+    fx.stars.setAlpha(0.7 + Math.sin(t * 3) * 0.3);
+    fx.count.setPosition(actor.x, headY - 26);
+    fx.count.setText(Math.ceil(left / 1000) + 's');
+  }
+
   ringPulse(x, y, color, scale) {
     const r = this.scene.add.image(x, y, 'ring').setDepth(880).setTint(color || 0xffffff);
     this.scene.tweens.add({
@@ -86,14 +113,32 @@ class Effects {
     this.scene.cameras.main.flash(220, c.red, c.green, c.blue);
   }
 
-  // squash & stretch a sprite briefly
+  // Squash & stretch a sprite briefly.
+  //
+  // The resting scale is remembered on the target rather than read at the
+  // moment of the call. Reading it live is what made the cash counter grow
+  // without end: the counter is squashed every time the number changes, which
+  // at any real income is several times a second, so each new tween sampled a
+  // scale that was already stretched and tweened up from *that* -- and its
+  // onComplete then restored the inflated value as the new resting size.
   squash(target, amount) {
     const a = amount || 0.22;
-    const sx = target.scaleX, sy = target.scaleY;
-    this.scene.tweens.add({
+    const live = target._sqTween;
+    if (live) {
+      // A squash is already in flight: drop it and reuse the resting scale it
+      // captured. Only this tween is removed -- the target may be in the
+      // middle of an unrelated one (the player's spin, say) that has to live.
+      this.scene.tweens.remove(live);
+    } else {
+      target._sqX = target.scaleX;
+      target._sqY = target.scaleY;
+    }
+    const sx = target._sqX, sy = target._sqY;
+    target.setScale(sx, sy);
+    target._sqTween = this.scene.tweens.add({
       targets: target, scaleX: sx * (1 + a), scaleY: sy * (1 - a),
       duration: 90, yoyo: true, ease: 'Quad.easeOut',
-      onComplete: () => { target.setScale(sx, sy); },
+      onComplete: () => { target.setScale(sx, sy); target._sqTween = null; },
     });
   }
 

@@ -2,13 +2,24 @@
 // (offline, ad blocker, or serving the folder yourself), so the game stays
 // fully playable off-platform.
 //
-// The rule that shapes this file: ads never play over a live game. Interstitials
-// are only ever requested between levels, and while one runs the game loop is
-// asleep and the audio context is suspended.
+// Two rules shape this file.
+//
+// Ads never play over a live game: interstitials are only ever requested
+// between levels, and while one runs the game loop is asleep and the audio
+// context is suspended.
+//
+// And no lifecycle event is ever dropped. The game boots on a race between
+// `PokiSDK.init()` and a 5s timeout, so a level can be under way while the SDK
+// is still coming up. Calls made in that window are recorded, not thrown away,
+// and replayed in order the moment the SDK answers -- a gameplayStart lost
+// there is the one event Poki's inspector will not pass a build without.
 const Poki = {
   ready: false,
   adPlaying: false,
-  _gameplayOn: false,
+  _gameplayOn: false,     // what the game is doing
+  _sentGameplay: false,   // what the SDK has been told about it
+  _loadingDone: false,    // the boot scene finished
+  _sentLoading: false,    // ...and the SDK knows
   _levelStarts: 0,
   _lastAdAt: 0,
 
@@ -20,10 +31,14 @@ const Poki = {
     const sdk = this.sdk;
     if (!sdk) return Promise.resolve(false);
     if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && sdk.setDebug) sdk.setDebug(true);
+    // Load time is measured from here, so this goes in before init() answers.
+    // The SDK buffers what it gets before it is ready; called afterwards it is
+    // simply ignored, and the loading pair never shows up on Poki's side.
+    if (sdk.gameLoadingStart) sdk.gameLoadingStart();
     const ready = sdk.init()
       .then(() => {
         this.ready = true;
-        if (sdk.gameLoadingStart) sdk.gameLoadingStart();
+        this._flush();
         return true;
       })
       .catch(() => false);
@@ -32,18 +47,39 @@ const Poki = {
     return Promise.race([ready, timeout]);
   },
 
-  loadingFinished() { if (this.ready) this.sdk.gameLoadingFinished(); },
+  // The single place that talks to the SDK about state. Everything else just
+  // records what the game did and calls this, which sends whatever the SDK has
+  // not heard yet — including anything recorded before it was ready.
+  _flush() {
+    if (!this.ready) return;
+    if (this._loadingDone && !this._sentLoading) {
+      this._sentLoading = true;
+      this.sdk.gameLoadingFinished();
+    }
+    // Gameplay never precedes the end of loading, whichever order the game
+    // happened to reach them in.
+    if (!this._sentLoading) return;
+    const playing = this._gameplayOn && !this.adPlaying;
+    if (playing === this._sentGameplay) return;
+    this._sentGameplay = playing;
+    if (playing) this.sdk.gameplayStart();
+    else this.sdk.gameplayStop();
+  },
 
+  loadingFinished() {
+    this._loadingDone = true;
+    this._flush();
+  },
+
+  // Both are safe to call twice: _flush only sends a change.
   gameplayStart() {
-    if (this._gameplayOn) return;
     this._gameplayOn = true;
-    if (this.ready) this.sdk.gameplayStart();
+    this._flush();
   },
 
   gameplayStop() {
-    if (!this._gameplayOn) return;
     this._gameplayOn = false;
-    if (this.ready) this.sdk.gameplayStop();
+    this._flush();
   },
 
   // Moments of joy — helps Poki tune ad timing away from them.
@@ -114,3 +150,8 @@ const Poki = {
     };
   }
 };
+
+// `const` at the top of a classic script is a lexical global, not a property of
+// the window: without this line `window.Poki` is undefined, and the guard that
+// keeps sound effects from playing under an ad reads as false forever.
+window.Poki = Poki;

@@ -19,6 +19,7 @@ class StealSystem {
     if (!this.canGrab(thief, cr)) return false;
     const s = this.scene;
     s.creatures.startCarry(cr, thief);
+    cr.grabbedAt = s.time.now;
     thief.carrying = cr;
     AudioSys.sfx('grab');
     s.fx.ringPulse(cr.x, cr.y - 20, 0xff5252, 1.2);
@@ -26,9 +27,10 @@ class StealSystem {
     const victim = cr.owner;
     if (victim === 'player') {
       AudioSys.sfx('alarm');
-      s.fx.banner('⚠ THIEF!', '#ff5252', thief.name + ' grabbed your ' + cr.def.name + '!');
+      s.fx.banner('⚠ THIEF!', '#ff5252', thief.name);
       s.fx.shake(0.005, 200);
       SaveSys.addStat('robbed');
+      s.tutorial.onPlayerRobbed();
       const arrow = s.add.image(thief.x, thief.y - 70, 'arrow').setTint(0xff5252).setDepth(940);
       s.tweens.add({ targets: arrow, y: '-=10', duration: 300, yoyo: true, repeat: -1 });
       this._alarms.push({ thief, arrow });
@@ -55,7 +57,9 @@ class StealSystem {
       const victim = cr.owner;
       if (victim !== 'player') {
         const owner = s.botById(victim);
-        if (owner && time > owner.stunnedUntil &&
+        // the grace window stops an owner who was already standing on its own
+        // pedestal from re-catching on the frame after the grab
+        if (owner && time > owner.stunnedUntil && time > cr.grabbedAt + CFG.CATCH_GRACE_MS &&
             Phaser.Math.Distance.Between(owner.x, owner.y, a.x, a.y) < CFG.CATCH_RANGE) {
           this._caught(a, cr, owner);
         }
@@ -84,14 +88,14 @@ class StealSystem {
       if (SaveSys.data.stats.stolen > SaveSys.data.best.steals) SaveSys.data.best.steals = SaveSys.data.stats.stolen;
       AudioSys.sfx('escape');
       const css = '#' + RARITIES[cr.def.rarity].color.toString(16).padStart(6, '0');
-      s.fx.banner('STOLEN!', '#69f0ae', cr.def.name + ' (' + RARITIES[cr.def.rarity].name + ') is yours!');
+      s.fx.banner('STOLEN!', '#69f0ae', cr.def.name);
       s.fx.confetti(s.player.x, s.player.y - 30, 30);
       s.fx.shake(0.008, 260);
       s.fx.floatText(s.player.x, s.player.y - 70, RARITIES[cr.def.rarity].name + '!', css, 24);
       Poki.happyTime(1);
     } else if (victim === 'player') {
       AudioSys.sfx('caught');
-      s.fx.banner('CREATURE LOST!', '#b0bec5', thief.name + ' escaped with your ' + cr.def.name);
+      s.fx.banner('LOST!', '#b0bec5', thief.name + ' took your ' + cr.def.name);
     }
   }
 
@@ -102,7 +106,7 @@ class StealSystem {
     this.knockback(thief, catcher.x, catcher.y);
     if (thief.id === 'player') {
       AudioSys.sfx('caught');
-      s.fx.banner('CAUGHT!', '#ff8a80', 'The ' + cr.def.name + ' flew back home');
+      s.fx.banner('CAUGHT!', '#ff8a80');
       s.fx.shake(0.009, 280);
     } else {
       AudioSys.sfx('slap');
@@ -132,7 +136,7 @@ class StealSystem {
       best.carrying = null;
       s.creatures.returnHome(cr);
       if (cr.owner === 'player') {
-        s.fx.banner('SAVED!', '#69f0ae', 'Your ' + cr.def.name + ' is coming home');
+        s.fx.banner('SAVED!', '#69f0ae', cr.def.name);
         Poki.happyTime(0.6);
       }
     }

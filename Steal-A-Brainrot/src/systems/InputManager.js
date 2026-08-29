@@ -14,7 +14,11 @@ class InputManager {
     this.cursors = scene.input.keyboard.createCursorKeys();
     this.keys = scene.input.keyboard.addKeys('W,A,S,D,E,L,C,SPACE');
 
-    this.isTouch = scene.sys.game.device.input.touchAvailable;
+    // Phaser exposes this as `touch` -- there is no `touchAvailable`, and
+    // reading the wrong name left isTouch undefined, so the joystick and the
+    // action button were never built on a phone at all.
+    const dev = scene.sys.game.device.input;
+    this.isTouch = !!(dev.touch || dev.mspointer) && navigator.maxTouchPoints > 0;
     this._joy = null;   // { base, knob, pointerId, ox, oy }
     if (this.isTouch) this._makeTouch();
   }

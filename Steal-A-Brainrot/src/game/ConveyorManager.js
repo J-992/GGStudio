@@ -1,6 +1,6 @@
 // The central belt: spawns creatures on a timer with rarity weights (bent by
-// rebirth luck and events), scrolls them across the map, and announces the
-// big ones so everybody rushes over.
+// events), scrolls them across the map, and announces the big ones so
+// everybody rushes over.
 class ConveyorManager {
   constructor(scene) {
     this.scene = scene;
@@ -11,9 +11,7 @@ class ConveyorManager {
   speedMult() { return this.scene.eventMgr ? this.scene.eventMgr.conveyorMult() : 1; }
 
   luck() {
-    let l = SaveSys.data.rebirths * CFG.REBIRTH_LUCK;
-    if (this.scene.eventMgr && this.scene.eventMgr.active === 'rush') l += 1.5;
-    return l;
+    return (this.scene.eventMgr && this.scene.eventMgr.active === 'rush') ? 1.5 : 0;
   }
 
   pickDef(minTier) {

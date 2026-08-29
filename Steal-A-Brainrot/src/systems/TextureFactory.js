@@ -686,16 +686,25 @@ const TextureFactory = {
     g.fillStyle(0xffffff, 1); g.fillTriangle(0, 0, 30, 0, 15, 22);
     g.generateTexture('arrow', 30, 22); g.destroy();
 
-    // gates: hazard-striped bars, horizontal + vertical
-    const gap = CFG.ENTRANCE_GAP;
+    // Tutorial hand: a cartoon fist with the index finger pointing DOWN, so it
+    // can hover above whatever the tutorial wants tapped. Drawn at 2x (96x116)
+    // and scaled down at use, so a big on-screen hand still has clean edges.
     g = this._g(scene);
-    g.fillStyle(0x37474f, 1); g.fillRoundedRect(0, 0, gap, 14, 4);
-    for (let x = 4; x < gap - 8; x += 18) { g.fillStyle(0xffb300, 1); g.fillRect(x, 3, 10, 8); }
-    g.generateTexture('gate_h', gap, 14); g.destroy();
-    g = this._g(scene);
-    g.fillStyle(0x37474f, 1); g.fillRoundedRect(0, 0, 14, gap, 4);
-    for (let y = 4; y < gap - 8; y += 18) { g.fillStyle(0xffb300, 1); g.fillRect(3, y, 8, 10); }
-    g.generateTexture('gate_v', 14, gap); g.destroy();
+    const SKIN = 0xffcc80, LINE = 0x4e342e, CUFF = 0x42a5f5;
+    // sleeve cuff at the top
+    g.fillStyle(CUFF, 1); g.fillRoundedRect(18, 4, 60, 26, 10);
+    g.lineStyle(6, LINE, 1); g.strokeRoundedRect(18, 4, 60, 26, 10);
+    // fist
+    g.fillStyle(SKIN, 1); g.fillRoundedRect(16, 24, 64, 52, 20);
+    g.lineStyle(6, LINE, 1); g.strokeRoundedRect(16, 24, 64, 52, 20);
+    // knuckle creases, so the fist does not read as a blob
+    g.lineStyle(4, LINE, 0.55);
+    g.beginPath(); g.moveTo(60, 38); g.lineTo(76, 38); g.strokePath();
+    g.beginPath(); g.moveTo(60, 52); g.lineTo(76, 52); g.strokePath();
+    // index finger pointing down
+    g.fillStyle(SKIN, 1); g.fillRoundedRect(30, 66, 26, 44, 12);
+    g.lineStyle(6, LINE, 1); g.strokeRoundedRect(30, 66, 26, 44, 12);
+    g.generateTexture('hand', 96, 116); g.destroy();
 
     // conveyor belt tile (scrolled via tileSprite)
     g = this._g(scene);
@@ -713,14 +722,6 @@ const TextureFactory = {
     g.fillStyle(0xb2dfdb, 1); g.fillRoundedRect(20, 28, 44, 18, 6);
     g.fillStyle(0xffb300, 1); g.fillEllipse(28, 64, 12, 12); g.fillEllipse(56, 64, 12, 12);
     g.generateTexture('station', 84, 84); g.destroy();
-
-    // rebirth portal
-    g = this._g(scene);
-    g.lineStyle(8, 0x7c4dff, 1); g.strokeEllipse(48, 48, 76, 76);
-    g.lineStyle(5, 0xb388ff, 1); g.strokeEllipse(48, 48, 54, 54);
-    g.fillStyle(0x311b92, 0.85); g.fillEllipse(48, 48, 44, 44);
-    g.fillStyle(0xd1c4e9, 1); g.fillEllipse(48, 48, 14, 14);
-    g.generateTexture('portal', 96, 96); g.destroy();
 
     // touch controls
     g = this._g(scene);

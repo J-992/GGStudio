@@ -105,27 +105,6 @@ for (let i = 1; i < tiers.length; i++) {
   if (hi.minInc <= lo.maxInc) fail(`tier ${tiers[i]} earns from $${hi.minInc}/s, which is not above tier ${tiers[i - 1]}'s best $${lo.maxInc}/s.`);
 }
 
-//  ------------------------------------------------------------------ rebirth
-
-//  Rebirth gates on owning a creature of REBIRTH_RARITY or better. If no such
-//  creature can spawn, the run has no exit and the player grinds forever.
-const needed = RARITIES[CFG.REBIRTH_RARITY];
-
-if (!needed) fail(`CFG.REBIRTH_RARITY "${CFG.REBIRTH_RARITY}" is not a rarity.`);
-else if (!CREATURES.some((c) => RARITIES[c.rarity].tier >= needed.tier)) {
-  fail(`rebirth needs a ${CFG.REBIRTH_RARITY}+ creature and none exists -- the run cannot be completed.`);
-}
-
-//  Its cheapest qualifying creature also has to be affordable at the cash gate,
-//  or "own one epic" is a second, hidden paywall on top of $50,000.
-const cheapestQualifying = Math.min(...CREATURES
-  .filter((c) => RARITIES[c.rarity].tier >= needed.tier)
-  .map((c) => c.price));
-
-if (cheapestQualifying > CFG.REBIRTH_CASH) {
-  fail(`the cheapest ${CFG.REBIRTH_RARITY}+ costs $${cheapestQualifying}, above the $${CFG.REBIRTH_CASH} rebirth gate.`);
-}
-
 //  ------------------------------------------------------------------ slots
 
 if (CFG.PLAYER_SLOTS > CFG.MAX_SLOTS) fail(`PLAYER_SLOTS ${CFG.PLAYER_SLOTS} exceeds MAX_SLOTS ${CFG.MAX_SLOTS}.`);

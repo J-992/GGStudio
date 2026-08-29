@@ -4,7 +4,7 @@ class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
 
   create() {
-    this.upgrades = {};                       // temporary upgrade levels, reset on rebirth
+    this.upgrades = {};                       // upgrade levels for this run
     this.physics.world.setBounds(0, 0, CFG.W, CFG.H);
 
     this._drawGround();
@@ -19,23 +19,26 @@ class GameScene extends Phaser.Scene {
     this.player = new PlayerController(this);
     this.bots = CFG.BOTS.map((b) => new BotController(this, b));
     this.eventMgr = new EventManager(this);
-    this.rebirth = new RebirthSystem(this);
     this.tutorial = new TutorialSystem(this);
     this.hud = new HUD(this);
 
     // upgrade station prop
     this.add.image(CFG.UPGRADE_STATION.x, CFG.UPGRADE_STATION.y, 'station')
       .setDepth(CFG.UPGRADE_STATION.y - 40);
-    this.add.text(CFG.UPGRADE_STATION.x, CFG.UPGRADE_STATION.y - 58, 'UPGRADES', {
-      fontFamily: 'Arial Black, Arial', fontSize: '15px', color: '#80cbc4',
+    this.add.text(CFG.UPGRADE_STATION.x, CFG.UPGRADE_STATION.y - 62, 'UPGRADES', {
+      fontFamily: 'Arial Black, Arial', fontSize: '17px', color: '#80cbc4',
       stroke: '#000000', strokeThickness: 4,
     }).setOrigin(0.5).setDepth(860);
+    // the standing invitation; HUD adds a brighter one when something in there
+    // is actually affordable
+    this.add.text(CFG.UPGRADE_STATION.x, CFG.UPGRADE_STATION.y - 44, 'walk up to open', {
+      fontFamily: 'Arial', fontSize: '12px', color: '#cfd8dc',
+      stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(860);
 
-    // physics: only the player collides with walls and (locked) gates
-    this.physics.add.collider(this.player.sprite, this.bases.walls);
-    for (const id in this.bases.gates) {
-      this.physics.add.collider(this.player.sprite, this.bases.gates[id]);
-    }
+    // physics: bases are open, so the only solid things are the perimeter
+    // fences of locked bases -- and only the player is stopped by them
+    this.physics.add.collider(this.player.sprite, this.bases.barriers);
 
     this._restoreRun();
     this._seedBots();
@@ -80,10 +83,15 @@ class GameScene extends Phaser.Scene {
     this.economy.cash.player = run.cash || CFG.START_CASH;
     Object.assign(this.upgrades, run.upgrades || {});
     this.bases.refreshPedestals('player');
-    (run.creatures || []).forEach((id) => {
+    // Entries are { i: id, n: income }. Saves written before merges carried
+    // their own income hold bare id strings, which restore at the catalogue
+    // rate -- the only thing lost is a merge bonus from an older build.
+    (run.creatures || []).forEach((entry) => {
+      const id = typeof entry === 'string' ? entry : entry.i;
       const def = CREATURES_BY_ID[id];
-      if (def) this.creatures.placeDirect(def, 'player');
+      if (def) this.creatures.placeDirect(def, 'player', typeof entry === 'string' ? 0 : entry.n);
     });
+    this.creatures.settleMerges('player');
   }
 
   // every bot opens with one cheap creature so the map is never empty (and the
@@ -99,17 +107,19 @@ class GameScene extends Phaser.Scene {
     const own = this.creatures.creaturesOf('player').filter((c) => c.state === 'pedestal');
     if (own.length === 0) return;
     const cr = own[Math.floor(Math.random() * own.length)];
-    this.fx.floatText(cr.x, cr.y - 60, '+$' + Math.floor(cr.def.income * this.economy.mult('player')), '#ffe082', 14);
-    this.fx.coinFly(cr.x, cr.y - 40, 30, 26, () => AudioSys.sfx('coin'));
+    const t = this.hud.coinTarget();
+    this.fx.floatText(cr.x, cr.y - 60,
+      '+' + HUD.money(cr.income * this.economy.mult('player')), '#ffe082', 14);
+    this.fx.coinFly(cr.x, cr.y - 40, t.x, t.y, () => AudioSys.sfx('coin'));
   }
 
   snapshot() {
     SaveSys.addStat('playMs', this._sessionT);
     this._sessionT = 0;
-    const ids = this.creatures.creaturesOf('player')
+    const owned = this.creatures.creaturesOf('player')
       .filter((c) => c.state !== 'carried' || true)   // carried ones still belong to the player
-      .map((c) => c.def.id);
-    SaveSys.snapshotRun(this.economy.cash.player, ids, this.upgrades);
+      .map((c) => ({ i: c.def.id, n: Math.floor(c.income) }));
+    SaveSys.snapshotRun(this.economy.cash.player, owned, this.upgrades);
   }
 
   update(time, delta) {
@@ -128,8 +138,7 @@ class GameScene extends Phaser.Scene {
     this.bases.update(time);
     this.economy.update(dtSec);
     this.eventMgr.update(time);
-    this.rebirth.update(time);
-    this.tutorial.update(time);
+    this.tutorial.update(time, dtSec);
     this.hud.update(time);
 
     // chase music whenever the player is robbing or being robbed
