@@ -55,10 +55,10 @@ failures.push(...errors);
 
 //  --------------------------------------------------------------- creatures
 
-const { CFG, CREATURES, RARITIES, Poki } = data;
+const { CFG, CREATURES, RARITIES, ARCHETYPES, ENEMIES, BOSSES, STAGES, LAYOUT, configureLayout, Poki } = data;
 
-if (!CFG || !CREATURES || !RARITIES) {
-  if (errors.length === 0) fail('CFG, CREATURES or RARITIES are not defined.');
+if (!CFG || !CREATURES || !RARITIES || !ARCHETYPES || !ENEMIES || !BOSSES || !STAGES) {
+  if (errors.length === 0) fail('CFG, CREATURES, RARITIES, ARCHETYPES, ENEMIES, BOSSES or STAGES are not defined.');
   done();
 }
 
@@ -66,34 +66,34 @@ if (!CFG || !CREATURES || !RARITIES) {
 //  outside poki.com, including this one.
 if (Poki && Poki.ready) fail('Poki.ready is true with no SDK present; the wrapper is not degrading to no-ops.');
 
-if (CREATURES.length < 15) fail(`expected at least 15 creatures, found ${CREATURES.length}.`);
+if (CREATURES.length < 20) fail(`expected at least 20 creatures, found ${CREATURES.length}.`);
 
 const ids = new Set();
 
 for (const c of CREATURES) {
   const where = `creature ${c.id} (${c.name})`;
 
-  if (ids.has(c.id)) fail(`${where}: duplicate id -- the collection and save data key off it.`);
+  if (ids.has(c.id)) fail(`${where}: duplicate id -- the braindex and save data key off it.`);
   ids.add(c.id);
 
   if (!RARITIES[c.rarity]) { fail(`${where}: unknown rarity "${c.rarity}".`); continue; }
-  if (!(CFG.RARITY_WEIGHTS[c.rarity] > 0)) fail(`${where}: rarity "${c.rarity}" has no spawn weight, so it never reaches the belt.`);
-  if (!(c.price > 0)) fail(`${where}: price must be positive.`);
-  if (!(c.income > 0)) fail(`${where}: income must be positive.`);
+  if (!(CFG.RARITY_WEIGHTS[c.rarity] > 0)) fail(`${where}: rarity "${c.rarity}" has no gacha weight, so the machine never dispenses it.`);
+  if (!ARCHETYPES[c.archetype]) fail(`${where}: unknown archetype "${c.archetype}" -- it would stand on the field and never attack.`);
+  if (!(c.baseDamage > 0)) fail(`${where}: baseDamage must be positive.`);
+  if (!(c.attackSpeed > 0)) fail(`${where}: attackSpeed must be positive.`);
+  if (!(c.sellValue > 0)) fail(`${where}: sellValue must be positive.`);
 }
 
-//  Value has to climb with rarity, or the ladder means nothing. Compared tier
-//  against tier rather than entry against entry, so reordering within a tier
+//  Power has to climb with rarity, or pulling a rare is a lie. Compared tier
+//  against tier (1-star dps = damage x speed) so reordering within a tier
 //  stays free.
 const byTier = new Map();
 
 for (const c of CREATURES) {
   const t = RARITIES[c.rarity].tier;
-  const cur = byTier.get(t) || { min: Infinity, max: -Infinity, minInc: Infinity, maxInc: -Infinity };
-  byTier.set(t, {
-    min: Math.min(cur.min, c.price), max: Math.max(cur.max, c.price),
-    minInc: Math.min(cur.minInc, c.income), maxInc: Math.max(cur.maxInc, c.income)
-  });
+  const dps = c.baseDamage * c.attackSpeed;
+  const cur = byTier.get(t) || { min: Infinity, max: -Infinity };
+  byTier.set(t, { min: Math.min(cur.min, dps), max: Math.max(cur.max, dps) });
 }
 
 const tiers = [...byTier.keys()].sort((a, b) => a - b);
@@ -101,17 +101,51 @@ const tiers = [...byTier.keys()].sort((a, b) => a - b);
 for (let i = 1; i < tiers.length; i++) {
   const lo = byTier.get(tiers[i - 1]);
   const hi = byTier.get(tiers[i]);
-  if (hi.min <= lo.max) fail(`tier ${tiers[i]} starts at $${hi.min}, which is not above tier ${tiers[i - 1]}'s top price $${lo.max}.`);
-  if (hi.minInc <= lo.maxInc) fail(`tier ${tiers[i]} earns from $${hi.minInc}/s, which is not above tier ${tiers[i - 1]}'s best $${lo.maxInc}/s.`);
+  if (hi.min <= lo.max) fail(`tier ${tiers[i]} bottoms out at ${hi.min.toFixed(1)} dps, not above tier ${tiers[i - 1]}'s top ${lo.max.toFixed(1)}.`);
 }
 
-//  ------------------------------------------------------------------ slots
+//  A merge must always be an upgrade, never a doubling: 2 units become 1 at
+//  dmgGrowth x, so dmgGrowth/2 is the board-power multiplier per merge.
+if (CFG.STAR.max !== 5) fail(`CFG.STAR.max is ${CFG.STAR.max}; the game and its art are authored for 5.`);
+if (!(CFG.STAR.dmgGrowth / 2 > 1)) fail(`CFG.STAR.dmgGrowth ${CFG.STAR.dmgGrowth} makes a merge a downgrade (needs > 2).`);
 
-if (CFG.PLAYER_SLOTS > CFG.MAX_SLOTS) fail(`PLAYER_SLOTS ${CFG.PLAYER_SLOTS} exceeds MAX_SLOTS ${CFG.MAX_SLOTS}.`);
+//  ----------------------------------------------------------------- stages
 
-for (const [id, b] of Object.entries(CFG.BASES)) {
-  if (b.x - b.w / 2 < 0 || b.x + b.w / 2 > CFG.W) fail(`base ${id} runs off the screen horizontally.`);
-  if (b.y - b.h / 2 < 0 || b.y + b.h / 2 > CFG.H) fail(`base ${id} runs off the screen vertically.`);
+if (STAGES.length < 10) fail(`expected at least 10 stages, found ${STAGES.length}.`);
+
+STAGES.forEach((st, i) => {
+  const where = `stage ${st.stage || i + 1}`;
+  if (!Array.isArray(st.waves) || st.waves.length < 1 || st.waves.length > 5) {
+    fail(`${where}: needs 1..5 waves.`);
+    return;
+  }
+  for (const w of st.waves) {
+    for (const sp of w.spawns || []) {
+      if (!ENEMIES[sp.enemy]) fail(`${where}: wave spawns unknown enemy "${sp.enemy}".`);
+      if (!(sp.n > 0) || !(sp.everyMs > 0)) fail(`${where}: spawn group needs positive n and everyMs.`);
+    }
+  }
+  if (st.boss && !BOSSES[st.boss]) fail(`${where}: unknown boss "${st.boss}".`);
+  const n = st.stage || i + 1;
+  if (n % CFG.STAGE.bossEveryN === 0 && !st.boss) fail(`${where}: every ${CFG.STAGE.bossEveryN}th stage must carry a boss.`);
+});
+
+//  ----------------------------------------------------------------- layout
+
+//  Both orientations have to produce sane, non-overlapping zones.
+for (const [vw, vh] of [[390, 844], [1280, 720]]) {
+  configureLayout(vw, vh);
+  const where = `layout ${vw}x${vh}`;
+  const f = LAYOUT.field, b = LAYOUT.bench, m = LAYOUT.machine;
+  if (!f || !b || !m) { fail(`${where}: zones missing.`); continue; }
+  if (f.y < LAYOUT.hud.h) fail(`${where}: battlefield runs under the HUD.`);
+  for (const [name, r] of [['field', f], ['bench', b], ['machine', m]]) {
+    if (r.x < 0 || r.y < 0 || r.x + r.w > LAYOUT.width || r.y + r.h > LAYOUT.height) {
+      fail(`${where}: ${name} zone runs off the canvas.`);
+    }
+  }
+  const overlap = !(f.x + f.w <= b.x || b.x + b.w <= f.x || f.y + f.h <= b.y || b.y + b.h <= f.y);
+  if (overlap) fail(`${where}: battlefield and bench overlap.`);
 }
 
 //  --------------------------------------------------------------------- art
@@ -131,12 +165,12 @@ if (existsSync(manifestPath)) {
   //  A sprite for a creature that no longer exists is dead weight in the build.
   const known = new Set([
     ...CREATURES.map((c) => `cr_${c.id}`),
-    'player',
-    ...CFG.BOTS.map((b) => `tex_${b.id}`)
+    ...Object.keys(ENEMIES).map((id) => `en_${id}`),
+    ...Object.keys(BOSSES).map((id) => `en_${id}`)
   ]);
 
   for (const key of Object.keys(manifest.sprites || {})) {
-    if (!known.has(key)) fail(`the manifest ships ${key}, which matches no creature, the player or any bot.`);
+    if (!known.has(key)) fail(`the manifest ships ${key}, which matches no creature, enemy or boss.`);
   }
 }
 

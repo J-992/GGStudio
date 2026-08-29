@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Brainrot Factory</title>
+<title>Brainrot Merge Clash</title>
 <style>
   html, body { margin: 0; padding: 0; background: #14213d; height: 100%; overflow: hidden; }
-  #game { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #game { width: 100%; height: 100%; }
   canvas { touch-action: none; }
 </style>
 </head>
@@ -20,21 +20,23 @@
   if (!window.Phaser) document.write('<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"><\/script>');
 </script>
 <script src="src/Config.js"></script>
+<script src="src/systems/Layout.js"></script>
 <script src="src/data/creatures.js"></script>
+<script src="src/data/enemies.js"></script>
+<script src="src/data/stages.js"></script>
 <script src="src/systems/SaveSystem.js"></script>
 <script src="src/systems/AudioSystem.js"></script>
 <script src="src/systems/PokiSDK.js"></script>
 <script src="src/systems/TextureFactory.js"></script>
 <script src="src/systems/Effects.js"></script>
-<script src="src/systems/InputManager.js"></script>
-<script src="src/game/EconomyManager.js"></script>
-<script src="src/game/CreatureManager.js"></script>
-<script src="src/game/ConveyorManager.js"></script>
-<script src="src/game/BaseManager.js"></script>
-<script src="src/game/StealSystem.js"></script>
-<script src="src/game/PlayerController.js"></script>
-<script src="src/game/BotController.js"></script>
-<script src="src/game/EventManager.js"></script>
+<script src="src/game/Economy.js"></script>
+<script src="src/game/BoardModel.js"></script>
+<script src="src/game/GachaSystem.js"></script>
+<script src="src/game/CombatSystem.js"></script>
+<script src="src/game/StageDirector.js"></script>
+<script src="src/game/BoardUI.js"></script>
+<script src="src/game/MachineUI.js"></script>
+<script src="src/game/Braindex.js"></script>
 <script src="src/game/TutorialSystem.js"></script>
 <script src="src/game/HUD.js"></script>
 <script src="src/scenes/BootScene.js"></script>

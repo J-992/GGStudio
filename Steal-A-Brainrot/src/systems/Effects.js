@@ -1,11 +1,27 @@
 // Juice central: floating numbers, coin bursts, sparks, confetti, camera
-// shake and the big center-screen announcement banners. Everything is short
-// tweened sprites — no particle emitters to manage.
+// shake, hit-stop/slow-mo and the big center-screen announcement banners.
+// Everything is short tweened sprites -- no particle emitters to manage.
 class Effects {
   constructor(scene) {
     this.scene = scene;
     this._bannerBusy = false;
     this._bannerQueue = [];
+    this._hitUntil = 0;
+    this._slowUntil = 0;
+    this._slowScale = 1;
+  }
+
+  // ---- combat time control -------------------------------------------
+  // GameScene multiplies the combat dt by timeScale() every frame. Wall-clock
+  // timestamps, so a stretched scene clock can never strand the game slow
+  // (the merge-ninja hit-stop lesson).
+  hitStop(ms) { this._hitUntil = Math.max(this._hitUntil, Date.now() + ms); }
+  slowMo(scale, ms) { this._slowScale = scale; this._slowUntil = Date.now() + ms; }
+  timeScale() {
+    const now = Date.now();
+    if (now < this._hitUntil) return 0;
+    if (now < this._slowUntil) return this._slowScale;
+    return 1;
   }
 
   floatText(x, y, str, color, size) {
@@ -32,7 +48,7 @@ class Effects {
     }
   }
 
-  // one coin arcs from the world to the HUD cash counter
+  // one coin arcs from the world to the HUD coin counter
   coinFly(x, y, tx, ty, onArrive) {
     const c = this.scene.add.image(x, y, 'coin').setDepth(950);
     this.scene.tweens.add({
@@ -54,6 +70,21 @@ class Effects {
     }
   }
 
+  // gold stars flying out of a merge
+  starBurst(x, y, n) {
+    for (let i = 0; i < (n || 8); i++) {
+      const s = this.scene.add.image(x, y, 'star').setDepth(905)
+        .setTint(0xffd54f).setScale(0.4 + Math.random() * 0.6);
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4, d = 40 + Math.random() * 80;
+      this.scene.tweens.add({
+        targets: s, x: x + Math.cos(a) * d, y: y + Math.sin(a) * d + 20,
+        alpha: { from: 1, to: 0 }, angle: Math.random() * 360 - 180,
+        duration: 550 + Math.random() * 350, ease: 'Quad.easeOut',
+        onComplete: () => s.destroy(),
+      });
+    }
+  }
+
   confetti(x, y, n) {
     const colors = [0xef5350, 0xffca28, 0x66bb6a, 0x42a5f5, 0xab47bc, 0x26c6da];
     for (let i = 0; i < (n || 26); i++) {
@@ -67,33 +98,6 @@ class Effects {
         onComplete: () => p.destroy(),
       });
     }
-  }
-
-  // Three seconds of no control needs to be legible, or it reads as a freeze.
-  // Stars orbit the head and a countdown says when you get to move again.
-  makeStunFx(scene) {
-    const stars = scene.add.text(0, 0, '✦ ✦ ✦', {
-      fontFamily: 'Arial Black, Arial', fontSize: '18px', color: '#ffee58',
-      stroke: '#000000', strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(938).setVisible(false);
-    const count = scene.add.text(0, 0, '', {
-      fontFamily: 'Arial Black, Arial', fontSize: '15px', color: '#ff8a80',
-      stroke: '#000000', strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(938).setVisible(false);
-    return { stars, count };
-  }
-
-  updateStunFx(fx, actor, time, headY) {
-    const left = actor.stunnedUntil - time;
-    const on = left > 0;
-    fx.stars.setVisible(on);
-    fx.count.setVisible(on);
-    if (!on) return;
-    const t = time / 160;
-    fx.stars.setPosition(actor.x + Math.cos(t) * 10, headY - 6 + Math.sin(t * 2) * 4);
-    fx.stars.setAlpha(0.7 + Math.sin(t * 3) * 0.3);
-    fx.count.setPosition(actor.x, headY - 26);
-    fx.count.setText(Math.ceil(left / 1000) + 's');
   }
 
   ringPulse(x, y, color, scale) {
@@ -116,18 +120,12 @@ class Effects {
   // Squash & stretch a sprite briefly.
   //
   // The resting scale is remembered on the target rather than read at the
-  // moment of the call. Reading it live is what made the cash counter grow
-  // without end: the counter is squashed every time the number changes, which
-  // at any real income is several times a second, so each new tween sampled a
-  // scale that was already stretched and tweened up from *that* -- and its
-  // onComplete then restored the inflated value as the new resting size.
+  // moment of the call, so rapid repeat squashes cannot compound the scale
+  // (that is what once made the cash counter grow without end).
   squash(target, amount) {
     const a = amount || 0.22;
     const live = target._sqTween;
     if (live) {
-      // A squash is already in flight: drop it and reuse the resting scale it
-      // captured. Only this tween is removed -- the target may be in the
-      // middle of an unrelated one (the player's spin, say) that has to live.
       this.scene.tweens.remove(live);
     } else {
       target._sqX = target.scaleX;
@@ -152,9 +150,9 @@ class Effects {
     if (this._bannerBusy || this._bannerQueue.length === 0) return;
     this._bannerBusy = true;
     const { str, colorStr, subStr } = this._bannerQueue.shift();
-    const cx = CFG.W / 2, cy = CFG.H * 0.32;
+    const cx = LAYOUT.width / 2, cy = LAYOUT.height * 0.3;
     const t = this.scene.add.text(cx, cy, str, {
-      fontFamily: 'Arial Black, Arial', fontSize: '52px',
+      fontFamily: 'Arial Black, Arial', fontSize: LAYOUT.landscape ? '52px' : '42px',
       color: colorStr || '#ffffff', stroke: '#000000', strokeThickness: 8,
     }).setOrigin(0.5).setDepth(980).setScale(0.2);
     let sub = null;

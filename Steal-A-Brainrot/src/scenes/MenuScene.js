@@ -1,74 +1,82 @@
-// One-tap menu: title, a parade of weirdos, PLAY. Nothing else between the
-// player and the game.
+// Title screen: name, PLAY, braindex count, and a parade of brainrots
+// marching across the bottom. Rebuilt wholesale on resize.
 class MenuScene extends Phaser.Scene {
   constructor() { super('Menu'); }
 
   create() {
-    const W = CFG.W, H = CFG.H;
-    this.add.rectangle(W / 2, H / 2, W, H, 0x1a237e);
-    this.add.rectangle(W / 2, H - 130, W, 260, 0x283593);
+    this.cameras.main.setBackgroundColor('#14213d');
+    this.root = this.add.container(0, 0);
+    this._build();
 
-    this.add.text(W / 2, 150, 'BRAINROT', {
-      fontFamily: 'Arial Black, Arial', fontSize: '54px', color: '#ffffff',
-      stroke: '#000000', strokeThickness: 8,
-    }).setOrigin(0.5);
-    const title = this.add.text(W / 2, 226, 'FACTORY', {
-      fontFamily: 'Arial Black, Arial', fontSize: '96px', color: '#ffd54f',
-      stroke: '#7b1fa2', strokeThickness: 12,
-    }).setOrigin(0.5);
-    this.tweens.add({ targets: title, scale: { from: 1, to: 1.05 }, angle: { from: -1.5, to: 1.5 },
-      duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    this._onResize = () => this._build();
+    this.scale.on('resize', this._onResize);
+    this.events.once('shutdown', () => {
+      this.scale.off('resize', this._onResize);
+      if (this._paradeTimer) this._paradeTimer.remove();
+    });
 
-    this.add.text(W / 2, 300, 'collect italian brainrots · print cash · rob your neighbors', {
-      fontFamily: 'Arial', fontSize: '20px', color: '#b3e5fc',
-      stroke: '#000000', strokeThickness: 3,
-    }).setOrigin(0.5);
-
-    // parade of creatures marching across the bottom
-    this.paradeys = [];
-    for (let i = 0; i < 7; i++) {
-      const def = CREATURES[Math.floor(Math.random() * CREATURES.length)];
-      const img = this.add.image(((i * 200) + 100) % (W + 200) - 100, H - 120, 'cr_' + def.id)
-        .setScale(TextureFactory.scaleFor(this, 'cr_' + def.id, CFG.CREATURE_H));
-      img.wobble = Math.random() * 10;
-      this.paradeys.push(img);
-    }
-
-    const play = this.add.text(W / 2, H / 2 + 110, '▶  PLAY', {
-      fontFamily: 'Arial Black, Arial', fontSize: '46px', color: '#ffffff',
-      backgroundColor: '#43a047', padding: { x: 44, y: 18 },
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    this.tweens.add({ targets: play, scale: { from: 1, to: 1.06 }, duration: 600, yoyo: true, repeat: -1 });
-    play.on('pointerdown', () => this._start());
     this.input.keyboard.on('keydown-SPACE', () => this._start());
     this.input.keyboard.on('keydown-ENTER', () => this._start());
 
-    if (SaveSys.data.discovered.length > 0) {
-      this.add.text(W / 2, H / 2 + 190,
-        '📖 ' + SaveSys.data.discovered.length + '/' + CREATURES.length + ' found', {
-        fontFamily: 'Arial', fontSize: '18px', color: '#ffe082',
-        stroke: '#000000', strokeThickness: 3,
-      }).setOrigin(0.5);
-    }
+    this._paradeTimer = this.time.addEvent({
+      delay: 1400, loop: true, callback: () => this._marcher(),
+    });
+    for (let i = 0; i < 4; i++) this.time.delayedCall(i * 300, () => this._marcher(true));
+  }
 
-    this._started = false;
+  _build() {
+    const r = this.root;
+    r.removeAll(true);
+    const W = LAYOUT.width, H = LAYOUT.height;
+
+    const title1 = this.add.text(W / 2, H * 0.26, 'BRAINROT', {
+      fontFamily: 'Arial Black, Arial', fontSize: LAYOUT.landscape ? '84px' : '64px',
+      color: '#ffd54f', stroke: '#000000', strokeThickness: 10,
+    }).setOrigin(0.5);
+    const title2 = this.add.text(W / 2, H * 0.26 + (LAYOUT.landscape ? 78 : 60), 'MERGE CLASH', {
+      fontFamily: 'Arial Black, Arial', fontSize: LAYOUT.landscape ? '56px' : '44px',
+      color: '#80deea', stroke: '#000000', strokeThickness: 8,
+    }).setOrigin(0.5);
+    r.add([title1, title2]);
+
+    const play = this.add.text(W / 2, H * 0.62, '▶ PLAY', {
+      fontFamily: 'Arial Black, Arial', fontSize: '46px', color: '#ffffff',
+      stroke: '#000000', strokeThickness: 8,
+      backgroundColor: '#43a047', padding: { x: 38, y: 14 },
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    play.on('pointerdown', () => this._start());
+    this.tweens.add({ targets: play, scale: { from: 1, to: 1.06 }, duration: 600, yoyo: true, repeat: -1 });
+    r.add(play);
+
+    const found = SaveSys.data.discovered.length;
+    const sub = this.add.text(W / 2, H * 0.62 + 70,
+      '\u{1F4D6} ' + found + ' / ' + CREATURES.length + ' brainrots found', {
+        fontFamily: 'Arial, sans-serif', fontSize: '18px', color: '#b0bec5',
+      }).setOrigin(0.5);
+    r.add(sub);
+  }
+
+  _marcher(startMid) {
+    const def = CREATURES[Math.floor(Math.random() * CREATURES.length)];
+    const H = LAYOUT.height;
+    const img = this.add.image(startMid ? Math.random() * LAYOUT.width : -60, H - 24, 'cr_' + def.id)
+      .setOrigin(0.5, 1);
+    img.setScale(TextureFactory.scaleFor(this, 'cr_' + def.id, 76));
+    this.tweens.add({
+      targets: img, x: LAYOUT.width + 70,
+      duration: (LAYOUT.width - img.x + 130) * 14,
+      onComplete: () => img.destroy(),
+    });
+    this.tweens.add({
+      targets: img, y: H - 30, duration: 260, yoyo: true, repeat: -1,
+    });
   }
 
   _start() {
-    if (this._started) return;
-    this._started = true;
     AudioSys.ensure();
     AudioSys.setMuted(SaveSys.data.muted);
+    AudioSys.sfx('tick');
     this.scene.start('Game');
-  }
-
-  update(t, dt) {
-    for (const img of this.paradeys) {
-      img.x += dt * 0.06;
-      img.wobble += dt * 0.008;
-      img.setAngle(Math.sin(img.wobble) * 6);
-      if (img.x > CFG.W + 60) img.x = -60;
-    }
   }
 }
 window.MenuScene = MenuScene;

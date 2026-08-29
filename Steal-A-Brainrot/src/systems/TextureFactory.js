@@ -11,8 +11,8 @@ const TextureFactory = {
 
   generateAll(scene) {
     CREATURES.forEach((def) => this.creature(scene, def));
-    this.character(scene, 'player', 0x26c6da, 0x00838f);
-    CFG.BOTS.forEach((b) => this.character(scene, 'tex_' + b.id, b.color, 0x263238));
+    Object.keys(ENEMIES).forEach((id) => this.enemy(scene, id, ENEMIES[id]));
+    Object.keys(BOSSES).forEach((id) => this.enemy(scene, id, BOSSES[id]));
     this.props(scene);
   },
 
@@ -706,35 +706,195 @@ const TextureFactory = {
     g.lineStyle(6, LINE, 1); g.strokeRoundedRect(30, 66, 26, 44, 12);
     g.generateTexture('hand', 96, 116); g.destroy();
 
-    // conveyor belt tile (scrolled via tileSprite)
+    // 5-point star (merge bursts, star pips)
     g = this._g(scene);
-    g.fillStyle(0x37474f, 1); g.fillRect(0, 0, 64, 52);
-    g.fillStyle(0x263238, 1); g.fillRect(0, 0, 64, 6); g.fillRect(0, 46, 64, 6);
-    g.lineStyle(4, 0x546e7a, 1);
-    g.lineBetween(8, 42, 24, 26); g.lineBetween(24, 26, 8, 10);
-    g.lineBetween(40, 42, 56, 26); g.lineBetween(56, 26, 40, 10);
-    g.generateTexture('belt', 64, 52); g.destroy();
+    g.fillStyle(0xffffff, 1);
+    (() => {
+      const cx = 16, cy = 17, R = 15, r = 6.2;
+      const pts = [];
+      for (let i = 0; i < 10; i++) {
+        const rad = i % 2 === 0 ? R : r;
+        const a = -Math.PI / 2 + (i * Math.PI) / 5;
+        pts.push({ x: cx + Math.cos(a) * rad, y: cy + Math.sin(a) * rad });
+      }
+      g.fillPoints(pts, true);
+    })();
+    g.generateTexture('star', 32, 34); g.destroy();
 
-    // upgrade station
+    // heart (lives)
     g = this._g(scene);
-    g.fillStyle(0x455a64, 1); g.fillRoundedRect(6, 14, 72, 62, 10);
-    g.fillStyle(0x26a69a, 1); g.fillRoundedRect(14, 22, 56, 30, 8);
-    g.fillStyle(0xb2dfdb, 1); g.fillRoundedRect(20, 28, 44, 18, 6);
-    g.fillStyle(0xffb300, 1); g.fillEllipse(28, 64, 12, 12); g.fillEllipse(56, 64, 12, 12);
-    g.generateTexture('station', 84, 84); g.destroy();
+    g.fillStyle(0xef5350, 1);
+    g.fillEllipse(11, 11, 18, 18); g.fillEllipse(25, 11, 18, 18);
+    g.fillTriangle(2, 15, 34, 15, 18, 34);
+    g.generateTexture('heart', 36, 36); g.destroy();
 
-    // touch controls
+    // gacha capsule (two-tone pill)
     g = this._g(scene);
-    g.fillStyle(0xffffff, 0.14); g.fillEllipse(60, 60, 116, 116);
-    g.lineStyle(3, 0xffffff, 0.35); g.strokeEllipse(60, 60, 116, 116);
-    g.generateTexture('joyBase', 120, 120); g.destroy();
+    g.fillStyle(0xffffff, 1); g.fillEllipse(26, 26, 46, 46);
+    g.fillStyle(0xef5350, 1);
+    g.beginPath(); g.arc(26, 26, 23, Math.PI, 0, false); g.fillPath();
+    g.lineStyle(4, 0x263238, 1); g.strokeEllipse(26, 26, 46, 46);
+    g.lineStyle(3, 0x263238, 1); g.lineBetween(4, 26, 48, 26);
+    g.generateTexture('capsule', 52, 52); g.destroy();
+
+    // trash bin (sell target)
     g = this._g(scene);
-    g.fillStyle(0xffffff, 0.4); g.fillEllipse(28, 28, 52, 52);
-    g.generateTexture('joyKnob', 56, 56); g.destroy();
+    g.fillStyle(0x546e7a, 1); g.fillRoundedRect(10, 18, 44, 46, 6);
+    g.fillStyle(0x455a64, 1); g.fillRect(6, 10, 52, 10);
+    g.fillRect(24, 4, 16, 8);
+    g.lineStyle(3, 0x263238, 1);
+    g.strokeRoundedRect(10, 18, 44, 46, 6); g.strokeRect(6, 10, 52, 10);
+    g.lineBetween(22, 26, 22, 56); g.lineBetween(32, 26, 32, 56); g.lineBetween(42, 26, 42, 56);
+    g.generateTexture('trash', 64, 68); g.destroy();
+
+    // slot pad (board tiles; tinted per zone)
     g = this._g(scene);
-    g.fillStyle(0xffffff, 0.16); g.fillEllipse(52, 52, 100, 100);
-    g.lineStyle(4, 0xffffff, 0.4); g.strokeEllipse(52, 52, 100, 100);
-    g.generateTexture('btnA', 104, 104); g.destroy();
+    g.fillStyle(0xffffff, 0.10); g.fillRoundedRect(2, 2, 92, 92, 16);
+    g.lineStyle(3, 0xffffff, 0.28); g.strokeRoundedRect(2, 2, 92, 92, 16);
+    g.generateTexture('slotPad', 96, 96); g.destroy();
+
+    // ---- projectiles ----
+    g = this._g(scene);
+    g.fillStyle(0xffe135, 1);
+    g.beginPath(); g.arc(14, 4, 12, 0.3, Math.PI - 0.3, false); g.fillPath();
+    g.lineStyle(3, 0x8d6e63, 1);
+    g.beginPath(); g.arc(14, 4, 12, 0.3, Math.PI - 0.3, false); g.strokePath();
+    g.generateTexture('pr_banana', 28, 20); g.destroy();
+
+    g = this._g(scene);
+    g.fillStyle(0xeceff1, 1); g.fillTriangle(0, 5, 22, 0, 22, 10);
+    g.fillStyle(0x8d6e63, 1); g.fillRect(22, 2, 7, 6);
+    g.generateTexture('pr_blade', 30, 10); g.destroy();
+
+    g = this._g(scene);
+    g.fillStyle(0x37474f, 1); g.fillEllipse(12, 14, 22, 20);
+    g.fillStyle(0x263238, 1); g.fillRect(9, 2, 6, 5);
+    g.fillStyle(0xffb300, 1); g.fillEllipse(15, 3, 5, 5);
+    g.generateTexture('pr_bomb', 26, 26); g.destroy();
+
+    g = this._g(scene);
+    g.lineStyle(4, 0xffffff, 0.9);
+    g.beginPath(); g.arc(6, 13, 10, -1.1, 1.1, false); g.strokePath();
+    g.lineStyle(3, 0xffffff, 0.5);
+    g.beginPath(); g.arc(2, 13, 8, -1.0, 1.0, false); g.strokePath();
+    g.generateTexture('pr_wave', 20, 28); g.destroy();
+  },
+
+  // ------------------------------------------------------------- enemies
+  // Meme-food blobs with angry faces. Same convention as creatures: drawn on
+  // their own canvas, feet on the bottom edge, displayed with origin(0.5, 1).
+  enemy(scene, id, def) {
+    const key = 'en_' + id;
+    if (scene.textures.exists(key)) scene.textures.remove(key);
+    const W = 96, H = 96, g = this._g(scene);
+    const draw = this.ENEMY_BODIES[id] || this.ENEMY_BODIES.pizza;
+    draw.call(this, g, def, W, H);
+    g.generateTexture(key, W, H);
+    g.destroy();
+  },
+
+  _angryEyes(g, x1, x2, y, r) {
+    [x1, x2].forEach((x) => {
+      g.fillStyle(0xffffff, 1); g.fillEllipse(x, y, r * 2, r * 2);
+      g.fillStyle(0x111111, 1); g.fillEllipse(x + r * 0.2, y + r * 0.15, r, r);
+    });
+    g.lineStyle(4, 0x111111, 1);
+    g.lineBetween(x1 - r, y - r * 1.2, x1 + r * 0.7, y - r * 0.4);
+    g.lineBetween(x2 + r, y - r * 1.2, x2 - r * 0.7, y - r * 0.4);
+  },
+
+  _stubbyLegs(g, cx, count, top, color) {
+    for (let i = 0; i < count; i++) {
+      const lx = cx + (i - (count - 1) / 2) * 18;
+      g.fillStyle(color, 1);
+      g.fillRoundedRect(lx - 5, top, 10, 92 - top, 5);
+    }
+  },
+
+  ENEMY_BODIES: {
+    pizza(g, def) {
+      this._stubbyLegs(g, 48, 2, 76, 0x8d6e63);
+      // a fat slice, point down
+      g.fillStyle(0xffb74d, 1); g.fillTriangle(14, 20, 82, 20, 48, 78);
+      g.lineStyle(4, 0xbf360c, 1); g.strokeTriangle(14, 20, 82, 20, 48, 78);
+      g.fillStyle(0xffcc80, 1); g.fillRoundedRect(10, 10, 76, 16, 8);
+      g.lineStyle(4, 0xbf360c, 1); g.strokeRoundedRect(10, 10, 76, 16, 8);
+      g.fillStyle(0xd32f2f, 1);
+      g.fillEllipse(36, 36, 13, 13); g.fillEllipse(60, 34, 12, 12); g.fillEllipse(48, 54, 11, 11);
+      this._angryEyes(g, 38, 58, 30, 5);
+    },
+    espresso(g, def) {
+      this._stubbyLegs(g, 48, 2, 78, 0x4e342e);
+      g.fillStyle(0xfafafa, 1); g.fillRoundedRect(20, 26, 52, 52, { tl: 6, tr: 6, bl: 20, br: 20 });
+      g.lineStyle(4, 0x4e342e, 1); g.strokeRoundedRect(20, 26, 52, 52, { tl: 6, tr: 6, bl: 20, br: 20 });
+      // handle
+      g.lineStyle(6, 0xfafafa, 1); g.beginPath(); g.arc(74, 48, 12, -1.2, 1.2, false); g.strokePath();
+      g.lineStyle(3, 0x4e342e, 1); g.beginPath(); g.arc(74, 48, 12, -1.2, 1.2, false); g.strokePath();
+      // coffee + steam
+      g.fillStyle(0x6d4c41, 1); g.fillEllipse(46, 30, 44, 12);
+      g.lineStyle(3, 0xb0bec5, 1);
+      g.beginPath(); g.moveTo(38, 20); g.lineTo(42, 10); g.strokePath();
+      g.beginPath(); g.moveTo(54, 20); g.lineTo(58, 8); g.strokePath();
+      this._angryEyes(g, 38, 56, 48, 6);
+      g.lineStyle(4, 0x4e342e, 1);
+      g.beginPath(); g.arc(47, 66, 8, Math.PI + 0.4, -0.4, false); g.strokePath();
+    },
+    croissant(g, def) {
+      this._stubbyLegs(g, 48, 2, 74, 0x8d6e63);
+      const c = 0xd7a86e, dk = 0x8d5524;
+      g.fillStyle(c, 1);
+      g.fillEllipse(48, 46, 60, 34);
+      g.fillEllipse(20, 38, 26, 24); g.fillEllipse(76, 38, 26, 24);
+      g.lineStyle(4, dk, 1);
+      g.strokeEllipse(48, 46, 60, 34);
+      g.lineBetween(34, 30, 30, 58); g.lineBetween(48, 28, 48, 62); g.lineBetween(62, 30, 66, 58);
+      this._angryEyes(g, 40, 58, 40, 5);
+    },
+    banana(g, def) {
+      this._stubbyLegs(g, 48, 2, 78, 0x8d6e63);
+      g.fillStyle(0xffe135, 1);
+      g.beginPath(); g.arc(48, 18, 34, 0.35, Math.PI - 0.35, false);
+      g.arc(48, 30, 22, Math.PI - 0.5, 0.5, true);
+      g.closePath(); g.fillPath();
+      g.lineStyle(4, 0x8d6e63, 1);
+      g.beginPath(); g.arc(48, 18, 34, 0.35, Math.PI - 0.35, false); g.strokePath();
+      g.fillStyle(0x6d4c41, 1); g.fillRect(14, 20, 8, 10); g.fillRect(76, 20, 8, 10);
+      this._angryEyes(g, 40, 58, 42, 5);
+    },
+    pasta(g, def) {
+      this._stubbyLegs(g, 48, 3, 80, 0xbf8f30);
+      // a writhing noodle mound
+      g.fillStyle(0xfff176, 1); g.fillEllipse(48, 52, 72, 52);
+      g.lineStyle(4, 0xf9a825, 1);
+      for (let i = 0; i < 4; i++) {
+        g.beginPath();
+        g.arc(28 + i * 14, 38 + (i % 2) * 10, 12, 0, Math.PI * 1.4, false);
+        g.strokePath();
+      }
+      g.strokeEllipse(48, 52, 72, 52);
+      // meatball hat
+      g.fillStyle(0x8d6e63, 1); g.fillEllipse(48, 22, 26, 22);
+      g.lineStyle(3, 0x5d4037, 1); g.strokeEllipse(48, 22, 26, 22);
+      this._angryEyes(g, 38, 60, 50, 6);
+    },
+    megaEspresso(g, def) {
+      // the boss: an espresso MACHINE with legs
+      this._stubbyLegs(g, 48, 3, 82, 0x263238);
+      g.fillStyle(0x455a64, 1); g.fillRoundedRect(10, 8, 76, 74, 10);
+      g.lineStyle(4, 0x263238, 1); g.strokeRoundedRect(10, 8, 76, 74, 10);
+      g.fillStyle(0x37474f, 1); g.fillRoundedRect(18, 16, 60, 20, 6);
+      g.fillStyle(0xffb300, 1); g.fillEllipse(26, 26, 8, 8);
+      g.fillStyle(0xef5350, 1); g.fillEllipse(40, 26, 8, 8);
+      // portafilter grin
+      g.fillStyle(0x263238, 1); g.fillRoundedRect(30, 62, 36, 12, 6);
+      g.fillStyle(0xfafafa, 1);
+      for (let i = 0; i < 4; i++) g.fillTriangle(33 + i * 8, 62, 39 + i * 8, 62, 36 + i * 8, 70);
+      this._angryEyes(g, 36, 60, 48, 7);
+      // steam
+      g.lineStyle(3, 0xb0bec5, 1);
+      g.beginPath(); g.moveTo(22, 8); g.lineTo(26, -2); g.strokePath();
+      g.beginPath(); g.moveTo(70, 8); g.lineTo(74, 0); g.strokePath();
+    },
   },
 };
 window.TextureFactory = TextureFactory;

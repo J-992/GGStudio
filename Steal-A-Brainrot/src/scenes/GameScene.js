@@ -1,148 +1,215 @@
-// The whole game lives in one compact 1280x720 screen. This scene builds the
-// world, wires the managers together, and runs the update loop.
+// Orchestration: builds every system, owns the drop() intent table, forwards
+// raw pointer events to the board, gates Poki gameplay reporting on real
+// player input, and drives the per-frame update order.
 class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
 
   create() {
-    this.upgrades = {};                       // upgrade levels for this run
-    this.physics.world.setBounds(0, 0, CFG.W, CFG.H);
+    this.modalOpen = false;
+    this.playerStartedGameplay = false;
+    this._gameplayReported = false;
+    this._saveTimer = 0;
 
-    this._drawGround();
+    this.cameras.main.setBackgroundColor('#101a30');
 
     this.fx = new Effects(this);
-    this.creatures = new CreatureManager(this);
-    this.bases = new BaseManager(this);
-    this.economy = new EconomyManager(this);
-    this.conveyor = new ConveyorManager(this);
-    this.steal = new StealSystem(this);
-    this.inputMgr = new InputManager(this);
-    this.player = new PlayerController(this);
-    this.bots = CFG.BOTS.map((b) => new BotController(this, b));
-    this.eventMgr = new EventManager(this);
-    this.tutorial = new TutorialSystem(this);
-    this.hud = new HUD(this);
+    this.economy = new Economy();
+    this.board = new BoardModel();
 
-    // upgrade station prop
-    this.add.image(CFG.UPGRADE_STATION.x, CFG.UPGRADE_STATION.y, 'station')
-      .setDepth(CFG.UPGRADE_STATION.y - 40);
-    this.add.text(CFG.UPGRADE_STATION.x, CFG.UPGRADE_STATION.y - 62, 'UPGRADES', {
-      fontFamily: 'Arial Black, Arial', fontSize: '17px', color: '#80cbc4',
-      stroke: '#000000', strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(860);
-    // the standing invitation; HUD adds a brighter one when something in there
-    // is actually affordable
-    this.add.text(CFG.UPGRADE_STATION.x, CFG.UPGRADE_STATION.y - 44, 'walk up to open', {
-      fontFamily: 'Arial', fontSize: '12px', color: '#cfd8dc',
-      stroke: '#000000', strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(860);
-
-    // physics: bases are open, so the only solid things are the perimeter
-    // fences of locked bases -- and only the player is stopped by them
-    this.physics.add.collider(this.player.sprite, this.bases.barriers);
-
-    this._restoreRun();
-    this._seedBots();
-
-    // visible income: a coin flies from a random creature to the counter
-    this.time.addEvent({
-      delay: CFG.COIN_FLY_EVERY, loop: true, callback: () => this._coinPop(),
-    });
-    // autosave
-    this.time.addEvent({ delay: CFG.SAVE_EVERY_MS, loop: true, callback: () => this.snapshot() });
-
-    this._sessionT = 0;
-    AudioSys.setMusic('normal');
-    Poki.gameplayStart();
-    this.events.on('shutdown', () => {
-      Poki.gameplayStop();
-      AudioSys.setMusic(null);
-      this.snapshot();
-    });
-  }
-
-  _drawGround() {
-    const g = this.add.graphics().setDepth(0);
-    g.fillStyle(0x33691e, 1);
-    g.fillRect(0, 0, CFG.W, CFG.H);
-    // mottled grass patches
-    const rnd = new Phaser.Math.RandomDataGenerator(['brainrot']);
-    g.fillStyle(0x558b2f, 0.5);
-    for (let i = 0; i < 60; i++) {
-      g.fillEllipse(rnd.between(0, CFG.W), rnd.between(0, CFG.H), rnd.between(30, 90), rnd.between(16, 40));
-    }
-    // worn path around the conveyor
-    g.fillStyle(0x795548, 0.25);
-    g.fillRect(0, CFG.CONVEYOR_Y - 60, CFG.W, 120);
-  }
-
-  botById(id) { return this.bots.find((b) => b.id === id); }
-
-  _restoreRun() {
+    // restore the run
     const run = SaveSys.data.run;
-    if (!run) return;
-    this.economy.cash.player = run.cash || CFG.START_CASH;
-    Object.assign(this.upgrades, run.upgrades || {});
-    this.bases.refreshPedestals('player');
-    // Entries are { i: id, n: income }. Saves written before merges carried
-    // their own income hold bare id strings, which restore at the catalogue
-    // rate -- the only thing lost is a merge bonus from an older build.
-    (run.creatures || []).forEach((entry) => {
-      const id = typeof entry === 'string' ? entry : entry.i;
-      const def = CREATURES_BY_ID[id];
-      if (def) this.creatures.placeDirect(def, 'player', typeof entry === 'string' ? 0 : entry.n);
+    this.economy.coins = run.coins != null ? run.coins : CFG.ECON.startCoins;
+    this.economy.tickets = run.tickets || 0;
+    this.board.load(run.board);
+    this.board.allUnits().forEach((u) => { SaveSys.discover(u.id); SaveSys.bestStar(u.id, u.star); });
+
+    this.gacha = new GachaSystem(this.board, this.economy);
+    this.boardUI = new BoardUI(this, this.board);
+    this.combat = new CombatSystem(this, this.board, this.economy);
+    this.hud = new HUD(this, this.economy);
+    this.machineUI = new MachineUI(this, this.gacha, this.economy);
+    this.braindex = new Braindex(this);
+    this.director = new StageDirector(this, this.combat, this.economy, this.hud);
+    this.tutorial = new TutorialSystem(this, this.director);
+
+    this.machineUI.onResult = (result) => this.applyGachaResult(result);
+    this.combat.onKill = () => this.machineUI.refresh();
+
+    // ---- input: raw pointer events, no drag plugin ----
+    this.input.addPointer(2);
+    this.input.on('pointerdown', (p) => {
+      AudioSys.ensure();
+      if (this.modalOpen) return;
+      if (this.machineUI.handlePointerDown(p)) return;
+      if (this.boardUI.beginDrag(p)) this.startGameplayOnInteraction();
     });
-    this.creatures.settleMerges('player');
+    this.input.on('pointermove', (p) => { if (!this.modalOpen) this.boardUI.moveDrag(p); });
+    this.input.on('pointerup', (p) => { if (!this.modalOpen) this.boardUI.endDrag(p); });
+    this.input.on('pointerupoutside', (p) => { if (!this.modalOpen) this.boardUI.endDrag(p); });
+
+    this._onResize = () => this.relayoutAll();
+    this.scale.on('resize', this._onResize);
+    this.events.once('shutdown', () => {
+      this.scale.off('resize', this._onResize);
+      Poki.gameplayStop();
+    });
+
+    this.director.startStage(run.stage || 1);
+    AudioSys.setMusic('normal');
   }
 
-  // every bot opens with one cheap creature so the map is never empty (and the
-  // tutorial always has something to steal)
-  _seedBots() {
-    const commons = CREATURES.filter((c) => c.rarity === 'common');
-    this.bots.forEach((b, i) => {
-      this.creatures.placeDirect(commons[i % commons.length], b.id);
-    });
+  // ------------------------------------------------------- drop intents
+  // merge -> swap -> move -> sell; a max-star pair trades places instead of
+  // refusing silently.
+
+  drop(fromSlot, target) {
+    const unit = this.board.at(fromSlot);
+    if (!unit) return 'rejected';
+
+    if (target.kind === 'trash') {
+      const def = CREATURES_BY_ID[unit.id];
+      const price = Units.sellPrice(def, unit.star);
+      this.board.remove(fromSlot);
+      this.economy.earn(price);
+      this.boardUI.sellAnim(unit.uid, price);
+      this.machineUI.refresh();
+      return 'sold';
+    }
+
+    const to = target.slot;
+    if (to < 0 || to >= BoardModel.SIZE || to === fromSlot) return 'rejected';
+    const other = this.board.at(to);
+
+    if (!other) {
+      this.board.move(fromSlot, to);
+      if (this.board.isField(to) && this.tutorial) this.tutorial.onDeploy();
+      return 'moved';
+    }
+
+    if (other.id !== unit.id || other.star !== unit.star) {
+      this.board.swap(fromSlot, to);
+      if (this.board.isField(to) && this.tutorial) this.tutorial.onDeploy();
+      return 'swapped';
+    }
+
+    const merged = this.board.merge(fromSlot, to);
+    if (!merged) {
+      // both already at max star
+      this.board.swap(fromSlot, to);
+      return 'swapped';
+    }
+
+    SaveSys.addStat('merges');
+    SaveSys.bestStar(merged.result.id, merged.result.star);
+    if (merged.result.star >= CFG.STAR.max) SaveSys.addStat('fiveStars');
+    this.boardUI.animateMerge(fromSlot, to, merged.consumedUids, merged.result);
+    if (this.tutorial) this.tutorial.onMerge();
+    Poki.happyTime(merged.result.star >= 4 ? 0.8 : 0.5);
+    this.machineUI.refresh();
+    return 'merged';
   }
 
-  _coinPop() {
-    const own = this.creatures.creaturesOf('player').filter((c) => c.state === 'pedestal');
-    if (own.length === 0) return;
-    const cr = own[Math.floor(Math.random() * own.length)];
-    const t = this.hud.coinTarget();
-    this.fx.floatText(cr.x, cr.y - 60,
-      '+' + HUD.money(cr.income * this.economy.mult('player')), '#ffe082', 14);
-    this.fx.coinFly(cr.x, cr.y - 40, t.x, t.y, () => AudioSys.sfx('coin'));
+  // ------------------------------------------------------- gacha results
+
+  applyGachaResult(result) {
+    const m = LAYOUT.machine;
+    const mx = m.x + m.w / 2, my = m.y + m.h / 2;
+
+    if (result.coins) {
+      this.economy.earn(result.coins);
+      const t = this.hud.coinTarget();
+      this.fx.coinBurst(mx, my, 10);
+      this.fx.coinFly(mx, my, t.x, t.y, () => this.hud.bumpCoins());
+      this.fx.floatText(mx, my - 30, '+' + HUD.money(result.coins), '#ffe082', 24);
+    }
+    if (result.kind === 'jackpot') {
+      this.fx.banner('JACKPOT!', '#ffd54f');
+      this.fx.confetti(mx, my, 30);
+    }
+    if (result.kind === 'double' && result.defs.length > 1) {
+      this.fx.banner('DOUBLE!', '#80deea');
+    }
+
+    result.defs.forEach((def) => {
+      const slot = this.board.firstEmptyBench();
+      if (slot === -1) return;   // guarded upstream; never drop one silently
+      const unit = this.board.spawn(def.id, 1, slot);
+      this.boardUI.spawnAnim(unit);
+      const isNew = SaveSys.discover(def.id);
+      SaveSys.bestStar(def.id, 1);
+      const rc = RARITIES[def.rarity];
+      const colorStr = '#' + rc.color.toString(16).padStart(6, '0');
+      if (isNew) {
+        this.fx.banner('NEW! ' + def.name.toUpperCase(), colorStr, rc.name);
+        AudioSys.sfx(rc.tier >= 4 ? 'legendary' : 'reveal');
+        Poki.happyTime(rc.tier >= 4 ? 1 : 0.6);
+      } else if (rc.tier >= 4) {
+        this.fx.banner(def.name.toUpperCase() + '!', colorStr);
+        AudioSys.sfx('legendary');
+        Poki.happyTime(1);
+      }
+    });
+
+    this.machineUI.refresh();
+    // the merge/deploy hand can only aim once the units actually exist
+    if (this.tutorial && this.tutorial.active) this.tutorial.relayout();
+    this.snapshot();
+  }
+
+  // ------------------------------------------------------- poki gating
+  // The SDK event must follow an actual game interaction, never the first
+  // frame; opening any modal reads as a gameplay pause.
+
+  startGameplayOnInteraction() {
+    if (this.playerStartedGameplay) return;
+    this.playerStartedGameplay = true;
+    this.syncGameplayReport();
+  }
+
+  syncGameplayReport() {
+    const active = this.playerStartedGameplay && !this.modalOpen && !Poki.adPlaying;
+    if (active === this._gameplayReported) return;
+    this._gameplayReported = active;
+    if (active) Poki.gameplayStart();
+    else Poki.gameplayStop();
+  }
+
+  // ------------------------------------------------------- frame
+
+  update(time, delta) {
+    const dt = Math.min(delta, 100);
+
+    if (!this.modalOpen) {
+      const combatDt = dt * this.fx.timeScale();
+      const st = this.director.state;
+      if (st === 'wave' || st === 'boss' || st === 'gap') this.combat.update(combatDt);
+      this.director.update(dt);
+    }
+
+    this.boardUI.update(time);
+    this.hud.refresh();
+    this.syncGameplayReport();
+
+    SaveSys.addStat('playMs', dt);
+    this._saveTimer += dt;
+    if (this._saveTimer >= CFG.SAVE_EVERY_MS) {
+      this._saveTimer = 0;
+      this.snapshot();
+    }
   }
 
   snapshot() {
-    SaveSys.addStat('playMs', this._sessionT);
-    this._sessionT = 0;
-    const owned = this.creatures.creaturesOf('player')
-      .filter((c) => c.state !== 'carried' || true)   // carried ones still belong to the player
-      .map((c) => ({ i: c.def.id, n: Math.floor(c.income) }));
-    SaveSys.snapshotRun(this.economy.cash.player, owned, this.upgrades);
+    SaveSys.snapshotRun(this.economy, this.board, this.director.stage);
   }
 
-  update(time, delta) {
-    const dtSec = Math.min(delta, 100) / 1000;
-    this._sessionT += delta;
-
-    this.inputMgr.update();
-    if (this.inputMgr.lockJust) this.hud.tryLock();
-    if (this.inputMgr.collectionJust) this.hud.toggleCollection();
-
-    this.player.update(time, dtSec);
-    for (const b of this.bots) b.update(time, dtSec);
-    this.conveyor.update(time, dtSec);
-    this.creatures.update(time, dtSec);
-    this.steal.update(time);
-    this.bases.update(time);
-    this.economy.update(dtSec);
-    this.eventMgr.update(time);
-    this.tutorial.update(time, dtSec);
-    this.hud.update(time);
-
-    // chase music whenever the player is robbing or being robbed
-    AudioSys.setMusic(this.steal.playerInChase() ? 'chase' : 'normal');
+  relayoutAll() {
+    this.boardUI.relayout();
+    this.combat.relayout();
+    this.hud.relayout();
+    this.machineUI.relayout();
+    this.braindex.relayout();
+    this.director.relayout();
+    if (this.tutorial) this.tutorial.relayout();
   }
 }
 window.GameScene = GameScene;

@@ -20,12 +20,6 @@
     "cr_trulimero": "sprites/cr_trulimero.png",
     "cr_tungtung": "sprites/cr_tungtung.png",
     "cr_udin": "sprites/cr_udin.png",
-    "cr_vacca": "sprites/cr_vacca.png",
-    "player": "sprites/player.png",
-    "tex_bot0": "sprites/tex_bot0.png",
-    "tex_bot1": "sprites/tex_bot1.png",
-    "tex_bot2": "sprites/tex_bot2.png",
-    "tex_bot3": "sprites/tex_bot3.png",
-    "tex_bot4": "sprites/tex_bot4.png"
+    "cr_vacca": "sprites/cr_vacca.png"
   }
 }
