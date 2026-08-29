@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0d0b18" />
+    <title>Ninja Flow</title>
+    <!--
+      The Poki SDK is loaded here rather than injected at runtime: Poki's review
+      looks for the tag, and having it resolved before the module boots means the
+      loading progress events land on a real SDK instead of a stub. The adapter
+      still works without it — the game is playable with no SDK at all.
+    -->
+    <script src="https://game-cdn.poki.com/scripts/v2/poki-sdk.js"></script>
+    <link rel="stylesheet" href="./src/ui/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+      <div id="ui"></div>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
