@@ -1,0 +1,26 @@
+{
+  "base": "assets/",
+  "sprites": {
+    "cr_assassino": "sprites/cr_assassino.png",
+    "cr_ballerina": "sprites/cr_ballerina.png",
+    "cr_bobritto": "sprites/cr_bobritto.png",
+    "cr_bombardiro": "sprites/cr_bombardiro.png",
+    "cr_boneca": "sprites/cr_boneca.png",
+    "cr_burbaloni": "sprites/cr_burbaloni.png",
+    "cr_chimpanzini": "sprites/cr_chimpanzini.png",
+    "cr_cocofanto": "sprites/cr_cocofanto.png",
+    "cr_girafa": "sprites/cr_girafa.png",
+    "cr_lirili": "sprites/cr_lirili.png",
+    "cr_octopussini": "sprites/cr_octopussini.png",
+    "cr_orangutini": "sprites/cr_orangutini.png",
+    "cr_patapim": "sprites/cr_patapim.png",
+    "cr_tralalero": "sprites/cr_tralalero.png",
+    "cr_trippi": "sprites/cr_trippi.png",
+    "cr_troppa": "sprites/cr_troppa.png",
+    "cr_trulimero": "sprites/cr_trulimero.png",
+    "cr_tungtung": "sprites/cr_tungtung.png",
+    "cr_udin": "sprites/cr_udin.png",
+    "cr_vacca": "sprites/cr_vacca.png",
+    "hand": "ui/tutorial-hand.webp"
+  }
+}

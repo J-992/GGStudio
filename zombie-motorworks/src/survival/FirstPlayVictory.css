@@ -207,51 +207,174 @@
   font: 400 var(--ui-text-12) / 1.5 var(--ui-font-body);
 }
 
-/* ---- The one button ----------------------------------------------------- */
+/* ---- The two doors out -------------------------------------------------- */
+
+/* Side by side, equal width, and stacking on their own on a narrow phone
+   rather than at a hand-picked breakpoint — the card is already fluid. */
+.first-play-victory__choices {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+}
 
 .first-play-victory__cta {
-  min-height: 52px;
-  padding: 14px 18px;
-  border: 1px solid var(--ui-signal-dark);
+  --cta-face: var(--ui-signal);
+  --cta-face-dark: var(--ui-signal-dark);
+  --cta-edge: var(--ui-signal-dark);
+  --cta-text: var(--ui-black);
+  --cta-blurb: rgb(7 8 7 / 0.72);
+  --cta-lift: 0px;
+  --cta-slide: 0px;
+
+  position: relative;
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  min-width: 0;
+  min-height: 98px;
+  gap: 6px;
+  padding: 13px 10px 12px;
+  overflow: hidden;
+  border: 1px solid var(--cta-edge);
   background: linear-gradient(
     180deg,
-    var(--ui-signal) 0%,
-    var(--ui-signal-dark) 100%
+    var(--cta-face) 0%,
+    var(--cta-face-dark) 100%
   );
   box-shadow:
     4px 5px 0 rgb(0 0 0 / 0.5),
     inset 0 1px 0 rgb(255 255 255 / 0.16);
-  color: var(--ui-black);
-  font: 400 clamp(17px, 4.6vw, 21px) / 1 var(--ui-font-display);
-  letter-spacing: 0.16em;
-  text-indent: 0.16em;
-  text-transform: uppercase;
+  color: var(--cta-text);
   cursor: pointer;
   opacity: 0;
+  /* Only the press/hover offset is transitioned; the entrance and the idle
+     pulse are keyframes, and transitioning box-shadow as well would fight
+     them mid-animation. */
+  transform: translate(var(--cta-slide), var(--cta-lift));
+  transition: transform 90ms ease-out;
+}
+
+/* Creative is the quieter of the two: a bone-outlined panel that lights up
+   under the pointer, so the eye still lands on Survival first without the
+   sandbox reading as a disabled option. */
+.first-play-victory__cta--creative {
+  --cta-face: var(--ui-surface-2);
+  --cta-face-dark: var(--ui-surface-1);
+  --cta-edge: var(--victory-gold);
+  --cta-text: var(--victory-gold);
+  --cta-blurb: var(--ui-text-muted);
+}
+
+.first-play-victory__cta-glyph {
+  display: block;
+  width: 26px;
+  height: 26px;
+  color: inherit;
+}
+
+.first-play-victory__cta-glyph svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.first-play-victory__cta-label {
+  font: 400 clamp(16px, 4.4vw, 20px) / 1 var(--ui-font-display);
+  letter-spacing: 0.14em;
+  text-indent: 0.14em;
+  text-transform: uppercase;
+}
+
+.first-play-victory__cta-blurb {
+  color: var(--cta-blurb);
+  font: 400 var(--ui-text-10) / 1.35 var(--ui-font-body);
+  text-wrap: balance;
+}
+
+/* A single skewed highlight that crosses the face. It runs on a long loop
+   while the buttons idle and again, faster, under the pointer — the cheapest
+   way to say "these are live" without moving the layout. */
+.first-play-victory__cta-shine {
+  position: absolute;
+  top: -60%;
+  left: -140%;
+  width: 55%;
+  height: 220%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(255 255 255 / 0.28),
+    transparent
+  );
+  pointer-events: none;
+  transform: skewX(-22deg);
 }
 
 .first-play-victory__cta.is-in {
-  animation:
-    victory-cta-in 320ms cubic-bezier(0.2, 0.85, 0.28, 1.15) both,
-    victory-cta-breathe 2.2s ease-in-out 320ms infinite;
+  animation: victory-cta-in 320ms cubic-bezier(0.2, 0.85, 0.28, 1.15) both;
+}
+
+/* The row assembles left to right, matching the stats above it. */
+.first-play-victory__cta.is-in:nth-child(2) {
+  animation-delay: 90ms;
+}
+
+/* The idle pulse lives on an overlay rather than on the button's own
+   box-shadow, so hovering can still change the drop shadow — a running
+   animation would otherwise own that property outright. */
+.first-play-victory__cta--survival::after {
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 26px rgb(216 232 168 / 0.6);
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+}
+
+.first-play-victory__cta--survival.is-in::after {
+  animation: victory-cta-breathe 2.2s ease-in-out 320ms infinite;
+}
+
+.first-play-victory__cta.is-in .first-play-victory__cta-shine {
+  animation: victory-cta-shine 3.6s ease-in-out 700ms infinite;
 }
 
 .first-play-victory__cta:hover:not(:disabled),
 .first-play-victory__cta:focus-visible {
-  background: linear-gradient(
-    180deg,
-    var(--ui-signal-strong) 0%,
-    var(--ui-signal) 100%
-  );
+  --cta-lift: -2px;
+  --cta-face: var(--ui-signal-strong);
+  --cta-face-dark: var(--ui-signal);
+
+  box-shadow:
+    6px 7px 0 rgb(0 0 0 / 0.5),
+    inset 0 1px 0 rgb(255 255 255 / 0.22);
   outline: 2px solid var(--victory-gold);
   outline-offset: 3px;
 }
 
+.first-play-victory__cta--creative:hover:not(:disabled),
+.first-play-victory__cta--creative:focus-visible {
+  --cta-face: var(--ui-surface-3);
+  --cta-face-dark: var(--ui-surface-2);
+  --cta-text: var(--ui-text);
+  --cta-blurb: var(--ui-text);
+
+  outline-color: var(--ui-signal-strong);
+}
+
+.first-play-victory__cta:hover:not(:disabled) .first-play-victory__cta-shine {
+  animation-duration: 1.4s;
+  animation-delay: 0ms;
+}
+
 .first-play-victory__cta:active:not(:disabled) {
+  --cta-lift: 3px;
+  --cta-slide: 3px;
+
   box-shadow:
     1px 2px 0 rgb(0 0 0 / 0.5),
     inset 0 1px 0 rgb(255 255 255 / 0.16);
-  transform: translate(3px, 3px);
 }
 
 .first-play-victory__cta:disabled {
@@ -314,8 +437,21 @@
   }
 
   .first-play-victory__cta {
-    min-height: 44px;
-    padding: 11px 16px;
+    min-height: 0;
+    gap: 4px;
+    padding: 9px 10px;
+  }
+
+  /* The copy is the first thing to go: at this height the name and the icon
+     carry the choice on their own, and the button has to stay reachable
+     without a swipe. */
+  .first-play-victory__cta-blurb {
+    display: none;
+  }
+
+  .first-play-victory__cta-glyph {
+    width: 20px;
+    height: 20px;
   }
 }
 
@@ -424,24 +560,30 @@
   }
 }
 
-/* The pulse is thrown inward, not outward. The card scrolls (`overflow-y:
-   auto`), which computes the horizontal axis to `auto` as well and would clip
-   an outer bloom against the panel edge — worse at the short-viewport
-   breakpoint, where the padding around the button shrinks. */
+/* The idle pulse: an inner bloom fading up and back down. Inward rather than
+   outward because the card scrolls (`overflow-y: auto`), which would clip an
+   outer bloom against the panel edge. */
 @keyframes victory-cta-breathe {
   0%,
   100% {
-    box-shadow:
-      4px 5px 0 rgb(0 0 0 / 0.5),
-      inset 0 1px 0 rgb(255 255 255 / 0.16),
-      inset 0 0 0 rgb(216 232 168 / 0);
+    opacity: 0;
   }
 
   50% {
-    box-shadow:
-      4px 5px 0 rgb(0 0 0 / 0.5),
-      inset 0 1px 0 rgb(255 255 255 / 0.16),
-      inset 0 0 26px rgb(216 232 168 / 0.6);
+    opacity: 1;
+  }
+}
+
+/* Crosses the face once and then waits out the rest of the loop, rather than
+   sweeping back and forth like a loading bar. */
+@keyframes victory-cta-shine {
+  0% {
+    left: -140%;
+  }
+
+  28%,
+  100% {
+    left: 200%;
   }
 }
 
@@ -472,7 +614,9 @@
   .first-play-victory.is-in .first-play-victory__title,
   .first-play-victory.is-in .first-play-victory__stat,
   .first-play-victory__stat.is-landed .first-play-victory__stat-value,
-  .first-play-victory__cta.is-in {
+  .first-play-victory__cta.is-in,
+  .first-play-victory__cta--survival.is-in::after,
+  .first-play-victory__cta.is-in .first-play-victory__cta-shine {
     animation: none;
   }
 
@@ -481,6 +625,10 @@
   .first-play-victory__rays,
   .first-play-victory__cta {
     opacity: 1;
+  }
+
+  .first-play-victory__cta-shine {
+    display: none;
   }
 
   .first-play-victory__spark {

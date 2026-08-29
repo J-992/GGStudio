@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+
+# Local verification harness (orchestrator-only, not shipped)
+verify-*.mjs
+screenshots/
+
+# Raw art drops from the asset pipeline; packed output lives in public/assets/
+assets-staging/
+
+# Local verification harnesses (orchestrator-only)
+verify-fps.mjs
+verify-playthrough.mjs
+verify-mergeburst.mjs
+Claude-Code-Game-Studios/

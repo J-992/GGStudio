@@ -458,6 +458,12 @@ export interface SurvivalCallbacks {
     kills: number,
     score: number,
   ): void;
+  /**
+   * The first-play celebration's second exit: abandon the campaign run this
+   * tutorial wave started and open Creative instead. Optional, and when it is
+   * absent the celebration offers only the campaign button.
+   */
+  onFirstPlayCreative?(): void;
   /** Commit the next wave's start state as soon as a clear is resolved. */
   onWaveCheckpoint?(
     run: RunState,
@@ -1431,6 +1437,10 @@ export class SurvivalMode {
         ? null
         : new FirstPlayVictory(this.ui, {
             onStartRun: () => this.leaveFirstPlayWave(),
+            onCreativeMode:
+              this.callbacks.onFirstPlayCreative === undefined
+                ? undefined
+                : () => this.callbacks.onFirstPlayCreative?.(),
           });
     if (this.firstPlay !== null) {
       this.waves.setCompositionOverride(FIRST_PLAY_WAVE_COMPOSITION);
@@ -3354,7 +3364,10 @@ export class SurvivalMode {
     // Nods harder the longer it has been going, up to the same ceiling a heavy
     // shell already uses, so a twenty-kill run through a pack lands.
     this.followCamera.addShake(
-      Math.min(KILL_STREAK_SHAKE_MAX, KILL_STREAK_SHAKE * (1 + this.killStreak / 12)),
+      Math.min(
+        KILL_STREAK_SHAKE_MAX,
+        KILL_STREAK_SHAKE * (1 + this.killStreak / 12),
+      ),
     );
     // Climbs with the streak and then holds, so a long run reads as one rising
     // line instead of an ever-shriller squeak.
@@ -3667,7 +3680,7 @@ export class SurvivalMode {
     }
   }
 
-  /** The celebration's single button: hand the player to the rig picker. */
+  /** The celebration's Survival button: hand the player to the rig picker. */
   private leaveFirstPlayWave(): void {
     this.firstPlayVictory?.hide();
     const payload = this.clearedWavePayload();
@@ -4185,11 +4198,9 @@ export class SurvivalMode {
         const repaired = this.vehicle.repairOne();
         playSfx(repaired === null ? 'uiDeny' : 'pickupRepair');
         if (repaired === null) {
-          this.popPickupToast(
-            'RIG INTACT',
-            PICKUP_KINDS.repair.minimapColor,
-            { icon: '+' },
-          );
+          this.popPickupToast('RIG INTACT', PICKUP_KINDS.repair.minimapColor, {
+            icon: '+',
+          });
           return true;
         }
         if (repaired.action === 'rebuild')

@@ -6,6 +6,10 @@ import { GameScene } from './scenes/GameScene';
 import { WorldScene } from './scenes/WorldScene';
 import { BonusScene } from './scenes/BonusScene';
 import { ResultScene } from './scenes/ResultScene';
+import { GiftScene } from './scenes/GiftScene';
+import { VersusQueueScene } from './scenes/VersusQueueScene';
+import { VersusScene } from './scenes/VersusScene';
+import { VersusResultScene } from './scenes/VersusResultScene';
 import { H, W } from './core/theme';
 
 const config: Types.Core.GameConfig = {
@@ -51,7 +55,7 @@ const config: Types.Core.GameConfig = {
         //  break or a tab switch.
         smoothStep: true
     },
-    scene: [ Boot, MainMenu, GameScene, BonusScene, WorldScene, ResultScene ]
+    scene: [ Boot, MainMenu, GameScene, BonusScene, WorldScene, ResultScene, GiftScene, VersusQueueScene, VersusScene, VersusResultScene ]
 };
 
 const StartGame = (parent: string) =>

@@ -121,6 +121,12 @@ const PHOTOS: TargetSkin[] = [
         shape: 'circle', spin: 0, glow: 1.4, art: 'liquid', trail: 'bubbles'
     },
     {
+        id: 'johnPork', name: 'JOHN PORK', group: 'photo',
+        blurb: 'HE IS CALLING. PICK UP.',
+        cost: 3400, accent: 0xf2a3ae,
+        shape: 'circle', spin: 0, glow: 1.2, art: 'johnPork', trail: 'sparkle'
+    },
+    {
         id: 'ember', name: 'FIRECLOUD', group: 'photo',
         blurb: 'ROLLING FLAME. TRAILS EMBERS.',
         cost: 3800, accent: 0xff4d1a,

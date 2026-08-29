@@ -8,6 +8,12 @@ import { FINAL_LEVEL, TargetKind } from './levels';
  * next arena: no goal, no way to lose the run -- a few seconds of money and a
  * gun already pointed at it.
  *
+ * The ladder starts at level three rather than level five. A player who has
+ * never seen the vault does not know it is there, and a treat nobody knows
+ * about cannot pull anybody deeper into a run to reach it -- so it turns up
+ * inside the first minute of play, and the every-fifth cadence runs from
+ * there.
+ *
  * The clock is the only rule in the room. What the player shoots is banked the
  * moment it is shot; what is still standing when the clock stops is left
  * behind. Nothing is swept up at the end, which is the only thing making the
@@ -18,10 +24,22 @@ import { FINAL_LEVEL, TargetKind } from './levels';
 /** A cash round drops in after every Nth level cleared. */
 export const BONUS_EVERY = 5;
 
+/**
+ * The level the ladder starts on.
+ *
+ * Three levels is a little under a minute on the clock, which is long enough
+ * for the player to have the loop and short enough that the vault is something
+ * they meet rather than something they hear about. It also lands the ladder on
+ * 3, 8, 13 ... 38 -- the last one right before the finale.
+ */
+export const BONUS_FIRST = 3;
+
 /** True when clearing `level` should hand the player the vault. */
 export function isBonusAfter (level: number): boolean
 {
-    return level > 0 && level < FINAL_LEVEL && level % BONUS_EVERY === 0;
+    return level >= BONUS_FIRST
+        && level < FINAL_LEVEL
+        && (level - BONUS_FIRST) % BONUS_EVERY === 0;
 }
 
 export interface BonusConfig

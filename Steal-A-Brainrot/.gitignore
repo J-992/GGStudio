@@ -1,0 +1,13 @@
+# Art inputs are not committed — they are large, third-party, and only ever
+# feed the importers. The sprites they produce ARE committed, because the game
+# loads them at runtime and they have to be in the Poki build.
+art/source/
+art/models/
+art/turntable/
+
+# Build output: regenerate with `npm run build:poki`.
+dist/
+node_modules/
+
+# Hand-upload archive: regenerate with `node tools/package-poki.mjs`.
+*-poki.zip

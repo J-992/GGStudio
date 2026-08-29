@@ -1,4 +1,5 @@
 import { zoneFor } from './zones';
+import { isBossLevel } from './bosses';
 
 /**
  * What each zone throws at the player on top of its rule.
@@ -221,6 +222,30 @@ function settle (h: HazardSpec, level: number): HazardSpec
     return h;
 }
 
+/**
+ * A boss level keeps its world's *rule* and loses its world's furniture.
+ *
+ * The rule is what the place is -- the wind still drags, the lights still go
+ * out, the field still turns -- and a fight staged without it would not be
+ * that world's exam at all. The furniture is different: a slab of concrete
+ * parked in front of a body the player is required to shoot is not difficulty,
+ * it is a coin flip on where the boss happened to spawn, and a pane of glass
+ * over a fight that already has a ring of glass around it is the same idea
+ * said twice, badly.
+ *
+ * The boss brings its own obstacle, and it is the only one in the room.
+ */
+function stripForBoss (h: HazardSpec): HazardSpec
+{
+    h.panes = 0;
+    h.blocks = 0;
+    h.flakEvery = 0;
+    h.chainChance = 0;
+    h.fallChance = 0;
+
+    return h;
+}
+
 export function hazardFor (level: number): HazardSpec
 {
     const zone = zoneFor(level);
@@ -398,7 +423,7 @@ export function hazardFor (level: number): HazardSpec
             break;
     }
 
-    return settle(h, level);
+    return isBossLevel(level) ? stripForBoss(h) : settle(h, level);
 }
 
 /**

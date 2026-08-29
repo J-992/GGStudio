@@ -10,7 +10,7 @@ import { GameObjects, Scene } from 'phaser';
  * harder to see would be a cosmetic that costs the player the run.
  */
 
-export type TrailId = 'smoke' | 'sparkle' | 'toxic' | 'bubbles' | 'embers' | 'sparks' | 'stars' | 'steam';
+export type TrailId = 'smoke' | 'sparkle' | 'toxic' | 'bubbles' | 'embers' | 'sparks' | 'stars' | 'steam' | 'gold';
 
 interface TrailSpec
 {
@@ -43,6 +43,20 @@ const SPECS: Record<TrailId, TrailSpec> = {
         gravityY: -26,
         every: 90,
         count: 1
+    },
+    //  The ability orb's wake: a heavier, brighter sparkle that hangs in the
+    //  air long enough to draw the line the orb just flew along.
+    gold: {
+        texture: 'spark',
+        tint: [ 0xffd23f, 0xfff3b0, 0xffffff, 0xffc857 ],
+        additive: true,
+        speed: { min: 4, max: 22 },
+        lifespan: { min: 420, max: 760 },
+        scale: { start: 0.55, end: 0 },
+        alpha: { start: 1, end: 0 },
+        gravityY: 10,
+        every: 38,
+        count: 2
     },
     sparkle: {
         texture: 'spark',

@@ -15,6 +15,21 @@ import { BonusConfig, bonusConfig, cashMult, cashScale, pickMoney } from '../dat
 import { styleOf } from '../data/skins';
 import { isZoneStart } from '../data/zones';
 import { CX, FONT, FONT_UI, H, HUD, PLAY, Tier, W, fmt, hex } from '../core/theme';
+import { Wingman } from '../objects/Wingman';
+import {
+    ABILITIES, AbilityBanner, AbilityId, BOMB_RADIUS, BOMB_RATE, Bolts, MAYHEM_BOLTS, MAYHEM_RATE, SENTRY_RATE, bombImpact, drawLaser, laserPath, lobShell,
+    sprayDirs
+} from '../core/abilities';
+
+function distToSegment (px: number, py: number, x1: number, y1: number, x2: number, y2: number): number
+{
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = dx * dx + dy * dy;
+    let t = len === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / len;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (x1 + dx * t), py - (y1 + dy * t));
+}
 
 /**
  * The vault: a few seconds of pure money between two levels.
@@ -81,6 +96,17 @@ export class BonusScene extends Scene
 
     private kills = 0;
     private mult = 1;
+    /**
+     * A weapon carried in from the level before. It finishes its clock here
+     * -- money is the best thing in the game to point a machine gun at.
+     */
+    private ability: AbilityId | null = null;
+    private abilityLeft = 0;
+    private abilityBanner!: AbilityBanner;
+    private laserGfx!: GameObjects.Graphics;
+    private bolts!: Bolts;
+    private sentries: Wingman[] = [];
+    private sentryTimer = 0;
     private earned = 0;
     private earnedShown = 0;
     private coinsDisplay = 0;
@@ -122,12 +148,26 @@ export class BonusScene extends Scene
         this.coinsDisplay = meta.coins;
         this.bills = [];
         this.raySpin = 0;
+        this.ability = null;
+        this.abilityLeft = 0;
+        this.sentries = [];
+        this.sentryTimer = 0;
 
         this.cameras.main.setBackgroundColor(VAULT.bg);
 
         this.buildVault();
         this.fx = new Fx(this, 20);
         this.buildHud();
+
+        this.laserGfx = this.add.graphics().setDepth(26).setBlendMode('ADD');
+        this.bolts = new Bolts(this, 26);
+        this.abilityBanner = new AbilityBanner(this);
+
+        if (run.ability)
+        {
+            this.resumeAbility(run.ability.id, run.ability.left);
+            run.ability = null;
+        }
 
         //  Money is already standing when the doors part. An empty vault on the
         //  reveal would waste the best frame of the round.
@@ -415,7 +455,11 @@ export class BonusScene extends Scene
     {
         if (this.time.now < this.nextShot) return;
 
-        this.nextShot = this.time.now + this.stats.fireRate;
+        this.nextShot = this.time.now + this.fireRate;
+
+        if (this.ability === 'laser') return;
+        if (this.ability === 'mayhem') { this.shootMayhem(px, py); return; }
+        if (this.ability === 'bomb') { this.shootBomb(px, py); return; }
 
         const primary = this.pickTarget(px, py);
         const volley = primary ? 1 + this.stats.multishot : 1;
@@ -613,11 +657,31 @@ export class BonusScene extends Scene
                 this.spawnTimer = this.cfg.spawnRate;
             }
 
+            this.tickAbility(dt);
+
             if (this.timeLeft <= 0)
             {
                 this.timeLeft = 0;
                 this.timeUp();
             }
+        }
+
+        const def = ABILITIES.mayhem;
+
+        this.bolts.update(this.state === 'play' ? dt : 0, this.targets, t =>
+        {
+            if (this.state === 'play') this.cashIn(t);
+            return false;
+        }, (x, y) => this.fx.burst(x, y, def.glow, 3, 'hit'));
+
+        for (const w of this.sentries)
+        {
+            const mark = this.nearestTo(w.x, w.y);
+
+            if (mark) w.aimAt(mark.x, mark.y);
+            else w.stand();
+
+            w.tick(dt, this.time.now);
         }
 
         for (let i = this.targets.length - 1; i >= 0; i--)
@@ -661,6 +725,177 @@ export class BonusScene extends Scene
         t.destroy();
     }
 
+    //  ------------------------------------------------------------ abilities
+
+    private get fireRate (): number
+    {
+        if (this.ability === 'mayhem') return MAYHEM_RATE;
+        if (this.ability === 'bomb') return BOMB_RATE;
+
+        return this.stats.fireRate;
+    }
+
+    private resumeAbility (id: AbilityId, left: number): void
+    {
+        const def = ABILITIES[id];
+
+        this.ability = id;
+        this.abilityLeft = left;
+        this.turret.charge(id);
+        this.abilityBanner.show(def);
+        this.abilityBanner.set(left / def.duration);
+
+        if (id === 'sentry')
+        {
+            const y = arenaY(0.52);
+            const l = new Wingman(this, PLAY.left - 60, y, VAULT, -1);
+            const r = new Wingman(this, PLAY.right + 60, y, VAULT, 1);
+
+            this.tweens.add({ targets: l, x: PLAY.left - 6, duration: 380, ease: 'Back.out' });
+            this.tweens.add({ targets: r, x: PLAY.right + 6, duration: 380, ease: 'Back.out' });
+            this.sentries = [ l, r ];
+            this.sentryTimer = 500;
+        }
+    }
+
+    private endAbility (): void
+    {
+        if (!this.ability) return;
+
+        this.ability = null;
+        this.abilityLeft = 0;
+        this.laserGfx.clear();
+        this.turret.charge(null);
+        this.abilityBanner.hide();
+
+        for (const w of this.sentries)
+        {
+            const out = w.x < CX ? PLAY.left - 60 : PLAY.right + 60;
+            this.tweens.add({ targets: w, x: out, alpha: 0, duration: 300, ease: 'Quad.in', onComplete: () => w.destroy() });
+        }
+
+        this.sentries = [];
+        this.fx.popup(this.turret.tipX, this.turret.tipY - 30, 'POWER DOWN', 0x9fb0d0, 20, 40, 520);
+    }
+
+    private tickAbility (dt: number): void
+    {
+        if (!this.ability) return;
+
+        this.abilityLeft -= dt;
+        this.abilityBanner.set(Math.max(0, this.abilityLeft / ABILITIES[this.ability].duration));
+
+        if (this.abilityLeft <= 0)
+        {
+            this.endAbility();
+            return;
+        }
+
+        const p = this.input.activePointer;
+        const onBoard = p.y >= PLAY.top - 16 && p.y <= PLAY.bottom + 6;
+
+        if (this.ability === 'mayhem')
+        {
+            if (p.isDown && onBoard) this.shoot(p.x, p.y);
+        }
+        else if (this.ability === 'laser')
+        {
+            this.turret.aimAt(p.x, p.y);
+
+            const m = this.turret.tipFor(0);
+            const legs = laserPath(m.x, m.y, p.x, p.y);
+
+            drawLaser(this.laserGfx, legs, this.time.now);
+
+            for (let i = this.targets.length - 1; i >= 0; i--)
+            {
+                const t = this.targets[i];
+
+                if (!t.dead && legs.some(l => distToSegment(t.x, t.y, l.x1, l.y1, l.x2, l.y2) <= t.radius + 7)) this.cashIn(t);
+            }
+        }
+        else if (this.ability === 'sentry')
+        {
+            this.sentryTimer -= dt;
+
+            if (this.sentryTimer <= 0)
+            {
+                this.sentryTimer = SENTRY_RATE;
+
+                for (const w of this.sentries)
+                {
+                    const mark = this.nearestTo(w.x, w.y);
+
+                    if (!mark) continue;
+
+                    w.aimAt(mark.x, mark.y);
+                    w.fire();
+
+                    const m = w.muzzle;
+
+                    this.fx.beam(m.x, m.y, mark.x, mark.y, this.beam2, 0.8);
+                    this.cashIn(mark);
+                }
+            }
+        }
+    }
+
+    private nearestTo (x: number, y: number): Target | null
+    {
+        let best: Target | null = null;
+        let bestDist = Infinity;
+
+        for (const t of this.targets)
+        {
+            if (t.dead) continue;
+
+            const d = Math.hypot(t.x - x, t.y - y);
+
+            if (d < bestDist) { bestDist = d; best = t; }
+        }
+
+        return best;
+    }
+
+    private shootMayhem (px: number, py: number): void
+    {
+        this.turret.fire(px, py, 1);
+
+        const m = this.turret.tipFor(0);
+
+        this.cameras.main.shake(60, 0.004);
+        this.fx.burst(m.x, m.y, ABILITIES.mayhem.glow, 6, 'hit');
+
+        for (const dir of sprayDirs(m.x, m.y, px, py, MAYHEM_BOLTS))
+        {
+            this.bolts.fire(m.x, m.y, dir.dx, dir.dy);
+        }
+    }
+
+    private shootBomb (px: number, py: number): void
+    {
+        this.turret.fire(px, py, 1);
+
+        const def = ABILITIES.bomb;
+        const m = this.turret.tipFor(0);
+
+        this.fx.beam(m.x, m.y, m.x + (px - m.x) * 0.12, m.y + (py - m.y) * 0.12, { ...this.beam, color: def.color, width: 10, life: 120, head: 0 });
+        this.cameras.main.shake(80, 0.006);
+        Sfx.launch();
+
+        lobShell(this, m.x, m.y, px, py, () =>
+        {
+            if (this.state !== 'play') return;
+
+            bombImpact(this, this.fx, px, py);
+            Sfx.boom();
+
+            const caught = this.targets.filter(t => !t.dead && t.distanceTo(px, py) <= BOMB_RADIUS + t.radius);
+
+            for (const t of caught) this.cashIn(t);
+        });
+    }
+
     //  ----------------------------------------------------------------- flow
 
     /**
@@ -679,6 +914,11 @@ export class BonusScene extends Scene
 
         this.state = 'done';
         setGameplayActive(false);
+
+        //  Whatever is left of the weapon rides on into the next level.
+        run.ability = this.ability && this.abilityLeft > 0 ? { id: this.ability, left: this.abilityLeft } : null;
+        this.laserGfx.clear();
+        this.bolts.clear();
 
         const left = this.targets.slice();
 

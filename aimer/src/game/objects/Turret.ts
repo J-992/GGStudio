@@ -2,6 +2,7 @@ import { GameObjects, Scene } from 'phaser';
 import { GunLook, gunLook } from '../data/gunkit';
 import { GunPlan, Op, Part, planGun } from '../core/gunart';
 import { AIM_LIMIT, GUN_SCALE, MUZZLE, PLAY, Tier } from '../core/theme';
+import { ABILITIES, AbilityId, fillPoly, strokePoly } from '../core/abilities';
 
 /** Where the rotating rig pivots, relative to the turret's own origin. */
 const PIVOT_Y = -10;
@@ -54,6 +55,16 @@ export class Turret extends GameObjects.Container
     private laserGfx: GameObjects.Graphics | null = null;
     private cellGfx: GameObjects.Graphics | null = null;
     private gemArt: GameObjects.Container | null = null;
+
+    /**
+     * The ability's hardware, clamped over the bank while one is live. Built
+     * and torn down in `charge`; the base gun underneath is never touched.
+     */
+    private rigAbility: GameObjects.Container | null = null;
+    private abilityGfx: GameObjects.Graphics | null = null;
+    private abilityAura: GameObjects.Image | null = null;
+    private abilityId: AbilityId | null = null;
+    private abilityT = 0;
 
     private baseScale = 1;
 
@@ -322,6 +333,15 @@ export class Turret extends GameObjects.Container
         this.scene.tweens.add({ targets: this.bank, y: 0, duration: 160, ease: 'Back.out' });
     }
 
+    /** Swing to face a point without firing -- the beam weapon's tracking. */
+    aimAt (px: number, py: number): void
+    {
+        const raw = Math.atan2(py - (this.y + PIVOT_Y * this.baseScale), px - this.x);
+        const clamped = Math.max(-Math.PI / 2 - AIM_LIMIT, Math.min(-Math.PI / 2 + AIM_LIMIT, raw));
+
+        this.point(clamped, false);
+    }
+
     /** The mouth of the `i`th barrel in the current volley, wrapping. */
     tipFor (i: number): { x: number; y: number }
     {
@@ -386,6 +406,10 @@ export class Turret extends GameObjects.Container
         this.laserGfx?.destroy();
         this.removeAll(true);
 
+        this.rigAbility = null;
+        this.abilityGfx = null;
+        this.abilityAura = null;
+
         this.look = look;
         this.barrels = [];
         this.tips = [];
@@ -400,6 +424,261 @@ export class Turret extends GameObjects.Container
 
         this.build();
         this.point(aim, false);
+
+        //  A refit mid-ability (a rank taken while the weapon is live) keeps
+        //  the weapon dressed.
+        if (this.abilityId) this.charge(this.abilityId);
+    }
+
+    /**
+     * Dress the gun as an ability's weapon, or (`null`) strip it back.
+     *
+     * Each is one bolt-on over the barrel bank, in the ability's own colours
+     * and nothing like the upgrade parts, so the player reads "this is
+     * temporary and this is *mine for seven seconds*" at a glance:
+     *
+     *   mayhem   a rotary cage of six spinning vents round the bore, red-hot.
+     *   bomb     a fat black mortar tube with hazard stripes and a fuse lamp.
+     *   laser    a crystal prism emitter held in a cradle of rings.
+     *   sentry   a command mast with a spinning radar dish and an uplink lamp.
+     */
+    charge (id: AbilityId | null): void
+    {
+        this.rigAbility?.destroy();
+        this.rigAbility = null;
+        this.abilityGfx = null;
+        this.abilityAura?.destroy();
+        this.abilityAura = null;
+        this.abilityId = id;
+        this.abilityT = 0;
+
+        if (!id) return;
+
+        const def = ABILITIES[id];
+        const main = this.plan.barrels.reduce((a, b) => (Math.abs(b.x) < Math.abs(a.x) ? b : a), this.plan.barrels[0]);
+        const len = main.len;
+        const w = Math.max(9, main.wHalf * 1.6);
+
+        const rig = this.scene.add.container(main.x, 0);
+        const g = this.scene.add.graphics();
+
+        rig.add(g);
+
+        if (id === 'mayhem')
+        {
+            //  Shroud.
+            g.fillStyle(0x1a0a0a, 1);
+            g.fillRoundedRect(-w * 1.6, -len + 4, w * 3.2, len * 0.7, 6);
+            g.lineStyle(2.5, def.color, 1);
+            g.strokeRoundedRect(-w * 1.6, -len + 4, w * 3.2, len * 0.7, 6);
+
+            //  Twin side barrels.
+            for (const sx of [ -1, 1 ])
+            {
+                g.fillStyle(0x2a1010, 1);
+                g.fillRoundedRect(sx * w * 1.1 - w * 0.4, -len - 10, w * 0.8, len * 0.55, 3);
+                g.lineStyle(2, def.glow, 0.9);
+                g.strokeRoundedRect(sx * w * 1.1 - w * 0.4, -len - 10, w * 0.8, len * 0.55, 3);
+            }
+
+            //  Heat fins.
+            g.lineStyle(2, def.color, 0.8);
+            for (let i = 0; i < 5; i++)
+            {
+                const y = -len + 10 + i * (len * 0.12);
+                g.lineBetween(-w * 1.6, y, -w * 2.1, y + 4);
+                g.lineBetween(w * 1.6, y, w * 2.1, y + 4);
+            }
+        }
+        else if (id === 'bomb')
+        {
+            //  Mortar tube, fat and black.
+            g.fillStyle(0x111118, 1);
+            g.fillRoundedRect(-w * 1.7, -len - 8, w * 3.4, len * 0.95, 8);
+            g.lineStyle(3, def.color, 1);
+            g.strokeRoundedRect(-w * 1.7, -len - 8, w * 3.4, len * 0.95, 8);
+
+            //  Hazard stripes.
+            g.fillStyle(def.glow, 0.9);
+            for (let i = 0; i < 4; i++)
+            {
+                const y = -len + 6 + i * 12;
+                fillPoly(g, [
+                    [-w * 1.4, y + 6], [-w * 0.6, y], [-w * 0.2, y], [-w * 1.0, y + 6]
+                ]);
+                fillPoly(g, [
+                    [w * 0.2, y + 6], [w * 1.0, y], [w * 1.4, y], [w * 0.6, y + 6]
+                ]);
+            }
+
+            //  Muzzle lip.
+            g.fillStyle(0x222230, 1);
+            g.fillRoundedRect(-w * 2, -len - 14, w * 4, 10, 4);
+            g.lineStyle(2.5, def.color, 1);
+            g.strokeRoundedRect(-w * 2, -len - 14, w * 4, 10, 4);
+        }
+        else if (id === 'laser')
+        {
+            //  Cradle rings up the barrel.
+            for (let i = 0; i < 4; i++)
+            {
+                const y = -len + 8 + i * (len * 0.17);
+                g.lineStyle(3, i % 2 ? def.color : def.glow, 0.95);
+                g.strokeEllipse(0, y, w * 3.2, 9);
+            }
+
+            //  Spine struts.
+            g.lineStyle(2.5, 0xd8e4ff, 0.9);
+            g.lineBetween(-w * 1.6, -len + 8, -w * 1.6, -len + 8 + len * 0.51);
+            g.lineBetween(w * 1.6, -len + 8, w * 1.6, -len + 8 + len * 0.51);
+
+            //  The prism: a crystal sat in the mouth.
+            const py = -len - 4;
+            const ps = w * 1.5;
+
+            g.fillStyle(0xffffff, 0.95);
+            fillPoly(g, [
+                [0, py - ps * 1.4], [ps * 0.8, py - ps * 0.3], [ps * 0.5, py + ps * 0.8],
+                [-ps * 0.5, py + ps * 0.8], [-ps * 0.8, py - ps * 0.3]
+            ]);
+            g.fillStyle(def.color, 0.6);
+            fillPoly(g, [ [0, py - ps * 1.4], [ps * 0.8, py - ps * 0.3], [0, py] ]);
+            g.fillStyle(def.glow, 0.55);
+            fillPoly(g, [ [0, py], [ps * 0.5, py + ps * 0.8], [-ps * 0.5, py + ps * 0.8] ]);
+            g.lineStyle(2, 0xffffff, 1);
+            strokePoly(g, [
+                [0, py - ps * 1.4], [ps * 0.8, py - ps * 0.3], [ps * 0.5, py + ps * 0.8],
+                [-ps * 0.5, py + ps * 0.8], [-ps * 0.8, py - ps * 0.3]
+            ]);
+        }
+        else
+        {
+            //  Command mast beside the barrel, with a dish on top.
+            const mx = w * 2.4;
+
+            g.lineStyle(4, 0x1b2549, 1);
+            g.lineBetween(mx, 4, mx, -len * 0.75);
+            g.lineStyle(2, def.color, 0.9);
+            g.lineBetween(mx, 4, mx, -len * 0.75);
+
+            g.fillStyle(0x1b2549, 1);
+            g.fillCircle(mx, -len * 0.75, 7);
+            g.lineStyle(2, def.glow, 1);
+            g.strokeCircle(mx, -len * 0.75, 7);
+
+            //  Rank chevrons down the shroud.
+            g.lineStyle(2.5, def.color, 0.9);
+            for (let i = 0; i < 3; i++)
+            {
+                const y = -len * 0.55 + i * 9;
+                g.lineBetween(-w, y + 5, 0, y);
+                g.lineBetween(0, y, w, y + 5);
+            }
+        }
+
+        //  Per-frame layer: spinning vents, fuse lamp, prism pulse, radar.
+        const live = this.scene.add.graphics();
+        rig.add(live);
+        this.abilityGfx = live;
+
+        this.bank.add(rig);
+        this.rigAbility = rig;
+
+        //  A coloured aura under the whole gun says "charged" from across the
+        //  room, whichever way it is pointing.
+        const aura = this.scene.add.image(0, 0, 'spark');
+        aura.setDisplaySize(this.plan.glowR * 4.2, this.plan.glowR * 4.2).setTint(def.color).setBlendMode('ADD').setAlpha(0.55);
+        this.addAt(aura, 0);
+        this.abilityAura = aura;
+
+        //  Slams on.
+        rig.setScale(1.6).setAlpha(0);
+        this.scene.tweens.add({ targets: rig, scale: 1, alpha: 1, duration: 320, ease: 'Back.out' });
+    }
+
+    /** The moving parts of the ability hardware. */
+    private drawAbility (time: number): void
+    {
+        const g = this.abilityGfx;
+        const id = this.abilityId;
+
+        if (!g || !id) return;
+
+        this.abilityT = time;
+
+        const def = ABILITIES[id];
+        const main = this.plan.barrels.reduce((a, b) => (Math.abs(b.x) < Math.abs(a.x) ? b : a), this.plan.barrels[0]);
+        const len = main.len;
+        const w = Math.max(9, main.wHalf * 1.6);
+        const t = this.abilityT;
+
+        g.clear();
+
+        if (id === 'mayhem')
+        {
+            //  Six vents spinning round the bore.
+            const cy = -len + 4 + len * 0.35;
+
+            for (let i = 0; i < 6; i++)
+            {
+                const a = t * 0.012 + (i / 6) * Math.PI * 2;
+                const x = Math.cos(a) * w * 1.15;
+                const s = 0.5 + Math.sin(a) * 0.5;
+
+                g.fillStyle(s > 0.5 ? def.glow : def.color, 0.5 + s * 0.5);
+                g.fillCircle(x, cy, 2 + s * 2.5);
+            }
+
+            //  Hot muzzle.
+            g.fillStyle(def.glow, 0.55 + Math.abs(Math.sin(t * 0.03)) * 0.45);
+            g.fillCircle(0, -len - 2, w * 0.6);
+        }
+        else if (id === 'bomb')
+        {
+            //  A fuse lamp that blinks faster the nearer the next shell.
+            const on = Math.sin(t * 0.01) > 0;
+
+            g.fillStyle(on ? 0xff3b45 : 0x552020, 1);
+            g.fillCircle(0, -len + 12 + len * 0.5, 5);
+            g.fillStyle(def.glow, on ? 0.5 : 0.1);
+            g.fillCircle(0, -len + 12 + len * 0.5, 9);
+        }
+        else if (id === 'laser')
+        {
+            //  The prism hums; the rings climb the barrel.
+            const py = -len - 4;
+            const pulse = 0.5 + Math.sin(t * 0.02) * 0.5;
+
+            g.fillStyle(def.color, 0.25 + pulse * 0.35);
+            g.fillCircle(0, py - w * 0.3, w * (1.8 + pulse * 0.7));
+            g.fillStyle(0xffffff, 0.4 + pulse * 0.4);
+            g.fillCircle(0, py - w * 0.3, w * 0.45);
+
+            const climb = (t * 0.004) % 1;
+
+            g.lineStyle(2, 0xffffff, 0.7 * (1 - climb));
+            g.strokeEllipse(0, -len + 8 + (1 - climb) * len * 0.51, w * 3.2, 9);
+        }
+        else
+        {
+            //  Radar sweep on the dish and an uplink ping on the lamp.
+            const mx = w * 2.4;
+            const dy = -len * 0.75;
+            const a = t * 0.006;
+
+            g.lineStyle(2, def.glow, 0.9);
+            g.lineBetween(mx, dy, mx + Math.cos(a) * 9, dy + Math.sin(a) * 9);
+
+            const ping = (t * 0.0025) % 1;
+
+            g.lineStyle(1.5, def.color, 1 - ping);
+            g.strokeCircle(mx, dy, 7 + ping * 14);
+        }
+
+        if (this.abilityAura)
+        {
+            this.abilityAura.setAlpha(0.35 + Math.abs(Math.sin(t * 0.005)) * 0.3);
+        }
     }
 
     /**
@@ -439,6 +718,7 @@ export class Turret extends GameObjects.Container
         if (this.coilGfx) this.drawCoils(time);
         if (this.chronoGfx) this.drawChrono(time);
         if (this.laserGfx) this.drawLaser();
+        if (this.abilityGfx) this.drawAbility(time);
     }
 
     /** Charge cells lighting up in a wave out from the core. */

@@ -8,8 +8,9 @@ import { SKINS, TargetSkin } from '../data/skins';
 import { sa } from '../core/skinart';
 import {
     PERKS, Perk, boostCount, buyBoost, buySkin, equipSkin, equippedSkin,
-    meta, ownsSkin, perkCost, saveMeta
+    grantBoost, grantSkin, meta, ownsSkin, perkCost, saveMeta
 } from '../core/state';
+import { offerUnlock, skinUnlocked } from './StoreModal';
 import { FONT, FONT_UI, fmt, hex, mix } from '../core/theme';
 
 /**
@@ -38,24 +39,44 @@ export interface StoreLayout
     rowStep: number;
     rowW: number;
     rowH: number;
+    /**
+     * How many rows of skins one page of the wardrobe holds.
+     *
+     * A wide screen gives the store a column of its own and can afford four;
+     * a phone is showing the store *under* the whole menu, so it gets two and
+     * pages more often. Four rows of tiles down there read as the store having
+     * taken the screen over.
+     */
+    gridRows: number;
     /** Bottom of the shelf. The skin grid pages itself to fit inside it. */
     listBottom: number;
 }
 
 /** The skin grid. Four across is the widest that keeps a name legible. */
 const GRID_COLS = 4;
-const GRID_ROWS = 4;
-const PER_PAGE = GRID_COLS * GRID_ROWS;
 /** Room reserved under the grid for the pager. */
 const PAGER_H = 36;
+/** How tall a tile is allowed to get once the rows stop needing the room. */
+const TILE_MAX_H = 128;
 
 type TabId = 'perks' | 'boosts' | 'skins';
 
+/**
+ * Skins lead, and the store opens on them.
+ *
+ * The other two shelves are lists of numbers, and a player who has never
+ * bought anything has no way to want a number. The wardrobe is a grid of
+ * faces -- it is the only shelf that sells itself from across the room, and
+ * the only one worth putting in front of somebody who has just arrived.
+ */
 const TABS: { id: TabId; label: string }[] = [
+    { id: 'skins',  label: 'SKINS' },
     { id: 'perks',  label: 'UPGRADES' },
-    { id: 'boosts', label: 'BOOSTS' },
-    { id: 'skins',  label: 'SKINS' }
+    { id: 'boosts', label: 'BOOSTS' }
 ];
+
+/** Above the modal scrim in objects/StoreModal, so confetti lands on top. */
+const MODAL_FX_DEPTH = 46;
 
 const PANEL = 0x0b1024;
 const IDLE_EDGE = 0x2a3352;
@@ -69,8 +90,10 @@ export class StorePanel
     private fx: Fx;
     private L: StoreLayout;
     private onChange: () => void;
+    /** Starts a run wearing what was just bought. Handed down by the menu. */
+    private onPlay: () => void;
 
-    private tab: TabId = 'perks';
+    private tab: TabId = 'skins';
     private coinLabel!: IconLabel;
     private tabButtons: { id: TabId; redraw: () => void }[] = [];
     private rows: GameObjects.Container[] = [];
@@ -78,12 +101,22 @@ export class StorePanel
     private previews: { g: GameObjects.Graphics | null; skin: TargetSkin; rot: number; r: number }[] = [];
     private skinPage = 0;
 
-    constructor (scene: Scene, fx: Fx, layout: StoreLayout, onChange: () => void)
+    /**
+     * A second effects layer, above the modal scrim. The panel's own `fx` sits
+     * at the menu's depth and would fire its confetti *behind* the card that
+     * is celebrating -- so the modals get their own, and it is ticked with the
+     * rest of the panel.
+     */
+    private topFx: Fx;
+
+    constructor (scene: Scene, fx: Fx, layout: StoreLayout, onChange: () => void, onPlay: () => void)
     {
         this.scene = scene;
         this.fx = fx;
         this.L = layout;
         this.onChange = onChange;
+        this.onPlay = onPlay;
+        this.topFx = new Fx(scene, MODAL_FX_DEPTH);
 
         this.buildHeader();
         this.buildTabs();
@@ -274,8 +307,15 @@ export class StorePanel
     private bought (row: GameObjects.Container, color: number): void
     {
         Sfx.upgrade();
-        this.fx.burst(row.x, row.y, color, 18, 'hit');
-        this.scene.tweens.add({ targets: row, scale: 1.05, duration: 110, yoyo: true, ease: 'Quad.out' });
+
+        //  A rewarded video can outlive the row that started it -- the shelf
+        //  may have been re-dealt while the ad was on screen. The purchase
+        //  still stands either way; only its flourish is skipped.
+        if (row.active)
+        {
+            this.fx.burst(row.x, row.y, color, 18, 'hit');
+            this.scene.tweens.add({ targets: row, scale: 1.05, duration: 110, yoyo: true, ease: 'Quad.out' });
+        }
 
         this.refresh();
         this.onChange();
@@ -321,8 +361,11 @@ export class StorePanel
 
             for (let p = 0; p < perk.max; p++)
             {
+                //  Pinned to the bottom edge rather than measured down from the
+                //  middle, so a shorter row moves the pips off the effect line
+                //  instead of onto it.
                 pips.fillStyle(p < lvl ? DONE_EDGE : IDLE_EDGE, 1);
-                pips.fillRect(-rowW / 2 + 52 + p * 12, rowH / 2 - 15, 8, 4);
+                pips.fillRect(-rowW / 2 + 52 + p * 12, rowH / 2 - 9, 8, 4);
             }
 
             price.setValue(maxed ? 'MAX' : fmt(cost), !maxed);
@@ -405,7 +448,32 @@ export class StorePanel
         this.touchable(row, () =>
         {
             if (boostCount(boost.id) >= boost.max) { Sfx.dry(); return; }
-            if (meta.coins < boost.cost) { this.deny(row); return; }
+
+            if (meta.coins < boost.cost)
+            {
+                //  Short of the price. The tap said what they want, so the
+                //  video is offered for that -- and the shake is still what
+                //  happens on a build that has no video to offer.
+                const offered = offerUnlock(this.scene, {
+                    name: boost.name,
+                    blurb: boost.blurb,
+                    cost: boost.cost,
+                    color: boost.color,
+                    look: { color: boost.color, icon: boost.icon },
+                    action: 'GET ONE FREE',
+                    onUnlock: () =>
+                    {
+                        grantBoost(boost.id, 1);
+                        this.bought(row, boost.color);
+                    },
+                    onPlay: this.onPlay
+                });
+
+                if (!offered) this.deny(row);
+
+                return;
+            }
+
             if (!buyBoost(boost)) { this.deny(row); return; }
 
             this.bought(row, boost.color);
@@ -426,19 +494,20 @@ export class StorePanel
      */
     private dealSkins (): void
     {
-        const { x, rowY0, rowW, rowH, listBottom } = this.L;
+        const { x, rowY0, rowW, rowH, gridRows, listBottom } = this.L;
 
+        const perPage = GRID_COLS * gridRows;
         const top = rowY0 - rowH / 2;
         const gapX = 8;
         const tileW = (rowW - gapX * (GRID_COLS - 1)) / GRID_COLS;
-        const tileH = Math.min(104, (listBottom - top - PAGER_H) / GRID_ROWS - 6);
+        const tileH = Math.min(TILE_MAX_H, (listBottom - top - PAGER_H) / gridRows - 6);
         const gapY = 6;
 
-        const pages = Math.ceil(SKINS.length / PER_PAGE);
+        const pages = Math.ceil(SKINS.length / perPage);
 
         this.skinPage = Math.max(0, Math.min(pages - 1, this.skinPage));
 
-        const page = SKINS.slice(this.skinPage * PER_PAGE, (this.skinPage + 1) * PER_PAGE);
+        const page = SKINS.slice(this.skinPage * perPage, (this.skinPage + 1) * perPage);
 
         page.forEach((skin, i) =>
         {
@@ -465,7 +534,7 @@ export class StorePanel
             this.rows.push(tile);
         });
 
-        if (pages > 1) this.rows.push(this.pager(pages, top + GRID_ROWS * (tileH + gapY) + PAGER_H / 2 - 4));
+        if (pages > 1) this.rows.push(this.pager(pages, top + gridRows * (tileH + gapY) + PAGER_H / 2 - 4));
     }
 
     private skinTile (skin: TargetSkin, x: number, y: number, w: number, h: number): GameObjects.Container
@@ -475,8 +544,12 @@ export class StorePanel
         const g = this.scene.add.graphics();
         tile.add(g);
 
-        const artY = -h / 2 + 30;
-        const r = 21;
+        //  The name and the price own the bottom of the tile; the preview gets
+        //  everything above them, centred -- so a shelf with fewer rows on it
+        //  spends the room it saved on bigger faces rather than a bigger gap.
+        const textH = 46;
+        const r = Math.min(28, (h - textH) / 2 - 4);
+        const artY = -h / 2 + (h - textH) / 2;
 
         //  The preview is the real thing: a bought face is drawn from the same
         //  texture the target will wear, and a bought shape from the same path.
@@ -555,18 +628,56 @@ export class StorePanel
                 return;
             }
 
-            if (meta.coins < skin.cost) { this.denyAt(tile, x); return; }
+            if (meta.coins < skin.cost)
+            {
+                const offered = offerUnlock(this.scene, {
+                    name: skin.name,
+                    blurb: skin.blurb,
+                    cost: skin.cost,
+                    color: skin.accent,
+                    look: { color: skin.accent, art: skin.art, shape: skin.shape },
+                    action: 'UNLOCK FREE',
+                    onUnlock: () => { if (grantSkin(skin.id)) this.wonSkin(skin, tile); },
+                    onPlay: this.onPlay
+                });
+
+                if (!offered) this.denyAt(tile, x);
+
+                return;
+            }
+
             if (!buySkin(skin)) { this.denyAt(tile, x); return; }
 
-            Sfx.upgrade();
-            this.fx.burst(tile.x, tile.y, skin.accent, 22, 'hit');
-            this.scene.tweens.add({ targets: tile, scale: 1.12, duration: 120, yoyo: true, ease: 'Quad.out' });
-
-            this.refresh();
-            this.onChange();
+            this.wonSkin(skin, tile);
         });
 
         return tile;
+    }
+
+    /**
+     * What happens the moment a skin becomes theirs, however it was paid for.
+     *
+     * The tile pops first, because that is the thing they tapped, and the card
+     * follows a beat later -- two flourishes on the same frame read as one
+     * glitch. See objects/StoreModal for why the card exists at all.
+     */
+    private wonSkin (skin: TargetSkin, tile: GameObjects.Container): void
+    {
+        Sfx.upgrade();
+
+        if (tile.active)
+        {
+            this.fx.burst(tile.x, tile.y, skin.accent, 22, 'hit');
+            this.scene.tweens.add({ targets: tile, scale: 1.12, duration: 120, yoyo: true, ease: 'Quad.out' });
+        }
+
+        this.refresh();
+        this.onChange();
+
+        this.scene.time.delayedCall(180, () =>
+        {
+            skinUnlocked(this.scene, this.topFx, skin, this.onPlay);
+        });
     }
 
     /** Page back and forth through the wardrobe. */
@@ -643,6 +754,8 @@ export class StorePanel
     /** Turns the skin previews. Called from the scene's own update. */
     tick (dtMs: number): void
     {
+        this.topFx.update(dtMs);
+
         if (this.previews.length === 0) return;
 
         const t = this.scene.time.now;

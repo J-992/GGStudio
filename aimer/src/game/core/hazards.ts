@@ -196,6 +196,33 @@ export class Hazards
         Sfx.launch();
     }
 
+    /**
+     * A salvo fired on somebody else's order.
+     *
+     * The reactor's own flak is a metronome the zone owns (see `flakEvery`
+     * above); the boss at the end of that world fires on *its* rhythm instead,
+     * as the price of shutting its own door. Same bolts, same telegraph, same
+     * way to answer them -- shoot them down -- so nothing new has to be taught
+     * for the fight to make sense.
+     */
+    salvo (bolts: number): void
+    {
+        if (!this.armed) return;
+
+        const speed = this.spec.flakSpeed > 0 ? this.spec.flakSpeed : 260;
+
+        for (let i = 0; i < bolts; i++)
+        {
+            this.scene.time.delayedCall(i * 260, () =>
+            {
+                if (!this.armed) return;
+                this.bolts.push(new Flak(this.scene, this.tier.accent, speed));
+            });
+        }
+
+        Sfx.launch();
+    }
+
     //  ---------------------------------------------------------------- glass
 
     /** Where a shot out to (x2,y2) meets glass, if any pane is in its way. */

@@ -69,6 +69,7 @@ variables → Actions):
 | --- | --- |
 | `POKI_UPLOAD_TOKEN_AIMER` | aimer |
 | `POKI_UPLOAD_TOKEN_ZOMBIE_MOTORWORKS` | zombie-motorworks |
+| `POKI_UPLOAD_TOKEN_DRAWER_ORGANIZER` | drawer-organizer |
 
 The name is derived from the game's id — `aimer` → `POKI_UPLOAD_TOKEN_AIMER` —
 so **`poki.json` has no field to put a token in**, and a new game needs no

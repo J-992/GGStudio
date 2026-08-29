@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Steal the Brainrot — character sheet</title>
+<!--
+  Viewer for tools/draw-characters.js, which draws the player and the five
+  rivals as 352px sprites. Serve the project and open /tools/draw-characters.html
+  to see the sheet and save the PNGs into assets/sprites/.
+-->
+<style>
+  body { background: #1b2733; color: #cfd8e3; font: 14px system-ui, sans-serif; margin: 24px; }
+  #sheet { display: flex; flex-wrap: wrap; gap: 16px; }
+  figure { margin: 0; text-align: center; }
+  canvas { background: #2f6b3a; border-radius: 8px; width: 176px; height: 176px; }
+  figcaption { margin-top: 6px; font-size: 12px; }
+  a { color: #7fd3ff; margin-right: 10px; }
+</style>
+<div id="sheet"></div>
+<p id="links"></p>
+<script src="draw-characters.js"></script>
+<script>
+  const cast = drawCast();
+  const sheet = document.getElementById('sheet');
+  const links = document.getElementById('links');
+  for (const ch of cast) {
+    const fig = document.createElement('figure');
+    fig.appendChild(ch.canvas);
+    const cap = document.createElement('figcaption');
+    cap.textContent = ch.label + ' — ' + ch.key;
+    fig.appendChild(cap);
+    sheet.appendChild(fig);
+
+    const a = document.createElement('a');
+    a.href = ch.url; a.download = ch.key + '.png'; a.textContent = ch.key + '.png';
+    links.appendChild(a);
+  }
+</script>

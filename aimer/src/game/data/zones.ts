@@ -39,6 +39,8 @@ export interface Zone
     index: number;
     /** The place, on the gate the player walks through to get into it. */
     name: string;
+    /** The same place, for a rail seven stops wide. See the seeds below. */
+    short: string;
     /** What the place does to you, in two or three words. */
     rule: string;
     /** The rule again, as a sentence, under the name on the gate. */
@@ -61,6 +63,7 @@ interface ZoneSeed
 {
     from: number;
     name: string;
+    short: string;
     rule: string;
     ruleText: string;
     icon: string;
@@ -73,6 +76,7 @@ const SEEDS: ZoneSeed[] = [
     {
         from: 1,
         name: 'THE RANGE',
+        short: 'RANGE',
         rule: 'CALIBRATION',
         ruleText: 'NOTHING MOVES. LEARN THE GUN.',
         icon: 'crosshair',
@@ -83,6 +87,7 @@ const SEEDS: ZoneSeed[] = [
     {
         from: 4,
         name: 'NEON SKYLINE',
+        short: 'SKYLINE',
         rule: 'CROSSWIND',
         ruleText: 'THE WIND DRAGS EVERY TARGET SIDEWAYS.',
         icon: 'chevrons',
@@ -93,6 +98,7 @@ const SEEDS: ZoneSeed[] = [
     {
         from: 8,
         name: 'THE STORM',
+        short: 'STORM',
         rule: 'BLACKOUT',
         ruleText: 'THE LIGHTS GO OUT. THE TARGETS DO NOT.',
         icon: 'bolt',
@@ -103,6 +109,7 @@ const SEEDS: ZoneSeed[] = [
     {
         from: 13,
         name: 'MAGMA DEEP',
+        short: 'MAGMA',
         rule: 'WARP',
         ruleText: 'TARGETS JUMP ONCE, WITHOUT WARNING.',
         icon: 'sparkle',
@@ -113,6 +120,7 @@ const SEEDS: ZoneSeed[] = [
     {
         from: 20,
         name: 'THE REACTOR',
+        short: 'REACTOR',
         rule: 'SPIN',
         ruleText: 'THE WHOLE FIELD TURNS AROUND THE CORE.',
         icon: 'trefoil',
@@ -123,6 +131,7 @@ const SEEDS: ZoneSeed[] = [
     {
         from: 28,
         name: 'HIGH ORBIT',
+        short: 'ORBIT',
         rule: 'SHIELD',
         ruleText: 'A SPINNING PLATE EATS SHOTS FROM ITS SIDE.',
         icon: 'shield',
@@ -133,6 +142,7 @@ const SEEDS: ZoneSeed[] = [
     {
         from: 34,
         name: 'CRIMSON END',
+        short: 'CRIMSON',
         rule: 'SPLIT',
         ruleText: 'EVERY KILL BREAKS INTO TWO SMALLER ONES.',
         icon: 'trident',
@@ -145,6 +155,7 @@ const SEEDS: ZoneSeed[] = [
 export const ZONES: Zone[] = SEEDS.map((s, i) => ({
     index: i,
     name: s.name,
+    short: s.short,
     rule: s.rule,
     ruleText: s.ruleText,
     icon: s.icon,
@@ -221,4 +232,65 @@ export function skinFor (zone: Zone, kind: TargetKind): { color: number; ring: n
     //  Enough white in the life ring that it still reads against the body it
     //  is drawn around, whatever colour that body turned out to be.
     return { color, ring: mix(color, 0xffffff, 0.62) };
+}
+
+//  ------------------------------------------------------- lifetime progress
+
+/**
+ * How far into one world the player has ever got.
+ *
+ * The save carries a single number -- the deepest level ever cleared -- and
+ * that is deliberately all it carries: the run is linear, so one number is the
+ * whole history. Everything the map on the menu draws is worked back out of it
+ * here rather than in the drawing code, so the rule for "have I finished this
+ * place" is written down once.
+ */
+export interface ZoneProgress
+{
+    zone: Zone;
+    /** Levels in this world. */
+    total: number;
+    /** How many of them are behind the player, 0..total. */
+    done: number;
+    /** `done / total`, for a bar or a fill. */
+    frac: number;
+    /**
+     * The player has stood in this place. True the moment the level *before*
+     * it is cleared -- walking through the gate is arriving, not clearing.
+     */
+    reached: boolean;
+    /** Every level in it is behind them. */
+    cleared: boolean;
+}
+
+export function zoneProgress (zone: Zone, bestLevel: number): ZoneProgress
+{
+    const total = zone.to - zone.from + 1;
+    const done = Math.max(0, Math.min(total, bestLevel - zone.from + 1));
+
+    return {
+        zone,
+        total,
+        done,
+        frac: done / total,
+        reached: bestLevel >= zone.from - 1,
+        cleared: done >= total
+    };
+}
+
+/** The whole run's worth, in order. */
+export function worldProgress (bestLevel: number): ZoneProgress[]
+{
+    return ZONES.map(z => zoneProgress(z, bestLevel));
+}
+
+/**
+ * The world the player is working on: the first one they have not finished.
+ * Once the run has been beaten there is no such world, so the last one stands
+ * in -- a finished map should read as finished, not as back at the start.
+ */
+export function currentZone (bestLevel: number): Zone
+{
+    for (const zone of ZONES) if (bestLevel < zone.to) return zone;
+    return ZONES[ZONES.length - 1];
 }

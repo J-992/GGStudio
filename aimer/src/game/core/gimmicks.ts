@@ -73,7 +73,7 @@ export function tickGimmick (gimmick: GimmickId, ctx: GimmickCtx, dtMs: number):
     {
         for (const t of ctx.targets)
         {
-            if (t.kind === 'boss') continue;
+            if (t.warded) continue;
 
             t.x += ctx.wind * dt;
 
@@ -92,7 +92,7 @@ export function tickGimmick (gimmick: GimmickId, ctx: GimmickCtx, dtMs: number):
 
         for (const t of ctx.targets)
         {
-            if (t.kind === 'boss') continue;
+            if (t.warded) continue;
 
             const dx = t.x - CENTER_X;
             const dy = t.y - ARENA_MID;
@@ -111,6 +111,7 @@ export function tickGimmick (gimmick: GimmickId, ctx: GimmickCtx, dtMs: number):
     {
         for (const t of ctx.targets)
         {
+            if (t.warded) continue;
             if (t.warpAt < 0 || t.life > t.warpAt) continue;
 
             const spot = ctx.freeSpot(t.radius);

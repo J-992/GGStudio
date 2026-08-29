@@ -31,6 +31,8 @@ export interface RewardButtonOpts
 {
     width?: number;
     height?: number;
+    /** Label size. The default suits a full-width pill; a half-width one needs less. */
+    fontSize?: number;
     /** What the player gets, in their words: 'DOUBLE COINS'. */
     label: string;
     color: number;
@@ -76,7 +78,7 @@ export function rewardButton (
     btn.add(icon);
 
     const text = scene.add.text(0, compact ? 0 : -7, opts.label, {
-        fontFamily: FONT, fontSize: 26, color: INK
+        fontFamily: FONT, fontSize: opts.fontSize ?? 26, color: INK
     }).setOrigin(0, 0.5);
     btn.add(text);
 

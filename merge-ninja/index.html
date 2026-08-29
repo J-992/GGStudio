@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#141826" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon.png" />
+    <link rel="icon" type="image/png" sizes="128x128" href="./favicon-128.png" />
+    <link rel="apple-touch-icon" href="./favicon-128.png" />
+    <title>Merge Ninja</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 100%; height: 100%;
+        background: #0e1220;
+        overflow: hidden;
+        touch-action: none;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none; user-select: none;
+        overscroll-behavior: none;
+        font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      }
+      #game {
+        width: 100%; height: 100%;
+        display: flex; align-items: center; justify-content: center;
+      }
+      #game canvas {
+        display: block;
+        touch-action: none;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+      /* env() only computes where a stylesheet uses it: this invisible element
+         exists so theme.getSafeInsets() can read the notch insets back. */
+      #safe-probe {
+        position: absolute; width: 0; height: 0; overflow: hidden;
+        visibility: hidden; pointer-events: none;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right)
+          env(safe-area-inset-bottom) env(safe-area-inset-left);
+      }
+
+      /* The loading screen.
+
+         All of this is inline, in the head, so it paints on the browser's first
+         frame -- before the module script is fetched, let alone before Phaser
+         has parsed. The art arrives in two stages: a ~1 KB blur inlined as a
+         data URI that is on screen immediately, and the real 720px art as one
+         preloaded request that fades over it. Inlining the real art instead
+         would have cost 64 KB in the document, paid before any paint at all. */
+      #splash {
+        position: fixed; inset: 0; z-index: 10;
+        background: #0a0a10;
+        display: flex; align-items: center; justify-content: center;
+        opacity: 1; transition: opacity 420ms ease-out;
+      }
+      #splash.is-done { opacity: 0; pointer-events: none; }
+
+      /* Each generated screen is a native 9:16 composition. Keep the entire
+         illustration visible rather than cropping its action to fill a phone
+         with a different aspect ratio. */
+      #splash-art {
+        position: relative;
+        --splash-aspect: 1;
+        --track-left: __TRACK_LEFT__;
+        --track-top: __TRACK_TOP__;
+        --track-width: __TRACK_WIDTH__;
+        --track-height: __TRACK_HEIGHT__;
+        width: 100vw;
+        height: 100vh;
+        --splash-image: url("__SPLASH_PLACEHOLDER__");
+        background: #090d18 var(--splash-image) center / contain no-repeat;
+      }
+      /* Wide screens retain the complete portrait key art, while a soft
+         cover-sized copy carries its palette across the otherwise empty sides.
+         This adapts to landscape without stretching or cropping the foreground. */
+      #splash-art::before {
+        content: "";
+        position: absolute;
+        inset: -24px;
+        z-index: 0;
+        background: var(--splash-image) center / cover no-repeat;
+        filter: blur(22px) brightness(0.34) saturate(0.88);
+        opacity: 0;
+        transform: scale(1.06);
+        transition: opacity 260ms ease-out;
+      }
+      @media (orientation: landscape) {
+        #splash-art::before { opacity: 1; }
+      }
+      #splash-full {
+        position: absolute; z-index: 1; inset: 0;
+        width: 100%; height: 100%;
+        object-fit: contain;
+        opacity: 0; transition: opacity 260ms ease-out;
+      }
+      #splash-full.is-ready { opacity: 1; }
+
+      /* Coordinates come from tools/make_splash.py, measured off the art. */
+      #splash-track {
+        position: absolute;
+        z-index: 2;
+        left: var(--track-left); top: var(--track-top);
+        width: var(--track-width); height: var(--track-height);
+        padding: 2px;
+        border: 1px solid rgba(170, 231, 255, 0.72);
+        border-radius: 999px;
+        background: rgba(5, 10, 24, 0.74);
+        box-shadow: 0 0 12px rgba(89, 193, 246, 0.32), inset 0 0 8px rgba(0, 0, 0, 0.9);
+        overflow: hidden;
+      }
+      #splash-fill {
+        width: 0%; height: 100%;
+        border-radius: inherit;
+        transition: width 200ms linear;
+        /* The art's own bar colours: violet at the left, cyan at the head. */
+        background: linear-gradient(90deg, #7b1fd0 0%, #a83ce8 38%, #4fc9ee 82%, #7ef0f5 100%);
+        background-size: 100% 100%;
+        position: relative;
+      }
+      /* A sheen travelling along the filled part, so the bar is visibly working
+         even while a single large file is in flight and the width is not moving.
+         A bar that only moves on progress events is indistinguishable from a
+         stalled one for whole seconds at a time. */
+      #splash-fill::after {
+        content: "";
+        position: absolute; inset: 0;
+        background: linear-gradient(
+          100deg,
+          rgba(255, 255, 255, 0) 30%,
+          rgba(255, 255, 255, 0.45) 50%,
+          rgba(255, 255, 255, 0) 70%
+        );
+        background-size: 220% 100%;
+        animation: splash-sheen 1.15s linear infinite;
+      }
+      @keyframes splash-sheen {
+        from { background-position: 160% 0; }
+        to { background-position: -60% 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #splash, #splash-full, #splash-fill { transition: none; }
+        #splash-fill::after { animation: none; opacity: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="safe-probe" aria-hidden="true"></div>
+    <div id="game"></div>
+    <div id="splash" role="status" aria-live="polite" aria-label="Loading">
+      <div id="splash-art">
+        <img id="splash-full" alt=""
+             decoding="async" onload="this.classList.add('is-ready')" />
+        <div id="splash-track"><div id="splash-fill"></div></div>
+      </div>
+    </div>
+    <script>
+      (() => {
+        const screens = __SPLASH_SCREENS__;
+        const screen = screens[Math.floor(Math.random() * screens.length)] || screens[0];
+        const art = document.getElementById('splash-art');
+        const full = document.getElementById('splash-full');
+        const track = document.getElementById('splash-track');
+        if (!screen || !art || !full || !track) return;
+        art.dataset.splashScreen = screen.id;
+        art.style.setProperty('--splash-aspect', String(screen.aspect));
+        const layout = () => {
+          const viewportWidth = window.innerWidth;
+          const viewportHeight = window.innerHeight;
+          const renderedWidth = Math.min(viewportWidth, viewportHeight * screen.aspect);
+          const renderedHeight = renderedWidth / screen.aspect;
+          const offsetX = (viewportWidth - renderedWidth) / 2;
+          const offsetY = (viewportHeight - renderedHeight) / 2;
+          track.style.left = `${offsetX + screen.track.left * renderedWidth}px`;
+          track.style.top = `${offsetY + screen.track.top * renderedHeight}px`;
+          track.style.width = `${screen.track.width * renderedWidth}px`;
+          track.style.height = `${screen.track.height * renderedHeight}px`;
+        };
+        layout();
+        window.addEventListener('resize', layout, { passive: true });
+        art.style.setProperty('--track-left', `${screen.track.left * 100}%`);
+        art.style.setProperty('--track-top', `${screen.track.top * 100}%`);
+        art.style.setProperty('--track-width', `${screen.track.width * 100}%`);
+        art.style.setProperty('--track-height', `${screen.track.height * 100}%`);
+        art.style.setProperty('--splash-image', `url("${screen.placeholder}")`);
+        full.addEventListener('load', () => {
+          art.style.setProperty('--splash-image', `url("${screen.art}")`);
+        }, { once: true });
+        full.src = screen.art;
+      })();
+    </script>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

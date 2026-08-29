@@ -1,7 +1,7 @@
 import { GameObjects, Geom, Scene } from 'phaser';
 import { Fx } from '../core/fx';
 import { Sfx, unlockAudio } from '../core/audio';
-import { armRun, bankCoins, meta, run, saveMeta } from '../core/state';
+import { armRun, bankCoins, meta, run, runsToNextGift, saveMeta } from '../core/state';
 import { FINAL_LEVEL } from '../data/levels';
 import { IconLabel } from '../core/icons';
 import { rewardButton } from '../core/adButton';
@@ -79,6 +79,9 @@ export class ResultScene extends Scene
         this.leaving = false;
 
         //  Whatever the run did, the player is reading a card now, not playing.
+        //  The run itself was booked on the way in -- see `endOfRun` in the
+        //  gift scene, which is what decides whether the player got here
+        //  straight from the arena or via a present.
         setGameplayActive(false);
 
         this.cameras.main.setBackgroundColor(win ? 0x1f1203 : 0x140812);
@@ -169,21 +172,25 @@ export class ResultScene extends Scene
         const shift = offer ? L.shift : 0;
         const primaryLabel = win ? 'PLAY AGAIN' : 'TRY AGAIN';
 
-        //  A fresh run started from here gets the same loadout the menu would
-        //  have given it: whatever is armed is paid for and carried in. Trying
-        //  the failed level again is still the *same* run, so its boosts are
-        //  already spent and still in force -- nothing is charged twice.
-        this.button(CX, L.primaryY + shift, 340, 96, primaryLabel, win ? 0xffd23f : 0x6cf5c8, 40, () =>
+        //  Either button starts a brand new run: level 1, score and rank
+        //  wiped, and the same loadout the menu would have given it -- whatever
+        //  is armed is paid for and carried in. There is no resuming a failed
+        //  run from where it died.
+        const playAgain = () =>
         {
-            if (win) { run.reset(); armRun(); }
+            run.reset();
+            armRun();
             this.leave('Game');
-        });
+        };
 
-        this.button(CX, L.menuY + shift, 240, 62, 'MENU', 0x2a3352, 26, () =>
+        const toMenu = () =>
         {
             run.reset();
             this.leave('MainMenu');
-        }, '#ffffff');
+        };
+
+        this.button(CX, L.primaryY + shift, 340, 96, primaryLabel, win ? 0xffd23f : 0x6cf5c8, 40, playAgain);
+        this.button(CX, L.menuY + shift, 240, 62, 'MENU', 0x2a3352, 26, toMenu, '#ffffff');
 
         this.footer = new IconLabel(this, CX, L.footerY + shift, 'gem', this.footerText(), {
             fontFamily: FONT_UI, fontSize: 16, iconSize: 16, color: '#7d88b0'
@@ -197,16 +204,15 @@ export class ResultScene extends Scene
         }
 
         //  Keyboard shortcut so desktop testing stays fast.
-        this.input.keyboard?.once('keydown-SPACE', () =>
-        {
-            if (win) { run.reset(); armRun(); }
-            this.leave('Game');
-        });
+        this.input.keyboard?.once('keydown-SPACE', playAgain);
     }
 
     private footerText (): string
     {
-        return `${fmt(meta.coins)}   ·   ${fmt(meta.rank)} XP`;
+        const runs = runsToNextGift();
+        const next = runs > 0 ? `   ·   PRESENT IN ${runs}` : '';
+
+        return `${fmt(meta.coins)}   ·   ${fmt(meta.rank)} XP${next}`;
     }
 
     /**

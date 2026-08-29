@@ -1,8 +1,9 @@
+import type { AbilityId } from './abilities';
 import { baseStats, Stats, UPGRADE_BY_ID } from '../data/upgrades';
 import { pickXpBonus, rankXpBonus, xpForRank } from '../data/rank';
 import { unitHp } from '../data/levels';
 import { BOOST_BY_ID, BOOSTS, Boost } from '../data/boosts';
-import { DEFAULT_SKIN, SKIN_BY_ID, TargetSkin } from '../data/skins';
+import { DEFAULT_SKIN, SKINS, SKIN_BY_ID, SkinGroup, TargetSkin } from '../data/skins';
 
 export interface Perk
 {
@@ -47,6 +48,16 @@ export interface Meta
     skins: string[];
     /** The skin currently on the board. */
     skin: string;
+    /** Runs finished, ever. The mystery present is paced off this. */
+    runs: number;
+    /** Presents earned and not yet opened. */
+    gifts: number;
+    /** Presents opened, ever. The first one is the guaranteed face. */
+    opened: number;
+    /** Local day index the daily present was last claimed on. -1 = never. */
+    dailyDay: number;
+    /** Days claimed back to back, including today's. */
+    dailyStreak: number;
 }
 
 const SAVE_KEY = 'aimer.save.v1';
@@ -55,7 +66,8 @@ function emptyMeta (): Meta
 {
     return {
         coins: 0, rank: 0, best: 0, bestLevel: 0, perks: {}, muted: false,
-        boosts: {}, armed: {}, skins: [ DEFAULT_SKIN.id ], skin: DEFAULT_SKIN.id
+        boosts: {}, armed: {}, skins: [ DEFAULT_SKIN.id ], skin: DEFAULT_SKIN.id,
+        runs: 0, gifts: 0, opened: 0, dailyDay: -1, dailyStreak: 0
     };
 }
 
@@ -117,7 +129,18 @@ function load (): Meta
             boosts: counts(parsed.boosts),
             armed,
             skins: owned,
-            skin
+            skin,
+            //  A save from before presents existed has finished runs it was
+            //  never paid for. It keeps them -- the counter is what paces the
+            //  next present, not a debt -- and gets its first one at the end
+            //  of the very next run it plays.
+            runs: Math.max(0, Math.floor(Number(parsed.runs)) || 0),
+            gifts: Math.max(0, Math.floor(Number(parsed.gifts)) || 0),
+            opened: Math.max(0, Math.floor(Number(parsed.opened)) || 0),
+            //  A save from before the daily present has never claimed one, so
+            //  it is owed one the moment it next opens the menu.
+            dailyDay: Number.isFinite(Number(parsed.dailyDay)) ? Math.floor(Number(parsed.dailyDay)) : -1,
+            dailyStreak: Math.max(0, Math.floor(Number(parsed.dailyStreak)) || 0)
         };
     }
     catch
@@ -181,9 +204,16 @@ export class Run
      * stop to explain it a second time.
      */
     hazardsSeen: Record<string, boolean> = {};
+    /**
+     * The ability still running when the last screen ended, and how much of
+     * it is left. A weapon always gets its whole clock: it rides through the
+     * doors into the next level, or the cash round, and picks up there.
+     */
+    ability: { id: AbilityId; left: number } | null = null;
 
     reset (): void
     {
+        this.ability = null;
         this.level = 1;
         this.score = 0;
         this.coinsEarned = 0;
@@ -418,4 +448,218 @@ export function equipSkin (id: string): boolean
 export function equippedSkin (): TargetSkin
 {
     return SKIN_BY_ID[meta.skin] || DEFAULT_SKIN;
+}
+
+//  ------------------------------------------------------------------ gifts
+
+/**
+ * How often a mystery present turns up after the first one.
+ *
+ * The first present is the point of the whole machine: a player who has just
+ * finished one run has seen the loop and nothing they own, and the thing that
+ * brings them back is a face on the board that is *theirs*. So run one always
+ * pays, and after that a present is three runs away -- close enough that the
+ * counter under PLAY is worth watching, far enough that the box stays an event.
+ */
+export const GIFT_EVERY = 3;
+
+/**
+ * Books a finished run and says whether it earned a present. Called once, by
+ * the results card, which is the one screen every run ends on.
+ */
+export function noteRunEnded (): boolean
+{
+    meta.runs += 1;
+
+    const earned = meta.runs === 1 || (meta.runs - 1) % GIFT_EVERY === 0;
+
+    if (earned) meta.gifts += 1;
+
+    saveMeta();
+
+    return earned;
+}
+
+export function giftsPending (): number
+{
+    return meta.gifts;
+}
+
+/** Runs left before the next present. Zero while one is already waiting. */
+export function runsToNextGift (): number
+{
+    if (meta.gifts > 0) return 0;
+    if (meta.runs < 1) return 1;
+
+    return GIFT_EVERY - ((meta.runs - 1) % GIFT_EVERY);
+}
+
+/** True the first time a present is opened -- the guaranteed face. */
+export function isFirstGift (): boolean
+{
+    return meta.opened === 0;
+}
+
+/** Spends one present. False when there was none waiting. */
+export function takeGift (): boolean
+{
+    if (meta.gifts <= 0) return false;
+
+    meta.gifts -= 1;
+    meta.opened += 1;
+    saveMeta();
+
+    return true;
+}
+
+/** Books an extra present -- what the rewarded video on the reel pays out. */
+export function addGift (n = 1): void
+{
+    meta.gifts += n;
+    saveMeta();
+}
+
+/**
+ * Puts a skin in the wardrobe and wears it. Nothing is charged: this is the
+ * present's doing, not the store's, and a gift the player has to go and equip
+ * is a gift they never see.
+ */
+export function grantSkin (id: string): boolean
+{
+    if (!SKIN_BY_ID[id] || ownsSkin(id)) return false;
+
+    meta.skins.push(id);
+    meta.skin = id;
+    saveMeta();
+
+    return true;
+}
+
+/** Drops boosts in the bag, up to what it holds. Returns how many fitted. */
+export function grantBoost (id: string, n: number): number
+{
+    const boost = BOOST_BY_ID[id];
+
+    if (!boost || n <= 0) return 0;
+
+    const before = boostCount(id);
+    const after = Math.min(boost.max, before + n);
+
+    if (after === before) return 0;
+
+    meta.boosts[id] = after;
+
+    //  Same courtesy the store does: the first one a player owns arms itself,
+    //  so a gifted run boost is in the next run without a second decision.
+    if (boost.use === 'run' && before === 0) meta.armed[id] = true;
+
+    saveMeta();
+
+    return after - before;
+}
+
+/** Skins the player does not own yet, optionally from one shelf. */
+export function unownedSkins (group?: SkinGroup): TargetSkin[]
+{
+    return SKINS.filter(s => s.cost > 0 && !ownsSkin(s.id) && (!group || s.group === group));
+}
+
+//  ------------------------------------------------------------- daily gift
+
+/**
+ * The present that is paid for in days rather than runs.
+ *
+ * The mystery box asks for three runs; this one asks for nothing at all except
+ * that the player come back tomorrow. That is the whole point of it -- it is
+ * the only reward in the game that is waiting *before* the first shot, so the
+ * menu always has something on it worth opening the app for.
+ *
+ * The day is the player's own local day, not twenty-four hours from the last
+ * claim: a rolling timer punishes somebody who plays at eight one evening and
+ * seven the next, and midnight is the boundary everybody already understands.
+ */
+
+const DAY_MS = 86400000;
+
+/** Which local day it is, as a whole number of days since the epoch. */
+function dayIndex (at = Date.now()): number
+{
+    return Math.floor((at - new Date(at).getTimezoneOffset() * 60000) / DAY_MS);
+}
+
+/** True when today's present has not been opened yet. */
+export function dailyReady (): boolean
+{
+    return meta.dailyDay !== dayIndex();
+}
+
+/** Milliseconds until the next local midnight, when the next one lands. */
+export function msToNextDaily (): number
+{
+    if (dailyReady()) return 0;
+
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+
+    return Math.max(0, midnight - now.getTime());
+}
+
+/**
+ * Books today's present and returns the streak it lands on, counting today.
+ *
+ * A day missed drops the streak back to one rather than to zero: the player
+ * who comes back after a week away is on day one of a new run of days, not
+ * on nothing, and the button says so.
+ */
+export function claimDaily (): number
+{
+    const today = dayIndex();
+
+    if (meta.dailyDay === today) return meta.dailyStreak;
+
+    meta.dailyStreak = meta.dailyDay === today - 1 ? meta.dailyStreak + 1 : 1;
+    meta.dailyDay = today;
+    saveMeta();
+
+    return meta.dailyStreak;
+}
+
+/** Days claimed back to back. Zero before the first one is ever opened. */
+export function dailyStreak (): number
+{
+    return meta.dailyStreak;
+}
+
+//  ------------------------------------------------------------------ perks
+
+export function perkLevel (id: string): number
+{
+    return meta.perks[id] || 0;
+}
+
+/** Permanent upgrades with a level still to give. */
+export function upgradablePerks (): Perk[]
+{
+    return PERKS.filter(p => perkLevel(p.id) < p.max);
+}
+
+/**
+ * Hands over levels of a permanent upgrade, free, up to its ceiling. Returns
+ * how many actually went on, so a present can say what it really paid.
+ */
+export function grantPerk (id: string, n = 1): number
+{
+    const perk = PERKS.find(p => p.id === id);
+
+    if (!perk || n <= 0) return 0;
+
+    const before = perkLevel(id);
+    const after = Math.min(perk.max, before + n);
+
+    if (after === before) return 0;
+
+    meta.perks[id] = after;
+    saveMeta();
+
+    return after - before;
 }

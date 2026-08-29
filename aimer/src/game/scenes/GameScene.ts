@@ -3,7 +3,7 @@ import { Target } from '../objects/Target';
 import { Fx } from '../core/fx';
 import { Sfx, unlockAudio, isMuted, toggleMute } from '../core/audio';
 import { FINAL_LEVEL, KINDS, LevelConfig, POWERUP_SPEED, TargetKind, isPowerup, levelConfig, pickKind, punchOf, unitHp, xpWorth } from '../data/levels';
-import { Stats, Upgrade, rollOffers } from '../data/upgrades';
+import { Stats, Upgrade, baseStats, rollOffers } from '../data/upgrades';
 import { BeamLook, GunLook, beamLook, gunLook, kickOf, partFor } from '../data/gunkit';
 import { bankCoins, boostCount, equippedSkin, meta, run, saveMeta, spendBoost } from '../core/state';
 import { setGameplayActive } from '../core/lifecycle';
@@ -18,6 +18,8 @@ import { Backdrop } from '../core/backdrop';
 import { Trails } from '../core/trails';
 import { isZoneStart, skinFor, Zone, zoneFor } from '../data/zones';
 import { LevelUpPanel } from '../objects/LevelUpPanel';
+import { endOfRun } from './GiftScene';
+import { quitButton } from '../objects/QuitToMenu';
 import { BuildStrip } from '../objects/BuildStrip';
 import { BOOST_BY_ID } from '../data/boosts';
 import { Skin, TargetSkin, TargetStyle, paintOf, styleOf } from '../data/skins';
@@ -25,6 +27,13 @@ import { gimmickIntro, seedTarget, tickGimmick } from '../core/gimmicks';
 import { Hazards, hazardIntro } from '../core/hazards';
 import { HazardSpec, hazardFor, teachesHazard } from '../data/hazards';
 import { Chain } from '../core/chain';
+import { BossFight, GuardHit } from '../core/bossfight';
+import {
+    ABILITIES, AbilityBanner, AbilityId, BOMB_DAMAGE, BOMB_RADIUS, BOMB_RATE, LASER_DPS, LASER_WIDTH,
+    Bolts, MAYHEM_BOLTS, MAYHEM_DAMAGE, MAYHEM_RATE, SENTRY_RATE, abilityPlan, dressAbilityTarget, drawLaser, bombImpact, laserPath, lobShell,
+    sprayDirs
+} from '../core/abilities';
+import { bossFor } from '../data/bosses';
 import { isBonusAfter } from '../data/bonus';
 import { CX, CY, FONT, FONT_UI, H, HUD, MUZZLE, PLAY, Tier, W, fmt, fmtShort, hex, mix } from '../core/theme';
 
@@ -95,6 +104,20 @@ const BULLSEYE_DAMAGE = 2;
 const BULLSEYE_SCORE = 1.25;
 
 /**
+ * The spam round's payout curve.
+ *
+ * Every tap is worth more than the last, up to a ceiling. The ramp is what
+ * makes the round feel like it is building instead of like a chore, and the
+ * ceiling is what stops seven seconds on level four from being worth more than
+ * the ten levels after it -- a treat has to be a treat and not a strategy.
+ */
+const SPAM_RAMP = 0.045;
+const SPAM_CAP = 4;
+
+/** Paid per tap again at the end, so the last second is the loudest one. */
+const SPAM_BONUS = 90;
+
+/**
  * What the lightning is worth.
  *
  * It used to jump 300px for three quarters of a full shot, four times over --
@@ -160,7 +183,7 @@ export class GameScene extends Scene
      * `intro` is the beat between the doors opening and the clock starting;
      * `rank` is the frozen moment a rank-up hand is on the table.
      */
-    private state: 'intro' | 'play' | 'rank' | 'done' = 'intro';
+    private state: 'intro' | 'spam' | 'play' | 'rank' | 'menu' | 'done' = 'intro';
     /** The hand currently being dealt, if any. */
     private levelUp: LevelUpPanel | null = null;
     /** True when this level owes the player a first look at its zone's rule. */
@@ -176,6 +199,12 @@ export class GameScene extends Scene
     private spawnTimer = 0;
     /** Ordered runs currently on the board. Emptied as each finishes. */
     private chains: Chain[] = [];
+    /** The fight that closes this world, on the levels that have one. */
+    private boss: BossFight | null = null;
+    /** Taps landed on the drum this spam round, and what the next one pays. */
+    private spamTaps = 0;
+    private spamLeft = 0;
+    private drum: Target | null = null;
     private nextShot = 0;
     private pending: { x: number; y: number; at: number } | null = null;
 
@@ -213,6 +242,29 @@ export class GameScene extends Scene
     private streakText!: GameObjects.Text;
     private streakKey = '';
     private multText!: GameObjects.Text;
+    /**
+     * The three bought multipliers -- XP, SCORE and COINS -- each riding on
+     * the readout it multiplies.
+     *
+     * They are the only cards on the board whose effect is invisible at the
+     * moment it is taken: POWER kills faster, MAGNET widens the tap, but XP
+     * BOOST only makes a bar that was already moving move slightly faster.
+     * Stamping the running total next to the number it acts on turns three
+     * cards the player had to take on trust into three numbers that visibly
+     * go up every time they are taken.
+     */
+    private xpMultText!: GameObjects.Text;
+    private scoreMultText!: GameObjects.Text;
+    private coinMultText!: GameObjects.Text;
+    /**
+     * COMBO TIME's chip, which is not one of the three: the window is a
+     * duration, not a multiplier, and it hangs off a readout that already says
+     * "COMBO x12" -- a second `x1.25` next to that would read as part of the
+     * combo count. It shows the window itself, in seconds.
+     */
+    private comboWindowChip!: IconLabel;
+    /** Last value each chip showed, so only a chip that moved gets bumped. */
+    private multShown: Record<string, number> = { xp: 0, score: 0, coin: 0, window: 0 };
     private muteBtn!: GameObjects.Image;
     /** The parts on the gun, as a rail up the left margin. */
     private build!: BuildStrip;
@@ -220,6 +272,30 @@ export class GameScene extends Scene
     /** The bought second gun, when the run paid for one. */
     private wingmen: Wingman[] = [];
     private wingTimer = 0;
+    /**
+     * The ability currently running the gun, and what is left of it.
+     *
+     * See core/abilities. The orb that hands it over is scheduled on the
+     * level's clock (`orbAt`, in ms of `timeLeft`) rather than rolled from the
+     * spawn table, so the level that owes the player one always pays.
+     */
+    private ability: AbilityId | null = null;
+    private abilityLeft = 0;
+    private abilityBanner!: AbilityBanner;
+    private orbAt = -1;
+    private orbId: AbilityId = 'mayhem';
+    /** The temporary pods the SENTRY ability brings in. */
+    private sentries: Wingman[] = [];
+    private sentryTimer = 0;
+    /** The STATIC LASER beam, redrawn every frame it is on. */
+    private laserGfx!: GameObjects.Graphics;
+    private laserSpark = 0;
+    /** MAYHEM's bolts in flight. */
+    private bolts!: Bolts;
+    /** Damage scale on the shot in flight -- the ability weapons hit harder. */
+    private shotMult = 1;
+    /** A blast does not care which link is next: set while a bomb lands. */
+    private shotIgnoresLock = false;
     private skin!: TargetSkin;
     private look!: GunLook;
     private beam!: BeamLook;
@@ -245,8 +321,18 @@ export class GameScene extends Scene
 
         this.targets = [];
         this.chains = [];
+        this.boss = null;
+        this.drum = null;
+        this.spamTaps = 0;
+        this.spamLeft = 0;
         this.wingmen = [];
         this.wingTimer = WINGMAN_DELAY;
+        this.sentries = [];
+        this.sentryTimer = 0;
+        this.ability = null;
+        this.abilityLeft = 0;
+        this.shotMult = 1;
+        this.laserSpark = 0;
         this.state = 'intro';
         this.revived = false;
         this.skipped = false;
@@ -303,11 +389,25 @@ export class GameScene extends Scene
 
         this.buildHud();
 
-        if (this.cfg.boss)
+        //  The orb is booked against the clock, so the levels that owe one
+        //  always deliver it, and at the moment on the level it was meant for.
+        const plan = abilityPlan(run.level, !!this.cfg.boss);
+
+        this.orbAt = plan ? this.timeTotal * (1 - plan.at) : -1;
+        this.orbId = plan ? plan.id : 'mayhem';
+
+        this.laserGfx = this.add.graphics().setDepth(26).setBlendMode('ADD');
+        this.bolts = new Bolts(this, 26);
+        this.abilityBanner = new AbilityBanner(this);
+
+        //  A weapon still on its clock from the last screen picks up here.
+        if (run.ability)
         {
-            this.spawnBoss();
+            this.activateAbility(run.ability.id, this.turret.tipX, this.turret.tipY, run.ability.left);
+            run.ability = null;
         }
-        else if (!this.teaching)
+
+        if (!this.cfg.boss && !this.cfg.spam && !this.teaching)
         {
             //  A few targets are already standing when the doors part. An empty
             //  arena on the reveal wastes the best frame of the whole level --
@@ -320,7 +420,7 @@ export class GameScene extends Scene
         this.input.on('pointerdown', (p: Phaser.Input.Pointer) =>
         {
             unlockAudio();
-            if (this.state !== 'play') return;
+            if (this.state !== 'play' && this.state !== 'spam') return;
             if (p.y < PLAY.top - 16 || p.y > PLAY.bottom + 6) return;
             this.requestShot(p.x, p.y);
         });
@@ -349,7 +449,11 @@ export class GameScene extends Scene
         {
             if (!this.teaching)
             {
-                this.beginPlay();
+                //  Straight to the beats that are not demonstrations -- the
+                //  boss warning and the spam round. A level with neither falls
+                //  through those and starts its clock, which is every ordinary
+                //  level in the run.
+                this.afterDemos();
                 return;
             }
 
@@ -371,7 +475,7 @@ export class GameScene extends Scene
             {
                 if (!this.showHazard)
                 {
-                    this.beginPlay();
+                    this.afterDemos();
                     return;
                 }
 
@@ -379,14 +483,218 @@ export class GameScene extends Scene
 
                 const shown = hazardIntro(this, signature, this.tier, this.fx);
 
-                if (shown <= 0)
-                {
-                    this.beginPlay();
-                    return;
-                }
-
-                this.time.delayedCall(shown, () => this.beginPlay());
+                this.time.delayedCall(Math.max(1, shown), () => this.afterDemos());
             });
+        });
+    }
+
+    /**
+     * Everything a level owes the player before its clock is allowed to start.
+     *
+     * The zone rule and the threat demo have already had their turn by the
+     * time this runs. Two things can still be waiting: the warning card on a
+     * boss level, and the spam round. Both are paid for out of the same
+     * budget -- the beat between the doors opening and the countdown starting
+     * -- because both are things being *given* to the player, and charging a
+     * gift to the clock the player is about to be judged on is how a reward
+     * turns into a tax.
+     */
+    private afterDemos (): void
+    {
+        if (this.cfg.boss)
+        {
+            const wait = this.warnOfBoss();
+            this.time.delayedCall(wait, () => this.openSpam());
+            return;
+        }
+
+        this.openSpam();
+    }
+
+    /**
+     * THE WARNING.
+     *
+     * A boss is the only thing in the run that can take a whole level off the
+     * player in one object, so it is the only thing that gets told to them in
+     * words before it arrives. Two lines: what it is called, and the one thing
+     * they have to do about it -- and then a beat of empty arena to read them
+     * in, because a warning delivered over a board that is already moving is
+     * not a warning.
+     */
+    private warnOfBoss (): number
+    {
+        const spec = bossFor(run.level);
+
+        if (!spec) return 1;
+
+        const mid = arenaY(0.42);
+
+        this.cameras.main.shake(420, 0.006);
+        Sfx.launch();
+
+        const bar = this.add.rectangle(CX, mid, W, 132, 0x000000, 0.55).setDepth(39);
+        bar.setScale(1, 0);
+
+        const name = this.add.text(CX, mid - 22, spec.name, {
+            fontFamily: FONT, fontSize: 54, color: '#ff2d55', stroke: '#000000', strokeThickness: 8
+        }).setOrigin(0.5).setDepth(40).setAlpha(0);
+
+        const tell = this.add.text(CX, mid + 34, spec.tell, {
+            fontFamily: FONT_UI, fontSize: 19, color: '#ffd7de'
+        }).setOrigin(0.5).setDepth(40).setAlpha(0);
+
+        this.tweens.add({ targets: bar, scaleY: 1, duration: 180, ease: 'Quad.out' });
+        this.tweens.add({ targets: [ name, tell ], alpha: 1, duration: 200, delay: 120 });
+        this.tweens.add({ targets: name, scale: { from: 1.35, to: 1 }, duration: 340, delay: 120, ease: 'Back.out' });
+
+        this.time.delayedCall(1500, () =>
+        {
+            this.tweens.add({
+                targets: [ bar, name, tell ],
+                alpha: 0,
+                duration: 220,
+                onComplete: () => { bar.destroy(); name.destroy(); tell.destroy(); }
+            });
+        });
+
+        return 1780;
+    }
+
+    /**
+     * THE SPAM ROUND.
+     *
+     * A drum the size of the arena, alone on an empty field, that cannot be
+     * killed and pays for every single tap. There is no aim test -- it is
+     * enormous and it does not move -- no order to read, no bomb to avoid and
+     * no way at all to lose: for seven seconds the only variable in the game
+     * is how fast the player's hand is, and every one of those taps is worth
+     * points that go straight onto the level's score.
+     *
+     * It is spent on the doorway into the third world: the skyline's boss has
+     * just been beaten and the storm has not started yet, which is the loudest
+     * the player is ever going to feel between two levels. Landing it earlier
+     * put it a level after the first vault, where it was the second treat in a
+     * row and the run had handed out two gifts before it had asked for
+     * anything -- this way it reads as what the world they just finished was
+     * worth.
+     *
+     * It runs before the level's clock starts for the same reason the vault
+     * has no goal: a gift charged to the countdown the player is about to be
+     * judged on is not a gift.
+     */
+    private openSpam (): void
+    {
+        const secs = this.cfg.spam || 0;
+
+        if (secs <= 0 || this.state !== 'intro')
+        {
+            this.beginPlay();
+            return;
+        }
+
+        this.state = 'spam';
+        this.spamTaps = 0;
+        this.spamLeft = secs * 1000;
+
+        const t = new Target(this, CX, arenaY(0.42), 'spam', this.cfg.size, run.level, 0, false);
+
+        t.endless = true;
+        t.setLifetime(this.spamLeft);
+        t.setDepth(10);
+
+        this.drum = t;
+        this.targets.push(t);
+
+        this.fx.popup(CX, arenaY(0.1), 'SPAM ROUND', 0xffd23f, 46, 44, 1100);
+        this.fx.popup(CX, arenaY(0.17), 'HIT IT AS FAST AS YOU CAN', 0xfff3b0, 20, 30, 1100);
+        this.fx.ring(CX, arenaY(0.42), t.radius * 2.6, 0xffd23f, 7, 520);
+        Sfx.jackpot();
+    }
+
+    /**
+     * One tap on the drum.
+     *
+     * The payout climbs with the count rather than being flat, because a flat
+     * one turns the round into a test of whether the player can be bothered.
+     * It is capped, so the round is worth about the same to a fast hand as a
+     * good level is -- generous, and not a way to farm the whole run out of
+     * seven seconds on level four.
+     */
+    private spamHit (px: number, py: number): void
+    {
+        const t = this.drum;
+
+        if (!t) return;
+
+        this.spamTaps += 1;
+
+        const step = Math.min(SPAM_CAP, 1 + this.spamTaps * SPAM_RAMP);
+        const gain = Math.round(KINDS.spam.score * step * (1 + run.level * 0.12) * this.stats.scoreMult);
+
+        this.levelScore += gain;
+        this.levelCoins += KINDS.spam.coins;
+        bankCoins(KINDS.spam.coins);
+
+        this.gainXp(Math.round(xpWorth(KINDS.spam.xp, run.level) * this.stats.xpMult), t.x, t.y);
+
+        //  Every tap lands where the player actually tapped, so a fast hand
+        //  paints the drum rather than stacking one popup on the middle of it.
+        this.fx.burst(px, py, 0xffd23f, 9, 'gold');
+        this.fx.popup(px, py - 18, fmtShort(gain), 0xffffff, 22 + Math.min(14, this.spamTaps * 0.3), 46, 420);
+
+        //  It bulges instead of flinching. Nothing here is being hurt.
+        this.tweens.killTweensOf(t);
+        t.setScale(1.09);
+        this.tweens.add({ targets: t, scale: 1, duration: 110, ease: 'Quad.out' });
+
+        if (this.spamTaps % 10 === 0)
+        {
+            this.fx.ring(t.x, t.y, t.radius * 2.2, 0xffd23f, 5, 320);
+            this.fx.popup(t.x, t.y - t.radius - 30, `x${this.spamTaps}`, 0xffd23f, 30, 54, 560);
+            this.fx.fly(t.x, t.y, COIN_HUD.x - 14, COIN_HUD.y, 0xffc857, () => this.bumpCoins());
+            Sfx.milestone(Math.min(3, Math.floor(this.spamTaps / 20)));
+        }
+        else
+        {
+            Sfx.cash(this.spamTaps);
+        }
+
+        this.updateScoreText();
+    }
+
+    /** The drum's clock has run out. It pays for the whole run of taps and goes. */
+    private closeSpam (): void
+    {
+        const t = this.drum;
+
+        this.drum = null;
+
+        if (t)
+        {
+            const i = this.targets.indexOf(t);
+            if (i !== -1) this.targets.splice(i, 1);
+
+            this.fx.burst(t.x, t.y, 0xffd23f, 40, 'gold');
+            this.fx.ring(t.x, t.y, t.radius * 4, 0xffd23f, 8, 560);
+            t.destroy();
+        }
+
+        const bonus = Math.round(this.spamTaps * SPAM_BONUS * (1 + run.level * 0.12) * this.stats.scoreMult);
+
+        this.levelScore += bonus;
+        this.cameras.main.flash(200, 255, 220, 120);
+        this.cameras.main.shake(240, 0.01);
+
+        this.fx.popup(CX, arenaY(0.3), `${this.spamTaps} HITS`, 0xffd23f, 44, 52, 1000);
+        this.fx.popup(CX, arenaY(0.38), fmtShort(bonus), 0xffffff, 40, 60, 1000);
+
+        Sfx.jackpot();
+        this.updateScoreText();
+
+        this.time.delayedCall(820, () =>
+        {
+            this.state = 'intro';
+            this.beginPlay();
         });
     }
 
@@ -405,7 +713,8 @@ export class GameScene extends Scene
 
         this.state = 'play';
 
-        if (this.teaching && !this.cfg.boss) this.openingTargets();
+        if (this.cfg.boss) this.spawnBoss();
+        else if (this.teaching || this.cfg.spam) this.openingTargets();
 
         //  The targets that were standing behind the doors have been ageing on
         //  screen; the clock starting is the first moment their timer is real.
@@ -498,6 +807,21 @@ export class GameScene extends Scene
             fontFamily: FONT, fontSize: 20, color: '#b388ff'
         }).setOrigin(0, 0.5).setDepth(31).setAlpha(0);
 
+        //  Colours are the cards': the XP chip is the purple of XP BOOST and of
+        //  the rank bar it sits on, SCORE is the mint of its own card, COINS is
+        //  the gold of the gem it hangs off.
+        this.xpMultText = this.multChip(RANK_COLOR, 0);
+        this.scoreMultText = this.multChip(0x6cf5c8, 0);
+        this.coinMultText = this.multChip(0xffc857, 1);
+
+        this.comboWindowChip = new IconLabel(this, CX, COMBO_Y, 'hourglass', '', {
+            align: 'left', fontSize: 15, iconSize: 14, gap: 5,
+            color: hex(0x62ffb8), iconColor: 0x62ffb8
+        });
+        this.comboWindowChip.setDepth(31).setVisible(false);
+
+        this.refreshMultChips();
+
         this.muteBtn = iconImage(this, W - HUD.margin + 4, HUD.footerY, isMuted() ? 'soundOff' : 'soundOn', {
             size: 20, color: 0xffffff, alpha: 0.45
         });
@@ -513,6 +837,7 @@ export class GameScene extends Scene
         });
 
         this.buildSkipPill();
+        this.buildQuitButton();
         this.buildStrip();
 
         this.turret = new Turret(this, this.tier, this.look);
@@ -526,6 +851,135 @@ export class GameScene extends Scene
             this.wingmen.push(new Wingman(this, PLAY.left - 8, y, this.tier, -1));
             this.wingmen.push(new Wingman(this, PLAY.right + 8, y, this.tier, 1));
         }
+    }
+
+    private multChip (color: number, originX: number): GameObjects.Text
+    {
+        return this.add.text(0, 0, '', {
+            fontFamily: FONT, fontSize: 17, color: hex(color), stroke: '#000000', strokeThickness: 4
+        }).setOrigin(originX, 0.5).setDepth(32).setVisible(false);
+    }
+
+    /**
+     * Re-reads the chips off the current build. Called once on open and again
+     * on every pick, with the id of the card that was just taken.
+     *
+     * Only that card's own chip pops. The XP number is nudged by *every* pick
+     * -- see `pickXpBonus` in core/state, where a part on the gun is worth
+     * +1.2% XP whatever the part does -- and popping the rank bar for a card
+     * that has nothing to do with XP claims a link that is not there. The
+     * creep still shows in the number, because the number is what XP the
+     * player is actually earning; it just no longer takes a bow for it.
+     */
+    private refreshMultChips (from = ''): void
+    {
+        this.setMultChip(this.xpMultText, 'xp', this.stats.xpMult, from === 'xp');
+        this.setMultChip(this.scoreMultText, 'score', this.stats.scoreMult, from === 'score');
+        this.setMultChip(this.coinMultText, 'coin', this.stats.coinMult, from === 'greed');
+        this.setComboWindowChip(from === 'window');
+        this.layoutMultChips();
+    }
+
+    private setMultChip (t: GameObjects.Text, key: string, value: number, bump: boolean): void
+    {
+        //  Below a percent the chip would read "x1.00", which is a number
+        //  saying nothing. It stays off the screen until something buys it.
+        if (value <= 1.005)
+        {
+            t.setVisible(false);
+            this.multShown[key] = value;
+            return;
+        }
+
+        t.setText(`x${value.toFixed(2)}`).setVisible(true);
+
+        if (bump && value > this.multShown[key] + 0.001) this.popChip(t);
+
+        this.multShown[key] = value;
+    }
+
+    /** The window, in seconds, and only once something has lengthened it. */
+    private setComboWindowChip (bump: boolean): void
+    {
+        const ms = this.stats.comboWindow;
+        const on = ms > baseStats().comboWindow + 1;
+
+        this.comboWindowChip.setVisible(on);
+
+        if (on)
+        {
+            this.comboWindowChip.setValue(`${(ms / 1000).toFixed(1)}s`);
+            if (bump && ms > this.multShown.window + 1) this.popChip(this.comboWindowChip);
+        }
+
+        this.multShown.window = ms;
+    }
+
+    private popChip (t: GameObjects.Text | IconLabel): void
+    {
+        t.setScale(1.7);
+        this.tweens.add({ targets: t, scale: 1, duration: 280, ease: 'Back.out' });
+    }
+
+    /**
+     * Each chip is parked off the edge of the readout it belongs to, and the
+     * readouts all change width as the run goes -- the rank number grows a
+     * digit, the score grows four -- so this runs with the rest of the HUD
+     * rather than once at build time.
+     */
+    private layoutMultChips (): void
+    {
+        this.xpMultText.setPosition(this.rankText.x + this.rankText.width + 8, this.rankText.y);
+
+        //  Score is centred and unbounded, so the chip rides its right edge and
+        //  is stopped at the margin rather than being allowed off screen.
+        //  Off the *displayed* width, so the pop each readout does when it
+        //  gains nudges its chip aside instead of being drawn over it.
+        const scoreX = Math.min(
+            W - HUD.margin - this.scoreMultText.width,
+            CX + this.scoreText.displayWidth / 2 + 10
+        );
+
+        this.scoreMultText.setPosition(scoreX, HUD.scoreY + 2);
+
+        //  The gem readout is right-aligned, so the chip goes on its far side.
+        const coinInset = this.coinLabel.icon.x - this.coinLabel.icon.displayWidth / 2;
+        const coinLeft = this.coinLabel.x + coinInset * this.coinLabel.scaleX;
+
+        this.coinMultText.setPosition(coinLeft - 10, COIN_HUD.y);
+
+        //  Off CX and the combo readout's unscaled width, so the chip neither
+        //  breathes with the combo text nor catches its jitter at high tiers.
+        //  The floor keeps it in the same place on the line while there is no
+        //  combo up and the readout is empty.
+        const comboHalf = Math.max(this.comboText.width / 2, 46);
+
+        this.comboWindowChip.setPosition(CX + comboHalf + 12, COMBO_Y);
+    }
+
+    /**
+     * The way out of a run, on the footer line beside the mute icon -- below
+     * the arena, where no target ever spawns and no shot is ever aimed.
+     */
+    private buildQuitButton (): void
+    {
+        quitButton(this, W - HUD.margin - 62, HUD.footerY, {
+            cost: 'Your run ends here. Coins you have already collected are kept.',
+            enabled: () => this.state === 'play',
+            hold: () =>
+            {
+                this.state = 'menu';
+                setGameplayActive(false);
+            },
+            resume: () =>
+            {
+                if (this.state !== 'menu') return;
+
+                this.state = 'play';
+                setGameplayActive(true);
+            },
+            quit: () => this.quitToMenu()
+        }).setDepth(32);
     }
 
     /**
@@ -704,6 +1158,11 @@ export class GameScene extends Scene
 
         t.setDepth(10);
 
+        //  The goal counter on a boss level is the boss's health (see the
+        //  update loop), so an add that carried progress would be writing into
+        //  a readout that means something else entirely.
+        if (this.boss) t.progressWorth = 0;
+
         seedTarget(this.zone.gimmick, t, run.level, this.hazard);
 
         this.targets.push(t);
@@ -829,6 +1288,12 @@ export class GameScene extends Scene
         for (const c of this.chains) c.destroy();
 
         this.chains = [];
+
+        //  The fight's rings are drawn on graphics of its own, and a level
+        //  that ended some other way -- the clock, a quit, a skip -- would
+        //  otherwise leave them turning over the next one.
+        this.boss?.destroy();
+        this.boss = null;
     }
 
     /**
@@ -869,19 +1334,85 @@ export class GameScene extends Scene
         }
     }
 
+    /**
+     * The fight itself, stood up the moment the warning card clears.
+     *
+     * Everything about *how* it is killed lives in core/bossfight; the scene's
+     * whole side of the deal is four hooks -- put a body on the board, weld a
+     * run of them together, find somewhere to blink to, and fire the flak --
+     * plus one question asked on every shot (see `applyShot`). No mechanic
+     * gets a branch anywhere else in this file, which is the only reason seven
+     * of them fit.
+     */
     private spawnBoss (): void
     {
-        const t = new Target(this, CX, arenaY(0.28), 'boss', this.cfg.size, run.level, this.cfg.speed, true);
-        t.setLifetime(999999);
-        t.setDepth(9);
-        this.targets.push(t);
+        const spec = bossFor(run.level);
 
-        this.time.delayedCall(320, () =>
-        {
-            this.fx.popup(CX, arenaY(0.14), 'BOSS', 0xff2d55, 46, 40, 900);
-            Sfx.bomb();
-            this.cameras.main.shake(300, 0.012);
+        if (!spec) return;
+
+        this.boss = new BossFight(this, spec, this.tier, run.level, this.cfg.size, this.fx, {
+            add: (t: Target) => this.targets.push(t),
+            dress: () => this.dress('normal'),
+            weld: (c: Chain) => this.chains.push(c),
+            freeSpot: (r: number) => this.freeSpot(r),
+            salvo: (n: number) => this.hazards.salvo(n)
         });
+
+        this.fx.popup(CX, arenaY(0.12), spec.name, 0xff2d55, 40, 40, 900);
+        Sfx.bomb();
+        this.cameras.main.shake(300, 0.012);
+    }
+
+    /**
+     * The fight is over.
+     *
+     * The bounty is paid here rather than through the kill that ended it,
+     * because on three of the seven the kill that ends it is the smallest one
+     * in the fight -- the hydra's last quarter-sized head is worth a fraction
+     * of the body it came out of, and paying the world's exam out of *that*
+     * would have made finishing the hardest fight in a zone feel like popping
+     * a stray target.
+     */
+    private bossDown (): void
+    {
+        const spec = bossFor(run.level);
+        const spot = this.boss ? this.boss.focus : { x: CX, y: arenaY(0.35) };
+
+        this.boss?.destroy();
+        this.boss = null;
+
+        if (!spec) return;
+
+        const gain = Math.round(spec.units * 420 * (1 + run.level * 0.12) * this.stats.scoreMult * (1 + this.streakBonus()));
+        const coins = Math.round(spec.bounty * this.stats.coinMult);
+
+        this.levelScore += gain;
+        this.levelCoins += coins;
+        bankCoins(coins);
+        this.gainXp(Math.round(xpWorth(spec.units * 26, run.level) * this.stats.xpMult), spot.x, spot.y);
+
+        this.cameras.main.flash(300, 255, 90, 120);
+        this.cameras.main.shake(420, 0.016);
+
+        this.fx.burst(spot.x, spot.y, 0xff2d55, 44, 'gold');
+        this.fx.ring(spot.x, spot.y, 300, 0xff2d55, 9, 620);
+        this.fx.popup(CX, arenaY(0.24), `${spec.name} DOWN`, 0xff2d55, 44, 46, 1000);
+        this.fx.popup(CX, arenaY(0.33), fmtShort(gain), 0xffffff, 40, 58, 1000);
+
+        for (let i = 0; i < 14; i++)
+        {
+            this.time.delayedCall(i * 45, () => this.fx.fly(spot.x, spot.y, COIN_HUD.x - 14, COIN_HUD.y, 0xffc857, () => this.bumpCoins()));
+        }
+
+        Sfx.jackpot();
+        this.updateScoreText();
+
+        //  The goal *is* the boss on a boss level, so finishing it finishes
+        //  the level -- there is never a tail of stragglers to mop up after
+        //  the thing the level was about is already dead.
+        this.progress = this.cfg.goal;
+
+        if (this.state === 'play') this.levelComplete();
     }
 
     //  -------------------------------------------------------------- combat
@@ -905,7 +1436,30 @@ export class GameScene extends Scene
     {
         const now = this.time.now;
 
-        this.nextShot = now + this.stats.fireRate;
+        this.nextShot = now + this.fireRate;
+
+        //  The drum answers to none of what follows -- no obstacles, no
+        //  bullseye, no crit, no combo, no miss. A tap is on it or it is not.
+        if (this.state === 'spam')
+        {
+            const drum = this.drum;
+
+            this.turret.fire(px, py, 1);
+
+            const m = this.turret.tipFor(0);
+            this.fx.beam(m.x, m.y, px, py, this.beam);
+
+            if (drum && drum.contains(px, py, this.stats.hitRadius)) this.spamHit(px, py);
+            else Sfx.dry();
+
+            return;
+        }
+
+        //  The ability weapons are their own guns entirely. The beam does not
+        //  answer to taps at all; the other two do their own thing with one.
+        if (this.ability === 'laser') return;
+        if (this.ability === 'mayhem') { this.shootMayhem(px, py); return; }
+        if (this.ability === 'bomb') { this.shootBomb(px, py); return; }
 
         //  Anything standing between the gun and the tap gets the shot first.
         if (this.hitObstacle(px, py)) return;
@@ -1157,6 +1711,33 @@ export class GameScene extends Scene
     }
 
     /**
+     * A shot the boss turned away, said in the one way that tells the player
+     * *why* -- because "nothing happened" is the same picture for a plate they
+     * can never break, a pane they are three shots from breaking, and a body
+     * that has already gone somewhere else.
+     */
+    private bossBlocked (t: Target, stop: GuardHit): void
+    {
+        if (stop.kind === 'ghost')
+        {
+            //  It is in the air. The shot goes through the space it left.
+            this.fx.burst(stop.x, stop.y, 0xd08cff, 6, 'hit');
+            Sfx.dry();
+            return;
+        }
+
+        const steel = stop.kind === 'steel';
+        const color = steel ? 0x8fa4c8 : 0xd8e4ff;
+
+        t.clang(Math.atan2(MUZZLE.y - t.y, MUZZLE.x - t.x));
+
+        this.fx.burst(stop.x, stop.y, color, steel ? 8 : 12, 'hit');
+        this.fx.ring(stop.x, stop.y, t.radius * 0.9, color, 3, 250);
+        this.cameras.main.shake(50, 0.0025);
+        Sfx.chip();
+    }
+
+    /**
      * A shot into a link that is not next.
      *
      * The combo survives, because the player did hit what they were aiming at
@@ -1197,12 +1778,36 @@ export class GameScene extends Scene
         //  A locked link refuses everything, not only the player's own tap:
         //  a lance running through it, a second barrel, a wingman's pot shot.
         //  The rule would not be a rule if a stray bullet could skip it.
-        if (t.chainLocked) return;
+        if (t.chainLocked && !this.shotIgnoresLock) return;
 
         if (t.kind === 'bomb')
         {
             this.hitBomb(t);
             return;
+        }
+
+        //  The orb takes two shots from any gun: its health is not a number
+        //  the build gets to argue with.
+        if (t.kind === 'ability')
+        {
+            this.hitOrb(t, hx, hy);
+            return;
+        }
+
+        //  The world's exam, if this level is one. Everything a boss does to
+        //  stop a shot -- a turning ring, a shutter that is still closed, a
+        //  body that is not there any more -- is one question asked here, and
+        //  answering it is the only boss-shaped code in this file.
+        if (this.boss && this.boss.owns(t))
+        {
+            const gun = origin || MUZZLE;
+            const stop = this.boss.guard(t, Math.atan2(gun.y - t.y, gun.x - t.x));
+
+            if (stop)
+            {
+                this.bossBlocked(t, stop);
+                return;
+            }
         }
 
         //  "Which side was it hit from" is always the same question: where the
@@ -1250,7 +1855,7 @@ export class GameScene extends Scene
         //  would mean the precision bonus was paid out for no precision.
         const perfect = direct && t.distanceTo(hx, hy) <= t.radius * BULLSEYE_SPOT;
 
-        const dmg = this.stats.damage
+        const dmg = this.stats.damage * this.shotMult
             * (crit ? this.stats.critMult : 1)
             * (perfect ? BULLSEYE_DAMAGE + this.stats.perfect : 1);
 
@@ -1296,6 +1901,7 @@ export class GameScene extends Scene
         const radius = t.radius;
         const splittable = !t.noSplit;
         const worth = t.progressWorth;
+        const abilityId = t.ability;
         const x = t.x;
         const y = t.y;
 
@@ -1393,6 +1999,17 @@ export class GameScene extends Scene
             this.cameras.main.flash(240, 255, 90, 120);
             this.fx.popup(CX, arenaY(0.21), 'BOSS DOWN', 0xff2d55, 44, 50, 900);
         }
+        else if (kind === 'ability' && abilityId)
+        {
+            this.activateAbility(abilityId, x, y);
+        }
+
+        //  --- the world's exam, one body lighter ---
+        if (this.boss && this.boss.took(t))
+        {
+            this.bossDown();
+            return;
+        }
 
         //  --- the zone's parting gift ---
         if (this.zone.gimmick === 'split' && splittable && def.progress > 0 && radius > 20)
@@ -1413,6 +2030,12 @@ export class GameScene extends Scene
 
         this.checkMilestone();
         this.updateScoreText();
+
+        //  A boss level is cleared by the boss and by nothing else. The adds
+        //  are there to keep the gun warm, the combo alive and the coins
+        //  coming; letting a long enough streak of them clear the level would
+        //  mean the exam could be passed by ignoring it.
+        if (this.boss) return;
 
         if (this.progress >= this.cfg.goal && this.state === 'play')
         {
@@ -1500,6 +2123,10 @@ export class GameScene extends Scene
 
         this.stats = run.stats();
 
+        //  The multiplier cards tick up on the readouts they act on, and the
+        //  card just shot is the only one allowed to pop its own chip.
+        this.refreshMultChips(up.id);
+
         const extra = (this.stats.timeBonus - hadBonus) * 1000;
 
         if (extra > 0)
@@ -1548,6 +2175,23 @@ export class GameScene extends Scene
      * silent when it catches nobody, so a heavy gun on an empty stretch of
      * board does not fill the screen with rings for free.
      */
+    /**
+     * True for a body the world's exam is standing behind.
+     *
+     * The shockwave, the explosive rounds and the lightning all reach past the
+     * thing the player actually aimed at, and all three of them damage what
+     * they find directly rather than firing a shot at it -- which means none of
+     * them ever asks the boss's rule whether it was allowed in. A turning ring
+     * that a stray blast could reach through is not a ring, and every one of
+     * the seven fights is built on the assumption that the only way to the
+     * body is the way the fight says it is. So splash simply does not touch
+     * one: the adds around it are what the upgrades get to eat.
+     */
+    private bossBody (t: Target): boolean
+    {
+        return !!this.boss && this.boss.owns(t);
+    }
+
     private blast (x: number, y: number, spare: number): void
     {
         const over = spare / unitHp(run.level);
@@ -1558,7 +2202,7 @@ export class GameScene extends Scene
         const room = Math.min(BLAST_MAX, Math.floor(over));
 
         const caught = this.targets
-            .filter(t => !t.dead && t.kind !== 'bomb' && !t.chainLocked && t.distanceTo(x, y) <= reach + t.radius)
+            .filter(t => !t.dead && t.kind !== 'bomb' && t.kind !== 'ability' && !t.chainLocked && !this.bossBody(t) && t.distanceTo(x, y) <= reach + t.radius)
             .sort((a, b) => a.distanceTo(x, y) - b.distanceTo(x, y))
             .slice(0, room);
 
@@ -1586,7 +2230,7 @@ export class GameScene extends Scene
         this.cameras.main.shake(120, 0.01);
         Sfx.boom();
 
-        const caught = this.targets.filter(t => !t.dead && t.kind !== 'bomb' && t.distanceTo(x, y) <= r + t.radius);
+        const caught = this.targets.filter(t => !t.dead && t.kind !== 'bomb' && t.kind !== 'ability' && !this.bossBody(t) && t.distanceTo(x, y) <= r + t.radius);
 
         for (const t of caught)
         {
@@ -1612,7 +2256,7 @@ export class GameScene extends Scene
             {
                 //  Welded chains are the lightning's business too: it does not
                 //  get to walk a rope the player is supposed to walk by hand.
-                if (t.dead || used.has(t) || t.kind === 'bomb' || t.chain) continue;
+                if (t.dead || used.has(t) || t.kind === 'bomb' || t.kind === 'ability' || t.chain || this.bossBody(t)) continue;
 
                 const d = t.distanceTo(fromX, fromY);
                 if (d < bestDist) { bestDist = d; best = t; }
@@ -1694,7 +2338,7 @@ export class GameScene extends Scene
 
         const x = t.x;
         const y = t.y;
-        const harmless = t.kind === 'bomb';
+        const harmless = t.kind === 'bomb' || t.kind === 'ability';
 
         if (t.chain) this.releaseChain(t, false);
 
@@ -1999,6 +2643,7 @@ export class GameScene extends Scene
         this.timeIcon.setScale(this.timeIconScale * (low ? 1 + Math.abs(Math.sin(this.time.now * 0.012)) * 0.2 : 1));
 
         this.drawRank(g);
+        this.layoutMultChips();
 
         //  low-time vignette
         if (low && this.state === 'play')
@@ -2143,6 +2788,15 @@ export class GameScene extends Scene
                 this.spawnTimer = this.cfg.spawnRate * added * (alive < floor ? 0.5 : 1);
             }
 
+            //  The orb, when its moment on the clock comes round.
+            if (this.orbAt >= 0 && this.timeLeft <= this.orbAt)
+            {
+                this.orbAt = -1;
+                this.spawnOrb(this.orbId);
+            }
+
+            this.tickAbility(dt);
+
             if (this.pending)
             {
                 if (this.time.now - this.pending.at > 220)
@@ -2167,13 +2821,19 @@ export class GameScene extends Scene
         //  Everything on the board holds still behind the cards. The world
         //  behind it does not -- the backdrop keeps running, so the pause reads
         //  as a held breath rather than as a freeze frame.
-        const frozen = this.state === 'rank';
+        const frozen = this.state === 'rank' || this.state === 'menu';
+
+        //  The beam only exists while the board is live; a frozen or finished
+        //  board does not get a laser painted across it.
+        if (this.state !== 'play' && this.ability === 'laser') this.laserGfx.clear();
+
+        this.tickBolts(dt);
 
         for (let i = this.targets.length - 1; i >= 0; i--)
         {
             const t = this.targets[i];
 
-            if (!frozen) t.update(dt, this.stats.slow);
+            if (!frozen && (this.state !== 'spam' || t === this.drum)) t.update(dt, this.stats.slow);
 
             if (t.trail && this.state === 'play' && t.takeTrailPuff())
             {
@@ -2186,6 +2846,29 @@ export class GameScene extends Scene
             {
                 this.expireTarget(t);
             }
+        }
+
+        if (this.state === 'spam')
+        {
+            this.spamLeft -= dt;
+
+            if (this.spamLeft <= 0)
+            {
+                this.state = 'intro';
+                this.closeSpam();
+            }
+        }
+
+        if (this.boss && this.state === 'play')
+        {
+            this.boss.tick(dt);
+
+            //  The goal counter *is* the boss's health bar on a boss level.
+            //  It already sits in the player's eye and it already means "how
+            //  much of this level is behind me", which on a level that is one
+            //  object is exactly what its health is -- so the fight gets a
+            //  readout without the HUD growing a second one.
+            this.progress = Math.round(this.cfg.goal * (1 - this.boss.frac));
         }
 
         if (this.state === 'play')
@@ -2237,42 +2920,369 @@ export class GameScene extends Scene
      */
     private tickWingmen (dt: number): void
     {
-        if (this.wingmen.length === 0) return;
+        if (this.wingmen.length === 0 && this.sentries.length === 0) return;
 
-        for (const w of this.wingmen)
-        {
-            const mark = this.wingTarget(w);
-
-            if (mark) w.aimAt(mark.x, mark.y);
-            else w.stand();
-
-            w.tick(dt, this.time.now);
-        }
+        for (const w of this.wingmen) this.trackPod(w, dt);
+        for (const w of this.sentries) this.trackPod(w, dt);
 
         if (this.state !== 'play') return;
 
         this.wingTimer -= dt;
 
-        if (this.wingTimer > 0) return;
-
-        this.wingTimer = WINGMAN_DELAY;
-
-        for (const w of this.wingmen)
+        if (this.wingTimer <= 0)
         {
-            if (this.state !== 'play') return;
-
-            const mark = this.wingTarget(w);
-
-            if (!mark) continue;
-
-            w.aimAt(mark.x, mark.y);
-            w.fire();
-
-            const m = w.muzzle;
-
-            this.fx.beam(m.x, m.y, mark.x, mark.y, this.beam2, 0.8);
-            this.applyShot(mark, mark.x, mark.y, false, m);
+            this.wingTimer = WINGMAN_DELAY;
+            for (const w of this.wingmen) this.firePod(w);
         }
+
+        //  The sentries run a much quicker clock: they are here for twelve
+        //  seconds and they have to be felt in all of them.
+        if (this.sentries.length > 0)
+        {
+            this.sentryTimer -= dt;
+
+            if (this.sentryTimer <= 0)
+            {
+                this.sentryTimer = SENTRY_RATE;
+                for (const w of this.sentries) this.firePod(w);
+            }
+        }
+    }
+
+    private trackPod (w: Wingman, dt: number): void
+    {
+        const mark = this.wingTarget(w);
+
+        if (mark) w.aimAt(mark.x, mark.y);
+        else w.stand();
+
+        w.tick(dt, this.time.now);
+    }
+
+    private firePod (w: Wingman): void
+    {
+        if (this.state !== 'play') return;
+
+        const mark = this.wingTarget(w);
+
+        if (!mark) return;
+
+        w.aimAt(mark.x, mark.y);
+        w.fire();
+
+        const m = w.muzzle;
+
+        this.fx.beam(m.x, m.y, mark.x, mark.y, this.beam2, 0.8);
+        this.applyShot(mark, mark.x, mark.y, false, m);
+    }
+
+    //  ----------------------------------------------------------- abilities
+
+    /** The gun's clock: the ability's own while one is live, the build's otherwise. */
+    private get fireRate (): number
+    {
+        if (this.ability === 'mayhem') return MAYHEM_RATE;
+        if (this.ability === 'bomb') return BOMB_RATE;
+
+        return this.stats.fireRate;
+    }
+
+    /**
+     * The orb: a rainbow target in a golden setting, always on the move,
+     * dragging a golden wake. It lives long enough to cross the board a few
+     * times, never counts towards the goal, and costs nothing if it is missed
+     * -- it is a gift, and a gift on a timer is a chore.
+     */
+    private spawnOrb (id: AbilityId): void
+    {
+        const radius = this.cfg.size * KINDS.ability.sizeMult;
+        const spot = this.freeSpot(radius * 1.5);
+        const speed = Math.max(this.cfg.speed, 120);
+
+        const t = new Target(this, spot.x, spot.y, 'ability', this.cfg.size, run.level, speed, true);
+
+        t.ability = id;
+        t.trail = 'gold';
+        t.progressWorth = 0;
+        t.setLifetime(this.cfg.lifetime * 3.2);
+        t.setDepth(12);
+
+        dressAbilityTarget(this, t, id);
+
+        this.targets.push(t);
+
+        this.fx.ring(spot.x, spot.y, radius * 4, 0xffd23f, 5, 480);
+        this.fx.burst(spot.x, spot.y, 0xfff3b0, 18, 'gold');
+        this.fx.popup(spot.x, spot.y - radius - 40, 'ABILITY', 0xffd23f, 22, 50, 700);
+        Sfx.unlock();
+    }
+
+    /** One of the orb's two shots. */
+    private hitOrb (t: Target, hx: number, hy: number): void
+    {
+        if (t.damage(t.maxHp / 2))
+        {
+            this.killTarget(t, false, false, 0);
+        }
+        else
+        {
+            this.fx.burst(hx, hy, 0xffd23f, 10, 'gold');
+            this.fx.ring(t.x, t.y, t.radius * 2.2, 0xffd23f, 4, 300);
+            this.cameras.main.shake(50, 0.003);
+            Sfx.clank();
+        }
+    }
+
+    /**
+     * The orb broke: the gun *is* this ability now, at once, for its clock.
+     * Taking a second orb while one is live simply swaps the weapon.
+     */
+    private activateAbility (id: AbilityId, x: number, y: number, carried = 0): void
+    {
+        if (this.ability) this.endAbility(true);
+
+        const def = ABILITIES[id];
+
+        this.ability = id;
+        this.abilityLeft = carried > 0 ? carried : def.duration;
+
+        this.turret.charge(id);
+        this.abilityBanner.show(def);
+        this.abilityBanner.set(this.abilityLeft / def.duration);
+
+        if (id === 'sentry') this.deploySentries();
+
+        //  Picked up from the last screen: no fanfare the second time.
+        if (carried > 0) return;
+
+        this.cameras.main.flash(220, 255, 240, 180);
+        this.cameras.main.shake(160, 0.01);
+        this.fx.ring(x, y, 260, def.color, 8, 520);
+        this.fx.burst(x, y, def.color, 30, 'gold');
+        this.fx.popup(CX, arenaY(0.36), def.shout, def.color, 46, 60, 1000);
+        Sfx.jackpot();
+    }
+
+    /** Bank what is left of the weapon so the next screen can finish it. */
+    private carryAbility (): void
+    {
+        run.ability = this.ability && this.abilityLeft > 0 ? { id: this.ability, left: this.abilityLeft } : null;
+    }
+
+    private endAbility (swapping = false): void
+    {
+        const id = this.ability;
+
+        if (!id) return;
+
+        this.ability = null;
+        this.abilityLeft = 0;
+        this.shotMult = 1;
+        this.laserGfx.clear();
+
+        this.turret.charge(null);
+        this.abilityBanner.hide();
+        this.recallSentries();
+
+        if (!swapping)
+        {
+            this.fx.popup(this.turret.tipX, this.turret.tipY - 30, 'POWER DOWN', 0x9fb0d0, 20, 40, 520);
+        }
+    }
+
+    /** Two pods ride in from the wings, halfway up the arena. */
+    private deploySentries (): void
+    {
+        const y = arenaY(0.52);
+        const left = new Wingman(this, PLAY.left - 60, y, this.tier, -1);
+        const right = new Wingman(this, PLAY.right + 60, y, this.tier, 1);
+
+        this.tweens.add({ targets: left, x: PLAY.left - 6, duration: 380, ease: 'Back.out' });
+        this.tweens.add({ targets: right, x: PLAY.right + 6, duration: 380, ease: 'Back.out' });
+
+        this.sentries = [ left, right ];
+        this.sentryTimer = 500;
+    }
+
+    private recallSentries (): void
+    {
+        for (const w of this.sentries)
+        {
+            const out = w.x < CX ? PLAY.left - 60 : PLAY.right + 60;
+
+            this.tweens.add({ targets: w, x: out, alpha: 0, duration: 300, ease: 'Quad.in', onComplete: () => w.destroy() });
+        }
+
+        this.sentries = [];
+    }
+
+    /** Per frame while playing: the clock, the hose, the beam. */
+    private tickAbility (dt: number): void
+    {
+        if (!this.ability) return;
+
+        this.abilityLeft -= dt;
+        this.abilityBanner.set(Math.max(0, this.abilityLeft / ABILITIES[this.ability].duration));
+
+        if (this.abilityLeft <= 0)
+        {
+            this.endAbility();
+            return;
+        }
+
+        const p = this.input.activePointer;
+        const onBoard = p.y >= PLAY.top - 16 && p.y <= PLAY.bottom + 6;
+
+        if (this.ability === 'mayhem')
+        {
+            //  Hold to fire. A machine gun that asked for a tap per bullet
+            //  would be a finger exercise, not mayhem.
+            if (p.isDown && onBoard) this.requestShot(p.x, p.y);
+        }
+        else if (this.ability === 'laser')
+        {
+            this.runLaser(dt, p.x, p.y);
+        }
+    }
+
+    /**
+     * MAYHEM: a fan of slow beam projectiles that bounce round the arena.
+     *
+     * Every pull sends six short bolts out of the muzzle across a cone. They
+     * fly on their own (see `Bolts`), fold off the walls twice, and hit at
+     * triple damage whatever they cross. Bombs are left alone, as every
+     * automatic gun in the game leaves them.
+     */
+    private shootMayhem (px: number, py: number): void
+    {
+        this.turret.fire(px, py, 1);
+
+        const m = this.turret.tipFor(0);
+
+        this.cameras.main.shake(60, 0.004);
+        this.fx.burst(m.x, m.y, ABILITIES.mayhem.glow, 6, 'hit');
+
+        //  Six bolts a pull, fanned across the cone. They are projectiles:
+        //  they leave the muzzle, cross the board and bounce, on their own.
+        for (const dir of sprayDirs(m.x, m.y, px, py, MAYHEM_BOLTS))
+        {
+            this.bolts.fire(m.x, m.y, dir.dx, dir.dy);
+        }
+    }
+
+    /** Fly the MAYHEM bolts and land whatever they cross. */
+    private tickBolts (dt: number): void
+    {
+        if (this.bolts.count === 0) return;
+
+        const live = this.state === 'play';
+        const def = ABILITIES.mayhem;
+
+        this.bolts.update(live ? dt : 0, this.targets, (t, x, y) =>
+        {
+            if (!live || t.kind === 'bomb' || t.chainLocked) return false;
+
+            this.shotMult = MAYHEM_DAMAGE;
+            this.applyShot(t, t.x, t.y, false, { x, y });
+            this.shotMult = 1;
+
+            //  A bolt goes through everything it kills; only a body that
+            //  survives it (a boss, a plate) stops it.
+            return !t.dead && this.targets.indexOf(t) !== -1;
+        }, (x, y) => this.fx.burst(x, y, def.glow, 3, 'hit'));
+    }
+
+    /**
+     * BOMBS: a fat shell lobbed to the tap, and a blast the size of a fist
+     * when it gets there. Slow, and worth the wait.
+     */
+    private shootBomb (px: number, py: number): void
+    {
+        this.turret.fire(px, py, 1);
+
+        const def = ABILITIES.bomb;
+        const m = this.turret.tipFor(0);
+
+        this.fx.beam(m.x, m.y, m.x + (px - m.x) * 0.12, m.y + (py - m.y) * 0.12, { ...this.beam, color: def.color, width: 10, life: 120, head: 0 });
+        this.cameras.main.shake(80, 0.006);
+        Sfx.launch();
+
+        lobShell(this, m.x, m.y, px, py, () =>
+        {
+            if (this.state === 'play') this.explodeBomb(px, py);
+        });
+    }
+
+    private explodeBomb (x: number, y: number): void
+    {
+        bombImpact(this, this.fx, x, y);
+        Sfx.boom();
+
+        //  A blast takes the whole rope at once, locked links included.
+        const caught = this.targets
+            .filter(t => !t.dead && t.kind !== 'bomb' && t.distanceTo(x, y) <= BOMB_RADIUS + t.radius);
+
+        this.shotMult = BOMB_DAMAGE;
+        this.shotIgnoresLock = true;
+
+        for (const t of caught) this.applyShot(t, t.x, t.y, false, { x, y });
+
+        this.shotIgnoresLock = false;
+        this.shotMult = 1;
+    }
+
+    /**
+     * STATIC LASER: a thick beam from the muzzle out through wherever the
+     * cursor is, on for as long as the ability lasts. No tapping. It burns
+     * everything it crosses a little every frame rather than shooting
+     * anything, so a target that wanders through it is scorched and one the
+     * player holds it on is gone in a third of a second.
+     */
+    private runLaser (dt: number, px: number, py: number): void
+    {
+        const def = ABILITIES.laser;
+
+        this.turret.aimAt(px, py);
+
+        const m = this.turret.tipFor(0);
+        const legs = laserPath(m.x, m.y, px, py);
+
+        drawLaser(this.laserGfx, legs, this.time.now);
+
+        this.laserSpark -= dt;
+
+        const burn = this.stats.damage * LASER_DPS * (dt / 1000);
+        const half = LASER_WIDTH * 0.5;
+
+        for (let i = this.targets.length - 1; i >= 0; i--)
+        {
+            const t = this.targets[i];
+
+            //  The beam burns through a rope in whatever order it likes.
+            if (t.dead || t.kind === 'bomb') continue;
+
+            //  Which leg of the beam is on it decides where the beam is
+            //  coming *from*, which is what the guard and the plate ask.
+            const leg = legs.find(l => distToSegment(t.x, t.y, l.x1, l.y1, l.x2, l.y2) <= t.radius + half);
+
+            if (!leg) continue;
+
+            const from = Math.atan2(leg.y1 - t.y, leg.x1 - t.x);
+
+            //  The boss's guard and the shield plate still answer the beam;
+            //  a wall of light does not get to skip the one rule of the zone.
+            if (this.boss && this.boss.owns(t) && this.boss.guard(t, from)) continue;
+            if (t.shieldArc > 0 && t.shielded(from)) continue;
+
+            if (this.laserSpark <= 0) this.fx.burst(t.x, t.y, def.glow, 3, 'hit');
+
+            //  The orb melts on its own clock rather than on the gun's.
+            const amount = t.kind === 'ability' ? t.maxHp * (dt / 650) : burn;
+
+            if (t.damage(amount)) this.killTarget(t, false, false, 0);
+        }
+
+        if (this.laserSpark <= 0) this.laserSpark = 70;
     }
 
     /** Whatever that pod can reach soonest, bombs excepted. */
@@ -2444,7 +3454,12 @@ export class GameScene extends Scene
         this.fx.ring(MUZZLE.x, MUZZLE.y - 60, 340, 0x6cf5c8, 8, 520);
     }
 
-    private endRun (): void
+    /**
+     * Everything a run that is not going to be finished still owes the save.
+     * Coins were banked to the counter as they were picked up, so the one
+     * thing that would actually lose them is not writing the save.
+     */
+    private bankRun (): void
     {
         this.hazards.clear();
         this.clearChains();
@@ -2457,11 +3472,35 @@ export class GameScene extends Scene
         meta.best = Math.max(meta.best, run.score + this.levelScore);
         meta.bestLevel = Math.max(meta.bestLevel, run.level - 1);
         saveMeta();
+    }
+
+    /**
+     * Walking out mid-run. The run's winnings are kept, but it is not booked
+     * as a finished run: the present counter only pays for runs that were
+     * played to the end, or quitting three times would be the fastest way to
+     * open a box.
+     */
+    private quitToMenu (): void
+    {
+        if (this.state === 'done') return;
+
+        this.state = 'done';
+        setGameplayActive(false);
+
+        this.bankRun();
+
+        this.cameras.main.fadeOut(200, 0, 0, 0);
+        this.time.delayedCall(210, () => this.scene.start('MainMenu'));
+    }
+
+    private endRun (): void
+    {
+        this.bankRun();
 
         this.time.delayedCall(340, () =>
         {
             this.cameras.main.fadeOut(180, 0, 0, 0);
-            this.time.delayedCall(190, () => this.scene.start('Result', { mode: 'fail', levelScore: this.levelScore, bestCombo: this.bestCombo }));
+            this.time.delayedCall(190, () => endOfRun(this, { mode: 'fail', levelScore: this.levelScore, bestCombo: this.bestCombo }));
         });
     }
 
@@ -2488,6 +3527,9 @@ export class GameScene extends Scene
         this.clearChains();
 
         run.bestCombo = Math.max(run.bestCombo, this.bestCombo);
+        this.carryAbility();
+        this.laserGfx.clear();
+        this.bolts.clear();
         Sfx.levelClear();
         this.cameras.main.flash(200, 255, 255, 255);
 
@@ -2527,7 +3569,7 @@ export class GameScene extends Scene
             {
                 if (run.level >= FINAL_LEVEL)
                 {
-                    this.scene.start('Result', { mode: 'victory', levelScore: this.levelScore, bestCombo: this.bestCombo });
+                    endOfRun(this, { mode: 'victory', levelScore: this.levelScore, bestCombo: this.bestCombo });
                     return;
                 }
 
