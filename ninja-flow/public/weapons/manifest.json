@@ -1,0 +1,86 @@
+[
+  {
+    "id": "katana",
+    "name": "Katana",
+    "bytes": 58908,
+    "verts": 2694,
+    "parts": 5
+  },
+  {
+    "id": "katana-ornate",
+    "name": "Ornate katana",
+    "bytes": 108536,
+    "verts": 5216,
+    "parts": 7
+  },
+  {
+    "id": "wakizashi",
+    "name": "Wakizashi",
+    "bytes": 21004,
+    "verts": 866,
+    "parts": 3
+  },
+  {
+    "id": "wakizashi-serrated",
+    "name": "Serrated wakizashi",
+    "bytes": 66156,
+    "verts": 3173,
+    "parts": 3
+  },
+  {
+    "id": "ninjato",
+    "name": "Ninjato",
+    "bytes": 23128,
+    "verts": 888,
+    "parts": 5
+  },
+  {
+    "id": "ninjato-gold",
+    "name": "Gilded ninjato",
+    "bytes": 44120,
+    "verts": 1900,
+    "parts": 7
+  },
+  {
+    "id": "nagamaki",
+    "name": "Nagamaki",
+    "bytes": 107348,
+    "verts": 5162,
+    "parts": 7
+  },
+  {
+    "id": "tanto",
+    "name": "Tanto",
+    "bytes": 43836,
+    "verts": 1916,
+    "parts": 5
+  },
+  {
+    "id": "tanto-hooked",
+    "name": "Hooked tanto",
+    "bytes": 46072,
+    "verts": 2036,
+    "parts": 5
+  },
+  {
+    "id": "tanto-broad",
+    "name": "Broad tanto",
+    "bytes": 46672,
+    "verts": 2060,
+    "parts": 5
+  },
+  {
+    "id": "katana-worn",
+    "name": "Worn katana",
+    "bytes": 303876,
+    "verts": 8588,
+    "parts": 4
+  },
+  {
+    "id": "katana-scifi",
+    "name": "Sci-fi katana",
+    "bytes": 397744,
+    "verts": 16039,
+    "parts": 10
+  }
+]
