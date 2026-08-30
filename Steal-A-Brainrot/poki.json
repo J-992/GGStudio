@@ -13,7 +13,7 @@
       "Steal-A-Brainrot/assets/sprites/**",
       "Steal-A-Brainrot/assets/ui/**"
     ],
-    "token_git_secret_name": "POKI_UPLOAD_TOKEN_STEAL_THE_BRAINROT",
+    "token_git_secret_name": "POKI_UPLOAD_BRAINROT_FACTORY",
     "max_bytes": 20971520,
     "node_version": "22"
   }
