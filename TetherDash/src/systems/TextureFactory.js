@@ -7,10 +7,12 @@ const TextureFactory = {
     if (!scene.textures.exists('runnerB')) this.runnerB(scene);
     this.bolt(scene);
     this.gearHaz(scene);
+    this.blockHaz(scene);
     this.clouds(scene);
     this.shadow(scene);
     this.particles(scene);
     this.padGlyph(scene);
+    this.flipGlyph(scene);
     this.touchButtons(scene);
   },
 
@@ -104,6 +106,32 @@ const TextureFactory = {
     g.fillStyle(0xffd35c, 1); g.fillCircle(cx, cy, 14);
     g.fillStyle(0xb8860b, 1); g.fillCircle(cx, cy, 6);
     g.generateTexture('gearHaz', 160, 160);
+    g.destroy();
+  },
+
+  // Hazard: a solid crate. Reads as "go around" where the gear reads as
+  // "moving, do not touch".
+  blockHaz(scene) {
+    const g = this.g(scene);
+    g.fillStyle(0x3b4a75, 1); g.fillRoundedRect(4, 10, 112, 106, 12);
+    g.fillStyle(0x54679c, 1); g.fillRoundedRect(4, 4, 112, 100, 12);
+    g.lineStyle(6, 0xff5252, 1);
+    for (let i = -1; i < 5; i++) {
+      g.lineBetween(10 + i * 26, 100, 36 + i * 26, 8);
+    }
+    g.lineStyle(5, 0x93a8e6, 1); g.strokeRoundedRect(4, 4, 112, 100, 12);
+    g.generateTexture('blockHaz', 120, 120);
+    g.destroy();
+  },
+
+  // The chevron that flashes toward the wall a forced flip wants you on.
+  flipGlyph(scene) {
+    const g = this.g(scene);
+    // drawn pointing right; the renderer flips it for a left-hand wall
+    g.fillStyle(0xffffff, 0.95);
+    g.fillTriangle(34, 32, 6, 6, 6, 58);
+    g.fillTriangle(58, 32, 30, 6, 30, 58);
+    g.generateTexture('glyphFlip', 64, 64);
     g.destroy();
   },
 

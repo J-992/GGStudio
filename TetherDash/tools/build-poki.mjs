@@ -9,9 +9,9 @@
  *
  * Concatenation, not bundling, and deliberately so: a tree-shaking bundler
  * drops top-level declarations nothing appears to reference, which for classic
- * scripts means `LEVELS` and `CFG` silently vanish from the output and the game
+ * scripts means `PIECES` and `CFG` silently vanish from the output and the game
  * dies on Poki instead of here. The saving would be ~60 KB against a 1.2 MB
- * Phaser, which is not worth a build that can eat the level data.
+ * Phaser, which is not worth a build that can eat the track catalogue.
  *
  * Two things must be true of the output or Poki's technical review ends the
  * submission -- no request to a third-party origin, and the SDK tag present.

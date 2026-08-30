@@ -23,20 +23,27 @@ class Effects {
       tint: [0xff5c8a, 0x59d98c, 0x53c8d6, 0xffd35c, 0x9b7bff]
     }).setDepth(200);
 
-    this.rescueSparks = scene.add.particles(0, 0, 'spark', {
-      speed: { min: 40, max: 140 }, scale: { start: 1.3, end: 0 },
-      lifespan: 500, emitting: false, tint: 0x9ef0e0
+    this.magnet = scene.add.particles(0, 0, 'spark', {
+      speed: { min: 40, max: 160 }, scale: { start: 1.3, end: 0 },
+      lifespan: 460, emitting: false, tint: 0x9ef0e0
     }).setDepth(90);
   }
 
-  landDust(player) {
-    const pr = Projection.project(player.x, player.y, player.z);
+  landDust(p) {
+    const pr = Projection.face(p.f, p.u, p.h, p.z);
     this.dust.explode(7, pr.x, pr.y);
   }
 
   coinBurst(sx, sy) { this.coins.explode(8, sx, sy); }
 
-  rescueBurst(sx, sy) { this.rescueSparks.explode(14, sx, sy); }
+  // The magnet biting the new face. Fired on every flip, so it is the clearest
+  // read the player gets that the wall is now the floor.
+  flipBurst(p) {
+    const pr = Projection.face(p.f, p.u, p.h, p.z);
+    this.magnet.explode(12, pr.x, pr.y);
+  }
+
+  reviveBurst(sx, sy) { this.magnet.explode(16, sx, sy); }
 
   winConfetti() {
     this.confetti.emitting = true;

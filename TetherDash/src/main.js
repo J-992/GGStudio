@@ -6,14 +6,14 @@ function startGame() {
     parent: 'game',
     width: CFG.GAME_W,
     height: CFG.GAME_H,
-    backgroundColor: '#8ecdf4',
+    backgroundColor: '#0b1026',
     scale: {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH
     },
     render: { antialias: true },
-    input: { activePointers: 4 },
-    scene: [BootScene, MenuScene, LevelSelectScene, GameScene]
+    input: { activePointers: 3 },
+    scene: [BootScene, MenuScene, GameScene]
   });
 }
 

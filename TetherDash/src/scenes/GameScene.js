@@ -1,92 +1,58 @@
-// The run itself: physics, tether, rescue drama, fake-3D rendering, HUD,
-// touch controls, pause and the completion panel. Everything visible is
-// re-projected every frame; the course is drawn painter's-order into one
-// Graphics object, sprites get their depth from camera distance.
+// The run itself: physics, the endless tunnel, fake-3D rendering, HUD, touch
+// controls, pause and the game-over panel.
+//
+// Everything visible is re-projected every frame. The tunnel is painted into
+// one Graphics in painter's order -- far strips first -- and every sprite is
+// one the Track already owns, positioned here and culled with setVisible. No
+// display object is created or destroyed while a run is going.
 class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
 
-  init(data) { this.levelId = (data && data.levelId) || 1; }
-
   create() {
     const W = CFG.GAME_W, H = CFG.GAME_H;
-    this.level = LEVELS[this.levelId - 1];
-    this.course = Course.build(this.level);
-    this.mode = Save.data.mode;
     this.t = 0; this.runTime = 0;
-    this.paused = false; this.finished = false; this.respawning = false;
-    this.falls = 0; this.boltsGot = 0;
-    this.critWarned = false;
-    this.lastCheckpoint = this.course.checkpoints[0];
-    this.passedCp = 0;
+    this.paused = false; this.over = false; this.dying = false;
+    this.bolts = 0; this.flips = 0;
+    this.revived = false;
+    this.milestone = 0;
+    this.hintSide = 0;
 
-    // ---- background ----
+    // ---- the void the tunnel hangs in ----
     const bg = this.add.graphics().setDepth(0);
-    bg.fillGradientStyle(CFG.SKY_TOP, CFG.SKY_TOP, CFG.SKY_BOT, CFG.SKY_BOT, 1);
-    bg.fillRect(0, 0, W, CFG.HORIZON_Y + 40);
-    bg.fillGradientStyle(0xbfe0f7, 0xbfe0f7, 0xa8cae8, 0xa8cae8, 1);
-    bg.fillRect(0, CFG.HORIZON_Y + 40, W, H - CFG.HORIZON_Y - 40);
+    bg.fillGradientStyle(CFG.VOID_TOP, CFG.VOID_TOP, CFG.VOID_BOT, CFG.VOID_BOT, 1);
+    bg.fillRect(0, 0, W, H);
 
-    // slow clouds above the horizon
-    this.skyClouds = [];
-    for (let i = 0; i < 5; i++) {
-      const c = this.add.image(Math.random() * W, 25 + Math.random() * (CFG.HORIZON_Y - 60), 'cloud' + (i % 3))
-        .setAlpha(0.65).setScale(0.5 + Math.random() * 0.6).setDepth(1);
-      c.drift = 4 + Math.random() * 8;
-      this.skyClouds.push(c);
-    }
-    // clouds streaming past far below — the "you are high up" motion cue
-    this.deepClouds = [];
-    for (let i = 0; i < 10; i++) {
-      const c = this.add.image(0, 0, 'cloud' + (i % 3)).setDepth(3).setAlpha(0.85);
-      c.wx = -30 + Math.random() * 60;
-      c.wz = 5 + Math.random() * 65;
-      c.size = 1.2 + Math.random() * 2.2;
-      this.deepClouds.push(c);
+    // Motes streaming past outside the tube. They are the only thing visible
+    // through a hole in a panel, which is what makes a hole read as a hole.
+    this.motes = [];
+    for (let i = 0; i < 30; i++) {
+      const m = this.add.image(0, 0, 'spark').setDepth(5).setTint(0x5b7bd6);
+      this.seedMote(m, 4 + Math.random() * (CFG.DRAW_DIST - 6));
+      this.motes.push(m);
     }
 
-    this.courseGfx = this.add.graphics().setDepth(10);
-    this.tetherGfx = this.add.graphics().setDepth(19);
+    this.tunnelGfx = this.add.graphics().setDepth(10);
+    this.cordGfx = this.add.graphics().setDepth(19);
 
-    // ---- world sprites ----
-    for (const b of this.course.bolts) {
-      b.spr = this.add.image(0, 0, 'bolt').setVisible(false);
-    }
-    for (const g of this.course.gears) {
-      g.spr = this.add.image(0, 0, 'gearHaz').setVisible(false);
-    }
-    for (const pad of this.course.pads) {
-      pad.spr = this.add.image(0, 0, 'padGlyph').setVisible(false);
-    }
+    // ---- track + runner ----
+    this.sprites = new SpritePool(this);
+    Track.init(this, this.sprites).reset();
 
-    this.playerA = new PlayerController(this, this.course, 'A', -0.9);
-    this.playerB = new PlayerController(this, this.course, 'B', 0.9);
-    this.shadowA = this.add.image(0, 0, 'shadow');
-    this.shadowB = this.add.image(0, 0, 'shadow');
-    // Sprites anchor at the feet: squash/stretch then compresses toward the
-    // floor instead of shrinking about the middle and lifting them off it.
+    this.player = new Runner(this);
+    this.player.reset(2);
+
+    this.shadow = this.add.image(0, 0, 'shadow').setVisible(false);
     this.animated = !!Save.meshRunners;
     this.sprH = this.animated ? CFG.SPRITE_H_MESH : CFG.SPRITE_H_PROC;
-    this.sprA = this.add.sprite(0, 0, 'runnerA').setOrigin(0.5, 1);
-    this.sprB = this.add.sprite(0, 0, 'runnerB').setOrigin(0.5, 1);
-    if (this.animated) {
-      this.sprA.play('runnerA_run');
-      this.sprB.play('runnerB_run');
-    }
+    this.spr = this.add.sprite(0, 0, 'runnerA').setOrigin(0.5, 1);
+    if (this.animated) this.spr.play('runnerA_run');
 
-    this.tether = new TetherSystem();
+    this.hint = this.add.image(0, 0, 'glyphFlip').setDepth(88).setVisible(false);
+
     this.cam = new CameraController();
-    this.cam.snapTo(this.playerA, this.playerB);
+    this.cam.snapTo(this.player);
     this.fx = new Effects(this);
-    this.im = new InputManager(this, this.mode);
-    this.aiA = new CompanionAI(this.course);
-    this.aiB = new CompanionAI(this.course);
-    this.activeId = 'A';
-    this.rescue = null;
-
-    this.youTag = this.add.text(0, 0, '▼', {
-      fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '22px', fontStyle: 'bold',
-      color: '#ffd35c', stroke: '#a06b20', strokeThickness: 4
-    }).setOrigin(0.5).setDepth(85).setVisible(this.mode === 'solo');
+    this.im = new InputManager(this);
 
     this.createHUD();
     if (this.sys.game.device.input.touch) this.createTouchControls();
@@ -95,11 +61,20 @@ class GameScene extends Phaser.Scene {
     Poki.gameplayStart();
 
     this.events.on('shutdown', () => {
-      AudioSys.stopTension();
+      AudioSys.stopRush();
       Poki.gameplayStop();
       const panel = document.getElementById('debug-panel');
       if (panel) panel.style.display = 'none';
     });
+  }
+
+  /** Park a mote at a random point outside the tube, `dz` ahead of the camera. */
+  seedMote(m, dz) {
+    const a = Math.random() * Math.PI * 2;
+    const r = CFG.TUBE_R * 1.9 + Math.random() * 9;
+    m.wx = Math.cos(a) * r;
+    m.wy = Math.sin(a) * r;
+    m.wz = dz;
   }
 
   // ------------------------------------------------------------------ HUD
@@ -108,287 +83,274 @@ class GameScene extends Phaser.Scene {
     const W = CFG.GAME_W;
     const style = {
       fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '24px', fontStyle: 'bold',
-      color: '#ffffff', stroke: '#33334d', strokeThickness: 5
+      color: '#ffffff', stroke: '#101838', strokeThickness: 5
     };
-    this.hudLevel = this.add.text(18, 14, 'LV ' + this.levelId, style).setDepth(100);
-    this.add.image(W / 2 - 44, 28, 'bolt').setScale(0.7).setDepth(100);
-    this.hudBolts = this.add.text(W / 2 - 22, 14, '0/' + this.course.bolts.length, style).setDepth(100);
-    this.hudTime = this.add.text(W - 130, 14, '0:00', style).setDepth(100);
+    this.add.image(30, 28, 'bolt').setScale(0.7).setDepth(100);
+    this.hudBolts = this.add.text(50, 14, '0', style).setDepth(100);
+
+    this.hudDist = this.add.text(W / 2, 16, '0 m', {
+      fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '38px', fontStyle: 'bold',
+      color: '#ffffff', stroke: '#101838', strokeThickness: 7
+    }).setOrigin(0.5, 0).setDepth(100);
+
+    this.hudBest = this.add.text(W - 78, 18, 'BEST ' + Save.data.best, {
+      fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '17px', fontStyle: 'bold',
+      color: '#9ec7ff', stroke: '#101838', strokeThickness: 4
+    }).setOrigin(1, 0).setDepth(100);
 
     Effects.button(this, W - 40, 30, 48, 40, 'II', () => this.showPause(),
-      { color: 0x8899aa, fontSize: 18, depth: 100 });
+      { color: 0x4a5a92, fontSize: 18, depth: 100 });
 
-    if (this.level.tip) {
-      const tip = this.add.text(W / 2, 130, this.level.tip, {
-        fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '22px', fontStyle: 'bold',
-        color: '#ffffff', stroke: '#e0537e', strokeThickness: 5,
-        align: 'center', wordWrap: { width: 640 }
+    if (!Save.data.seenTutorial) {
+      const tip = this.add.text(CFG.GAME_W / 2, 150,
+        'Hold  ←  →  into a corner\nto run up the wall', {
+        fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '26px', fontStyle: 'bold',
+        color: '#ffffff', stroke: '#e0537e', strokeThickness: 6, align: 'center'
       }).setOrigin(0.5).setDepth(100);
-      this.tweens.add({ targets: tip, alpha: 0, delay: 3400, duration: 700, onComplete: () => tip.destroy() });
+      this.tweens.add({ targets: tip, alpha: 0, delay: 4200, duration: 800, onComplete: () => tip.destroy() });
+      Save.markTutorialSeen();
     }
   }
 
   createTouchControls() {
     const H = CFG.GAME_H, W = CFG.GAME_W;
+    const t = this.im.touch;
     const mk = (x, y, glyph, scale, onDown, onUp) => {
       const btn = this.add.image(x, y, 'touchBtn').setDepth(120).setScale(scale).setInteractive();
-      if (glyph) this.add.image(x, y, glyph).setDepth(121).setScale(scale);
+      this.add.image(x, y, glyph).setDepth(121).setScale(scale);
       btn.on('pointerdown', () => { AudioSys.unlock(); onDown(); });
       btn.on('pointerup', onUp);
       btn.on('pointerout', onUp);
       return btn;
     };
-    const wire = (id, x0, mirror) => {
-      const t = this.im.touch[id];
-      const s = mirror ? -1 : 1;
-      mk(x0, H - 62, 'glyphLeft', 1, () => { t.left = true; }, () => { t.left = false; });
-      mk(x0 + s * 104, H - 62, 'glyphRight', 1, () => { t.right = true; }, () => { t.right = false; });
-      mk(x0 + s * 52, H - 160, 'glyphJump', 1.05,
-        () => { t.jumpHeld = true; t.jumpJust = true; }, () => { t.jumpHeld = false; });
-    };
-    if (this.mode === 'coop') {
-      wire('A', 66, false);
-      wire('B', W - 66, true);
-    } else {
-      wire('A', 66, false);
-      const jump = this.add.image(W - 84, H - 84, 'touchBtn').setDepth(120).setScale(1.3).setInteractive();
-      this.add.image(W - 84, H - 84, 'glyphJump').setDepth(121).setScale(1.3);
-      const t = this.im.touch.A;
-      jump.on('pointerdown', () => { AudioSys.unlock(); t.jumpHeld = true; t.jumpJust = true; });
-      jump.on('pointerup', () => { t.jumpHeld = false; });
-      jump.on('pointerout', () => { t.jumpHeld = false; });
-    }
-    if (this.mode === 'solo') {
-      Effects.button(this, W - 84, H - 190, 96, 44, 'SWAP', () => this.swapRunner(),
-        { color: 0x53a8d6, fontSize: 18, depth: 120 });
-    }
+    mk(70, H - 66, 'glyphLeft', 1.15, () => { t.left = true; }, () => { t.left = false; });
+    mk(186, H - 66, 'glyphRight', 1.15, () => { t.right = true; }, () => { t.right = false; });
+    mk(W - 88, H - 88, 'glyphJump', 1.35,
+      () => { t.jumpHeld = true; t.jumpJust = true; }, () => { t.jumpHeld = false; });
   }
 
-  // ------------------------------------------------------------------ update
+  // ------------------------------------------------------------------ loop
 
   update(time, deltaMs) {
-    if (this.paused || this.finished) return;
+    if (this.paused || this.over) return;
     const dt = Math.min(deltaMs / 1000, 0.033);
-    this.t += dt; this.runTime += dt;
-    const A = this.playerA, B = this.playerB;
+    this.t += dt;
+    const p = this.player;
 
-    if (this.im.pausePressed()) { this.showPause(); return; }
-    if (this.im.retryPressed()) { this.scene.restart({ levelId: this.levelId }); return; }
-    if (this.mode === 'solo' && this.im.swapPressed()) this.swapRunner();
-
-    const inpA = this.im.getFor('A', this.activeId) || this.aiA.getInput(A, B, this.t, dt);
-    const inpB = this.im.getFor('B', this.activeId) || this.aiB.getInput(B, A, this.t, dt);
-    A.update(dt, inpA, this.t);
-    B.update(dt, inpB, this.t);
-
-    // the companion eases off when it gets too far ahead of the human
-    if (this.mode === 'solo') {
-      const aiP = this.activeId === 'A' ? B : A;
-      const hum = this.activeId === 'A' ? A : B;
-      if (aiP.z - hum.z > CFG.tether.slackLength * 0.8) {
-        aiP.vzExtra = Math.max(aiP.vzExtra - 8 * dt, -3);
-      }
+    // Falling out is worth watching: physics and input stop, the camera and
+    // the renderer do not, so the tunnel recedes above you for a beat before
+    // the panel arrives.
+    if (this.dying) {
+      p.h -= 26 * dt;
+      p.z += p.speed * 0.4 * dt;
+      this.cam.update(dt, p);
+      this.render(dt);
+      return;
     }
 
-    this.updateRescue(dt);
-    this.tether.update(dt, A, B);
+    this.runTime += dt;
+    if (this.im.pausePressed()) { this.showPause(); return; }
+    if (this.im.retryPressed()) { this.scene.restart(); return; }
 
-    for (const g of this.course.gears) g.angle += g.speed * dt;
+    p.update(dt, this.im.get());
+    if (this.dying) return;             // the update ran him off the edge
 
-    this.collectBolts(A);
-    this.collectBolts(B);
-    this.checkCheckpoints();
+    Track.update(p.z, dt);
+    this.collectBolts();
+    this.updateHint();
+    this.checkMilestone();
 
-    if (A.z > this.course.finishZ && B.z > this.course.finishZ) { this.complete(); return; }
-
-    this.cam.update(dt, A, B, this.tether);
+    this.cam.update(dt, p);
     this.render(dt);
 
-    AudioSys.setTension(this.tether.state >= 1 ? this.tether.tension01 : 0);
-    if (this.tether.state === 3 && !this.critWarned) { AudioSys.play('warn'); this.critWarned = true; }
-    if (this.tether.state < 3) this.critWarned = false;
+    const speed01 = Phaser.Math.Clamp(
+      (p.speed - CFG.RUN_SPEED) / (CFG.SPEED_MAX - CFG.RUN_SPEED), 0, 1);
+    AudioSys.setRush(speed01);
 
-    const m = Math.floor(this.runTime / 60), s = Math.floor(this.runTime % 60);
-    this.hudTime.setText(m + ':' + (s < 10 ? '0' : '') + s);
+    this.hudDist.setText(Math.floor(p.distance) + ' m');
+    this.hudBolts.setText(String(this.bolts));
   }
 
-  swapRunner() {
-    this.activeId = this.activeId === 'A' ? 'B' : 'A';
-    AudioSys.play('swap');
+  get score() { return Math.floor(this.player.distance) + this.bolts * CFG.BOLT_SCORE; }
+
+  onFlip(p) {
+    this.flips++;
+    this.fx.flipBurst(p);
+    this.cam.shake(3, 0.12);
   }
 
-  collectBolts(p) {
-    for (const b of this.course.bolts) {
-      if (b.taken) continue;
-      if (Math.abs(b.z - p.z) < 0.9 && Math.abs(b.x - p.x) < 0.85 && Math.abs(b.y - (p.y + 0.55)) < 1.15) {
+  collectBolts() {
+    const p = this.player;
+    for (const c of Track.chunks) {
+      if (p.z < c.z0 - 2 || p.z > c.z1 + 2) continue;
+      for (const b of c.bolts) {
+        if (b.taken || b.f !== p.f) continue;
+        if (Math.abs(b.z - p.z) > 0.9) continue;
+        if (Math.abs(b.u - p.u) > 0.9) continue;
+        if (Math.abs(b.h - (p.h + 0.55)) > 1.15) continue;
         b.taken = true;
-        b.spr.setVisible(false);
-        this.boltsGot++;
+        if (b.spr) b.spr.setVisible(false);
+        this.bolts++;
         AudioSys.play('coin');
-        const pr = Projection.project(b.x, b.y, b.z);
+        const pr = Projection.face(b.f, b.u, b.h, b.z);
         this.fx.coinBurst(pr.x, pr.y);
-        this.hudBolts.setText(this.boltsGot + '/' + this.course.bolts.length);
       }
     }
   }
 
-  checkCheckpoints() {
-    const cps = this.course.checkpoints;
-    const behind = Math.min(this.playerA.z, this.playerB.z);
-    for (let i = this.passedCp + 1; i < cps.length; i++) {
-      if (behind > cps[i]) {
-        this.passedCp = i;
-        this.lastCheckpoint = cps[i];
-        AudioSys.play('checkpoint');
-        Poki.happyTime(0.4);
-        this.fx.floatText(CFG.GAME_W / 2, 200, 'CHECKPOINT!', '#9ef0e0', 34);
-      }
-    }
+  checkMilestone() {
+    const m = Math.floor(this.player.distance / 250);
+    if (m <= this.milestone) return;
+    this.milestone = m;
+    AudioSys.play('milestone');
+    Poki.happyTime(0.4);
+    this.fx.floatText(CFG.GAME_W / 2, 210, (m * 250) + ' m!', '#9ef0e0', 34);
   }
 
-  // ------------------------------------------------------------------ falling & rescue
+  // Looks ahead down the face the runner is on. If the panels run out inside a
+  // gap no jump can clear, and a neighbouring face carries on past it, a
+  // chevron points at the wall to take. This is the whole game's tutorial, and
+  // it keeps working forever because it reads the live track, not the piece id.
+  updateHint() {
+    const p = this.player;
+    const R = CFG.TUBE_R;
+    this.hintSide = 0;
+    if (!p.alive) return;
 
-  handleFall(p) {
-    if (p.state !== 'run' || this.finished || this.respawning) return;
-    const o = p === this.playerA ? this.playerB : this.playerA;
-    this.falls++;
-    if (o.state === 'run' && o.grounded && this.tether.dist <= CFG.RESCUE_MAX) {
-      p.state = 'rescued';
-      AudioSys.play('fall');
-      AudioSys.play('rescue');
-      const pr = Projection.project(o.x, o.y + 1.6, o.z);
-      this.fx.floatText(pr.x, pr.y - 20, 'SAVED!', '#9ef0e0', 34);
-      this.rescue = { p, o, k: 0, sx: p.x, sy: p.y, sz: p.z };
-      this.cam.shake(5, 0.2);
-    } else {
-      this.respawn();
+    const d = Track.distToDrop(p.f, p.u, p.z, 22);
+    if (d >= 16) return;
+
+    const reach = 2 * CFG.JUMP_VEL / CFG.GRAVITY * p.speed;
+    for (let s = d + 0.5; s <= d + reach * 0.85; s += 0.5) {
+      if (Track.groundAt(p.f, p.u, p.z + s, 0)) return;   // just a jump, not a wall
     }
+    const probe = p.z + d + 3;
+    if (Track.groundAt((p.f + 1) % 4, -R + 0.6, probe)) this.hintSide = 1;
+    else if (Track.groundAt((p.f + 3) % 4, R - 0.6, probe)) this.hintSide = -1;
   }
 
-  updateRescue(dt) {
-    const r = this.rescue;
-    if (!r) return;
-    r.k = Math.min(1, r.k + dt / CFG.RESCUE_TIME);
-    const e = r.k * r.k * (3 - 2 * r.k);   // smoothstep
-    const side = Math.sign(r.sx - r.o.x) || (r.p.id === 'A' ? -1 : 1);
-    const tx = r.o.x + side * 1.15;
-    const tz = r.o.z - 0.7;
-    r.p.x = r.sx + (tx - r.sx) * e;
-    r.p.z = r.sz + (tz - r.sz) * e;
-    // swing: sink along the cord, then whip up over the edge
-    r.p.y = r.sy * (1 - e) * (1 - e) + Math.sin(e * Math.PI) * 1.4 * e;
-    if (r.k >= 1) {
-      r.p.state = 'run';
-      r.p.y = 0.6; r.p.vy = 2; r.p.vx = 0; r.p.vzExtra = 0;
-      r.p.grounded = false;
-      const pr = Projection.project(r.p.x, r.p.y, r.p.z);
-      this.fx.rescueBurst(pr.x, pr.y);
-      this.rescue = null;
-    }
-  }
+  // ------------------------------------------------------------ falling out
 
-  respawn() {
-    if (this.respawning) return;
-    this.respawning = true;
-    this.rescue = null;
+  handleFall() {
+    if (this.dying || this.over) return;
+    this.dying = true;
+    this.hintSide = 0;
+    this.hint.setVisible(false);
+    this.player.alive = false;
     AudioSys.play('fall');
-    const cover = this.add.rectangle(CFG.GAME_W / 2, CFG.GAME_H / 2, CFG.GAME_W, CFG.GAME_H, 0x33334d)
-      .setDepth(180).setAlpha(0);
-    this.tweens.add({
-      targets: cover, alpha: 1, duration: CFG.RESPAWN_FADE * 500, yoyo: true,
-      onYoyo: () => {
-        this.playerA.respawnAt(this.lastCheckpoint);
-        this.playerB.respawnAt(this.lastCheckpoint);
-        this.cam.snapTo(this.playerA, this.playerB);
-      },
-      onComplete: () => { cover.destroy(); this.respawning = false; }
-    });
+    AudioSys.stopRush();
+    this.cam.shake(9, 0.3);
+    this.time.delayedCall(650, () => { this.over = true; this.gameOver(); });
   }
 
-  // ------------------------------------------------------------------ finish
-
-  complete() {
-    this.finished = true;
-    AudioSys.stopTension();
-    AudioSys.play('win');
-    this.fx.winConfetti();
-    // The run is over: gameplay stops here, not when the scene changes, so the
-    // results panel is never counted as play time and never eats an ad.
+  gameOver() {
+    const score = this.score;
+    const dist = Math.floor(this.player.distance);
+    const beat = Save.recordRun(score, dist, this.bolts);
     Poki.gameplayStop();
-    Poki.happyTime(1);
-
-    // synchronized victory hops on the frozen frame
-    [this.sprA, this.sprB].forEach((spr, i) => {
-      this.tweens.add({
-        targets: spr, y: spr.y - 26, duration: 320, yoyo: true, repeat: -1,
-        ease: 'Quad.easeOut', delay: i * 160
-      });
-    });
-
-    const total = this.course.bolts.length;
-    let stars = 1;
-    const boltsOK = total > 0 && this.boltsGot >= Math.ceil(total * CFG.BOLT_STAR_RATIO);
-    if (boltsOK) stars++;
-    const cleanOK = this.falls === 0 || this.runTime <= this.course.targetTime;
-    if (cleanOK) stars++;
-    Save.recordResult(this.levelId, stars, this.boltsGot, this.runTime);
+    AudioSys.play(beat ? 'best' : 'gameover');
+    if (beat) { this.fx.winConfetti(); Poki.happyTime(1); }
 
     const W = CFG.GAME_W, H = CFG.GAME_H;
-    this.add.rectangle(W / 2, H / 2, W, H, 0x33334d, 0.45).setDepth(190);
+    const dim = this.add.rectangle(W / 2, H / 2, W, H, 0x101838, 0.55).setDepth(190);
     const panel = this.add.container(W / 2, H / 2).setDepth(200);
+    this.overItems = [dim, panel];
     const g = this.add.graphics();
-    g.fillStyle(0x33334d, 0.3); g.fillRoundedRect(-235, -164, 470, 340, 26);
+    g.fillStyle(0x101838, 0.35); g.fillRoundedRect(-235, -164, 470, 340, 26);
     g.fillStyle(0xffffff, 1); g.fillRoundedRect(-240, -170, 470, 340, 26);
-    g.lineStyle(5, 0xf2aac6, 1); g.strokeRoundedRect(-240, -170, 470, 340, 26);
+    g.lineStyle(5, beat ? 0xffd35c : 0xf2aac6, 1); g.strokeRoundedRect(-240, -170, 470, 340, 26);
     panel.add(g);
-    panel.add(this.add.text(-5, -128, 'LEVEL COMPLETE!', {
-      fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '34px', fontStyle: 'bold', color: '#e0537e'
+
+    panel.add(this.add.text(-5, -132, beat ? 'NEW BEST!' : 'RUN OVER', {
+      fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '36px', fontStyle: 'bold',
+      color: beat ? '#e8a300' : '#e0537e'
     }).setOrigin(0.5));
 
-    for (let i = 0; i < 3; i++) {
-      const star = this.add.text(-5 + (i - 1) * 78, -62, '★', {
-        fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '64px',
-        color: i < stars ? '#ffd35c' : '#d8dde4'
-      }).setOrigin(0.5);
-      panel.add(star);
-      if (i < stars) {
-        star.setScale(0);
-        this.tweens.add({
-          targets: star, scale: 1, delay: 350 + i * 250, duration: 300, ease: 'Back.easeOut',
-          onStart: () => AudioSys.play('coin')
-        });
-      }
-    }
-
-    const m = Math.floor(this.runTime / 60), s = Math.floor(this.runTime % 60);
-    panel.add(this.add.text(-5, 6,
-      'Time  ' + m + ':' + (s < 10 ? '0' : '') + s + '        Bolts  ' + this.boltsGot + '/' + total, {
-      fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '24px', fontStyle: 'bold', color: '#4a6a8a'
+    panel.add(this.add.text(-5, -74, String(score), {
+      fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '58px', fontStyle: 'bold',
+      color: '#33406b'
     }).setOrigin(0.5));
 
-    const next = this.levelId < LEVELS.length;
-    if (next) {
-      panel.add(Effects.button(this, -5, 76, 210, 56, 'NEXT →',
-        () => Poki.startLevel(this, this.levelId + 1), { fontSize: 26, depth: 0 }));
+    panel.add(this.add.text(-5, -22,
+      dist + ' m      ' + this.bolts + ' bolts      ' + this.flips + ' flips', {
+      fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '21px', fontStyle: 'bold',
+      color: '#4a6a8a'
+    }).setOrigin(0.5));
+
+    // One revive per run, and only where an ad can actually be shown. Off
+    // platform the button is simply not there rather than being a dead end.
+    const canRevive = !this.revived && Poki.ready;
+    if (canRevive) {
+      panel.add(Effects.button(this, -5, 34, 300, 54, '▶  KEEP RUNNING',
+        () => this.tryRevive(), { color: 0x53a8d6, fontSize: 22, depth: 0 }));
     }
-    panel.add(Effects.button(this, next ? -120 : -5, next ? 138 : 90, 150, 46, 'REPLAY',
-      () => Poki.startLevel(this, this.levelId), { color: 0x53a8d6, fontSize: 20, depth: 0 }));
-    panel.add(Effects.button(this, next ? 112 : -5, next ? 138 : 145, 150, 46, 'MENU',
+    const y = canRevive ? 104 : 54;
+    panel.add(Effects.button(this, canRevive ? -85 : -5, y, canRevive ? 180 : 240, 54,
+      'RETRY', () => Poki.startRun(this), { fontSize: 24, depth: 0 }));
+    panel.add(Effects.button(this, canRevive ? 110 : -5, canRevive ? y : y + 66,
+      canRevive ? 150 : 240, canRevive ? 54 : 48, 'MENU',
       () => this.scene.start('Menu'), { color: 0x8899aa, fontSize: 20, depth: 0 }));
 
     panel.setScale(0.4).setAlpha(0);
     this.tweens.add({ targets: panel, scale: 1, alpha: 1, duration: 360, ease: 'Back.easeOut' });
+    this.overPanel = panel;
   }
 
+  tryRevive(panel) {
+    Poki.rewardedBreak().then((watched) => {
+      if (!watched) return;
+      this.revived = true;
+      panel.destroy();
+      this.children.list
+        .filter((o) => o.depth === 190 || o.depth === 200)
+        .forEach((o) => o.destroy());
+      this.resumeAfterRevive();
+    });
+  }
+
+  resumeAfterRevive() {
+    const p = this.player;
+    const spot = this.findSafeSpot(p.distance - CFG.REVIVE_BACK);
+    p.reset(spot.z);
+    p.f = spot.f;
+    p.distance = Math.max(spot.z, p.distance);   // keep the speed you earned
+    p.roll = -Math.PI / 2 * spot.f;
+    p.stun = 0;
+    this.cam.snapTo(p);
+    this.over = false;
+    this.dying = false;
+    AudioSys.play('revive');
+    const pr = Projection.face(p.f, p.u, p.h, p.z);
+    this.fx.reviveBurst(pr.x, pr.y);
+    this.im.clear();
+    Poki.gameplayStart();
+  }
+
+  /** The nearest z at or behind `from` with a panel under u = 0, and its face. */
+  findSafeSpot(from) {
+    for (let z = from; z > from - 40; z -= 1) {
+      for (let f = 0; f < 4; f++) {
+        if (Track.groundAt(f, 0, z, 0)) return { z, f };
+      }
+    }
+    // Nothing behind survived the recycler: weld a fresh straight on the front.
+    const c = Track._spawn(PIECES[0]);
+    return { z: c.z0 + 2, f: 0 };
+  }
+
+  // ------------------------------------------------------------------ pause
+
   showPause() {
+    if (this.over) return;
     this.paused = true;
-    AudioSys.setTension(0);
+    AudioSys.setRush(0);
+    this.im.clear();
     // A pause is not play time, and Poki wants the pair around it: the session
     // ends here and a fresh one starts on RESUME.
     Poki.gameplayStop();
     const W = CFG.GAME_W, H = CFG.GAME_H;
     const items = [];
-    items.push(this.add.rectangle(W / 2, H / 2, W, H, 0x33334d, 0.55).setDepth(190).setInteractive());
+    items.push(this.add.rectangle(W / 2, H / 2, W, H, 0x101838, 0.6).setDepth(190).setInteractive());
     items.push(this.add.text(W / 2, H / 2 - 110, 'PAUSED', {
       fontFamily: 'Nunito, "Trebuchet MS", sans-serif', fontSize: '44px', fontStyle: 'bold',
       color: '#ffffff', stroke: '#e0537e', strokeThickness: 8
@@ -396,314 +358,229 @@ class GameScene extends Phaser.Scene {
     const close = () => {
       items.forEach((o) => o.destroy());
       this.paused = false;
-      // ...unless the run is already over: the results panel is not gameplay,
-      // and the pause button is still reachable behind it.
-      if (!this.finished) Poki.gameplayStart();
+      this.im.clear();
+      if (!this.over) Poki.gameplayStart();
     };
     items.push(Effects.button(this, W / 2, H / 2 - 30, 240, 56, 'RESUME', close, { depth: 191 }));
-    items.push(Effects.button(this, W / 2, H / 2 + 42, 240, 52, 'RETRY',
-      () => this.scene.restart({ levelId: this.levelId }), { color: 0x53a8d6, fontSize: 22, depth: 191 }));
+    items.push(Effects.button(this, W / 2, H / 2 + 42, 240, 52, 'RESTART',
+      () => this.scene.restart(), { color: 0x53a8d6, fontSize: 22, depth: 191 }));
     items.push(Effects.button(this, W / 2, H / 2 + 110, 240, 52, 'MENU',
       () => this.scene.start('Menu'), { color: 0x8899aa, fontSize: 22, depth: 191 }));
     this.input.keyboard.once('keydown-ESC', close);
   }
 
-  // ------------------------------------------------------------------ rendering
+  // -------------------------------------------------------------- rendering
 
   render(dt) {
-    this.drawBackground(dt);
-    this.drawCourse();
-    this.placeSprites();
-    this.drawTether();
+    this.drawMotes(dt);
+    this.drawTunnel();
+    this.placeEntities();
+    this.placePlayer();
+    this.drawCord();
+    this.drawHint();
     if (this.debugReadout) this.updateDebug();
   }
 
-  drawBackground(dt) {
-    for (const c of this.skyClouds) {
-      c.x += c.drift * dt;
-      if (c.x > CFG.GAME_W + 80) c.x = -80;
-    }
-    const speed = (this.playerA.vzTotal + this.playerB.vzTotal) / 2;
-    for (const c of this.deepClouds) {
-      c.wz -= speed * dt;
-      if (c.wz < 3) { c.wz = 60 + Math.random() * 10; c.wx = -30 + Math.random() * 60; }
-      const pr = Projection.project(c.wx + Projection.cam.x * 0.6, -7.5, Projection.cam.z + c.wz);
-      c.setPosition(pr.x, pr.y).setScale(pr.s * c.size * 0.02);
-      c.setAlpha(0.85 * (1 - Projection.fog(pr.dz) * 0.8));
+  drawMotes(dt) {
+    const speed = this.player.speed;
+    for (const m of this.motes) {
+      m.wz -= speed * dt;
+      if (m.wz < 2.5) this.seedMote(m, CFG.DRAW_DIST - 4);
+      const pr = Projection.project(m.wx, m.wy, Projection.cam.z + m.wz);
+      m.setPosition(pr.x, pr.y).setScale(Math.max(0.25, pr.s * 0.02));
+      m.setAlpha(0.5 * (1 - Projection.fog(pr.dz)));
     }
   }
 
-  drawCourse() {
-    const g = this.courseGfx;
+  // One Graphics, painter's order. Panels are cut into fixed-length strips so
+  // the two-tone banding scrolls past at a constant rate however long a piece
+  // is, and so a strip's depth is a good enough sort key for a convex tube.
+  drawTunnel() {
+    const g = this.tunnelGfx;
     g.clear();
-    const course = this.course;
     const camZ = Projection.cam.z;
     const zNear = camZ + CFG.NEAR, zFar = camZ + CFG.DRAW_DIST;
-    const items = [];
+    const items = this._items || (this._items = []);
+    items.length = 0;
 
-    for (const p of course.platforms) {
-      const z0 = Math.max(p.z0, zNear), z1 = Math.min(p.z1, zFar);
-      if (z1 <= z0 + 0.01) continue;
-      let s0 = z0;
-      for (let b = Math.ceil(z0 / 3) * 3; b < z1; b += 3) {
-        items.push({ z: s0, kind: 'strip', p, s0, s1: b });
-        s0 = b;
+    for (const c of Track.chunks) {
+      if (c.z1 < zNear || c.z0 > zFar) continue;
+      for (const p of c.panels) {
+        const z0 = Math.max(p.z0, zNear), z1 = Math.min(p.z1, zFar);
+        if (z1 <= z0 + 0.01) continue;
+        let s0 = z0;
+        for (let b = Math.ceil(z0 / CFG.STRIP) * CFG.STRIP; b < z1; b += CFG.STRIP) {
+          items.push({ z: s0, kind: 0, p, s0, s1: b });
+          s0 = b;
+        }
+        items.push({ z: s0, kind: 0, p, s0, s1: z1 });
+        // the panel's own thickness at its near end -- what makes a hole
+        // look like an edge you can fall off rather than a change of paint
+        if (p.z0 > zNear) items.push({ z: p.z0 - 0.01, kind: 1, p });
       }
-      items.push({ z: s0, kind: 'strip', p, s0, s1: z1 });
-      if (p.z0 > zNear) items.push({ z: p.z0 - 0.01, kind: 'face', p });
-    }
-    for (const b of course.blocks) {
-      if (b.z0 < zFar && b.z1 > zNear) items.push({ z: Math.max(b.z0, zNear), kind: 'block', b });
-    }
-    for (const pad of course.pads) {
-      if (Projection.inView(pad.z)) items.push({ z: pad.z, kind: 'pad', pad });
-    }
-    course.checkpoints.forEach((cz, i) => {
-      if (i > 0 && Projection.inView(cz)) items.push({ z: cz, kind: 'arch', cz, passed: i <= this.passedCp });
-    });
-    if (course.finishZ < zFar && course.finishZ > zNear) {
-      items.push({ z: course.finishZ, kind: 'finish', cz: course.finishZ });
+      for (const pad of c.pads) {
+        if (Projection.inView(pad.z)) items.push({ z: pad.z, kind: 2, pad });
+      }
     }
 
     items.sort((a, b) => b.z - a.z);
     for (const it of items) {
-      if (it.kind === 'strip') this.drawStrip(g, it.p, it.s0, it.s1);
-      else if (it.kind === 'face') this.drawFace(g, it.p);
-      else if (it.kind === 'block') this.drawBlock(g, it.b);
-      else if (it.kind === 'pad') this.drawPad(g, it.pad);
-      else if (it.kind === 'arch') this.drawArch(g, it.cz, it.passed);
-      else if (it.kind === 'finish') this.drawFinish(g, it.cz);
+      if (it.kind === 0) this.drawStrip(g, it.p, it.s0, it.s1);
+      else if (it.kind === 1) this.drawLip(g, it.p);
+      else this.drawPad(g, it.pad);
     }
   }
 
   drawStrip(g, p, s0, s1) {
-    const c = this.course;
-    const n = c.platformAt(p, s0, this.t);
-    const f = c.platformAt(p, s1, this.t);
-    const pn1 = Projection.project(n.c - n.w / 2, 0, s0);
-    const pn2 = Projection.project(n.c + n.w / 2, 0, s0);
-    const pf1 = Projection.project(f.c - f.w / 2, 0, s1);
-    const pf2 = Projection.project(f.c + f.w / 2, 0, s1);
-    const fog = Projection.fog((pn1.dz + pf1.dz) / 2);
-    const conveyor = p.kind === 'conveyor';
-    const even = Math.floor(s0 / 3) % 2 === 0;
-    // conveyor stripes scroll with the belt direction
-    const shift = conveyor ? Math.floor(this.t * p.conv * 3) % 2 === 0 : even;
-    const base = conveyor ? (shift ? CFG.CONV_A : CFG.CONV_B) : (even ? CFG.FLOOR_A : CFG.FLOOR_B);
+    const f = p.f;
+    const n1 = Projection.face(f, p.u0, 0, s0);
+    const n2 = Projection.face(f, p.u1, 0, s0);
+    const f1 = Projection.face(f, p.u0, 0, s1);
+    const f2 = Projection.face(f, p.u1, 0, s1);
+    const fog = Projection.fog((n1.dz + f1.dz) / 2);
+    const even = Math.floor(s0 / CFG.STRIP) % 2 === 0;
+    const base = p.ring ? (even ? CFG.RING_A : CFG.RING_B)
+      : (even ? CFG.FACE_A[f] : CFG.FACE_B[f]);
     g.fillStyle(Projection.fogColor(base, fog), 1);
     g.beginPath();
-    g.moveTo(pf1.x, pf1.y); g.lineTo(pf2.x, pf2.y);
-    g.lineTo(pn2.x, pn2.y); g.lineTo(pn1.x, pn1.y);
+    g.moveTo(f1.x, f1.y); g.lineTo(f2.x, f2.y);
+    g.lineTo(n2.x, n2.y); g.lineTo(n1.x, n1.y);
     g.closePath(); g.fillPath();
-    // side edges — the depth cue that makes ledges readable
-    const edge = Projection.fogColor(conveyor ? CFG.CONV_EDGE : CFG.FLOOR_EDGE, fog);
-    g.lineStyle(Math.max(1.5, pn1.s * 0.06), edge, 0.9);
-    g.beginPath(); g.moveTo(pf1.x, pf1.y); g.lineTo(pn1.x, pn1.y); g.strokePath();
-    g.beginPath(); g.moveTo(pf2.x, pf2.y); g.lineTo(pn2.x, pn2.y); g.strokePath();
+    // The two long edges: the depth cue that makes the corner of a face --
+    // the thing you have to walk off to flip -- readable at speed.
+    const edge = Projection.fogColor(p.ring ? CFG.RING_EDGE : CFG.FACE_EDGE[f], fog);
+    g.lineStyle(Math.max(1.5, n1.s * 0.05), edge, 0.9);
+    g.beginPath(); g.moveTo(f1.x, f1.y); g.lineTo(n1.x, n1.y); g.strokePath();
+    g.beginPath(); g.moveTo(f2.x, f2.y); g.lineTo(n2.x, n2.y); g.strokePath();
   }
 
-  drawFace(g, p) {
-    const c = this.course;
-    const n = c.platformAt(p, p.z0, this.t);
-    const t1 = Projection.project(n.c - n.w / 2, 0, p.z0);
-    const t2 = Projection.project(n.c + n.w / 2, 0, p.z0);
-    const b1 = Projection.project(n.c - n.w / 2, -1.1, p.z0);
-    const b2 = Projection.project(n.c + n.w / 2, -1.1, p.z0);
+  drawLip(g, p) {
+    const f = p.f, z = p.z0;
+    const t1 = Projection.face(f, p.u0, 0, z);
+    const t2 = Projection.face(f, p.u1, 0, z);
+    const b1 = Projection.face(f, p.u0, -0.6, z);
+    const b2 = Projection.face(f, p.u1, -0.6, z);
     const fog = Projection.fog(t1.dz);
-    g.fillStyle(Projection.fogColor(CFG.FLOOR_SIDE, fog), 1);
+    g.fillStyle(Projection.fogColor(CFG.PANEL_LIP, fog), 1);
     g.beginPath();
     g.moveTo(t1.x, t1.y); g.lineTo(t2.x, t2.y);
     g.lineTo(b2.x, b2.y); g.lineTo(b1.x, b1.y);
     g.closePath(); g.fillPath();
   }
 
-  drawBlock(g, b) {
-    const zc = Math.max(b.z0, Projection.cam.z + CFG.NEAR);
-    const fog = Projection.fog(zc - Projection.cam.z);
-    // top face first (behind), then front face
-    const ft1 = Projection.project(b.c - b.w / 2, b.h, b.z1);
-    const ft2 = Projection.project(b.c + b.w / 2, b.h, b.z1);
-    const nt1 = Projection.project(b.c - b.w / 2, b.h, zc);
-    const nt2 = Projection.project(b.c + b.w / 2, b.h, zc);
-    g.fillStyle(Projection.fogColor(0x9d91f5, fog), 1);
-    g.beginPath();
-    g.moveTo(ft1.x, ft1.y); g.lineTo(ft2.x, ft2.y);
-    g.lineTo(nt2.x, nt2.y); g.lineTo(nt1.x, nt1.y);
-    g.closePath(); g.fillPath();
-    const nb1 = Projection.project(b.c - b.w / 2, 0, zc);
-    const nb2 = Projection.project(b.c + b.w / 2, 0, zc);
-    g.fillStyle(Projection.fogColor(CFG.WALL_COLOR, fog), 1);
-    g.beginPath();
-    g.moveTo(nt1.x, nt1.y); g.lineTo(nt2.x, nt2.y);
-    g.lineTo(nb2.x, nb2.y); g.lineTo(nb1.x, nb1.y);
-    g.closePath(); g.fillPath();
-    g.lineStyle(2, Projection.fogColor(CFG.WALL_EDGE, fog), 1);
-    g.strokeRect(Math.min(nt1.x, nt2.x), Math.min(nt1.y, nb1.y),
-      Math.abs(nt2.x - nt1.x), Math.abs(nb1.y - nt1.y));
-  }
-
   drawPad(g, pad) {
-    const pr = Projection.project(pad.c, 0.02, pad.z);
+    const pr = Projection.face(pad.f, pad.u, 0.02, pad.z);
     const fog = Projection.fog(pr.dz);
     const pulse = 0.75 + Math.sin(this.t * 5) * 0.25;
     g.fillStyle(Projection.fogColor(CFG.PAD_COLOR, fog), 1);
     g.fillEllipse(pr.x, pr.y, pad.r * 2 * pr.s, pad.r * 2 * pr.s * 0.42);
-    g.fillStyle(0xffffff, 0.5 * pulse);
+    g.fillStyle(0xffffff, 0.5 * pulse * (1 - fog));
     g.fillEllipse(pr.x, pr.y, pad.r * 1.3 * pr.s, pad.r * 1.3 * pr.s * 0.42);
-    pad.spr.setVisible(true).setPosition(pr.x, pr.y - 0.55 * pr.s - Math.sin(this.t * 5) * 4)
-      .setScale(pr.s * 0.012).setAlpha(1 - fog);
   }
 
-  drawArch(g, cz, passed) {
-    const color = passed ? 0xffd35c : 0x59d98c;
-    const fog = Projection.fog(cz - Projection.cam.z);
-    const col = Projection.fogColor(color, fog);
-    for (const px of [-3.6, 3.6]) {
-      const top = Projection.project(px, 3, cz);
-      const bot = Projection.project(px, 0, cz);
-      g.lineStyle(Math.max(2, top.s * 0.22), col, 1);
-      g.beginPath(); g.moveTo(bot.x, bot.y); g.lineTo(top.x, top.y); g.strokePath();
-    }
-    const l = Projection.project(-3.6, 3, cz);
-    const r = Projection.project(3.6, 3, cz);
-    g.lineStyle(Math.max(3, l.s * 0.3), col, 1);
-    g.beginPath(); g.moveTo(l.x, l.y); g.lineTo(r.x, r.y); g.strokePath();
-  }
-
-  drawFinish(g, cz) {
-    for (let i = 0; i < 14; i++) {
-      const x0 = -3.5 + i * 0.5;
-      for (let row = 0; row < 2; row++) {
-        const z0 = cz + row * 0.45;
-        const a = Projection.project(x0, 0.01, z0);
-        const b = Projection.project(x0 + 0.5, 0.01, z0);
-        const c2 = Projection.project(x0 + 0.5, 0.01, z0 + 0.45);
-        const d = Projection.project(x0, 0.01, z0 + 0.45);
-        g.fillStyle((i + row) % 2 === 0 ? 0x33334d : 0xffffff, 1);
-        g.beginPath();
-        g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(c2.x, c2.y); g.lineTo(d.x, d.y);
-        g.closePath(); g.fillPath();
+  placeEntities() {
+    const t = this.t;
+    for (const c of Track.chunks) {
+      for (const b of c.bolts) {
+        if (!b.spr) continue;
+        if (b.taken || !Projection.inView(b.z)) { b.spr.setVisible(false); continue; }
+        const pr = Projection.face(b.f, b.u, b.h + Math.sin(t * 3 + b.z) * 0.12, b.z);
+        b.spr.setVisible(true).setPosition(pr.x, pr.y)
+          .setScale(pr.s * 0.5 / 44)
+          .setDepth(20 + Math.max(0, CFG.DRAW_DIST - pr.dz))
+          .setAlpha(1 - Projection.fog(pr.dz));
+        b.spr.rotation = t * 1.5;
+      }
+      for (const h of c.hazards) {
+        if (!h.spr) continue;
+        if (!Projection.inView(h.z)) { h.spr.setVisible(false); continue; }
+        const pr = Projection.face(h.f, h.u, h.r * 0.62, h.z);
+        const px = h.kind === 'block' ? 120 : 160;
+        h.spr.setVisible(true).setPosition(pr.x, pr.y)
+          .setScale(pr.s * h.r * 2 / px)
+          .setDepth(20 + Math.max(0, CFG.DRAW_DIST - pr.dz))
+          .setAlpha(1 - Projection.fog(pr.dz));
+        h.spr.rotation = h.kind === 'gear' ? h.angle : 0;
+      }
+      for (const pad of c.pads) {
+        if (!pad.spr) continue;
+        if (!Projection.inView(pad.z)) { pad.spr.setVisible(false); continue; }
+        const pr = Projection.face(pad.f, pad.u, 0.02, pad.z);
+        const fog = Projection.fog(pr.dz);
+        pad.spr.setVisible(true)
+          .setPosition(pr.x, pr.y - 0.5 * pr.s - Math.sin(t * 5) * 4)
+          .setScale(pr.s * 0.012)
+          .setDepth(20 + Math.max(0, CFG.DRAW_DIST - pr.dz))
+          .setAlpha(1 - fog);
       }
     }
   }
 
-  placeSprites() {
-    for (const b of this.course.bolts) {
-      if (b.taken || !Projection.inView(b.z)) { b.spr.setVisible(false); continue; }
-      const pr = Projection.project(b.x, b.y + Math.sin(this.t * 3 + b.z) * 0.12, b.z);
-      b.spr.setVisible(true).setPosition(pr.x, pr.y)
-        .setScale(pr.s * 0.5 / 44).setDepth(20 + Math.max(0, CFG.DRAW_DIST - pr.dz))
-        .setAlpha(1 - Projection.fog(pr.dz));
-      b.spr.rotation = this.t * 1.5;
-    }
-    for (const gear of this.course.gears) {
-      if (!Projection.inView(gear.z)) { gear.spr.setVisible(false); continue; }
-      const pr = Projection.project(gear.c, gear.r * 0.62, gear.z);
-      gear.spr.setVisible(true).setPosition(pr.x, pr.y)
-        .setScale(pr.s * gear.r * 2 / 160).setDepth(20 + Math.max(0, CFG.DRAW_DIST - pr.dz))
-        .setAlpha(1 - Projection.fog(pr.dz));
-      gear.spr.rotation = gear.angle;
-    }
-    for (const pad of this.course.pads) {
-      if (!Projection.inView(pad.z)) pad.spr.setVisible(false);
-    }
-    this.placePlayer(this.playerA, this.sprA, this.shadowA);
-    this.placePlayer(this.playerB, this.sprB, this.shadowB);
-
-    if (this.mode === 'solo') {
-      const p = this.activeId === 'A' ? this.playerA : this.playerB;
-      const pr = Projection.project(p.x, p.y + 1.5, p.z);
-      this.youTag.setPosition(pr.x, pr.y - 8 + Math.sin(this.t * 6) * 3);
-      this.youTag.setDepth(85);
-    }
-  }
-
-  placePlayer(p, spr, shadow) {
-    // Anchored at the feet, so the projection point is the player's own
-    // ground position and the image rises from there.
-    const pr = Projection.project(p.x, p.y, p.z);
+  placePlayer() {
+    const p = this.player;
+    const pr = Projection.face(p.f, p.u, p.h, p.z);
+    const spr = this.spr;
     const base = this.sprH * pr.s / spr.height;
     spr.setPosition(pr.x, pr.y);
     spr.setScale(base * (1 + p.squash * 0.7), base * (1 - p.squash));
-    spr.rotation = Phaser.Math.Clamp(p.vx * 0.035, -0.3, 0.3);
-    spr.setDepth(p.y < -0.6 ? 8 : 20 + Math.max(0, CFG.DRAW_DIST - pr.dz));
+    spr.rotation = Phaser.Math.Clamp(p.vu * 0.035, -0.3, 0.3);
+    spr.setDepth(p.h < -0.6 ? 8 : 20 + Math.max(0, CFG.DRAW_DIST - pr.dz));
     spr.setAlpha(p.stun > 0 ? (Math.floor(this.t * 18) % 2 === 0 ? 0.45 : 1) : 1);
-    spr.setVisible(true);
 
-    // The run cycle keeps pace with how fast this runner is actually moving,
+    // The run cycle keeps pace with how fast the runner is actually moving,
     // and holds one pose in the air -- a walk cycle mid-jump reads as a bug.
     if (this.animated) {
-      if (p.grounded && p.state === 'run') {
-        if (!spr.anims.isPlaying) spr.anims.play(spr.texture.key + '_run', true);
-        spr.anims.timeScale = Phaser.Math.Clamp(
-          p.vzTotal / (CFG.RUN_SPEED * this.level.speed), 0.35, 2.2);
+      if (p.grounded && p.alive) {
+        if (!spr.anims.isPlaying) spr.anims.play('runnerA_run', true);
+        spr.anims.timeScale = Phaser.Math.Clamp(p.speed / CFG.RUN_SPEED, 0.35, 2.2);
       } else if (spr.anims.isPlaying) {
         spr.anims.stop();
         spr.setFrame(CFG.RUNNER_JUMP_FRAME);
       }
     }
 
-    const ground = this.course.groundAt(p.x, p.z, this.t);
-    if (ground && p.y > -0.3) {
-      const sh = Projection.project(p.x, 0, p.z);
-      shadow.setVisible(true).setPosition(sh.x, sh.y)
-        .setScale(sh.s * 0.014 * Math.max(0.4, 1 - p.y * 0.18))
-        .setAlpha(0.5 * Math.max(0.25, 1 - p.y * 0.25))
+    if (p.h > -0.3 && Track.groundAt(p.f, p.u, p.z)) {
+      const sh = Projection.face(p.f, p.u, 0, p.z);
+      this.shadow.setVisible(true).setPosition(sh.x, sh.y)
+        .setScale(sh.s * 0.014 * Math.max(0.4, 1 - p.h * 0.18))
+        .setAlpha(0.5 * Math.max(0.25, 1 - p.h * 0.25))
         .setDepth(spr.depth - 1);
     } else {
-      shadow.setVisible(false);
+      this.shadow.setVisible(false);
     }
   }
 
-  drawTether() {
-    const g = this.tetherGfx;
+  // The magnetic tether: a line from the runner to the tunnel's axis. It is
+  // what holds him to whatever face he is on, and watching it swing round the
+  // tube is the clearest read of which way is currently down.
+  drawCord() {
+    const g = this.cordGfx;
     g.clear();
-    const A = this.playerA, B = this.playerB;
-    const p1 = Projection.project(A.x, A.y + 0.72, A.z);
-    const p2 = Projection.project(B.x, B.y + 0.72, B.z);
-    const st = this.tether.state;
-    const colors = [CFG.TETHER_SLACK, CFG.TETHER_TENSE, CFG.TETHER_HIGH, CFG.TETHER_CRIT];
-    const t01 = this.tether.tension01;
-    const avgS = (p1.s + p2.s) / 2;
-    const sagPx = 1.15 * Math.pow(1 - t01, 1.5) * avgS;
-    let mx = (p1.x + p2.x) / 2;
-    let my = (p1.y + p2.y) / 2 + sagPx;
-    if (st === 3) {   // critical: the cord trembles
-      mx += (Math.random() * 2 - 1) * 2.5;
-      my += (Math.random() * 2 - 1) * 2.5;
-    }
-    const lw = Math.max(2, (5.5 - t01 * 2.8) * avgS / 80);
-    if (st >= 2) {   // glow pass
-      g.lineStyle(lw * 2.6, colors[st], 0.25);
-      this.strokeCord(g, p1, p2, mx, my);
-    }
-    g.lineStyle(lw, colors[st], 1);
-    this.strokeCord(g, p1, p2, mx, my);
-
-    // slingshot speed streaks
-    for (const p of [A, B]) {
-      if (p.vzExtra > 3.2 && p.state === 'run') {
-        const pr = Projection.project(p.x, p.y + 0.6, p.z);
-        g.lineStyle(2, 0xffffff, 0.5);
-        for (let i = -1; i <= 1; i++) {
-          g.beginPath();
-          g.moveTo(pr.x + i * 14, pr.y + 10 + Math.abs(i) * 6);
-          g.lineTo(pr.x + i * 20, pr.y + 34 + Math.abs(i) * 6);
-          g.strokePath();
-        }
-      }
-    }
+    const p = this.player;
+    if (!p.alive) return;
+    const a = Projection.face(p.f, p.u, p.h + 0.72, p.z);
+    const b = Projection.project(0, 0, p.z + 2.2);
+    const flip = p.flipFlash > 0;
+    const color = flip ? CFG.CORD_FLIP : CFG.CORD_COLOR;
+    // Quiet while it is just holding him down, loud for the third of a second
+    // it is biting a new face -- otherwise it is a bright line across the
+    // middle of every frame competing with the track for attention.
+    const lw = Math.max(1.2, a.s * 0.016) * (flip ? 2.4 : 1);
+    g.lineStyle(lw * 2.4, color, flip ? 0.35 : 0.08);
+    g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.strokePath();
+    g.lineStyle(lw, color, flip ? 1 : 0.42);
+    g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.strokePath();
   }
 
-  strokeCord(g, p1, p2, mx, my) {
-    g.beginPath();
-    g.moveTo(p1.x, p1.y);
-    for (let i = 1; i <= 18; i++) {
-      const t = i / 18, o = 1 - t;
-      g.lineTo(o * o * p1.x + 2 * o * t * mx + t * t * p2.x,
-               o * o * p1.y + 2 * o * t * my + t * t * p2.y);
-    }
-    g.strokePath();
+  drawHint() {
+    if (this.hintSide === 0) { this.hint.setVisible(false); return; }
+    const p = this.player;
+    const pr = Projection.face(p.f, this.hintSide * (CFG.TUBE_R + 0.9), 1.1, p.z + 7);
+    const pulse = 0.6 + Math.abs(Math.sin(this.t * 6)) * 0.4;
+    this.hint.setVisible(true).setPosition(pr.x, pr.y)
+      .setScale(pr.s * 0.022 * pulse)
+      .setAlpha(pulse)
+      .setFlipX(this.hintSide < 0);
   }
 
   // ------------------------------------------------------------------ debug
@@ -712,32 +589,19 @@ class GameScene extends Phaser.Scene {
     const panel = document.getElementById('debug-panel');
     if (!panel) return;
     panel.style.display = 'block';
-    panel.innerHTML = '<b>tether tuning</b>';
-    const T = CFG.tether;
-    const rows = [
-      ['slackLength', 1, 8, 0.5], ['warningLength', 3, 12, 0.5], ['maxLength', 6, 16, 0.5],
-      ['springStrength', 0, 30, 1], ['damping', 0, 10, 0.5], ['maxTetherForce', 10, 120, 5]
-    ];
-    for (const [key, min, max, step] of rows) {
-      const label = document.createElement('label');
-      label.textContent = key + ' ';
-      const input = document.createElement('input');
-      input.type = 'range'; input.min = min; input.max = max; input.step = step; input.value = T[key];
-      const val = document.createElement('span');
-      val.textContent = T[key];
-      input.oninput = () => { T[key] = parseFloat(input.value); val.textContent = input.value; };
-      label.appendChild(input); label.appendChild(val);
-      panel.appendChild(label);
-    }
+    panel.innerHTML = '<b>tunnel</b>';
     this.debugReadout = document.createElement('div');
     panel.appendChild(this.debugReadout);
   }
 
   updateDebug() {
+    const p = this.player;
+    const s = this.sprites.census();
     this.debugReadout.textContent =
-      'dist ' + this.tether.dist.toFixed(2) +
-      '  stretch ' + this.tether.stretch.toFixed(2) +
-      '  state ' + this.tether.state +
+      'face ' + p.f + '  u ' + p.u.toFixed(2) + '  h ' + p.h.toFixed(2) +
+      '  spd ' + p.speed.toFixed(1) + '  tier ' + Track.tier() +
+      '\nchunks ' + Track.chunks.length +
+      '  free bolt/gear ' + (s.bolt || 0) + '/' + (s.gearHaz || 0) +
       '  fps ' + Math.round(this.game.loop.actualFps);
   }
 }

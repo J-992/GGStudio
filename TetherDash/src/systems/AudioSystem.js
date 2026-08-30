@@ -1,10 +1,10 @@
 // Procedural WebAudio: every sound is synthesized, nothing is loaded.
-// One-shots via play(); the tether has a continuous creak whose pitch/volume
-// follow tension via setTension().
+// One-shots via play(); the tunnel has a continuous rush whose pitch and volume
+// track how fast the run has got, via setRush().
 const AudioSys = {
   ctx: null,
   master: null,
-  creak: null,        // { osc, gain, filter }
+  rush: null,         // { osc, filt, g }
   enabled: true,
 
   init() {
@@ -70,48 +70,54 @@ const AudioSys = {
       case 'land':      this.thud(0.09, 0.22); break;
       case 'landHard':  this.thud(0.14, 0.32); this.tone(120, 0.1, 'sine', 0.12, 70); break;
       case 'coin':      this.tone(920, 0.07, 'square', 0.12); this.tone(1380, 0.16, 'square', 0.12, undefined, 0.06); break;
-      case 'snap':      this.tone(220, 0.1, 'sawtooth', 0.16, 90); this.thud(0.06, 0.14); break;
+      // the magnet grabbing the next face: a short rising zip plus a clunk
+      case 'flip':      this.tone(240, 0.13, 'square', 0.13, 780); this.thud(0.05, 0.16); break;
       case 'stumble':   this.tone(160, 0.2, 'sawtooth', 0.2, 60); this.thud(0.12, 0.28); break;
       case 'fall':      this.tone(500, 0.5, 'sine', 0.16, 90); break;
-      case 'rescue':    this.tone(320, 0.12, 'sine', 0.14, 700); this.tone(700, 0.2, 'sine', 0.14, 1050, 0.1); break;
-      case 'checkpoint': this.tone(660, 0.1, 'triangle', 0.16); this.tone(990, 0.22, 'triangle', 0.16, undefined, 0.09); break;
+      case 'revive':    this.tone(320, 0.12, 'sine', 0.14, 700); this.tone(700, 0.22, 'sine', 0.14, 1050, 0.1); break;
+      case 'milestone': this.tone(660, 0.1, 'triangle', 0.16); this.tone(990, 0.22, 'triangle', 0.16, undefined, 0.09); break;
       case 'pad':       this.tone(180, 0.24, 'sine', 0.2, 720); break;
-      case 'win':
+      case 'best':
         [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.22, 'triangle', 0.16, undefined, i * 0.11));
         break;
+      case 'gameover':
+        [440, 349, 262].forEach((f, i) => this.tone(f, 0.3, 'triangle', 0.15, undefined, i * 0.14));
+        break;
       case 'click':     this.tone(700, 0.05, 'square', 0.08); break;
-      case 'swap':      this.tone(500, 0.08, 'square', 0.1, 800); break;
       case 'warn':      this.tone(1100, 0.05, 'square', 0.07); break;
     }
   },
 
-  // Continuous cord creak. tension 0..1 (0 = slack, 1 = at max length).
-  setTension(tension) {
-    if (!this.ctx || !this.enabled) { return; }
-    if (tension > 0.05 && !this.creak) {
+  // Continuous tunnel rush. `speed01` is 0 at the starting run speed and 1 at
+  // the cap, so the soundtrack of a long run is the noise climbing with it.
+  setRush(speed01) {
+    if (!this.ctx || !this.enabled) return;
+    if (speed01 > 0.005 && !this.rush) {
       const osc = this.ctx.createOscillator();
       const filt = this.ctx.createBiquadFilter();
       const g = this.ctx.createGain();
       osc.type = 'sawtooth';
-      filt.type = 'bandpass'; filt.Q.value = 8;
+      filt.type = 'bandpass'; filt.Q.value = 4;
       g.gain.value = 0;
       osc.connect(filt); filt.connect(g); g.connect(this.master);
       osc.start();
-      this.creak = { osc, filt, g };
+      this.rush = { osc, filt, g };
     }
-    if (this.creak) {
+    if (this.rush) {
       const t = this.now();
-      const vol = tension < 0.05 ? 0 : 0.015 + tension * 0.06;
-      this.creak.g.gain.setTargetAtTime(vol, t, 0.06);
-      this.creak.osc.frequency.setTargetAtTime(60 + tension * 160, t, 0.06);
-      this.creak.filt.frequency.setTargetAtTime(220 + tension * 900, t, 0.06);
+      this.rush.g.gain.setTargetAtTime(0.012 + speed01 * 0.05, t, 0.12);
+      this.rush.osc.frequency.setTargetAtTime(52 + speed01 * 46, t, 0.12);
+      this.rush.filt.frequency.setTargetAtTime(180 + speed01 * 620, t, 0.12);
     }
   },
 
-  stopTension() {
-    if (this.creak) {
-      try { this.creak.g.gain.setTargetAtTime(0, this.now(), 0.03); this.creak.osc.stop(this.now() + 0.2); } catch (e) {}
-      this.creak = null;
+  stopRush() {
+    if (this.rush) {
+      try {
+        this.rush.g.gain.setTargetAtTime(0, this.now(), 0.03);
+        this.rush.osc.stop(this.now() + 0.2);
+      } catch (e) { /* already torn down */ }
+      this.rush = null;
     }
   },
 

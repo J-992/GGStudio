@@ -2,7 +2,7 @@
   "name": "tether-dash",
   "version": "0.1.0",
   "private": true,
-  "description": "Fast co-op runner where two toy-factory robots are joined by an elastic bungee cord. Phaser 3, no dependencies: the build is a concatenation, not a bundle.",
+  "description": "Endless tunnel runner where the walls and ceiling are floors too. Phaser 3, no dependencies: the build is a concatenation, not a bundle.",
   "engines": {
     "node": ">=20.19.0"
   },

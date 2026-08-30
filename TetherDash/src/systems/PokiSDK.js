@@ -5,11 +5,11 @@
 // Two rules shape this file.
 //
 // Ads never play over a live game: interstitials are only ever requested
-// between levels, and while one runs the game loop is asleep and the audio
+// between runs, and while one runs the game loop is asleep and the audio
 // context is suspended.
 //
 // And no lifecycle event is ever dropped. The game boots on a race between
-// `PokiSDK.init()` and a 5s timeout, so a level can be under way while the SDK
+// `PokiSDK.init()` and a 5s timeout, so a run can be under way while the SDK
 // is still coming up. Calls made in that window are recorded, not thrown away,
 // and replayed in order the moment the SDK answers -- a gameplayStart lost
 // there is the one event Poki's inspector will not pass a build without.
@@ -20,7 +20,7 @@ const Poki = {
   _sentGameplay: false,   // what the SDK has been told about it
   _loadingDone: false,    // the boot scene finished
   _sentLoading: false,    // ...and the SDK knows
-  _levelStarts: 0,
+  _runStarts: 0,
   _lastAdAt: 0,
 
   get sdk() { return window.PokiSDK || null; },
@@ -87,28 +87,28 @@ const Poki = {
     if (this.ready && this.sdk.happyTime) this.sdk.happyTime(value === undefined ? 1 : value);
   },
 
-  // Interstitial on the way into a level. Skips the session's first level
-  // (nobody should meet an ad before they have played) and keeps a minimum gap
-  // after that. Always resolves, so the caller can start the level either way.
-  breakBeforeLevel() {
-    const first = this._levelStarts === 0;
-    this._levelStarts++;
+  // Interstitial on the way into a run. Skips the session's first run (nobody
+  // should meet an ad before they have played) and keeps a minimum gap after
+  // that. Always resolves, so the caller can start the run either way.
+  breakBeforeRun() {
+    const first = this._runStarts === 0;
+    this._runStarts++;
     if (first) return Promise.resolve();
     return this.commercialBreak();
   },
 
-  // Every path into a level goes through here, so the rule about when an
+  // Every path into a run goes through here, so the rule about when an
   // interstitial may play lives in one place: ad first if one is due, then the
-  // level starts. Off-platform this is just a scene change a microtask later.
-  startLevel(scene, levelId) {
-    //  Leaving a level ends its gameplay session before the ad, not after it:
+  // run starts. Off-platform this is just a scene change a microtask later.
+  startRun(scene) {
+    //  Leaving a run ends its gameplay session before the ad, not after it:
     //  otherwise the ad's resume reports a few milliseconds of "gameplay" that
-    //  the level change immediately stops again.
+    //  the scene change immediately stops again.
     this.gameplayStop();
-    this.breakBeforeLevel().then(() => scene.scene.start('Game', { levelId }));
+    this.breakBeforeRun().then(() => scene.scene.start('Game'));
   },
 
-  // Interstitial. Only ever called between levels, never mid-run.
+  // Interstitial. Only ever called between runs, never mid-run.
   commercialBreak(minGapMs) {
     const gap = minGapMs === undefined ? 60000 : minGapMs;
     if (!this.ready || this.adPlaying) return Promise.resolve();
@@ -120,8 +120,8 @@ const Poki = {
   },
 
   // Rewarded video. Resolves true only when the player watched it through.
-  // No placement uses this yet — it is here so adding one is wiring a button,
-  // not rewriting the ad plumbing.
+  // One placement uses it: the single revive offered per run on the game-over
+  // panel, which is the moment a player most wants one.
   rewardedBreak() {
     if (!this.ready || this.adPlaying) return Promise.resolve(false);
     const resume = this._adStart();
@@ -139,7 +139,7 @@ const Poki = {
     const wasPlaying = this._gameplayOn;
     if (wasPlaying) this.gameplayStop();
     this.adPlaying = true;
-    AudioSys.stopTension();     // the cord creak is a loop; it must not survive an ad
+    AudioSys.stopRush();        // the tunnel rush is a loop; it must not survive an ad
     AudioSys.suspend();
     if (window.game && window.game.loop) window.game.loop.sleep();
     return () => {

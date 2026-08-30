@@ -1,16 +1,18 @@
 // Square gameplay plates for the store thumbnail, shot out of the running game.
 //
-// Both runners get null input, so GameScene falls through to CompanionAI and
-// the game plays itself; the script waits until the feature it wants sits 6-12
-// units ahead, sets a pose for one frame, freezes, and crops a square around
-// the pair. It also grabs the two menu screens. Output lands in docs/ -- see
-// docs/README.md.
+// An endless runner has no levels to photograph, so each plate stages the piece
+// it wants instead of waiting for it: the track is rebuilt by hand as
+// straight -> the piece -> straight, the runner is dropped onto a chosen face
+// part-way through it, the game is stepped a few frames so the camera roll and
+// the run cycle settle, then frozen and cropped square around the runner.
+//
+// Staging beats waiting because the interesting plates are the ones where the
+// floor is missing -- a played run reaches those maybe once a minute, and only
+// if it survives.
 //
 // Two things are staged rather than played: the camera is pulled in tighter
-// than play (CFG.CAM_BACK/CAM_HEIGHT) and the cord thresholds are squeezed so a
-// photogenic separation reads as the orange high-tension cord. At the real
-// thresholds that separation draws the yellow cord, which is invisible against
-// a yellow factory floor. Both are per-shot state and touch no game file.
+// than play (CFG.CAM_BACK/CAM_HEIGHT), and a pose is written straight onto the
+// runner. Both are per-shot state and touch no game file.
 //
 //   npm run dev                  # any static server on :8123
 //   node tools/thumbshots.mjs
@@ -26,23 +28,25 @@ const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null;   // reshoot
 mkdirSync(OUT, { recursive: true });
 mkdirSync(UI, { recursive: true });
 
-const CAM = [6.4, 3.5];
+const CAM = [7.4, 2.9];
+
+//  face: 0 floor, 1 right wall, 2 ceiling, 3 left wall
+//  at:   z into the piece body, past its coupler ring
 const SHOTS = [
-  { tag: 'launch-party',  level: 13, want: 'pads',  minZ: 30, pose: 'launch', cam: [6.2, 3.3] },
-  { tag: 'gear-alley',    level: 9,  want: 'gears', minZ: 40, pose: 'leap' },
-  { tag: 'tangle',        level: 14, want: 'gears', minZ: 55, pose: 'leap' },
-  { tag: 'conveyor',      level: 6,  want: 'bolts', minZ: 45, pose: 'chase' },
-  { tag: 'gauntlet',      level: 15, want: 'gears', minZ: 45, pose: 'chase', cam: [6.6, 3.7] },
-  { tag: 'bolt-rush',     level: 3,  want: 'bolts', minZ: 60, pose: 'leap' },
-  { tag: 'moving-day',    level: 5,  want: 'bolts', minZ: 45, pose: 'leap' },
-  { tag: 'first-steps',   level: 1,  want: 'bolts', minZ: 55, pose: 'leap' },
-  { tag: 'narrow',        level: 2,  want: 'bolts', minZ: 45, pose: 'leap' },
-  { tag: 'wide-gate',     level: 4,  want: 'bolts', minZ: 25, pose: 'chase' },
-  { tag: 'split-ends',    level: 7,  want: 'bolts', minZ: 45, pose: 'leap' },
-  { tag: 'speed-run',     level: 10, want: 'bolts', minZ: 50, pose: 'leap' },
-  { tag: 'divided',       level: 11, want: 'bolts', minZ: 25, pose: 'chase' },
-  { tag: 'slalom',        level: 12, want: 'bolts', minZ: 30, pose: 'leap' },
-  { tag: 'cord-critical', level: 9,  want: 'gears', minZ: 40, pose: 'wide', cord: 'crit' }
+  { tag: 'wall-run',    piece: 'wallRun',    face: 1, at: 13, u: -1.4, pose: 'run' },
+  { tag: 'the-drop',    piece: 'wallRun',    face: 0, at: 3.4, u: 2.6, pose: 'leap' },
+  { tag: 'ceiling-run', piece: 'ceilingRun', face: 2, at: 22, u: 0, pose: 'run' },
+  { tag: 'spiral',      piece: 'spiral',     face: 1, at: 16, u: 0.6, pose: 'run' },
+  { tag: 'cross-flip',  piece: 'crossFlip',  face: 2, at: 20, u: -1.2, pose: 'run' },
+  { tag: 'one-wall',    piece: 'oneWall',    face: 1, at: 12, u: 0, pose: 'run' },
+  { tag: 'zig-wall',    piece: 'zigWall',    face: 3, at: 14, u: 0.4, pose: 'run' },
+  { tag: 'gear-alley',  piece: 'gearAlley',  face: 0, at: 6.5, u: -0.4, pose: 'leap' },
+  { tag: 'step-gaps',   piece: 'stepGaps',   face: 0, at: 5.6, u: 0, pose: 'leap' },
+  { tag: 'pad-launch',  piece: 'padJump',    face: 0, at: 11, u: 0, pose: 'launch' },
+  { tag: 'pillars',     piece: 'pillars',    face: 0, at: 6, u: 1.4, pose: 'run' },
+  { tag: 'checker',     piece: 'checker',    face: 0, at: 9, u: 1.2, pose: 'run' },
+  { tag: 'narrow',      piece: 'narrow',     face: 0, at: 9, u: 0, pose: 'run' },
+  { tag: 'bolt-run',    piece: 'straight',   face: 0, at: 8, u: 0, pose: 'run' }
 ];
 
 const browser = await chromium.launch({
@@ -56,65 +60,74 @@ await page.goto('http://localhost:8123/', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => window.game && window.game.scene && window.game.scene.getScene && window.game.scene.getScene('Menu'), null, { timeout: 20000 });
 await page.waitForTimeout(1500);
 
-// ---- menu screens first, before anything gets tweaked ----
+// ---- menu screen first, before anything gets tweaked ----
 if (!ONLY) {
-await page.screenshot({ path: `${UI}/menu.png` });
-await page.evaluate(() => {
-  const g = window.game;
-  g.scene.stop('Menu'); g.scene.start('LevelSelect');
-});
-await page.waitForTimeout(900);
-await page.screenshot({ path: `${UI}/level-select.png` });
-console.log('  menu, level-select');
+  await page.screenshot({ path: `${UI}/menu.png` });
+  console.log('  menu');
 }
 
 for (const shot of SHOTS) {
   if (ONLY && !ONLY.includes(shot.tag)) continue;
-  await page.evaluate(({ level, cord, cam }) => {
-    Save.setMode('coop');
+
+  const staged = await page.evaluate(({ piece, face, at, u, pose, cam }) => {
     const g = window.game;
-    for (const k of ['Menu', 'LevelSelect', 'Game']) if (g.scene.isActive(k)) g.scene.stop(k);
-    g.scene.start('Game', { levelId: level });
-    CFG.CAM_BACK = cam[0]; CFG.CAM_HEIGHT = cam[1];
-    Object.assign(CFG.tether, cord === 'crit'
-      ? { slackLength: 0.8, warningLength: 1.6, maxLength: 3.4 }
-      : { slackLength: 1.0, warningLength: 2.4, maxLength: 5.0 });
+    for (const k of ['Menu', 'Game']) if (g.scene.isActive(k)) g.scene.stop(k);
+    g.scene.start('Game');
+    return { piece, face, at, u, pose, cam };
   }, { ...shot, cam: shot.cam || CAM });
-  await page.waitForTimeout(450);
-  await page.evaluate(() => { window.game.scene.getScene('Game').im.getFor = () => null; });
 
-  const ok = await page.waitForFunction(({ want, minZ }) => {
+  await page.waitForFunction(() => {
     const s = window.game.scene.getScene('Game');
-    if (!s || !s.playerA || s.respawning) return false;
-    const z = (s.playerA.z + s.playerB.z) / 2;
-    return (s.course[want] || []).some((o) => o.z > minZ && o.z - z > 6 && o.z - z < 12) &&
-           s.playerA.grounded && s.playerB.grounded;
-  }, shot, { timeout: 60000 }).catch(() => null);
-  if (!ok) { console.log(`  ${shot.tag}: never lined up`); continue; }
+    return s && s.player && s.sys.settings.status === 5;
+  }, null, { timeout: 20000 });
 
+  const ok = await page.evaluate(({ piece, face, at, u, pose, cam }) => {
+    const s = window.game.scene.getScene('Game');
+    const def = PIECES.find((d) => d.id === piece);
+    if (!def) return null;
+
+    CFG.CAM_BACK = cam[0]; CFG.CAM_HEIGHT = cam[1];
+
+    //  straight -> the piece -> straight, welded from scratch
+    for (const c of Track.chunks) Track._recycle(c);
+    Track.chunks.length = 0; Track.headZ = 0; Track.distance = 0; Track.lastDef = null;
+    Track._spawn(PIECES[0]);
+    const target = Track._spawn(def);
+    Track._spawn(PIECES[0]);
+
+    const p = s.player;
+    p.reset(target.z0 + CFG.RING_LEN + at);
+    p.f = face;
+    p.u = u;
+    p.roll = -Math.PI / 2 * face;
+    if (pose === 'leap') { p.h = 1.35; p.vh = 1.2; p.grounded = false; }
+    else if (pose === 'launch') { p.h = 2.6; p.vh = 3.4; p.grounded = false; }
+    else { p.h = 0; p.vh = 0; p.grounded = true; }
+    s.cam.snapTo(p);
+    s.hintSide = 0;
+    return { z: Math.round(p.z) };
+  }, { ...shot, cam: shot.cam || CAM });
+
+  if (!ok) { console.log(`  ${shot.tag}: no piece "${shot.piece}"`); continue; }
+
+  //  A handful of frames so the run cycle, the cord and the shadow settle,
+  //  with the runner pinned in place rather than running out of the shot.
   await page.evaluate((pose) => {
     const s = window.game.scene.getScene('Game');
-    const A = s.playerA, B = s.playerB;
-    A.stun = 0; B.stun = 0; A.state = 'run'; B.state = 'run';
-    if (pose === 'leap') {
-      A.x = -1.5; B.x = 1.55; A.y = 1.3; B.y = 1.5; A.vy = 1.0; B.vy = 0.5; A.vx = -2; B.vx = 2;
-      A.grounded = false; B.grounded = false; B.z = A.z + 0.1;
-    } else if (pose === 'wide') {
-      A.x = -2.0; B.x = 2.1; A.y = 0.9; B.y = 1.4; A.vy = 0.6; B.vy = 1.0; A.vx = -3; B.vx = 3;
-      A.grounded = false; B.grounded = false; B.z = A.z + 0.1;
-    } else {
-      A.x = -1.5; B.x = 1.4; A.y = 0; B.y = 1.1; A.vy = 0; B.vy = 1.2; A.vx = -1; B.vx = 2.5;
-      A.grounded = true; B.grounded = false; B.z = A.z + 1.6;
+    const p = s.player;
+    const held = { f: p.f, u: p.u, h: p.h, z: p.z, roll: p.roll };
+    for (let i = 0; i < 6; i++) {
+      s.cam.update(1 / 60, p);
+      s.render(1 / 60);
+      Object.assign(p, held);
     }
   }, shot.pose);
+  await page.waitForTimeout(120);
 
-  await page.waitForTimeout(40);
   const st = await page.evaluate(() => {
     const s = window.game.scene.getScene('Game');
     window.game.scene.pause('Game');
-    return { cord: s.tether.state, tension: +s.tether.tension01.toFixed(2),
-             cx: Math.round((s.sprA.x + s.sprB.x) / 2),
-             feet: Math.round(Math.max(s.sprA.y, s.sprB.y)), z: Math.round(s.playerA.z) };
+    return { cx: Math.round(s.spr.x), feet: Math.round(s.spr.y), face: s.player.f };
   });
   await page.waitForTimeout(90);
 
@@ -129,7 +142,8 @@ for (const shot of SHOTS) {
   await page.waitForTimeout(90);
   await page.screenshot({ path: `${OUT}/${shot.tag}.png`, clip });
   await page.screenshot({ path: `${OUT}/${shot.tag}-wide.png` });
-  console.log(`  ${shot.tag}: z=${st.z} cordState=${st.cord} tension=${st.tension}`);
+  console.log(`  ${shot.tag}: ${shot.piece} on face ${st.face} at z=${ok.z}`);
+  await page.evaluate(() => window.game.scene.resume('Game'));
 }
 
 await browser.close();
