@@ -43,7 +43,7 @@ class WaveDirector {
     this.combat.reset();
     this._hidePanel();
     this.state = 'prep';
-    this.timer = CFG.LEVEL.prepMs;
+    this.timer = this.prepMs();
     this.hud.setLevelLabel('LEVEL ' + n + ' · ' + this.recipe.def.name);
     this.hud.setProgress(0);
     this.scene.fx.banner('LEVEL ' + n, '#ffffff', this.recipe.def.name);
@@ -51,6 +51,23 @@ class WaveDirector {
   }
 
   totalWaves() { return this.recipe.def.waves.length; }
+
+  // Pacing is per level first, CFG second: the early levels buy their gentler
+  // difficulty with time on the clock rather than with weaker enemies.
+  prepMs() {
+    const v = this.recipe.def.prepMs;
+    return v != null ? v : CFG.LEVEL.prepMs;
+  }
+
+  waveGapMs() {
+    const v = this.recipe.def.waveGapMs;
+    return v != null ? v : CFG.LEVEL.waveTimeoutMs;
+  }
+
+  clearGapMs() {
+    const v = this.recipe.def.clearGapMs;
+    return v != null ? v : CFG.LEVEL.waveClearGapMs;
+  }
 
   update(dtMs) {
     switch (this.state) {
@@ -62,7 +79,7 @@ class WaveDirector {
       case 'wave': {
         this.timer -= dtMs;
         const cleared = this.combat.allDead();
-        if (cleared && this._clearedAt === null) this._clearedAt = CFG.LEVEL.waveClearGapMs;
+        if (cleared && this._clearedAt === null) this._clearedAt = this.clearGapMs();
         if (this._clearedAt !== null) this._clearedAt -= dtMs;
         const moreWaves = this.waveIdx < this.totalWaves();
 
@@ -86,7 +103,7 @@ class WaveDirector {
     const waves = this.recipe.def.waves;
     this.waveIdx = i + 1;
     this.state = 'wave';
-    this.timer = CFG.LEVEL.waveTimeoutMs;
+    this.timer = this.waveGapMs();
     this._clearedAt = null;
     this.combat.startWave(waves[i].spawns, this.recipe.hpMult);
     const last = this.waveIdx === waves.length && !this.recipe.def.boss;
@@ -123,7 +140,7 @@ class WaveDirector {
     this._showPanel({
       title: 'LEVEL ' + this.levelN + ' CLEAR!',
       titleColor: '#ffd54f',
-      sub: 'The evil brainrots paid ' + HUD.money(banked) + '\nSpend it on new brainrots!',
+      sub: 'The monsters dropped ' + HUD.money(banked) + '\nSpend it on new brainrots!',
       buttons: [
         { label: '\u{1F6D2} SHOP & NEXT LEVEL', color: 0x43a047, cb: () => this.toHQ() },
       ],
@@ -151,7 +168,7 @@ class WaveDirector {
     this._showPanel({
       title: 'THE LAWN IS LOST!',
       titleColor: '#ff8a80',
-      sub: 'They got through. Rethink your squad!',
+      sub: 'The monsters got through. Rethink your squad!',
       buttons,
     });
   }

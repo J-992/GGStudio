@@ -55,7 +55,7 @@ failures.push(...errors);
 
 //  --------------------------------------------------------------- creatures
 
-const { CFG, CREATURES, CREATURES_BY_ID, RARITIES, ENEMIES, BOSSES, LEVELS, LAYOUT, configureLayout, Poki, Units } = data;
+const { CFG, CREATURES, CREATURES_BY_ID, RARITIES, ENEMIES, BOSSES, LEVELS, LAYOUT, configureLayout, Poki, Units, TextureFactory } = data;
 
 if (!CFG || !CREATURES || !RARITIES || !ENEMIES || !BOSSES || !LEVELS) {
   if (errors.length === 0) fail('CFG, CREATURES, RARITIES, ENEMIES, BOSSES or LEVELS are not defined.');
@@ -79,7 +79,7 @@ for (const c of CREATURES) {
 
   if (!RARITIES[c.rarity]) fail(`${where}: unknown rarity "${c.rarity}".`);
   if (!ROLES.has(c.role)) fail(`${where}: unknown role "${c.role}" -- it would stand on the lawn doing nothing.`);
-  if (!(c.cost > 0)) fail(`${where}: brainz cost must be positive.`);
+  if (!(c.cost > 0)) fail(`${where}: doge-coin cost must be positive.`);
   if (!(c.hp > 0)) fail(`${where}: hp must be positive -- everything can be chewed.`);
   if (!(c.cooldownMs > 0)) fail(`${where}: card cooldown must be positive.`);
   if (!(c.price >= 0)) fail(`${where}: shop price must be >= 0 (0 = starter).`);
@@ -99,10 +99,13 @@ for (const c of CREATURES) {
 }
 
 //  The starters are the level-1 squad: they must exist, be free, and cover
-//  the tutorial script (a producer to teach brainz, a shooter to teach lanes).
+//  the tutorial script (a producer to teach the economy, a shooter for lanes).
 const starters = CREATURES.filter((c) => c.price === 0);
 if (starters.length < 3) fail(`only ${starters.length} starters (price 0); the default squad needs at least 3.`);
 if (!starters.some((c) => c.role === 'producer')) fail('no free producer -- the tutorial cannot teach the economy.');
+if (!CREATURES_BY_ID.cocofanto || CREATURES_BY_ID.cocofanto.price !== 0) {
+  fail('cocofanto is not a starter -- TutorialSystem plants it by id to teach where the coins come from.');
+}
 if (!starters.some((c) => c.role === 'shooter')) fail('no free shooter -- the tutorial cannot teach the lanes.');
 
 //  Buying into a higher rarity has to buy more power for the money to mean
@@ -124,9 +127,21 @@ for (let i = 1; i < tiers.length; i++) {
 
 //  ---------------------------------------------------------------- enemies
 
+//  The horde owns its own art. Every enemy needs a texture key that the
+//  factory can draw from nothing, because that fallback is the only thing
+//  standing between a 404 on a sprite and an invisible enemy eating the lawn.
+const monsterArt = (TextureFactory && TextureFactory.MONSTERS) || {};
+
 for (const [id, e] of [...Object.entries(ENEMIES), ...Object.entries(BOSSES)]) {
   const where = `enemy ${id} (${e.name})`;
-  if (!CREATURES_BY_ID[e.base]) fail(`${where}: base "${e.base}" is not a creature -- it has no sprite to wear.`);
+  if (typeof e.art !== 'string' || e.art.length === 0) {
+    fail(`${where}: needs an "art" texture key.`);
+  } else if (!monsterArt[e.art]) {
+    fail(`${where}: art "${e.art}" has no TextureFactory.MONSTERS fallback -- if its sprite 404s it renders as nothing.`);
+  }
+  if (CREATURES_BY_ID[e.base]) {
+    fail(`${where}: still wears a creature sprite ("${e.base}"). The horde is meant to be its own species.`);
+  }
   if (!(e.hp > 0) || !(e.speed > 0) || !(e.bite > 0) || !(e.coins > 0)) {
     fail(`${where}: hp, speed, bite and coins must all be positive.`);
   }
@@ -158,12 +173,12 @@ LEVELS.forEach((lv, i) => {
 });
 
 //  Level 1 is the tutorial: a teaching lawn (not all lanes), and enough
-//  starting brainz to plant the starter shooter immediately.
+//  starting doge coins to plant the starter shooter immediately.
 const l1 = LEVELS[0];
 if (l1.lanes.length >= CFG.GRID.lanes) fail('level 1 opens every lane; the tutorial needs a smaller lawn.');
 const starterShooter = starters.find((c) => c.role === 'shooter');
 if (starterShooter && !(l1.startEnergy >= starterShooter.cost)) {
-  fail(`level 1 starts with ${l1.startEnergy} brainz; the tutorial's first plant costs ${starterShooter.cost}.`);
+  fail(`level 1 starts with ${l1.startEnergy} coins; the tutorial's first plant costs ${starterShooter.cost}.`);
 }
 
 //  ----------------------------------------------------------------- layout
@@ -199,11 +214,17 @@ if (existsSync(manifestPath)) {
     if (!existsSync(join(ROOT, base, file))) fail(`the manifest lists ${key} -> ${file}, which is not on disk.`);
   }
 
-  //  A sprite for a creature that no longer exists is dead weight in the build.
-  const known = new Set([...CREATURES.map((c) => `cr_${c.id}`), 'hand']);
+  //  A sprite nothing in the game asks for is dead weight in the build, and
+  //  the build is already close to Poki's 5 MB initial-download guidance.
+  const known = new Set([
+    ...CREATURES.map((c) => `cr_${c.id}`),
+    ...[...Object.values(ENEMIES), ...Object.values(BOSSES)].map((e) => e.art),
+    'dogecoin',
+    'hand',
+  ]);
 
   for (const key of Object.keys(manifest.sprites || {})) {
-    if (!known.has(key)) fail(`the manifest ships ${key}, which matches no creature (or the tutorial hand).`);
+    if (!known.has(key)) fail(`the manifest ships ${key}, which no creature, monster or prop asks for.`);
   }
 }
 

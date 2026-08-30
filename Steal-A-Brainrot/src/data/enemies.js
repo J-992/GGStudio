@@ -1,31 +1,39 @@
-// The EVIL brainrots. Each one is a dark-tinted version of a roster sprite
-// (`base` names the creature whose cr_ texture it wears), so real character
-// art carries the enemy side with zero extra assets.
+// The horde. These are MONSTERS -- their own species, their own sprites --
+// not dark recolours of the player's own roster. The brainrots are the heroes;
+// making the villains evil twins of them muddied every read on the lawn (which
+// green blob is mine?) and wasted the one thing a lane defender needs most:
+// an enemy you can identify from the far end of the lane while panicking.
+//
+// `art` is the texture key: a render in assets/sprites/en_<id>.png, with a
+// procedural fallback of the same name in TextureFactory.MONSTERS, so the game
+// still runs with the art folder empty.
 //
 // hp/coins are LEVEL 1 numbers -- WaveDirector scales hp by CFG.LEVEL.hpGrowth
 // per level. `speed` is px/sec against a ~620px lawn (LAYOUT.combatScale
-// corrects for the actual walk). `bite` is damage per chew (CFG.COMBAT.biteMs).
+// corrects for the actual walk). `bite` is damage per chew (CFG.COMBAT.biteMs),
+// and it is the number that decides whether a lane collapses: a 300hp shooter
+// survives 300/bite chews, so early bites are deliberately soft.
 const ENEMIES = {
-  grunt:  { base: 'trippi',    name: 'Evil Trippi',     hp: 100,  speed: 30, bite: 25,  coins: 8,
-            tint: 0x8f7bb8, scale: 1.0 },
-  shover: { base: 'boneca',    name: 'Evil Boneca',     hp: 170,  speed: 26, bite: 30,  coins: 11,
-            tint: 0x7a9e7e, scale: 1.05 },
-  runner: { base: 'assassino', name: 'Evil Assassino',  hp: 80,   speed: 62, bite: 20,  coins: 10,
-            tint: 0xb87b7b, scale: 0.95 },
-  bucket: { base: 'burbaloni', name: 'Evil Burbaloni',  hp: 420,  speed: 21, bite: 35,  coins: 18,
-            tint: 0x8a8aa8, scale: 1.12 },
-  dancer: { base: 'ballerina', name: 'Evil Ballerina',  hp: 150,  speed: 44, bite: 25,  coins: 14,
-            tint: 0xa87ba8, scale: 1.0 },
-  brute:  { base: 'patapim',   name: 'Evil Patapim',    hp: 650,  speed: 17, bite: 45,  coins: 26,
-            tint: 0x77778f, scale: 1.2 },
-  giant:  { base: 'tungtung',  name: 'EVIL TUNG TUNG',  hp: 1600, speed: 12, bite: 160, coins: 70,
-            tint: 0x6f5f8f, scale: 1.6, mini: true },
+  grunt:  { art: 'en_gloopo',    name: 'Gloopo',      hp: 100,  speed: 30, bite: 20,  coins: 8,
+            scale: 1.0 },
+  shover: { art: 'en_sporeling', name: 'Sporeling',   hp: 150,  speed: 26, bite: 24,  coins: 11,
+            scale: 1.05 },
+  runner: { art: 'en_zippet',    name: 'Zippet',      hp: 80,   speed: 54, bite: 16,  coins: 10,
+            scale: 0.95 },
+  bucket: { art: 'en_crustacle', name: 'Crustacle',   hp: 420,  speed: 21, bite: 35,  coins: 18,
+            scale: 1.12 },
+  dancer: { art: 'en_wispa',     name: 'Wispa',       hp: 150,  speed: 40, bite: 25,  coins: 14,
+            scale: 1.0 },
+  brute:  { art: 'en_grumblor',  name: 'Grumblor',    hp: 650,  speed: 17, bite: 45,  coins: 26,
+            scale: 1.2 },
+  giant:  { art: 'en_cyclomunch', name: 'CYCLOMUNCH', hp: 1600, speed: 12, bite: 160, coins: 70,
+            scale: 1.6, mini: true },
 };
 
 const BOSSES = {
-  megaBombardiro: {
-    base: 'bombardiro', name: 'MEGA BOMBARDIRO', hp: 4200, speed: 9, bite: 260, coins: 250,
-    tint: 0x5f6f8f, scale: 2.2, boss: true,
+  slimeKing: {
+    art: 'en_slimeking', name: 'THE SLIME KING', hp: 4200, speed: 9, bite: 260, coins: 250,
+    scale: 2.2, boss: true,
   },
 };
 

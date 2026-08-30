@@ -11,6 +11,7 @@ const TextureFactory = {
 
   generateAll(scene) {
     CREATURES.forEach((def) => this.creature(scene, def));
+    this.monsters(scene);
     this.props(scene);
   },
 
@@ -39,6 +40,23 @@ const TextureFactory = {
     const draw = this.BODIES[def.art] || this.BODIES.boneca;
     draw.call(this, g, def);
     g.generateTexture('cr_' + def.id, this.CW, this.CH);
+    g.destroy();
+  },
+
+  // The horde. Same contract as creature(): a flat stand-in living under the
+  // real render's texture key, so an empty assets/ folder still boots a
+  // playable game. Keyed by ENEMIES[..].art, which is also the sprite name.
+  monsters(scene) {
+    [...Object.values(ENEMIES), ...Object.values(BOSSES)]
+      .forEach((def) => this.monster(scene, def));
+  },
+
+  monster(scene, def) {
+    const draw = this.MONSTERS[def.art];
+    if (!draw) return;
+    const g = this._g(scene);
+    draw.call(this, g);
+    g.generateTexture(def.art, this.CW, this.CH);
     g.destroy();
   },
 
@@ -638,6 +656,128 @@ const TextureFactory = {
     g.destroy();
   },
 
+  // ---------------------------------------------------------------- horde
+  // Deliberately plainer than BODIES: these are never the shipped look, they
+  // are what keeps the game running when a render is missing.
+  MONSTERS: {
+    en_gloopo(g) {
+      const skin = 0x52c74d, dark = 0x2b7a2f;
+      g.fillStyle(dark, 1); g.fillEllipse(44, 82, 66, 12);
+      this._blob(g, 44, 62, 58, 44, skin, dark);
+      this._blob(g, 44, 40, 40, 36, skin, dark);
+      this._eyes(g, 44, 36, 12, 8, 'derp');
+      g.fillStyle(0x1b1b22, 1); g.fillEllipse(44, 54, 14, 8);
+    },
+
+    en_sporeling(g) {
+      const stalk = 0xf0e6cc, cap = 0xd2352f;
+      this._box(g, 32, 34, 24, 50, 10, stalk, 0xbfae8e);
+      g.fillStyle(stalk, 1); g.fillEllipse(34, 84, 18, 9); g.fillEllipse(54, 84, 18, 9);
+      this._eyes(g, 44, 52, 10, 6, 'angry');
+      g.fillStyle(0x1b1b22, 1); g.fillEllipse(44, 66, 9, 6);
+      this._blob(g, 44, 30, 68, 34, cap, 0x8e1f1c);
+      g.fillStyle(0xfff3dc, 1);
+      g.fillEllipse(26, 24, 16, 10); g.fillEllipse(56, 22, 14, 9); g.fillEllipse(42, 16, 10, 7);
+    },
+
+    en_zippet(g) {
+      const skin = 0x8b55b8, wing = 0x59318f;
+      g.fillStyle(wing, 1);
+      g.fillTriangle(24, 34, 0, 18, 4, 52);
+      g.fillTriangle(64, 34, 88, 18, 84, 52);
+      this._leg(g, 36, 66, 84, 6, 0x4a2a78);
+      this._leg(g, 52, 66, 84, 6, 0x4a2a78);
+      this._blob(g, 44, 52, 34, 38, skin, 0x4a2a78);
+      g.fillStyle(skin, 1);
+      g.fillTriangle(28, 18, 22, 0, 40, 14);
+      g.fillTriangle(60, 18, 66, 0, 48, 14);
+      this._blob(g, 44, 30, 36, 32, skin, 0x4a2a78);
+      this._eyes(g, 44, 28, 9, 6, 'angry');
+      g.fillStyle(0xffffff, 1);
+      g.fillTriangle(40, 38, 44, 38, 42, 44);
+      g.fillTriangle(46, 38, 50, 38, 48, 44);
+    },
+
+    en_crustacle(g) {
+      const shell = 0x5c6675, plate = 0x3d4451, flesh = 0xb87050;
+      g.fillStyle(plate, 1); g.fillEllipse(16, 82, 12, 7); g.fillEllipse(72, 82, 12, 7);
+      g.fillEllipse(8, 58, 18, 16); g.fillEllipse(80, 58, 18, 16);
+      g.fillTriangle(2, 50, 14, 50, 8, 38);
+      g.fillTriangle(74, 50, 86, 50, 80, 38);
+      this._blob(g, 44, 62, 58, 40, flesh, 0x7d452c);
+      this._eyes(g, 44, 56, 12, 7);
+      g.fillStyle(0x1b1b22, 1); g.fillEllipse(44, 72, 16, 6);
+      this._blob(g, 44, 42, 66, 38, shell, plate);
+      g.fillStyle(plate, 1);
+      g.fillEllipse(44, 28, 40, 12); g.fillEllipse(44, 38, 52, 12);
+    },
+
+    en_wispa(g) {
+      const veil = 0xdce8fb;
+      g.fillStyle(veil, 1);
+      g.fillTriangle(18, 34, 70, 34, 44, 80);
+      g.fillEllipse(26, 78, 14, 12); g.fillEllipse(38, 78, 14, 12);
+      g.fillEllipse(50, 78, 14, 12); g.fillEllipse(62, 78, 14, 12);
+      g.fillEllipse(44, 34, 52, 52);
+      g.lineStyle(3, 0x8fa8cf, 1); g.strokeEllipse(44, 34, 52, 52);
+      g.fillStyle(0x1b2233, 1);
+      g.fillEllipse(34, 30, 13, 18); g.fillEllipse(54, 30, 13, 18);
+      g.fillEllipse(44, 48, 10, 13);
+    },
+
+    en_grumblor(g) {
+      const hide = 0x7b5b96, dark = 0x4c3663, horn = 0xe6dcc0;
+      g.fillStyle(dark, 1); g.fillEllipse(32, 84, 22, 10); g.fillEllipse(56, 84, 22, 10);
+      g.fillStyle(hide, 1); g.fillEllipse(10, 60, 20, 26); g.fillEllipse(78, 60, 20, 26);
+      this._blob(g, 44, 58, 62, 46, hide, dark);
+      g.fillStyle(horn, 1);
+      g.fillTriangle(20, 22, 12, 0, 32, 14);
+      g.fillTriangle(68, 22, 76, 0, 56, 14);
+      this._blob(g, 44, 32, 44, 36, hide, dark);
+      g.fillStyle(dark, 1); g.fillEllipse(44, 22, 42, 9);
+      this._eyes(g, 44, 34, 10, 6, 'angry');
+      g.fillStyle(0x1b1b22, 1); g.fillEllipse(44, 46, 20, 7);
+      g.fillStyle(horn, 1);
+      g.fillTriangle(34, 46, 40, 46, 37, 38);
+      g.fillTriangle(48, 46, 54, 46, 51, 38);
+    },
+
+    en_cyclomunch(g) {
+      const hide = 0xb04d4d, dark = 0x76292d, tooth = 0xf5f0e2;
+      g.fillStyle(dark, 1); g.fillEllipse(32, 84, 22, 10); g.fillEllipse(56, 84, 22, 10);
+      g.fillStyle(hide, 1); g.fillEllipse(8, 50, 18, 30); g.fillEllipse(80, 50, 18, 30);
+      this._blob(g, 44, 48, 68, 62, hide, dark);
+      g.fillStyle(0x1b1b22, 1); g.fillEllipse(44, 62, 34, 18);
+      g.fillStyle(tooth, 1);
+      for (let i = 0; i < 5; i++) {
+        const x = 30 + i * 7;
+        g.fillTriangle(x, 54, x + 5, 54, x + 2, 62);
+        g.fillTriangle(x, 70, x + 5, 70, x + 2, 63);
+      }
+      this._eye(g, 44, 30, 17, 0, 2);
+      g.fillStyle(dark, 1); g.fillEllipse(44, 12, 40, 10);
+    },
+
+    en_slimeking(g) {
+      const skin = 0x4bb864, dark = 0x25763c, gold = 0xffc233;
+      g.fillStyle(dark, 1); g.fillEllipse(44, 84, 80, 12);
+      this._blob(g, 44, 60, 72, 52, skin, dark);
+      this._blob(g, 44, 38, 50, 40, skin, dark);
+      this._eyes(g, 44, 36, 13, 8, 'angry');
+      g.fillStyle(0x1b1b22, 1); g.fillEllipse(44, 56, 26, 12);
+      g.fillStyle(0xffffff, 1);
+      for (let i = 0; i < 4; i++) {
+        const x = 34 + i * 7;
+        g.fillTriangle(x, 50, x + 5, 50, x + 2, 57);
+      }
+      g.fillStyle(gold, 1);
+      g.fillRect(26, 10, 36, 8);
+      g.fillTriangle(26, 12, 34, 12, 30, 0);
+      g.fillTriangle(38, 12, 50, 12, 44, 0);
+      g.fillTriangle(54, 12, 62, 12, 58, 0);
+    },
+  },
+
   props(scene) {
     let g;
 
@@ -773,19 +913,7 @@ const TextureFactory = {
     g.lineStyle(2, 0x0277bd, 1); g.strokeEllipse(10, 10, 18, 16);
     g.generateTexture('pr_goo', 20, 20); g.destroy();
 
-    // brainz token (the sun): a glowing pink brain
-    g = this._g(scene);
-    g.fillStyle(0xff80ab, 0.35); g.fillEllipse(24, 22, 46, 42);
-    g.fillStyle(0xf48fb1, 1); g.fillEllipse(15, 22, 22, 26);
-    g.fillEllipse(33, 22, 22, 26);
-    g.fillStyle(0xf8bbd0, 1); g.fillEllipse(13, 16, 12, 10);
-    g.fillEllipse(31, 15, 12, 9);
-    g.lineStyle(3, 0xc2185b, 0.9);
-    g.strokeEllipse(15, 22, 22, 26); g.strokeEllipse(33, 22, 22, 26);
-    g.lineStyle(2, 0xc2185b, 0.6);
-    g.beginPath(); g.arc(15, 22, 6, -2.4, 0.6, false); g.strokePath();
-    g.beginPath(); g.arc(33, 24, 6, -2.8, 0.4, false); g.strokePath();
-    g.generateTexture('brainz', 48, 44); g.destroy();
+    this.propCoin(scene);
 
     // the lane-saving moped (faces right; it rides the lane when triggered)
     g = this._g(scene);
@@ -810,6 +938,35 @@ const TextureFactory = {
     g.fillTriangle(9, 44, 31, 44, 20, 56);
     g.lineStyle(2, 0x546e7a, 1); g.strokeRoundedRect(9, 28, 22, 22, 6);
     g.generateTexture('shovel', 40, 58); g.destroy();
+  },
+
+  // The doge coin: the in-level currency, and a fallback for the rendered
+  // assets/sprites/dogecoin.png that normally covers this key.
+  //
+  // The face is tan and cream ON gold rather than gold relief on gold. This
+  // token is drawn at ~50px on a phone; a same-metal emboss turns to mush at
+  // that size, and contrast is the entire job of a currency icon.
+  propCoin(scene) {
+    const g = this._g(scene);
+    const GOLD = 0xf5c02a, RIM = 0xc99206, TAN = 0xe1701f, CREAM = 0xfde9c0, INK = 0x2a1a0d;
+    const cx = 24;
+    g.fillStyle(RIM, 1); g.fillEllipse(cx, 24, 48, 48);
+    g.fillStyle(GOLD, 1); g.fillEllipse(cx, 24, 42, 42);
+    g.lineStyle(2, RIM, 1); g.strokeEllipse(cx, 24, 36, 36);
+    g.fillStyle(TAN, 1);
+    g.fillTriangle(11, 17, 19, 5, 25, 18);
+    g.fillTriangle(37, 17, 29, 5, 23, 18);
+    g.fillStyle(INK, 1);
+    g.fillTriangle(15, 16, 19, 9, 22, 17);
+    g.fillTriangle(33, 16, 29, 9, 26, 17);
+    g.fillStyle(TAN, 1); g.fillEllipse(cx, 26, 30, 26);
+    g.fillStyle(CREAM, 1); g.fillEllipse(cx, 31, 16, 12);
+    g.fillEllipse(18, 21, 7, 5); g.fillEllipse(30, 21, 7, 5);
+    g.fillStyle(INK, 1);
+    g.fillEllipse(18, 23, 4, 5); g.fillEllipse(30, 23, 4, 5);
+    g.fillEllipse(cx, 29, 6, 4);
+    g.fillEllipse(cx, 34, 8, 2);
+    g.generateTexture('dogecoin', 48, 48); g.destroy();
   },
 
   // The pointing hand (fallback for assets/ui/tutorial-hand.webp).

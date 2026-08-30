@@ -1,15 +1,25 @@
-// Drives Projection.cam: follows the pair, pulls back and rises as they
-// separate so both stay framed, and adds shake on impacts.
+// Drives Projection.cam. Follows the runner along the face it is on and rolls
+// around the tunnel axis to keep that face underfoot.
+//
+// The roll lag is deliberate and is most of what sells a flip: the world swings
+// through ninety degrees over a couple of hundred milliseconds while the runner
+// stays upright in the middle of the screen, so it reads as the tunnel turning
+// rather than the character falling over.
 class CameraController {
   constructor() {
     this.shakeMag = 0;
     this.shakeTime = 0;
+    this.roll = 0;
+    this.kick = 0;       // extra pull-back after a flip or a stumble
   }
 
-  snapTo(a, b) {
-    Projection.cam.x = (a.x + b.x) / 2 * 0.85;
+  snapTo(p) {
+    this.roll = p.roll;
+    Projection.setRoll(this.roll);
+    Projection.cam.x = p.u * CFG.CAM_LEAD;
     Projection.cam.y = CFG.CAM_HEIGHT;
-    Projection.cam.z = Math.min(a.z, b.z) - CFG.CAM_BACK;
+    Projection.cam.z = p.z - CFG.CAM_BACK;
+    this.kick = 0;
   }
 
   shake(mag, dur) {
@@ -17,23 +27,32 @@ class CameraController {
     this.shakeTime = Math.max(this.shakeTime, dur);
   }
 
-  update(dt, a, b, tether) {
+  update(dt, p) {
     const cam = Projection.cam;
-    const sep = Phaser.Math.Clamp(tether.dist - CFG.tether.slackLength, 0, 8);
 
-    const tx = (a.x + b.x) / 2 * 0.85;
-    const back = CFG.CAM_BACK + sep * 0.45;
-    const tz = Math.min(a.z, b.z) - back;
-    const avgY = Math.max(0, (Math.max(a.y, 0) + Math.max(b.y, 0)) / 2);
-    const ty = CFG.CAM_HEIGHT + avgY * 0.3 + sep * 0.12;
+    // Roll never wraps: the runner accumulates turns, so going twice round the
+    // tube the same way keeps spinning instead of snapping back.
+    this.roll += (p.roll - this.roll) * Math.min(1, CFG.ROLL_RATE * dt);
+    Projection.setRoll(this.roll);
 
-    cam.x += (tx - cam.x) * Math.min(1, 5 * dt);
-    cam.z += (tz - cam.z) * Math.min(1, 7 * dt);
+    if (p.flipFlash > 0) this.kick = Math.max(this.kick, p.flipFlash * 2.4);
+    this.kick += (0 - this.kick) * Math.min(1, 3 * dt);
+
+    // Only a hint of lateral follow. Track the runner across the face any
+    // harder and the tube itself swings off the side of the screen, which is
+    // exactly the moment the player needs to see the corner they are aiming at.
+    const tx = p.u * CFG.CAM_LEAD;
+    const tz = p.z - CFG.CAM_BACK - this.kick;
+    const ty = CFG.CAM_HEIGHT + Math.max(0, p.h) * 0.28;
+
+    cam.x += (tx - cam.x) * Math.min(1, 6 * dt);
     cam.y += (ty - cam.y) * Math.min(1, 4 * dt);
+    // Forward tracking is stiff: falling behind the runner at 21 units/sec
+    // eats the reaction time the player needs to read the next piece.
+    cam.z += (tz - cam.z) * Math.min(1, 12 * dt);
 
-    // shake is world-unit jitter on the camera itself; the follow-lerp above
-    // pulls it back out, so it decays on its own (mag is given in px-ish
-    // units, ~80 px per world unit at player depth)
+    // Shake is world-unit jitter on the camera; the follow-lerp above pulls it
+    // back out, so it decays on its own (~80 px per unit at runner depth).
     if (this.shakeTime > 0) {
       this.shakeTime -= dt;
       const m = this.shakeMag / 80;

@@ -44,7 +44,7 @@ function stubPhaser(captured) {
 /**
  * @param {{ name: string, code: string }[]} scripts  In load order.
  * @returns {Promise<{ errors: string[], config: object|undefined, data: object }>}
- *   `data` holds the level catalogue and systems, or `{}` if a script failed first.
+ *   `data` holds the piece catalogue and systems, or `{}` if a script failed first.
  */
 export async function boot(scripts) {
   const captured = {};
@@ -96,7 +96,7 @@ export async function boot(scripts) {
   let data = {};
 
   try {
-    data = runInContext('({ LEVELS, CFG, Course, Poki })', context);
+    data = runInContext('({ PIECES, CFG, Track, Projection, Pool, Poki })', context);
   } catch (err) {
     if (errors.length === 0) errors.push(`the game globals are unreadable: ${err.message}`);
   }

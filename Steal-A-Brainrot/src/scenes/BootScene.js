@@ -55,6 +55,9 @@ class BootScene extends Phaser.Scene {
     if (this.textures.exists(key)) return;
     const def = CREATURES.find((c) => 'cr_' + c.id === key);
     if (def) { TextureFactory.creature(this, def); return; }
+    const mon = [...Object.values(ENEMIES), ...Object.values(BOSSES)].find((e) => e.art === key);
+    if (mon) { TextureFactory.monster(this, mon); return; }
+    if (key === 'dogecoin') { TextureFactory.propCoin(this); return; }
     if (key === 'hand') TextureFactory.propHand(this);
   }
 }

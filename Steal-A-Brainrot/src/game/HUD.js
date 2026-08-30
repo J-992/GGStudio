@@ -1,4 +1,4 @@
-// In-level UI: brainz pill (left -- the energy counter every token flies to),
+// In-level UI: doge-coin pill (left -- the counter every coin flies to),
 // this level's coin take (right), the level label + wave progress bar
 // (centre) and the mute button. The pill measures its text unscaled and only
 // re-lays out on change -- squashing the text on every earn is what once made
@@ -20,17 +20,18 @@ class HUD {
     const D = 1100;
     this.bg = scene.add.graphics().setDepth(D - 2).setScrollFactor(0);
 
-    // brainz pill (left)
+    // doge-coin pill (left). The icon's scale is set in _layoutEnergy(), which
+    // is the only place allowed to know it -- see _iconScale().
     this.energyPill = scene.add.graphics().setDepth(D);
-    this.energyIcon = scene.add.image(0, 0, 'brainz').setDepth(D + 1).setScale(0.8);
+    this.energyIcon = scene.add.image(0, 0, 'dogecoin').setDepth(D + 1);
     this.energyText = scene.add.text(0, 0, '0', {
-      fontFamily: 'Arial Black, Arial', fontSize: '26px', color: '#f8bbd0',
+      fontFamily: 'Arial Black, Arial', fontSize: '26px', color: '#ffe9a8',
       stroke: '#000000', strokeThickness: 4,
     }).setOrigin(0, 0.5).setDepth(D + 1);
 
     // coin chip (right of centre-right)
     this.coinPill = scene.add.graphics().setDepth(D);
-    this.coinIcon = scene.add.image(0, 0, 'coin').setDepth(D + 1).setScale(1.1);
+    this.coinIcon = scene.add.image(0, 0, 'coin').setDepth(D + 1);
     this.coinText = scene.add.text(0, 0, '$0', {
       fontFamily: 'Arial Black, Arial', fontSize: '20px', color: '#ffe082',
       stroke: '#000000', strokeThickness: 4,
@@ -97,6 +98,21 @@ class HUD {
     }
   }
 
+  // Effects.squash() treats _sqX/_sqY as an icon's REST scale and snaps the
+  // icon back to it after every bump. So those have to be the icon's actual
+  // scale, never a literal: this pair was hardcoded to 0.8, which was right for
+  // a 48px placeholder and catastrophic the moment a 352px render took over the
+  // same texture key -- the first coin collected blew the HUD icon up to 282px
+  // and buried the corner of the screen. Deriving both from scaleFor() means a
+  // re-render at any resolution can never reintroduce it.
+  _iconScale(img, key, logicalH) {
+    const scale = TextureFactory.scaleFor(this.scene, key, logicalH);
+    if (img._sqTween) { this.scene.tweens.remove(img._sqTween); img._sqTween = null; }
+    img.setScale(scale);
+    img._sqX = scale;
+    img._sqY = scale;
+  }
+
   _layoutEnergy() {
     const h = LAYOUT.hud, pad = h.pad, y = h.h / 2;
     const w = this.energyText.width + 58;
@@ -104,7 +120,7 @@ class HUD {
     this.energyPill.fillStyle(0x000000, 0.45);
     this.energyPill.fillRoundedRect(pad, y - 21, w, 42, 21);
     this.energyIcon.setPosition(pad + 24, y);
-    this.energyIcon._sqX = 0.8; this.energyIcon._sqY = 0.8;
+    this._iconScale(this.energyIcon, 'dogecoin', CFG.ART.coinHudH);
     this.energyText.setPosition(pad + 46, y);
   }
 
@@ -116,7 +132,7 @@ class HUD {
     this.coinPill.fillStyle(0x000000, 0.45);
     this.coinPill.fillRoundedRect(x, y - 17, w, 34, 17);
     this.coinIcon.setPosition(x + 18, y);
-    this.coinIcon._sqX = 1.1; this.coinIcon._sqY = 1.1;
+    this._iconScale(this.coinIcon, 'coin', CFG.ART.metaCoinH);
     this.coinText.setPosition(x + 32, y);
   }
 

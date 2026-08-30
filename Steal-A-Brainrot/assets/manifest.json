@@ -21,6 +21,15 @@
     "cr_tungtung": "sprites/cr_tungtung.png",
     "cr_udin": "sprites/cr_udin.png",
     "cr_vacca": "sprites/cr_vacca.png",
+    "dogecoin": "sprites/dogecoin.png",
+    "en_crustacle": "sprites/en_crustacle.png",
+    "en_cyclomunch": "sprites/en_cyclomunch.png",
+    "en_gloopo": "sprites/en_gloopo.png",
+    "en_grumblor": "sprites/en_grumblor.png",
+    "en_slimeking": "sprites/en_slimeking.png",
+    "en_sporeling": "sprites/en_sporeling.png",
+    "en_wispa": "sprites/en_wispa.png",
+    "en_zippet": "sprites/en_zippet.png",
     "hand": "ui/tutorial-hand.webp"
   }
 }
