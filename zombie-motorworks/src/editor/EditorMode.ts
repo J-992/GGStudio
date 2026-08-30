@@ -307,12 +307,25 @@ export interface EditorModeContext {
    */
   onChooseBuild?: (buildId: BuildId) => void;
   /**
+   * The player bought into a Blueprint Shop car. App owns the swap for the
+   * same reasons `onChooseBuild` does — the rig, the wallet, the unlocks and
+   * the run's checkpoint all move together — and reopens the garage around
+   * the result, so the editor never sees the transaction.
+   */
+  onBuyShopCar?: (carId: string) => boolean;
+  /**
    * How this mode's economy differs from Campaign's. Absent means the ordinary
    * rules: parts cost money, stock is consumed on placement, the Store is open.
    */
   purchaseRules?: {
     /** Stock never decrements, so placing a part costs nothing. */
     infiniteInventory: boolean;
+    /**
+     * The wallet is not a real number. The Car Shop shows "unlimited funds"
+     * and stops quoting prices nobody pays, rather than a balance that never
+     * moves next to a price that is always met.
+     */
+    infiniteMoney?: boolean;
     /**
      * Build the garage without a Store panel at all — Creative, whose
      * inventory is already unlimited, and a Daily draft day, whose fixed kit is
@@ -554,6 +567,15 @@ export class EditorMode {
         onRotateSelected: (axis) => this.rotateSelected(axis),
         onCancelTool: () => this.disarmTool(),
         onChooseBuild: (buildId) => context.onChooseBuild?.(buildId),
+        carShop:
+          context.onBuyShopCar === undefined
+            ? undefined
+            : {
+                profile: () => this.profile,
+                onBuyCar: (carId) => context.onBuyShopCar?.(carId) ?? false,
+                infiniteMoney: () =>
+                  context.purchaseRules?.infiniteMoney === true,
+              },
         onCopyCode: () => this.copyShareText(encodeShareCode(this.bp), 'code'),
         onCopyLink: () =>
           this.copyShareText(buildShareLink(encodeShareCode(this.bp)), 'link'),

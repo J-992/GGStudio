@@ -18,6 +18,7 @@ routing, `ARCHITECTURE.md` for design rationale, and
 | Survival phase behavior    | `src/survival/SurvivalMode.ts`                                        | `tests/runloop.spec.ts`, `tests/failure.spec.ts`, `tests/combat.spec.ts`               |
 | Portal platform state      | `src/app/platform.ts`                                                 | `unit/platform.test.ts`, `unit/crazygames-sdk.test.ts`, `unit/poki-sdk.test.ts`        |
 | Retention funnel vocabulary | `src/app/funnel.ts`                                                  | `unit/funnel.test.ts`                                                                  |
+| Blueprint Shop cars        | `src/core/carShop.ts`, `src/core/shopProgress.ts`                     | `unit/car-shop.test.ts`, `unit/shop-progress.test.ts`                                  |
 | Browser verification Seam  | `src/app/App.ts` (`debugSeam`), `tests/seam.ts`                       | affected Playwright specs                                                              |
 
 ## Portal Platform Contract
@@ -450,3 +451,42 @@ boot one dependency-free module.
   friction; `EditorMode` reports the garage's own verbs and the guided tour.
   `App.setGameplayActive` is the single source for both the portal's gameplay
   state and the funnel's active-play clock.
+
+## Blueprint Shop Contract
+
+`src/core/carShop.ts` is the ten cars and their prices; `src/core/shopProgress.ts`
+is the half that knows about a wallet; `App` owns every side effect. The shop
+serves Campaign, Daily, Endless and Creative unchanged, because nothing in
+either core module reads the mode.
+
+- A car is an ordered list of stages. Stage zero is the base rig and every
+  later stage only ever **adds** parts to the one before it, so a bought
+  improvement can never be taken away to pay for another.
+- Every stage validates as a drivable rig — root, engine, wheels, no overlap,
+  everything connected. `unit/car-shop.test.ts` checks all ten cars at every
+  stage; that test is the contract, not a smoke check.
+- Part ids run sequentially across a whole car, so a half-built car's ids never
+  shift. That is what lets `prepareCheckpointForGarageFight` carry damage
+  across an auto-build: surviving blocks keep their HP and only the new parts
+  arrive whole.
+- Prices are computed against the player's unlocks, and an unlock is charged
+  once — four off-road wheels on a rig whose owner has never bought one is four
+  wheels plus one unlock.
+- `planShopAutoBuild` decides and costs a purchase but mutates nothing;
+  `App.autoBuildShopCar` applies it, because spending money, granting unlocks,
+  swapping the rig and rebasing the run's checkpoint have to happen together.
+  It runs on every `openEditor`, which is what makes the next part appear
+  between waves without the player opening a panel.
+- `applyShopPurchase` buys exactly one stage — the price on the button is the
+  price paid — and `App` chains the auto-build after it so a saved-up wallet
+  still lands as much car as it covers.
+- Shop progress lives on the profile (`shopCarId`, `shopStages`) and resets
+  with the run, alongside money and inventory. The catalog unlocks it bought
+  are permanent, exactly like Store purchases.
+- Creative's wallet is not real, so the whole car arrives at once. That is
+  correct: the mode hands out unlimited money and every unlock, and a shop that
+  made it wait would enforce an economy the mode does not have.
+- `CarShopPanel` is presentation only and mounts **one** WebGL preview at a
+  time. `mountSpinningRigPreview` takes a context per canvas and browsers cap
+  how many a page may hold, so the render is torn down on selection change and
+  on close.

@@ -30,6 +30,20 @@ export interface PlayerProfile {
   highestWaveCleared?: number;
   /** Lifetime Phone Addict kills; gates the EMP module. */
   phoneAddictsKilled?: number;
+  /**
+   * Car the player is working towards in the Blueprint Shop, if any.
+   *
+   * Not validated against the catalog here: `carShop.getShopCar` returns
+   * undefined for an id the shop no longer carries, and every caller already
+   * has to handle "no car chosen", so a retired car degrades to that rather
+   * than needing a migration.
+   */
+  shopCarId?: string;
+  /**
+   * How many of that car's stages are installed. One means the base rig and
+   * nothing else; the car is finished when it reaches the stage count.
+   */
+  shopStages?: number;
 }
 
 export const STARTER_UNLOCKS = [
@@ -74,6 +88,8 @@ function hasValidShape(value: unknown): value is {
   buildId?: unknown;
   highestWaveCleared?: unknown;
   phoneAddictsKilled?: unknown;
+  shopCarId?: unknown;
+  shopStages?: unknown;
 } {
   if (!isRecord(value)) return false;
   if (value.schemaVersion !== 1 || typeof value.money !== 'number')
@@ -148,6 +164,16 @@ export function decodeProfile(json: string | null | undefined): PlayerProfile {
   if (isNonNegativeSafeInteger(parsed.phoneAddictsKilled)) {
     profile.phoneAddictsKilled = parsed.phoneAddictsKilled;
   }
+  // Both halves or neither: a car id with no stage count would read as a car
+  // owned at stage zero, which is not a state the shop can produce.
+  if (
+    typeof parsed.shopCarId === 'string' &&
+    isNonNegativeSafeInteger(parsed.shopStages) &&
+    parsed.shopStages > 0
+  ) {
+    profile.shopCarId = parsed.shopCarId;
+    profile.shopStages = parsed.shopStages;
+  }
   return profile;
 }
 
@@ -175,6 +201,11 @@ export function encodeProfile(profile: PlayerProfile): string {
     ...(profile.phoneAddictsKilled !== undefined &&
     profile.phoneAddictsKilled > 0
       ? { phoneAddictsKilled: profile.phoneAddictsKilled }
+      : {}),
+    ...(profile.shopCarId !== undefined &&
+    profile.shopStages !== undefined &&
+    profile.shopStages > 0
+      ? { shopCarId: profile.shopCarId, shopStages: profile.shopStages }
       : {}),
   });
 }

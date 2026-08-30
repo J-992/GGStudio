@@ -9,6 +9,17 @@
 
 import * as THREE from 'three';
 import { funnel } from './funnel.ts';
+import {
+  SHOP_CARS,
+  carTotalCost,
+  getShopCar,
+  type ShopCar,
+} from '../core/carShop.ts';
+import {
+  applyShopPurchase,
+  planShopAutoBuild,
+  shopCarProgress,
+} from '../core/shopProgress.ts';
 import type {
   PartConfig,
   PlacedPart,
@@ -407,6 +418,12 @@ export function resetProfileForNewRun(profile: PlayerProfile): void {
   profile.money = fresh.money;
   profile.inventory = { ...fresh.inventory };
   delete profile.currentBlueprintName;
+  // The shop car goes with the wallet that paid for it. A car kept across a
+  // failed run would be a free rig on the next one, which is the same reason
+  // money and inventory reset here; the catalog unlocks it bought are
+  // permanent, exactly like the ones bought from the Store.
+  delete profile.shopCarId;
+  delete profile.shopStages;
 }
 
 /** Restore every persistent profile field owned by a fresh game. */
@@ -421,6 +438,8 @@ export function resetProfileForNewGame(profile: PlayerProfile): void {
   delete profile.currentBlueprintName;
   delete profile.highestWaveCleared;
   delete profile.phoneAddictsKilled;
+  delete profile.shopCarId;
+  delete profile.shopStages;
 }
 
 /**
@@ -920,6 +939,13 @@ export class App {
     // whether the rig is deployable, and that fact belongs inside the garage
     // visit it describes rather than ahead of it.
     funnel.enterScreen('garage');
+    // The shop's whole promise, and the reason it is here rather than on a
+    // button: a player who chose a car and then went and cleared a wave comes
+    // back to find the next part already bolted on. Run before the editor is
+    // constructed, because the editor caches meshes and overlays off the
+    // blueprint it is handed and every one of those is stale if the rig
+    // changes underneath it.
+    this.autoBuildShopCar();
     this.disposeTitle();
     this.chamber?.dispose();
     this.chamber = null;
@@ -957,11 +983,13 @@ export class App {
             : undefined,
         purchaseRules: {
           infiniteInventory: getGameMode(this.activeModeId).infiniteInventory,
+          infiniteMoney: getGameMode(this.activeModeId).infiniteMoney,
           hideStore: this.storeHidden,
         },
         notice: this.pendingEditorNotice,
         isNewGame: this.pendingIsNewGame,
         onChooseBuild: (buildId) => this.applyChosenBuild(buildId),
+        onBuyShopCar: (carId) => this.buyShopCar(carId),
       },
     );
     this.pendingEditorNotice = undefined;
@@ -974,6 +1002,108 @@ export class App {
     // Reporting it as play would also mean gameplay never stopped at a wave
     // end, which is the first thing a platform integration review checks.
     this.setGameplayActive(false);
+  }
+
+  /**
+   * Fit whatever the wallet now covers on the shop car being built.
+   *
+   * Silent and safe to call on every garage open: `planShopAutoBuild` returns
+   * null when there is no car, when the car is finished, or when the next part
+   * is still out of reach, which is most visits. Returns whether anything was
+   * actually fitted so the purchase path can chain straight into it.
+   *
+   * Creative gets the whole car at once and that is correct — the mode hands
+   * out unlimited money and every unlock, so a shop that made it wait would be
+   * enforcing an economy the mode does not have.
+   */
+  private autoBuildShopCar(): boolean {
+    const plan = planShopAutoBuild(this.profile);
+    if (plan === null) return false;
+
+    // `changeMoney` throws rather than going negative; the plan is priced off
+    // the same wallet a line above, so this can only fail if something else is
+    // mutating the profile mid-call, and in that case not swapping the rig is
+    // the right outcome.
+    try {
+      this.changeMoney(-plan.spend, false);
+    } catch {
+      return false;
+    }
+    this.profile.unlockedDefIds = [
+      ...new Set([...this.profile.unlockedDefIds, ...plan.unlocks]),
+    ];
+    this.profile.shopStages = plan.installed;
+    this.markProfileDirty();
+
+    this.bp = plan.blueprint;
+    this.history.clear();
+    // Damage is carried, not healed. Shop part ids are stable across stages, so
+    // a part that survived three waves keeps the HP it earned and only the new
+    // blocks arrive whole — otherwise every fitted part would be a free repair
+    // of the whole rig.
+    this.carryCheckpointOntoShopCar();
+    this.noteInEditor(`Fitted: ${plan.labels.join(', ')}`);
+    return true;
+  }
+
+  /**
+   * Buy into a shop car's base rig and fit everything the rest of the wallet
+   * covers, then reopen the garage around it.
+   *
+   * The car arrives whole and owing nothing, because it is a different
+   * vehicle: its part ids collide with the old rig's, so carried damage and
+   * an outstanding parts bill would both be describing blocks that are gone.
+   * That is the same reasoning as `rebaseCheckpointOnChosenBuild`, which the
+   * Build picker uses for exactly the same swap.
+   */
+  buyShopCar(carId: string): boolean {
+    const car = getShopCar(carId);
+    if (car === undefined) return false;
+    const switching = this.profile.shopCarId !== car.id;
+    const result = applyShopPurchase(this.profile, car, 0);
+    if (!result.bought || result.blueprint === null) return false;
+
+    this.markProfileDirty();
+    this.bp = result.blueprint;
+    this.history.clear();
+    if (switching) this.rebaseCheckpointOnChosenBuild();
+    this.pendingEditorNotice = undefined;
+    // Everything left in the wallet goes straight into the same car, so a
+    // player who saved up arrives with as much of it as they paid for rather
+    // than one stage per garage visit.
+    if (!this.autoBuildShopCar()) {
+      this.noteInEditor(`${car.name} — ${car.stages[0].label} fitted.`);
+    }
+    this.openEditor();
+    return true;
+  }
+
+  /** Which car the shop is building, for the garage panel and the seam. */
+  activeShopCar(): ShopCar | undefined {
+    return getShopCar(this.profile.shopCarId);
+  }
+
+  /**
+   * Put the run in flight back on the rig that just changed, keeping the
+   * damage every surviving block already carries.
+   */
+  private carryCheckpointOntoShopCar(): void {
+    if (this.checkpoint === null) return;
+    this.checkpoint = prepareCheckpointForGarageFight(this.checkpoint, this.bp);
+    this.persistRunCheckpoint(this.inBuildPhase ? 'build' : 'wave');
+  }
+
+  /**
+   * Queue a line for the garage banner without losing one already waiting.
+   *
+   * A Daily opens with its own notice and then the shop fits a part on the way
+   * in; both are worth reading, and the second must not silently eat the first.
+   */
+  private noteInEditor(text: string): void {
+    this.pendingEditorNotice =
+      this.pendingEditorNotice === undefined
+        ? text
+        : `${this.pendingEditorNotice} · ${text}`;
   }
 
   private showTitle(hasSave = this.hasStoredSave()): void {
@@ -2285,6 +2415,26 @@ export class App {
       // Every retention checkpoint this session has reported, so the funnel
       // can be verified by playing rather than by waiting on a dashboard.
       funnelLog: () => funnel.debugLog(),
+      shopCars: () =>
+        SHOP_CARS.map((car) => ({
+          id: car.id,
+          name: car.name,
+          stages: car.stages.length,
+          total: carTotalCost(car, this.profile.unlockedDefIds),
+        })),
+      shopProgress: () => {
+        const progress = shopCarProgress(this.profile);
+        return progress === null
+          ? null
+          : {
+              car: progress.car.id,
+              installed: progress.installed,
+              total: progress.total,
+              next: progress.nextStage?.label ?? null,
+              nextCost: progress.nextCost,
+            };
+      },
+      buyShopCar: (carId: string) => this.buyShopCar(carId),
       telemetry: () => this.chamber?.debugTelemetry(),
       survivalTelemetry: () => this.survival?.debugTelemetry() ?? null,
       profile: () => ({

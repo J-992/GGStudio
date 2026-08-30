@@ -58,6 +58,11 @@ They describe work at the time they were written and can be stale.
 - **Profile**: persistent wallet, unlocks, inventory, selected blueprint name,
   and lifetime progression counters.
 - **Inventory**: purchased but unplaced part counts keyed by definition ID.
+- **Shop Car**: one of the ten finished cars in `src/core/carShop.ts`, sold as
+  an ordered list of Stages. Stage zero is a drivable base rig and each later
+  Stage only adds parts, so the car is playable at every point in its build
+  order. The garage fits the next Stage automatically whenever the wallet
+  covers it; progress lives on the Profile and resets with the Run.
 - **Run**: a sequence of survival waves sharing banked earnings, cumulative
   kills, committed part losses, and carried part HP.
 - **Wave-Start Checkpoint**: immutable run state used by reset, failure, and

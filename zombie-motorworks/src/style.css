@@ -7578,3 +7578,289 @@ button:disabled {
     height: 148px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Car Shop
+
+   A list beside one large preview. Nobody buys a car off a name and a price,
+   so the render is the biggest thing in the panel and the list is narrow
+   enough to leave it room.
+   --------------------------------------------------------------------------- */
+
+.car-shop {
+  width: min(880px, calc(100vw - 32px));
+  max-height: min(660px, calc(100vh - 40px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.car-shop__head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.car-shop__title {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--ui-text);
+  font: 400 var(--ui-text-28)/1 var(--ui-font-display);
+}
+
+.car-shop__wallet {
+  color: var(--ui-cash, #d8c47a);
+  font: 400 var(--ui-text-18)/1 var(--ui-font-display);
+  white-space: nowrap;
+}
+
+.car-shop__close {
+  padding: 5px 10px;
+  border: 0;
+  background: rgb(255 255 255 / 0.09);
+  color: var(--ui-text);
+  font: 400 var(--ui-text-12)/1 var(--ui-font-display);
+  cursor: pointer;
+}
+
+.car-shop__lede {
+  margin: 0;
+  color: var(--ui-text-dim);
+  font: 400 var(--ui-text-13)/1.45 var(--ui-font-body);
+}
+
+.car-shop__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+  gap: 12px;
+}
+
+/* The list scrolls; the preview beside it does not move. */
+.car-shop__list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-right: 4px;
+}
+
+.car-shop__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1px 8px;
+  padding: 7px 9px;
+  border: 0;
+  text-align: left;
+  background: rgb(255 255 255 / 0.03);
+  box-shadow: inset 3px 0 0 rgb(255 255 255 / 0.08);
+  cursor: pointer;
+}
+
+.car-shop__row:hover {
+  background: rgb(255 255 255 / 0.07);
+}
+
+.car-shop__row--selected {
+  background: rgb(255 255 255 / 0.09);
+  box-shadow: inset 3px 0 0 var(--ui-text);
+}
+
+/* The car being built, marked in the list as well as in the detail pane. */
+.car-shop__row--active {
+  box-shadow: inset 3px 0 0 var(--ui-accent, #b9d46a);
+}
+
+.car-shop__row-name {
+  color: var(--ui-text);
+  font: 400 var(--ui-text-13)/1.2 var(--ui-font-display);
+}
+
+.car-shop__row-meta {
+  color: var(--ui-cash, #d8c47a);
+  font: 400 var(--ui-text-12)/1.2 var(--ui-font-body);
+  white-space: nowrap;
+}
+
+.car-shop__row-pips {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 2px;
+  margin-top: 3px;
+}
+
+.car-shop__detail {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: rgb(255 255 255 / 0.03);
+}
+
+/* The preview. Fixed height so switching cars does not reflow the pane under
+   the cursor that switched it. */
+.car-shop__stage {
+  /* Positioned and clipped rather than merely sized: the preview canvas is
+     shared with the build picker, which stretches it to a square card, and a
+     canvas that inherits that here spills 350px down over the description
+     under it. Absolute inset inside a clipped box cannot do that whatever the
+     shared rule says. */
+  position: relative;
+  /* Tall rather than wide. The cars this shop sells are four storeys at the
+     top end and the preview fits to the shorter axis, so a squat stage makes
+     the most extravagant car in the list the smallest thing on screen. */
+  height: 260px;
+  overflow: hidden;
+  background: radial-gradient(
+    ellipse at 50% 60%,
+    rgb(120 150 90 / 0.14),
+    rgb(0 0 0 / 0) 70%
+  );
+}
+
+.car-shop__stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.car-shop__detail-name {
+  color: var(--ui-text);
+  font: 400 var(--ui-text-22)/1.1 var(--ui-font-display);
+}
+
+.car-shop__chassis {
+  color: var(--ui-text-dim);
+  font: 400 var(--ui-text-11)/1.2 var(--ui-font-body);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.car-shop__blurb {
+  margin: 4px 0 2px;
+  color: var(--ui-text-dim);
+  font: 400 var(--ui-text-13)/1.4 var(--ui-font-body);
+}
+
+/* The build order as a row of boxes: how many there are, and how many are
+   yours. The promise made visible before anything has been spent. */
+.car-shop__track {
+  display: flex;
+  gap: 3px;
+  margin: 4px 0 2px;
+}
+
+.car-shop__pip {
+  width: 100%;
+  height: 6px;
+  background: rgb(255 255 255 / 0.12);
+}
+
+.car-shop__pip--on {
+  background: var(--ui-accent, #b9d46a);
+}
+
+/* The one being saved up for, so the panel answers "what am I waiting on"
+   without reading the status line. */
+.car-shop__pip--next {
+  background: rgb(216 196 122 / 0.55);
+}
+
+.car-shop__plan {
+  margin: 2px 0 4px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1px;
+}
+
+.car-shop__plan-item {
+  display: grid;
+  grid-template-columns: minmax(0, 128px) minmax(0, 1fr);
+  gap: 8px;
+  padding: 2px 0;
+  color: rgb(255 255 255 / 0.34);
+  font: 400 var(--ui-text-12)/1.35 var(--ui-font-body);
+}
+
+.car-shop__plan-item--on {
+  color: var(--ui-text-dim);
+}
+
+.car-shop__plan-item--on .car-shop__plan-label {
+  color: var(--ui-accent, #b9d46a);
+}
+
+.car-shop__plan-item--next .car-shop__plan-label {
+  color: var(--ui-cash, #d8c47a);
+}
+
+.car-shop__plan-label {
+  font-family: var(--ui-font-display);
+}
+
+.car-shop__plan-note {
+  min-width: 0;
+}
+
+.car-shop__status {
+  margin: 2px 0 0;
+  color: var(--ui-text-dim);
+  font: 400 var(--ui-text-12)/1.35 var(--ui-font-body);
+}
+
+.car-shop__action {
+  margin-top: 6px;
+  padding: 9px 12px;
+  border: 0;
+  background: var(--ui-accent, #b9d46a);
+  color: #14180c;
+  font: 400 var(--ui-text-14)/1 var(--ui-font-display);
+  cursor: pointer;
+}
+
+.car-shop__action:disabled {
+  cursor: default;
+  background: rgb(255 255 255 / 0.09);
+  color: var(--ui-text-dim);
+}
+
+/* Waiting on money is not the same as unavailable: the price is the point, so
+   it stays legible rather than dimming to the disabled grey. */
+.car-shop__action--waiting:disabled {
+  background: rgb(216 196 122 / 0.18);
+  color: var(--ui-cash, #d8c47a);
+}
+
+/* Phones: the preview and its detail go on top, the list underneath, and the
+   list gets a capped height so the car is always the first thing on screen. */
+@media (max-width: 640px) {
+  .car-shop__body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .car-shop__detail {
+    order: -1;
+  }
+
+  .car-shop__list {
+    max-height: 168px;
+  }
+
+  .car-shop__stage {
+    height: 190px;
+  }
+
+  .car-shop__plan {
+    display: none;
+  }
+}

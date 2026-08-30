@@ -33,6 +33,7 @@ import {
   type BuildId,
 } from '../core/builds.ts';
 import { mountSpinningRigPreview } from './BuildPreview.ts';
+import { createCarShop, type CarShopHandlers } from './CarShopPanel.ts';
 import { upgradePrice } from '../core/upgrades.ts';
 import { RIG_SPLASH_URLS, preloadRigSplashArt } from '../ui/splashArt.ts';
 
@@ -70,6 +71,12 @@ export interface EditorUIHandlers {
   onCancelTool(): void;
   /** The player picked their starting rig in the first-run build prompt. */
   onChooseBuild?(buildId: BuildId): void;
+  /**
+   * Everything the Car Shop panel needs. Absent in a garage that has no shop —
+   * the UI museum, and any caller that has not wired App's side of it — and
+   * the button is then not built at all.
+   */
+  carShop?: CarShopHandlers;
   newGarageDisposalSummary(): NewGarageDisposalSummary;
   onNew(): void;
   onMenu(): void;
@@ -1377,10 +1384,15 @@ export function buildEditorUI(
   });
   shareTopButton.setAttribute('aria-controls', 'garage-share-panel');
   shareTopButton.setAttribute('aria-expanded', 'false');
+  // Ten finished cars to work towards, on the same layer as the other confirms.
+  const carShopPanel =
+    handlers.carShop === undefined ? null : createCarShop(handlers.carShop);
+  if (carShopPanel !== null) root.appendChild(carShopPanel.overlay);
   utilityButtons.append(
     menuBtn,
     saveAndQuitBtn,
     btn('Tutorial', handlers.onStartTutorial),
+    ...(carShopPanel === null ? [] : [carShopPanel.button]),
     shareTopButton,
     newGarageBtn,
   );
