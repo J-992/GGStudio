@@ -2,7 +2,7 @@
 // cards, the shop and save code read everything from the definition.
 //
 // `role` picks the behaviour in CombatSystem:
-//   producer - makes brainz (the Cocofanto sunflower)
+//   producer - mints doge coins (the Cocofanto sunflower)
 //   shooter  - fires straight down its lane        (params: projectile, burst,
 //              pierce, slow, knockback)
 //   lobber   - arcs a splash shot; `anywhere` lobs at the densest pack on the
@@ -13,7 +13,7 @@
 //   wall     - just stands there, deliciously
 //   mine     - arms over `armMs`, detonates on contact
 //
-// `cost` is brainz (in-level), `price` is coins (the shop; 0 = starter).
+// `cost` is doge coins (in-level), `price` is shop money (0 = starter).
 // `cooldownMs` is the card recharge. `attackSpeed` is attacks/second.
 // Rarity still colours the cards and orders the shop.
 //
@@ -35,7 +35,7 @@ const CREATURES = [
   { id: 'cocofanto',   name: 'Cocofanto Elefanto',     rarity: 'uncommon', role: 'producer',
     cost: 50,  hp: 220, cooldownMs: 6000, price: 0,
     produceMs: 7000, produceAmount: 25,
-    special: 'MAKES BRAINZ', blurb: 'Trumpets out 25 brainz every 7s. The economy.',
+    special: 'MAKES DOGE COINS', blurb: 'Trumpets out 25 doge coins every 7s. The economy.',
     art: 'lirili',     color: 0xa1887f, accent: 0x8d6e63 },
   { id: 'trippi',      name: 'Trippi Troppi',          rarity: 'common', role: 'shooter',
     cost: 100, hp: 300, cooldownMs: 5000, price: 0,

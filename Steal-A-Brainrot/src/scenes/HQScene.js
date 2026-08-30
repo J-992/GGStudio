@@ -121,7 +121,7 @@ class HQScene extends Phaser.Scene {
     }).setOrigin(0.5);
     this.root.add(name);
 
-    // bottom chip: brainz cost (unlocked) or coin price + BUY (locked)
+    // bottom chip: doge-coin cost (unlocked) or shop price + BUY (locked)
     const chip = this.add.text(x, y + h / 2 - 12,
       unlocked ? '\u{1F9E0} ' + def.cost : (SaveSys.data.coins >= def.price ? 'BUY ' : '') + HUD.money(def.price), {
         fontFamily: 'Arial Black, Arial', fontSize: '13px',
@@ -196,7 +196,7 @@ class HQScene extends Phaser.Scene {
     if (!unlocked) {
       this.infoText.setText(d.name + ' — ' + RARITIES[d.rarity].name + ' — costs ' + HUD.money(d.price) + ' to recruit.');
     } else {
-      const stats = d.role === 'producer' ? '+' + d.produceAmount + ' brainz / ' + (d.produceMs / 1000) + 's'
+      const stats = d.role === 'producer' ? '+' + d.produceAmount + ' coins / ' + (d.produceMs / 1000) + 's'
         : d.role === 'wall' ? d.hp + ' HP wall'
         : Math.round(Units.dps(d)) + ' dps';
       this.infoText.setText(d.name + ' — ' + d.special + ' — ' + stats + ' — ' + d.blurb);

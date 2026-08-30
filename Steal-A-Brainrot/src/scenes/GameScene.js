@@ -1,5 +1,5 @@
 // Orchestration: builds every system, owns the place/dig rules, forwards raw
-// pointer events (brainz taps beat cards beat the lawn), gates Poki gameplay
+// pointer events (coin taps beat cards beat the lawn), gates Poki gameplay
 // reporting on real player input, and drives the per-frame update order.
 class GameScene extends Phaser.Scene {
   constructor() { super('Game'); }
@@ -87,7 +87,7 @@ class GameScene extends Phaser.Scene {
     if (!this.cards.isReady(cardIdx)) {
       AudioSys.sfx('denied');
       if (!this.economy.canAfford(def.cost)) {
-        this.fx.floatText(LAYOUT.field.colX(col), LAYOUT.field.laneY(lane) - 40, 'NEED MORE BRAINZ!', '#ff8a80', 18);
+        this.fx.floatText(LAYOUT.field.colX(col), LAYOUT.field.laneY(lane) - 40, 'NEED MORE COINS!', '#ff8a80', 18);
       }
       return false;
     }
@@ -121,7 +121,11 @@ class GameScene extends Phaser.Scene {
   // ------------------------------------------------------- frame
 
   update(time, delta) {
-    const dt = Math.min(delta, 100);
+    // Clamp the top end for a tab that was backgrounded, and the bottom end
+    // because a non-finite delta does not throw -- it silently turns every
+    // countdown in the game (produce timers, card cooldowns, wave clocks) into
+    // NaN, and the lawn just quietly stops working.
+    const dt = delta > 0 && delta < 100 ? delta : (delta >= 100 ? 100 : 16);
 
     if (!this.modalOpen) {
       const combatDt = dt * this.fx.timeScale();
@@ -130,6 +134,7 @@ class GameScene extends Phaser.Scene {
       this.energy.update(dt);
       this.cards.update(dt);
       this.director.update(dt);
+      if (this.tutorial) this.tutorial.update(dt);
     }
 
     this.hud.refresh();

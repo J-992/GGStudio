@@ -1,4 +1,4 @@
-// The seed-packet bar: one card per squad member (sprite + brainz cost +
+// The seed-packet bar: one card per squad member (sprite + doge-coin cost +
 // recharge sweep) and the shovel. Cards support both gestures: drag a card
 // onto a cell, or tap the card then tap the cell. GameScene owns the actual
 // placement rules (tryPlace/tryDig); this is presentation + intent.
@@ -29,10 +29,11 @@ class CardBar {
       const sprite = this.scene.add.image(x, y - 6, 'cr_' + id).setOrigin(0.5, 0.62);
       sprite.setScale((cb.cardH * 0.52) / sprite.height);
       const costText = this.scene.add.text(x + 4, y + cb.cardH / 2 - 12, String(def.cost), {
-        fontFamily: 'Arial Black, Arial', fontSize: '15px', color: '#f8bbd0',
+        fontFamily: 'Arial Black, Arial', fontSize: '15px', color: '#ffe9a8',
         stroke: '#000000', strokeThickness: 3,
       }).setOrigin(0.5);
-      const brain = this.scene.add.image(x - costText.width / 2 - 8, y + cb.cardH / 2 - 12, 'brainz').setScale(0.34);
+      const brain = this.scene.add.image(x - costText.width / 2 - 8, y + cb.cardH / 2 - 12, 'dogecoin')
+        .setScale(TextureFactory.scaleFor(this.scene, 'dogecoin', CFG.ART.coinCardH));
       const cdOverlay = this.scene.add.rectangle(x, y - cb.cardH / 2, cb.cardW - 4, 0, 0x000000, 0.62).setOrigin(0.5, 0);
       r.add([bg, sprite, brain, costText, cdOverlay]);
       this.cards.push({ def, i, bg, sprite, costText, brain, cdOverlay, cdMs: oldCd[i] || 0 });
@@ -66,7 +67,7 @@ class CardBar {
       c.bg.lineStyle(3, sel ? 0xffd54f : RARITIES[c.def.rarity].color, sel ? 1 : 0.85);
       c.bg.strokeRoundedRect(rect.x, rect.y, rect.w, rect.h, 10);
       c.sprite.setTint(affordable && ready ? 0xffffff : 0x666677);
-      c.costText.setColor(affordable ? '#f8bbd0' : '#ef9a9a');
+      c.costText.setColor(affordable ? '#ffe9a8' : '#ef9a9a');
     });
     const s = this._cardRect(CFG.TEAM.size);
     const sel = this.selected === 'shovel';

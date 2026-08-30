@@ -1,10 +1,10 @@
 // The two currencies, kept deliberately apart:
-//   brainz -- in-level only, produced by Cocofanto and the sky, spent planting
-//   coins  -- meta, paid by dead evil brainrots, banked ONLY on victory,
+//   coins  -- in-level only, produced by Cocofanto and the sky, spent planting
+//   coins  -- meta, paid by dead monsters, banked ONLY on victory,
 //             spent in the shop between levels
 class Economy {
   constructor() {
-    this.energy = 0;                  // brainz
+    this.energy = 0;                  // doge coins
     this.pendingCoins = 0;            // this level's kill money, banked on win
   }
 

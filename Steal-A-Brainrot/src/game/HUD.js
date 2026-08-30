@@ -1,4 +1,4 @@
-// In-level UI: brainz pill (left -- the energy counter every token flies to),
+// In-level UI: doge-coin pill (left -- the counter every coin flies to),
 // this level's coin take (right), the level label + wave progress bar
 // (centre) and the mute button. The pill measures its text unscaled and only
 // re-lays out on change -- squashing the text on every earn is what once made
@@ -20,11 +20,12 @@ class HUD {
     const D = 1100;
     this.bg = scene.add.graphics().setDepth(D - 2).setScrollFactor(0);
 
-    // brainz pill (left)
+    // doge-coin pill (left)
     this.energyPill = scene.add.graphics().setDepth(D);
-    this.energyIcon = scene.add.image(0, 0, 'brainz').setDepth(D + 1).setScale(0.8);
+    this.energyIcon = scene.add.image(0, 0, 'dogecoin').setDepth(D + 1)
+      .setScale(TextureFactory.scaleFor(scene, 'dogecoin', CFG.ART.coinHudH));
     this.energyText = scene.add.text(0, 0, '0', {
-      fontFamily: 'Arial Black, Arial', fontSize: '26px', color: '#f8bbd0',
+      fontFamily: 'Arial Black, Arial', fontSize: '26px', color: '#ffe9a8',
       stroke: '#000000', strokeThickness: 4,
     }).setOrigin(0, 0.5).setDepth(D + 1);
 

@@ -5,12 +5,12 @@ const CFG = {
   // ---- the lawn ----
   GRID: { lanes: 6, cols: 9 },
 
-  // ---- brainz (the in-level currency, PvZ sun) ----
+  // ---- doge coins (the in-level currency, PvZ sun) ----
   ENERGY: {
     start: 50,               // levels can override (levels.js startEnergy)
-    dropValue: 25,           // every brainz token is worth this
-    skyDropMs: 8500,         // a free token falls from the sky this often
-    dropLifeMs: 9000,        // uncollected tokens fade after this
+    dropValue: 25,           // every doge coin is worth this
+    skyDropMs: 8500,         // a free coin drops from the sky this often
+    dropLifeMs: 9000,        // uncollected coins fade after this
   },
 
   // ---- combat feel ----
@@ -42,7 +42,10 @@ const CFG = {
   ADS: { interstitialGapMs: 120000 },
 
   // ---- art ----
-  ART: { creatureH: 88, handH: 132 },
+  // Logical display heights. Every swappable texture is drawn through
+  // TextureFactory.scaleFor(), so a 352px render and a 48px placeholder under
+  // the same key occupy exactly the same space on screen.
+  ART: { creatureH: 88, handH: 132, coinH: 46, coinHudH: 38, coinCardH: 17 },
   ART_MANIFEST: 'assets/manifest.json',
 
   // ---- persistence ----

@@ -97,7 +97,7 @@ export async function boot(scripts) {
   let data = {};
 
   try {
-    data = runInContext('({ CFG, CREATURES, CREATURES_BY_ID, RARITIES, ENEMIES, BOSSES, LEVELS, LAYOUT, configureLayout, Poki, SaveSys, AudioSys, Units })', context);
+    data = runInContext('({ CFG, CREATURES, CREATURES_BY_ID, RARITIES, ENEMIES, BOSSES, LEVELS, LAYOUT, configureLayout, Poki, SaveSys, AudioSys, Units, TextureFactory })', context);
   } catch (err) {
     if (errors.length === 0) errors.push(`the game globals are unreadable: ${err.message}`);
   }

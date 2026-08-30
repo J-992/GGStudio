@@ -93,10 +93,9 @@ class CombatSystem {
     const root = this.scene.add.container(x, f.laneY(lane)).setDepth(300 + lane * 10);
     const shadow = this.scene.add.image(0, 2, 'shadow').setAlpha(0.5);
     shadow.setScale(h / 60);
-    const img = this.scene.add.image(0, 0, 'cr_' + def.base).setOrigin(0.5, 1);
+    const img = this.scene.add.image(0, 0, def.art).setOrigin(0.5, 1);
     img.setScale(h / img.height);
     img.setFlipX(true);                     // they walk left
-    img.setTint(def.tint || 0x8f7bb8);      // the evil wash
     const barW = Math.max(40, h * 0.7);
     const hpBg = this.scene.add.rectangle(0, -h - 12, barW, 7, 0x263238).setOrigin(0.5).setVisible(isBoss);
     const hpFg = this.scene.add.rectangle(-barW / 2, -h - 12, barW, 5, isBoss ? 0xff1744 : 0xb388ff).setOrigin(0, 0.5).setVisible(isBoss);
@@ -131,7 +130,8 @@ class CombatSystem {
 
       const slowed = this._clock < e.slowUntil;
       const rate = slowed ? CFG.COMBAT.slowFactor : 1;
-      e.img.setTint(slowed ? 0x64b5f6 : (e.def.tint || 0x8f7bb8));
+      // Monsters wear their own colours; only the slow debuff tints them.
+      if (slowed) e.img.setTint(0x64b5f6); else e.img.clearTint();
 
       // what's in front of the mouth?
       const mouthX = e.x - e.h * 0.28;

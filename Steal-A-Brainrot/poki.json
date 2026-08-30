@@ -10,8 +10,10 @@
       "npm run check"
     ],
     "lfs": [
-      "Steal-A-Brainrot/assets/sprites/**"
+      "Steal-A-Brainrot/assets/sprites/**",
+      "Steal-A-Brainrot/assets/ui/**"
     ],
+    "token_git_secret_name": "POKI_UPLOAD_TOKEN_STEAL_THE_BRAINROT",
     "max_bytes": 20971520,
     "node_version": "22"
   }
