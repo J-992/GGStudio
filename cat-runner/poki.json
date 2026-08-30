@@ -1,0 +1,29 @@
+{
+  "game_id": "13cec8c0-4a70-4649-b12b-b9d26a61a996",
+  "build_dir": "dist",
+  "ggs": {
+    "id": "cat-runner",
+    "package_manager": "npm",
+    "install": "npm ci",
+    "build": "npm run build",
+    "verify": [
+      "npm run typecheck",
+      "npm test"
+    ],
+    "lfs": [
+      "cat-runner/public/**"
+    ],
+    "ignore_origins": [
+      "(^|\\.)creativecommons\\.org$",
+      "(^|\\.)quaternius\\.com$",
+      "(^|\\.)patreon\\.com$",
+      "(^|\\.)discord\\.gg$",
+      "(^|\\.)twitter\\.com$",
+      "(^|\\.)github\\.io$",
+      "(^|\\.)games\\.poki\\.com$"
+    ],
+    "max_bytes": 20971520,
+    "node_version": "22",
+    "token_git_secret_name": "POKI_UPLOAD_TOKEN_CAT_RUNNER"
+  }
+}

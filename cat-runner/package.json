@@ -1,0 +1,30 @@
+{
+  "name": "rooftop-rascal-cat-escape",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rooftop Rascal: Cat Escape - a physics-driven 3D rooftop chase game",
+  "type": "module",
+  "scripts": {
+    "extract-assets": "node scripts/extract-assets.mjs",
+    "postinstall": "node scripts/extract-assets.mjs",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "playtest": "node scripts/playtest/run.mjs",
+    "profile": "node scripts/playtest/profile.mjs",
+    "preview:poki": "node scripts/serve-like-poki.mjs"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.14.0",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/three": "^0.169.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
+  }
+}

@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Cat Runner</title>
+  <meta name="description" content="Cat Runner - a physics-driven 3D endless rooftop runner. Collect fish, dodge obstacles, and sprint across sun-baked Mediterranean rooftops for as long as you can." />
+  <meta name="theme-color" content="#C9622F" />
+  <!-- Inlined so the browser never issues a request for /favicon.ico. -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23C9622F'/%3E%3Cpath d='M8 12 L8 5 L13 9 Q16 8 19 9 L24 5 L24 12 Q26 15 26 19 Q26 26 16 26 Q6 26 6 19 Q6 15 8 12 Z' fill='%23F2A65A'/%3E%3Ccircle cx='12.5' cy='17' r='1.7' fill='%232A1A12'/%3E%3Ccircle cx='19.5' cy='17' r='1.7' fill='%232A1A12'/%3E%3Cpath d='M14.5 21 L17.5 21 L16 22.8 Z' fill='%232A1A12'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/src/styles/main.css" />
+
+  <!-- Must run before anything resolves a relative URL.
+
+       Poki serves a build from a directory URL that arrives *without* a
+       trailing slash: `https://games.poki.com/<gameId>/<buildId>?tag=...`.
+       Per RFC 3986 the base for a document-relative reference is everything
+       up to the last `/`, so `./assets/x` there resolves to
+       `/<gameId>/assets/x` - the build directory itself is dropped and every
+       asset 404s. That is invisible locally, where the game is served from a
+       root path, and fatal on Poki: the bundle never loads, no JS runs, and
+       the static loading screen sits at "Warming up the grill..." forever.
+
+       So the build directory is computed once, here, and everything that
+       builds a URL uses it instead of `./` - the bundle tags Vite injects
+       (rewritten by the `pokiBaseUrl` plugin in vite.config.ts) and the
+       runtime asset loaders (AssetRegistry, AudioManager) alike.
+
+       Deliberately *not* a `<base href>` element, which would fix the same
+       problem in one line but re-point every `<use href="#icon-...">` in the
+       icon sprite at an external document, blanking every icon in the UI. -->
+  <script>
+    window.__ASSET_BASE__ = (function () {
+      var path = location.pathname;
+      // A trailing `foo.html` is a file; drop it. Anything else is the
+      // directory itself, whether or not the slash survived.
+      if (/\.[^/]*$/.test(path)) return path.replace(/[^/]*$/, '');
+      return path.charAt(path.length - 1) === '/' ? path : path + '/';
+    })();
+  </script>
+
+
+  <!-- The one external request a Poki build is allowed to make. Loaded ahead
+       of the module bundle so `window.PokiSDK` exists by the time boot runs;
+       it must NOT be `async`/`defer`, or the wrapper's first look finds
+       nothing and the whole session reports as unmonetized. Everything past
+       this point is bundled - no fonts, no CDNs, no remote assets. -->
+  <script src="https://game-cdn.poki.com/scripts/v2/poki-sdk.js"></script>
+</head>
+<body>
+
+  <!-- ============================================================
+       ICON SPRITE SHEET
+       Single-colour inline SVG symbols, referenced everywhere via
+       <svg class="icon"><use href="#icon-name"/></svg>. Never fetched
+       over the network - fill="currentColor" so icons inherit color.
+  ============================================================ -->
+  <svg style="display:none" aria-hidden="true">
+
+    <symbol id="icon-fish" viewBox="0 0 24 24">
+      <path fill-rule="evenodd" d="M2 12C4.5 7.3 9.1 4.6 13.7 4.6c2.1 0 4 .6 5.6 1.7.5-.6 1.1-1.1 1.8-1.5.4-.2.9.1.8.5-.3 1.4-.4 2.8-.4 4.2v5c0 1.4.1 2.8.4 4.2.1.4-.4.7-.8.5-.7-.4-1.3-.9-1.8-1.5-1.6 1.1-3.5 1.7-5.6 1.7C9.1 19.4 4.5 16.7 2 12Zm7.7-1.1a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6Z"/>
+    </symbol>
+
+    <symbol id="icon-paw" viewBox="0 0 24 24">
+      <path d="M7.5 16a4.5 3.8 0 1 0 9 0 4.5 3.8 0 1 0-9 0Z"/>
+      <path d="M4.8 10a2 2 0 1 0 4 0 2 2 0 1 0-4 0Z"/>
+      <path d="M9.4 5.6a2.1 2.1 0 1 0 4.2 0 2.1 2.1 0 1 0-4.2 0Z"/>
+      <path d="M14.6 5.4a2.1 2.1 0 1 0 4.2 0 2.1 2.1 0 1 0-4.2 0Z"/>
+      <path d="M16 9.8a2 2 0 1 0 4 0 2 2 0 1 0-4 0Z"/>
+    </symbol>
+
+    <symbol id="icon-cat" viewBox="0 0 24 24">
+      <path d="M6.5 9.4 3.6 3.7 9 6.4C9.9 6.1 10.9 6 12 6s2.1.1 3 .4l5.4-2.7-2.9 5.7C18.4 10.6 19 12.2 19 14c0 3.9-3.1 6-7 6s-7-2.1-7-6c0-1.8.6-3.4 1.5-4.6Z"/>
+    </symbol>
+
+    <symbol id="icon-play" viewBox="0 0 24 24">
+      <path d="M8 5.1c0-.9 1-1.5 1.8-1L18.5 9.5c.8.5.8 1.6 0 2.1L9.8 17c-.8.5-1.8-.1-1.8-1Z"/>
+    </symbol>
+
+    <symbol id="icon-gear" viewBox="0 0 24 24">
+      <path d="M19.4 13c0-.3.1-.6.1-1s0-.7-.1-1l2.1-1.6c.2-.1.2-.4.1-.6l-2-3.5c-.1-.2-.4-.3-.6-.2l-2.5 1c-.5-.4-1.1-.8-1.7-1l-.4-2.6c0-.2-.2-.4-.5-.4h-4c-.2 0-.4.2-.5.4l-.4 2.6c-.6.2-1.2.6-1.7 1l-2.5-1c-.2-.1-.5 0-.6.2l-2 3.5c-.1.2-.1.5.1.6L4.6 11c0 .3-.1.6-.1 1s0 .7.1 1l-2.1 1.6c-.2.1-.2.4-.1.6l2 3.5c.1.2.4.3.6.2l2.5-1c.5.4 1.1.8 1.7 1l.4 2.6c0 .2.2.4.5.4h4c.2 0 .4-.2.5-.4l.4-2.6c.6-.2 1.2-.6 1.7-1l2.5 1c.2.1.5 0 .6-.2l2-3.5c.1-.2.1-.5-.1-.6ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/>
+    </symbol>
+
+    <symbol id="icon-back" viewBox="0 0 24 24">
+      <path d="M20 11H7.8l4.6-4.6L11 5l-7 7 7 7 1.4-1.4L7.8 13H20Z"/>
+    </symbol>
+
+    <symbol id="icon-restart" viewBox="0 0 24 24">
+      <path d="M12 5V1.5L6.8 6 12 10.5V7c3.3 0 6 2.7 6 6s-2.7 6-6 6-6-2.7-6-6H4c0 4.4 3.6 8 8 8s8-3.6 8-8-3.6-8-8-8Z"/>
+    </symbol>
+
+    <symbol id="icon-pause" viewBox="0 0 24 24">
+      <path d="M6 5h4v14H6zM14 5h4v14h-4z"/>
+    </symbol>
+
+    <symbol id="icon-sound-on" viewBox="0 0 24 24">
+      <path d="M3 10v4h4l5 4V6l-5 4H3Z"/>
+      <path d="M15.5 12c0-1.8-.9-3.4-2.3-4.3v8.6c1.4-.9 2.3-2.5 2.3-4.3Z"/>
+      <path d="M13.2 3.5v2.1c3.3 1 5.8 4 5.8 7.4s-2.5 6.4-5.8 7.4v2.1c4.5-1.1 7.8-5.1 7.8-9.9s-3.3-8.8-7.8-9.9Z"/>
+    </symbol>
+
+    <symbol id="icon-sound-off" viewBox="0 0 24 24">
+      <path d="M3 10v4h4l5 4V6l-5 4H3Z"/>
+      <path d="M19.1 12l1.9-1.9-1.1-1.1L18 10.9l-1.9-1.9-1.1 1.1L16.9 12l-1.9 1.9 1.1 1.1L18 13.1l1.9 1.9 1.1-1.1Z"/>
+    </symbol>
+
+    <symbol id="icon-trophy" viewBox="0 0 24 24">
+      <path d="M7 3h10v6a5 5 0 0 1-5 5 5 5 0 0 1-5-5Z"/>
+      <path d="M5 5H3v2a4 4 0 0 0 4 4V9a2 2 0 0 1-2-2Z"/>
+      <path d="M19 5h2v2a4 4 0 0 1-4 4V9a2 2 0 0 0 2-2Z"/>
+      <path d="M11 14h2v3h3v2H8v-2h3Z"/>
+    </symbol>
+
+    <symbol id="icon-clock" viewBox="0 0 24 24">
+      <path fill-rule="evenodd" d="M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20Zm0-2a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z"/>
+      <path d="M11 6h2v6.4l4 2.3-1 1.7-5-2.9Z"/>
+    </symbol>
+
+  </svg>
+
+  <!-- ============================================================
+       GAME CANVAS
+       Full-viewport WebGL surface. Everything else in #ui-root
+       floats above it.
+  ============================================================ -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- ============================================================
+       UI ROOT
+       All screens + HUD live here. Pointer events are off by default
+       (see main.css) so gameplay input passes through except where a
+       screen or control explicitly re-enables it.
+  ============================================================ -->
+  <div id="ui-root">
+
+    <!-- ---------- Loading ---------- -->
+    <div class="screen" id="screen-loading">
+      <div class="loading-lockup">
+        <svg class="loading-icon icon" aria-hidden="true"><use href="#icon-cat"/></svg>
+        <h1 class="game-title">Cat Runner</h1>
+      </div>
+      <div id="loading-track" class="loading-track">
+        <div id="loading-bar" class="loading-bar" style="width: 0%"></div>
+      </div>
+      <p id="loading-status" class="loading-status">Warming up the grill&hellip;</p>
+    </div>
+
+    <!-- ---------- Main menu ----------
+         Deliberately NOT an opaque panel. The game itself is running behind
+         this screen - a real generated rooftop route with the cat sat on it
+         eating its fish (see `Game.startAttract()`) - and everything here
+         floats over it, the way Subway Surfers puts its menu over a live
+         scene of the character mid-graffiti. `#screen-menu`'s only background
+         is a top-and-bottom scrim; the middle band is left clear because that
+         is where the cat is. -->
+    <div class="screen" id="screen-menu" hidden>
+      <button id="btn-sound-toggle" class="icon-btn icon-btn--floating" type="button" aria-label="Toggle sound" aria-pressed="false">
+        <svg class="icon"><use href="#icon-sound-on"/></svg>
+      </button>
+
+      <div class="title-lockup">
+        <svg class="title-lockup__paw title-lockup__paw--a icon" aria-hidden="true"><use href="#icon-paw"/></svg>
+        <svg class="title-lockup__paw title-lockup__paw--b icon" aria-hidden="true"><use href="#icon-paw"/></svg>
+        <svg class="title-lockup__icon icon" aria-hidden="true"><use href="#icon-cat"/></svg>
+        <h1 class="game-title">Cat Runner</h1>
+      </div>
+
+      <!-- Personal best. Hidden outright until there is one, so a first-time
+           player is not shown a 0 m record - UIManager toggles it from
+           save.bestDistance whenever the menu is entered. -->
+      <p class="menu-best" id="menu-best" hidden>
+        <svg class="icon" aria-hidden="true"><use href="#icon-trophy"/></svg>
+        <span class="menu-best__label">Best</span>
+        <strong class="menu-best__value" id="menu-best-value">0 m</strong>
+      </p>
+
+      <nav class="menu-actions">
+        <button id="btn-play" class="btn btn--primary btn--large" type="button">
+          <svg class="icon"><use href="#icon-play"/></svg>
+          Play
+        </button>
+        <button id="btn-shop" class="btn btn--secondary" type="button">
+          <svg class="icon"><use href="#icon-paw"/></svg>
+          Shop
+        </button>
+        <button id="btn-settings" class="btn btn--secondary" type="button">
+          <svg class="icon"><use href="#icon-gear"/></svg>
+          Settings
+        </button>
+      </nav>
+    </div>
+
+    <!-- ---------- Shop ---------- -->
+    <div class="screen" id="screen-shop" hidden>
+      <header class="screen-header">
+        <button id="btn-shop-back" class="icon-btn" type="button" aria-label="Back to menu">
+          <svg class="icon"><use href="#icon-back"/></svg>
+        </button>
+        <h2 class="screen-header__title">Shop</h2>
+        <!-- The wallet sits where the header's spacer used to, so it balances
+             the back button instead of needing its own row. -->
+        <p class="wallet" id="shop-wallet" role="status" aria-label="Fish available">
+          <svg class="icon" aria-hidden="true"><use href="#icon-fish"/></svg>
+          <span id="shop-wallet-count">0</span>
+        </p>
+      </header>
+
+      <!-- Left: live 3D preview (CatPreview owns a second WebGLRenderer
+           targeting this canvas, started/stopped as the screen is
+           entered/left) and the single control that acts on whatever it is
+           showing. Right: the roster.
+
+           Cards only ever *show* a coat - buying and wearing both happen at
+           #btn-skin-action, so a click on the grid is always safe and every
+           coat, affordable or not, can be looked at on the cat before any of
+           the player's fish are spent. -->
+      <div class="shop-layout">
+        <div class="shop-preview">
+          <div class="cat-preview">
+            <canvas id="cat-preview-canvas" aria-label="Preview of the selected cat"></canvas>
+          </div>
+
+          <div class="shop-action">
+            <p class="shop-action__name" id="shop-preview-name">Orange Tabby</p>
+            <!-- Label, class and disabled state are all written by
+                 UIManager.renderShopAction; the markup here is only what the
+                 screen looks like before the first render. -->
+            <button id="btn-skin-action" class="btn btn--primary shop-action__btn" type="button">
+              Wear
+            </button>
+          </div>
+        </div>
+
+        <div id="skin-grid" class="card-grid">
+          <!--
+            Example markup injected per skin by JS (illustrative only, not rendered):
+
+            <button class="skin-card skin-card--locked" data-skin-id="tabby" type="button">
+              <span class="skin-card__swatch" style="background: #C9622F"></span>
+              <span class="skin-card__name">Tabby</span>
+              <span class="skin-card__cost">
+                <svg class="icon"><use href="#icon-fish"/></svg>
+                3
+              </span>
+            </button>
+          -->
+        </div>
+      </div>
+
+      <!--
+        Purchase confirmation.
+
+        Inside #screen-shop rather than alongside the other screens: it is not
+        a destination the state machine can route to, it is a question about
+        the screen already on show, and leaving the shop rendered behind it is
+        what makes "the coat I am looking at" unambiguous.
+      -->
+      <div class="confirm" id="shop-confirm" hidden role="dialog" aria-modal="true"
+           aria-labelledby="shop-confirm-title" aria-describedby="shop-confirm-body">
+        <div class="confirm__panel">
+          <h3 class="confirm__title" id="shop-confirm-title">Buy this coat?</h3>
+          <p class="confirm__body" id="shop-confirm-body"></p>
+          <div class="confirm__actions">
+            <button id="btn-buy-cancel" class="btn btn--secondary" type="button">Cancel</button>
+            <button id="btn-buy-confirm" class="btn btn--primary" type="button">Buy</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- Settings ---------- -->
+    <div class="screen" id="screen-settings" hidden>
+      <header class="screen-header">
+        <button id="btn-settings-back" class="icon-btn" type="button" aria-label="Back">
+          <svg class="icon"><use href="#icon-back"/></svg>
+        </button>
+        <h2 class="screen-header__title">Settings</h2>
+        <span class="screen-header__spacer" aria-hidden="true"></span>
+      </header>
+
+      <div class="settings-body">
+
+        <section class="settings-group">
+          <h3 class="settings-group__title">Sound</h3>
+
+          <div class="settings-row">
+            <label for="set-master-volume">Master volume</label>
+            <input type="range" id="set-master-volume" min="0" max="1" step="0.01" value="1" />
+          </div>
+
+          <div class="settings-row">
+            <label for="set-music-volume">Music volume</label>
+            <input type="range" id="set-music-volume" min="0" max="1" step="0.01" value="0.6" />
+          </div>
+
+          <div class="settings-row">
+            <label for="set-effects-volume">Effects volume</label>
+            <input type="range" id="set-effects-volume" min="0" max="1" step="0.01" value="1" />
+          </div>
+
+          <div class="settings-row settings-row--check">
+            <label for="set-muted">Mute all sound</label>
+            <input type="checkbox" id="set-muted" class="switch" />
+          </div>
+        </section>
+
+        <section class="settings-group">
+          <h3 class="settings-group__title">Accessibility</h3>
+
+          <div class="settings-row settings-row--check">
+            <label for="set-reduced-camera">Reduced camera motion</label>
+            <input type="checkbox" id="set-reduced-camera" class="switch" />
+          </div>
+
+          <div class="settings-row settings-row--check">
+            <label for="set-reduced-shake">Reduced screen shake</label>
+            <input type="checkbox" id="set-reduced-shake" class="switch" />
+          </div>
+
+          <div class="settings-row settings-row--check settings-row--stacked">
+            <div class="settings-row__head">
+              <label for="set-assist-mode">Assist mode</label>
+              <input type="checkbox" id="set-assist-mode" class="switch" />
+            </div>
+            <p class="settings-row__help">Adds one extra checkpoint at the midpoint of each level.</p>
+          </div>
+
+          <div class="settings-row settings-row--check">
+            <label for="set-high-contrast">High contrast UI</label>
+            <input type="checkbox" id="set-high-contrast" class="switch" />
+          </div>
+
+          <div class="settings-row settings-row--check">
+            <label for="set-pause-on-blur">Pause when window loses focus</label>
+            <input type="checkbox" id="set-pause-on-blur" class="switch" checked />
+          </div>
+        </section>
+
+        <section class="settings-group">
+          <h3 class="settings-group__title">Graphics</h3>
+
+          <div class="settings-row">
+            <label for="set-graphics-quality">Quality</label>
+            <select id="set-graphics-quality">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="settings-group">
+          <h3 class="settings-group__title">Progress</h3>
+          <div class="settings-row">
+            <button id="btn-reset-progress" class="btn btn--danger" type="button">Reset Progress</button>
+          </div>
+        </section>
+
+      </div>
+    </div>
+
+    <!-- ---------- Pause overlay ---------- -->
+    <div class="screen screen--overlay" id="screen-pause" hidden>
+      <div class="overlay-card">
+        <h2 class="overlay-card__title">Paused</h2>
+        <div class="overlay-card__actions">
+          <button id="btn-resume" class="btn btn--primary" type="button">
+            <svg class="icon"><use href="#icon-play"/></svg>
+            Resume
+          </button>
+          <button id="btn-pause-restart" class="btn btn--secondary" type="button">
+            <svg class="icon"><use href="#icon-restart"/></svg>
+            Restart
+          </button>
+          <button id="btn-pause-settings" class="btn btn--secondary" type="button">
+            <svg class="icon"><use href="#icon-gear"/></svg>
+            Settings
+          </button>
+          <button id="btn-pause-menu" class="btn btn--secondary" type="button">Main Menu</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- Failed overlay ---------- -->
+    <div class="screen screen--overlay" id="screen-failed" hidden>
+      <div class="overlay-card overlay-card--fail">
+        <h2 class="overlay-card__title" id="fail-title">Caught!</h2>
+        <p class="overlay-card__message" id="fail-message">The chef's ladle found you first.</p>
+
+        <!-- Distance is the run's headline number, so it is the one thing set
+             at display size; fish earned and the standing record read as
+             supporting detail beneath it. -->
+        <div class="run-results">
+          <p class="run-results__distance"><span id="fail-distance">0</span> m</p>
+          <p class="run-results__new-best" id="fail-new-best" hidden>New Best!</p>
+          <div class="run-results__stats">
+            <span class="run-results__stat">
+              <svg class="icon" aria-hidden="true"><use href="#icon-fish"/></svg>
+              <span id="fail-fish">0</span>
+            </span>
+            <span class="run-results__stat">
+              <svg class="icon" aria-hidden="true"><use href="#icon-trophy"/></svg>
+              <span id="fail-best">0 m</span>
+            </span>
+          </div>
+        </div>
+
+        <p class="overlay-card__hint">Press <kbd>R</kbd> or tap to retry</p>
+        <div class="overlay-card__actions">
+          <button id="btn-fail-retry" class="btn btn--primary" type="button">
+            <svg class="icon"><use href="#icon-restart"/></svg>
+            Retry
+          </button>
+          <button id="btn-fail-menu" class="btn btn--secondary" type="button">Main Menu</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================
+       HUD
+       Sits above gameplay at all times during a run. Not a `.screen`
+       - it must never block pointer events except on its own buttons.
+  ============================================================ -->
+  <div id="hud" hidden>
+    <!-- Comic-style speed lines near the screen edges while Catnip Rush is
+         active. Pure CSS, driven by the `--speedlines-intensity` custom
+         property (same pattern as `--proximity`/`--remaining` elsewhere in
+         this file); edges only, so it never covers the gameplay itself. -->
+    <div id="hud-speedlines" class="hud-speedlines" aria-hidden="true"></div>
+
+    <div class="hud-top">
+      <!-- Score fish, distance and lives are one group, pushed to the right
+           edge together: fish used to sit alone at the flex start while
+           `.hud-pill--distance`'s `margin-left: auto` carried distance and
+           lives away from it, which read as an isolated, forgotten counter.
+           The auto margin now lives on this pill instead - whichever pill
+           leads the group carries it, and only one of them may. Fish stays
+           first within the group, and styled up, because it is the number
+           that moves constantly during a run. -->
+      <div id="hud-fish" class="hud-pill hud-pill--fish" role="status" aria-label="Fish collected">
+        <svg class="icon"><use href="#icon-fish"/></svg>
+        <span id="hud-fish-count">0</span>
+      </div>
+      <div id="hud-distance" class="hud-pill hud-pill--distance" role="status" aria-label="Distance run">0 m</div>
+      <div
+        id="hud-lives"
+        class="hud-pill hud-pill--lives"
+        role="status"
+        aria-label="3 of 3 lives left"
+      >
+        <span class="hud-life">🐾</span>
+        <span class="hud-life">🐾</span>
+        <span class="hud-life">🐾</span>
+      </div>
+      <button id="hud-pause" class="icon-btn hud-pause-btn" type="button" aria-label="Pause">
+        <svg class="icon"><use href="#icon-pause"/></svg>
+      </button>
+    </div>
+
+    <!-- Active power-up icons. Rebuilt by UIManager whenever the *set* of
+         active types changes; each icon's `--remaining` custom property is
+         written every frame to drive its countdown ring. -->
+    <div id="hud-powerups" class="hud-powerups" hidden></div>
+
+    <div id="hud-chase-warning" class="hud-chase-warning" hidden aria-hidden="true">
+      <svg class="icon"><use href="#icon-paw"/></svg>
+      <svg class="icon"><use href="#icon-paw"/></svg>
+      <svg class="icon"><use href="#icon-paw"/></svg>
+    </div>
+
+    <!-- Flashes shortly before a 90-degree corner. `--proximity` is written by
+         UIManager and drives the pulse; the arrow itself (an emoji, not an
+         icon/glyph built for this game) is swapped between ⬅️/➡️ by
+         UIManager from the upcoming corner's actual direction - a minimal
+         directional arrow, no instructional text. -->
+    <div id="hud-turn-warning" class="hud-turn-warning" hidden aria-hidden="true"
+         role="alert" aria-label="Hazard ahead">
+      <span id="hud-turn-arrow" class="hud-turn-arrow" aria-hidden="true">⬅️</span>
+    </div>
+
+    <p id="hud-tutorial" class="hud-tutorial" hidden></p>
+
+    <!-- First-time lesson prompt: the clothesline's "swipe down", and the
+         trampoline's "line up and keep running". Shown once each, over a
+         world Game.updateTutorial has slowed underneath it - see Tutorial.ts.
+         The arrow and the label are both written by UIManager, which picks
+         the wording from whether the player is on a touch screen. -->
+    <div id="hud-tutorial-cue" class="hud-tutorial-cue" hidden aria-hidden="true"
+         role="status">
+      <span id="hud-tutorial-arrow" class="hud-tutorial-arrow" aria-hidden="true">⬇️</span>
+      <span id="hud-tutorial-label" class="hud-tutorial-label"></span>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

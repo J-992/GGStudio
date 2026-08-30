@@ -1,0 +1,14 @@
+﻿node_modules/
+dist/
+.DS_Store
+*.local
+.vite/
+
+# Raw asset archives - extracted into public/assets by scripts/extract-assets.mjs
+*.zip
+
+scripts/playtest/shots/
+scripts/playtest/report.json
+
+# Byte-compiled Python from scripts/bake-assets.py
+__pycache__/

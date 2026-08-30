@@ -1,0 +1,890 @@
+You are Claude Code acting as a senior HTML5 game engineer, technical game designer, gameplay programmer, and optimization specialist.
+
+Create a complete, polished, lightweight 3D browser game in the current repository.
+
+Do not merely explain how to build it. Inspect the repository, create or modify all required files, install dependencies, run the project, fix errors, test the game, and produce a working production build.
+
+WORKING TITLE
+
+Rooftop Rascal: Cat Escape
+
+HIGH-LEVEL CONCEPT
+
+Create a third-person physics-based rooftop obstacle game.
+
+The player controls a mischievous orange cat that has stolen a large grilled fish from a restaurant. The restaurant owner and two guard dogs chase the cat across a series of city rooftops.
+
+The cat must sprint, slide, jump, stumble, bounce, and recover while navigating narrow rooftops, wooden planks, awnings, pipes, air-conditioning units, moving signs, collapsing roof tiles, clotheslines, chimneys, water towers, and large gaps between buildings.
+
+The gameplay must feel extremely close to the physics-driven browser game commonly listed as “Crazy Cart” or “Labubu Rides a Cart”:
+
+- Third-person trailing camera.
+- Momentum-heavy movement.
+- Deliberately unstable traversal.
+- Wobbly steering and physical tilting.
+- Speed must be managed carefully.
+- Ramps and slopes materially affect velocity.
+- Hard turns at high speed can cause sliding, spinning, or falling.
+- Landing badly can cause the player to tumble.
+- Narrow elevated paths and fatal drops.
+- Simple controls but difficult mastery.
+- Very fast restarting.
+- Short “one more attempt” gameplay loop.
+
+Do not copy the reference game’s characters, models, textures, sounds, UI, name, code, or level layouts. Recreate only the general gameplay principles and physics feel using completely original content.
+
+CORE GAMEPLAY LOOP
+
+1. The cat steals a fish from the restaurant.
+2. The restaurant owner shouts and releases two dogs.
+3. The cat begins running across the rooftops.
+4. The player navigates a short but challenging obstacle course.
+5. Moving too slowly allows the pursuers to catch up.
+6. Falling from a rooftop or being caught ends the attempt.
+7. Restart the level almost instantly.
+8. Reaching the safe rooftop completes the level.
+9. Collected fish tokens unlock cosmetic cat appearances.
+10. The next rooftop course becomes available.
+
+The game should prioritize movement mastery rather than combat.
+
+TECHNOLOGY
+
+Use:
+
+- Vanilla TypeScript.
+- Three.js for rendering.
+- Rapier 3D for physics.
+- Vite for development and production builds.
+- HTML and CSS for the interface.
+- Web Audio API for simple procedural sound effects where practical.
+- No React.
+- No backend.
+- No online account system.
+- No network requests during gameplay.
+- No external CDN dependencies at runtime.
+
+Bundle all dependencies locally.
+
+The final game must be deployable as a static HTML5 build.
+
+The project must work with:
+
+- npm install
+- npm run dev
+- npm run build
+- npm run preview
+
+The production build must be contained in /dist.
+
+ART DIRECTION
+
+Use an original, colorful, low-poly visual style.
+
+The atmosphere should resemble a warm Mediterranean or European restaurant district at sunset:
+
+- Cream-colored buildings.
+- Terracotta roofs.
+- Colorful awnings.
+- Rooftop gardens.
+- Laundry hanging between buildings.
+- Restaurant signs.
+- Water tanks.
+- Chimneys.
+- Satellite dishes.
+- Air-conditioning units.
+- Pigeons.
+- Distant city skyline.
+- Warm sunlight and soft atmospheric fog.
+
+Create the prototype using procedural geometry, primitives, simple materials, SVG interface graphics, and code-generated effects.
+
+Do not depend on downloaded commercial assets.
+
+The cat must be recognizable even if constructed from simple low-poly shapes:
+
+- Rounded body.
+- Head.
+- Four legs.
+- Tail.
+- Triangular ears.
+- Large expressive eyes.
+- Fish held in its mouth.
+- Running leg animation.
+- Tail movement responding to turning and airborne motion.
+- Body lean when steering.
+- Squash or compression during heavy landings.
+
+The restaurant owner should have:
+
+- Chef clothing or an apron.
+- Chef hat.
+- Exaggerated angry running animation.
+- A rolling pin or kitchen towel.
+- Comedic, non-threatening presentation.
+
+The dogs should be stylized cartoon guard dogs rather than frightening realistic animals.
+
+PLAYER PHYSICS
+
+Do not use a traditional position-based character controller.
+
+The player must be physics driven.
+
+Create an invisible rigid-body controller underneath the visual cat model. Movement should be produced using forces, impulses, velocity adjustment, ground-normal alignment, and torque rather than directly teleporting the player.
+
+The physics should create the following feel:
+
+- Strong forward momentum.
+- Limited lateral grip.
+- Noticeable but controllable sliding.
+- Steering becomes less forgiving at high speed.
+- The cat can oversteer and rotate too far.
+- Slopes naturally accelerate or slow the player.
+- Ramps preserve momentum.
+- Collisions can knock the cat sideways.
+- Poor landings cause a temporary tumble.
+- The player can recover when landing on a valid rooftop.
+- Falling into the street results in failure.
+- The player should feel slightly unstable but not randomly uncontrollable.
+
+Use a fixed physics timestep of 1/60 second.
+
+Expose all important physics values in one configuration object:
+
+- Body mass.
+- Gravity.
+- Forward acceleration.
+- Reverse acceleration.
+- Maximum ground speed.
+- Maximum airborne speed.
+- Steering strength.
+- Steering responsiveness at low speed.
+- Steering responsiveness at high speed.
+- Lateral friction.
+- Ground friction.
+- Linear damping.
+- Angular damping.
+- Jump impulse.
+- Air control.
+- Landing stabilization.
+- Maximum slope angle.
+- Ground detection distance.
+- Recovery delay.
+- Collision knockback.
+- Speed needed for camera FOV expansion.
+
+Start with approximately these values, but tune them through playtesting:
+
+- Gravity: approximately -18.
+- Maximum running speed: approximately 14–17 world units per second.
+- Jump impulse: approximately 6–8.
+- Air control: approximately 20% of grounded steering.
+- Low-speed steering should be responsive.
+- High-speed steering should require smaller corrections.
+- A full-speed hard turn should visibly slide the cat.
+- A normal level should take approximately 45–90 seconds when completed cleanly.
+
+Implement:
+
+- Jump buffering.
+- Approximately 100 ms of coyote time.
+- Ground-normal detection.
+- Slope acceleration.
+- Reduced steering while airborne.
+- Momentum-preserving jumps.
+- Airborne rotation correction.
+- Landing impact detection.
+- Short stumble animation after hard landings.
+- Automatic upright recovery if the cat tumbles on a safe surface.
+- No recovery when the player has fallen off the level.
+
+CONTROLS
+
+Desktop:
+
+- W or Up Arrow: accelerate forward.
+- S or Down Arrow: slow down or move backward.
+- A/D or Left/Right Arrow: steer.
+- Space: jump.
+- R: instant restart.
+- Escape: pause.
+- M: mute.
+- F2: toggle physics debug information.
+
+Mobile:
+
+- Large virtual left and right steering buttons.
+- Forward input is held automatically by default.
+- Separate jump button.
+- Optional brake button.
+- Buttons must support simultaneous input.
+- Prevent page scrolling, selection, and browser gestures while playing.
+- Use responsive sizing and safe-area padding.
+
+Also support gamepads:
+
+- Left stick: steer and regulate movement.
+- South face button: jump.
+- Start: pause.
+
+CAMERA
+
+Create a polished third-person spring camera.
+
+Requirements:
+
+- Positioned behind and slightly above the cat.
+- Smooth spring movement rather than rigid attachment.
+- Look slightly ahead of the player.
+- Camera direction should follow movement direction gradually.
+- Camera should not immediately snap whenever the cat spins.
+- Increase FOV slightly at high speed.
+- Add subtle landing shake.
+- Add stronger but short shake after collisions.
+- Prevent the camera from passing through walls with a raycast.
+- Fade or reposition when a rooftop object blocks the player.
+- Include a “Reduced Camera Motion” setting.
+
+The camera must preserve visibility of the route ahead while maintaining the unstable physics feeling.
+
+CHASE SYSTEM
+
+The restaurant owner and dogs create constant pressure without requiring an expensive navigation system.
+
+Implement a data-driven rooftop route using path nodes or a spline.
+
+Calculate approximate player progress along this route.
+
+The pursuers should follow the same route behind the player:
+
+- Two dogs begin closer to the cat.
+- The restaurant owner begins farther behind.
+- The dogs move faster than the owner.
+- Pursuers gain slightly when the player is slow.
+- Pursuers lose distance when the player moves efficiently.
+- They should jump or animate over gaps in a simplified scripted manner.
+- They do not need full physics accuracy.
+- They should remain visually believable.
+
+Use chase rubber-banding carefully:
+
+- The pursuers must remain visible or audible enough to maintain tension.
+- They must not automatically catch a player who is moving well.
+- Colliding with obstacles should allow them to gain distance.
+- Standing still should result in being caught within several seconds.
+- Being caught triggers a humorous animation rather than violence.
+
+Display pursuit pressure using:
+
+- Barking that grows louder as dogs approach.
+- Footsteps and angry shouting from the owner.
+- Edge-of-screen warning paw prints.
+- Optional small distance indicator.
+- No large intrusive chase meter during normal play.
+
+LEVEL STRUCTURE
+
+Build three complete handcrafted rooftop levels using modular pieces.
+
+LEVEL 1: THE RESTAURANT ESCAPE
+
+Purpose:
+
+- Teach movement.
+- Teach steering.
+- Teach jumping.
+- Introduce the chase.
+
+Sequence:
+
+1. Very short opening scene in the restaurant kitchen.
+2. Cat grabs the fish.
+3. Chef notices.
+4. Cat exits through an open window.
+5. Tutorial rooftop with wide safe surfaces.
+6. Small wooden plank.
+7. Low air-conditioning obstacle.
+8. First manageable rooftop gap.
+9. Sloped awning.
+10. Final sprint to a rooftop garden.
+
+Difficulty should be forgiving.
+
+LEVEL 2: APARTMENT ROOFTOPS
+
+Introduce:
+
+- Narrower paths.
+- Clotheslines.
+- Satellite dishes.
+- Chimneys.
+- Rotating roof fans.
+- Falling flowerpots.
+- Moving window-cleaning platforms.
+- Pigeons that briefly obstruct visibility.
+- Multiple optional routes.
+
+Include:
+
+- One safe but slow route.
+- One narrow shortcut containing extra fish tokens.
+- One collapsing roof-tile section.
+
+LEVEL 3: NEON MARKET DISTRICT
+
+Introduce:
+
+- Nighttime or evening neon lighting.
+- Larger gaps.
+- Moving restaurant signs.
+- Steam vents.
+- Sliding metal roofs.
+- Water tanks.
+- Fast downward slopes.
+- A swinging billboard.
+- Rooftop construction equipment.
+- A final difficult sequence of jumps.
+
+The final escape destination should be an open attic window or a friendly rooftop cat hideout.
+
+LEVEL DATA SYSTEM
+
+Do not hard-code every object directly inside the main game file.
+
+Create a data-driven level format that can define:
+
+- Spawn position.
+- Finish position.
+- Pursuer route.
+- Rooftop platforms.
+- Ramps.
+- Gaps.
+- Obstacles.
+- Moving platforms.
+- Rotating hazards.
+- Collapsing objects.
+- Collectibles.
+- Decorative props.
+- Kill plane.
+- Lighting settings.
+- Background buildings.
+- Camera hints.
+- Tutorial triggers.
+
+Place level definitions in separate files.
+
+Create reusable constructors or factories for modular pieces.
+
+OBSTACLES
+
+Include working implementations for:
+
+- Static air-conditioning unit.
+- Chimney.
+- Narrow wooden plank.
+- Sloped roof.
+- Ramp.
+- Moving platform.
+- Rotating sign.
+- Swinging obstacle.
+- Steam vent that applies an upward impulse.
+- Loose roof tiles that fall after contact.
+- Collapsing plank.
+- Rolling barrel or tomato crate.
+- Clothesline that slows or deflects the player.
+- Pigeon group that flies away when approached.
+- Breakable lightweight restaurant boxes.
+
+Obstacles should interact with the player through physics wherever feasible.
+
+Avoid instant death from minor collisions. Minor mistakes should usually slow, spin, bounce, or destabilize the player.
+
+FAILURE AND RESTART
+
+Failure conditions:
+
+- Falling below the rooftop kill plane.
+- Being caught by a dog.
+- Being grabbed by the restaurant owner.
+- Becoming trapped outside the playable area.
+
+On failure:
+
+- Brief slow-motion effect lasting no more than approximately 0.4 seconds.
+- Show a short contextual message such as:
+  - “The dogs caught your scent!”
+  - “That landing used one too many lives.”
+  - “The chef wants his dinner back.”
+- Allow immediate restart using keyboard, touch, or gamepad.
+- Automatically restart after a short delay if no input is given.
+- Reload the level without refreshing the browser.
+- Restart transition should be under approximately 500 ms.
+
+The normal difficulty mode should restart from the beginning of the level.
+
+Add an optional Assist Mode in settings that enables one midpoint checkpoint per level. Assist Mode must be disabled by default.
+
+COLLECTIBLES AND PROGRESSION
+
+Add three optional fish tokens to each level.
+
+Tokens should be positioned along riskier paths.
+
+At the end of the level, show:
+
+- Completion time.
+- Best time.
+- Fish tokens collected.
+- Total attempts.
+- Whether the player used Assist Mode.
+
+Save progress locally.
+
+Unlock simple cosmetic variations:
+
+- Orange tabby.
+- Black cat.
+- White cat.
+- Calico cat.
+- Grey cat.
+
+Cosmetics must not alter physics.
+
+Use a storage abstraction so local persistence can later be replaced with a platform SDK.
+
+INTERFACE
+
+Create an original, polished interface.
+
+Start menu:
+
+- Game title.
+- Large Play button.
+- Level select.
+- Cat customization.
+- Settings.
+- Sound toggle.
+
+In-game HUD:
+
+- Fish token count.
+- Small current level indicator.
+- Pause button on mobile.
+- Subtle chase warning.
+- Minimal tutorial prompts.
+
+Pause menu:
+
+- Resume.
+- Restart.
+- Settings.
+- Return to level select.
+
+Results screen:
+
+- Level complete.
+- Time.
+- Best time.
+- Tokens.
+- Next Level.
+- Replay.
+
+Use HTML and CSS overlays so the interface remains sharp at different resolutions.
+
+The UI should use:
+
+- Rounded panels.
+- Cream and terracotta tones.
+- Fish and paw motifs.
+- Large readable buttons.
+- Clear hover, pressed, and disabled states.
+- Responsive desktop and mobile layouts.
+
+Do not visually imitate Crazy Cart’s menus.
+
+AUDIO
+
+Create or procedurally synthesize lightweight audio for:
+
+- Cat footsteps.
+- Jump.
+- Landing.
+- Hard landing.
+- Sliding.
+- Collision.
+- Fish collection.
+- Dog barking.
+- Chef shouting using short nonverbal sounds.
+- Pigeon wings.
+- Steam vent.
+- Level completion.
+- Failure.
+- Button interaction.
+
+Use positional audio selectively for pursuers and environmental hazards.
+
+Provide:
+
+- Master volume.
+- Music volume.
+- Effects volume.
+- Mute.
+- Pause audio when the page loses focus.
+
+If procedural audio is insufficient, create placeholder audio hooks and clearly document how assets can be replaced.
+
+VISUAL EFFECTS
+
+Implement lightweight effects:
+
+- Dust particles while sliding.
+- Small roof debris during collisions.
+- Speed streaks at high velocity.
+- Paw-print particles during a perfect landing.
+- Fish-token sparkle.
+- Steam particles.
+- Pigeon feather particles.
+- Short impact flash.
+- Sunset atmospheric fog.
+
+Avoid expensive post-processing.
+
+PERFORMANCE REQUIREMENTS
+
+The game must target:
+
+- Smooth 60 FPS on an average desktop.
+- At least approximately 30–60 FPS on a mid-range mobile device.
+- Fast initial loading.
+- A lightweight static build.
+- A target compressed build size below approximately 12 MB.
+- Minimal garbage creation during the update loop.
+- No unnecessary React or UI framework.
+- No runtime CDN access.
+
+Optimize using:
+
+- Instanced meshes for repeated buildings and props.
+- Shared geometries and materials.
+- Object pooling for particles and debris.
+- Limited dynamic shadows.
+- One primary directional light.
+- Baked-looking ambient lighting where possible.
+- Capped device pixel ratio, preferably between 1 and 1.5 on mobile.
+- Frustum culling.
+- Simplified distant buildings.
+- Simplified pursuer animation.
+- No high-resolution textures.
+- Dispose of level resources when changing scenes.
+
+Pause simulation when the page is hidden.
+
+Handle WebGL context loss gracefully.
+
+ARCHITECTURE
+
+Use a clean, maintainable structure similar to:
+
+src/
+  main.ts
+  game/
+    Game.ts
+    GameState.ts
+    InputManager.ts
+    AudioManager.ts
+    SaveManager.ts
+    SettingsManager.ts
+  physics/
+    PhysicsWorld.ts
+    PlayerController.ts
+    PhysicsConfig.ts
+  camera/
+    FollowCamera.ts
+  entities/
+    Cat.ts
+    Pursuer.ts
+    Dog.ts
+    RestaurantOwner.ts
+    Collectible.ts
+  levels/
+    LevelManager.ts
+    LevelTypes.ts
+    level1.ts
+    level2.ts
+    level3.ts
+  obstacles/
+    ObstacleFactory.ts
+    MovingPlatform.ts
+    CollapsingTile.ts
+    SteamVent.ts
+    SwingingSign.ts
+  effects/
+    ParticlePool.ts
+    CameraShake.ts
+  ui/
+    UIManager.ts
+  styles/
+    main.css
+
+This structure may be adjusted if there is a clearly better approach, but do not place the entire game in one giant file.
+
+GAME STATES
+
+Implement explicit states:
+
+- Boot.
+- Main Menu.
+- Level Select.
+- Intro.
+- Playing.
+- Paused.
+- Failed.
+- Level Complete.
+- Settings.
+
+State transitions must not leave old physics bodies, listeners, audio, or interface elements active.
+
+DEBUGGING AND TUNING
+
+Add a debug panel toggled with F2.
+
+Display:
+
+- FPS.
+- Player speed.
+- Grounded status.
+- Current slope.
+- Player progress.
+- Chaser progress.
+- Chase distance.
+- Player position.
+- Physics body rotation.
+- Number of active rigid bodies.
+- Current level.
+- Current game state.
+
+Add optional debug rendering for:
+
+- Player collider.
+- Ground raycasts.
+- Level route.
+- Chase path.
+- Trigger zones.
+- Kill plane.
+
+Keep debug features disabled in normal gameplay.
+
+ACCESSIBILITY AND QUALITY SETTINGS
+
+Include:
+
+- Reduced camera motion.
+- Reduced screen shake.
+- Assist Mode.
+- Adjustable volume.
+- High-contrast tutorial text.
+- Touch-control size setting.
+- Graphics quality setting.
+- Pause when focus is lost.
+
+MOBILE AND BROWSER BEHAVIOR
+
+The game should primarily use landscape orientation but remain usable in portrait with a rotate-device recommendation.
+
+Implement:
+
+- Responsive canvas.
+- Correct resize handling.
+- Safe area support.
+- Pointer events.
+- Touch input.
+- Fullscreen option.
+- No accidental browser scrolling.
+- No right-click menu during gameplay.
+- No text selection.
+- Graceful handling when audio cannot begin until the first user interaction.
+- Keyboard controls must not scroll the page.
+
+YOUTUBE-PLAYABLE-FRIENDLY DESIGN
+
+Keep the build fully self-contained and suitable for static hosting.
+
+Do not implement an advertising SDK.
+
+Instead, create optional integration hooks such as:
+
+- onGameStarted()
+- onLevelCompleted(levelId, time, collectibles)
+- onGameFailed(reason)
+- onRewardedContinueRequested()
+- onSoundChanged(enabled)
+
+These should default to harmless local functions and be documented for future platform integration.
+
+Do not require authentication, cookies, external analytics, or server communication.
+
+OPENING SEQUENCE
+
+Create a short, skippable opening using the existing game models:
+
+1. Cat watches a grilled fish on the restaurant counter.
+2. Chef turns away.
+3. Cat grabs fish.
+4. Plate spins and falls.
+5. Chef turns around.
+6. Dogs bark.
+7. Cat jumps through the open kitchen window.
+8. Gameplay begins immediately on the first roof.
+
+Keep the sequence approximately 4–6 seconds.
+
+Allow skipping with any gameplay input.
+
+POLISH TARGET
+
+The game should feel satisfying within the first 10 seconds.
+
+Prioritize these elements in order:
+
+1. Physics and movement feel.
+2. Camera feel.
+3. Instant restart loop.
+4. Clear rooftop route.
+5. Chase pressure.
+6. Collision reactions.
+7. Mobile controls.
+8. Visual polish.
+9. Cosmetics and progression.
+
+Do not sacrifice physics quality to add unnecessary menus or content.
+
+IMPLEMENTATION ORDER
+
+Follow this order:
+
+Phase 1:
+- Set up Vite, TypeScript, Three.js, and Rapier.
+- Create render loop and fixed physics loop.
+- Build one test roof.
+- Implement player movement and camera.
+- Tune the physics until traversal is enjoyable.
+
+Phase 2:
+- Implement jumping, slopes, ramps, falling, restart, and camera collision.
+- Add F2 debug tools.
+- Verify there are no frame-rate-dependent physics behaviors.
+
+Phase 3:
+- Implement the chase route and pursuers.
+- Add failure from being caught.
+- Add basic audio warnings.
+
+Phase 4:
+- Implement reusable rooftop obstacles.
+- Construct Level 1.
+- Fully polish the complete start-to-finish loop.
+
+Phase 5:
+- Build Levels 2 and 3.
+- Add collectibles and progression.
+- Add level select and result screen.
+
+Phase 6:
+- Add mobile controls, gamepad support, settings, effects, audio, optimization, and final polish.
+
+TESTING
+
+Perform and document the following tests:
+
+- Player can complete every level.
+- Player can restart every level.
+- Player cannot jump indefinitely.
+- Player does not fall through standard roofs.
+- Moving platforms carry the player correctly.
+- Collapsing tiles clean themselves up after restart.
+- Pursuers reset correctly.
+- Pausing stops physics.
+- Losing browser focus pauses the game.
+- Mobile buttons allow simultaneous steering and jumping.
+- Resizing does not distort the interface.
+- Sound starts correctly after user interaction.
+- Saved progress loads safely.
+- Invalid save data does not crash the game.
+- Production build launches without console errors.
+- No missing asset requests.
+- No external network requests during gameplay.
+- Frame rate does not significantly alter movement.
+
+Include a lightweight automated smoke test where practical.
+
+DELIVERABLES
+
+The repository must include:
+
+- Complete source code.
+- package.json.
+- TypeScript configuration.
+- Vite configuration.
+- Three complete levels.
+- Responsive interface.
+- Desktop controls.
+- Mobile controls.
+- Gamepad support.
+- Local progress saving.
+- Integration hooks.
+- README.md.
+- TUNING.md.
+- ATTRIBUTION.md, even if it states that all prototype assets are procedural.
+- Production-ready /dist build after running npm run build.
+
+README.md must explain:
+
+- How to install.
+- How to run locally.
+- How to build.
+- Controls.
+- Browser support.
+- Project architecture.
+- How to create another level.
+- How to replace procedural models and sounds.
+- How to connect platform integration hooks.
+
+TUNING.md must explain:
+
+- Every physics parameter.
+- How to make movement more stable.
+- How to make movement more chaotic.
+- How to change chase pressure.
+- How to change camera damping.
+- How to tune mobile steering.
+- How to change the maximum speed and jump distance.
+
+ACCEPTANCE CRITERIA
+
+The implementation is complete only when:
+
+- The player can open the game and begin playing with one click.
+- Level 1 includes the full restaurant escape introduction.
+- All three rooftop levels can be completed.
+- The cat is visibly chased by dogs and the restaurant owner.
+- Movement is force-based and momentum-driven.
+- High-speed steering creates controlled sliding.
+- Ramps, slopes, collisions, and landings affect movement.
+- Falling produces an immediate, reliable restart.
+- Desktop and mobile controls work.
+- The game builds successfully.
+- The production build has no console errors.
+- The game does not require an internet connection after its files are loaded.
+- There are no unfinished TODO systems required for the primary gameplay loop.
+
+When finished:
+
+1. Run the production build.
+2. Fix all build errors and warnings that indicate real problems.
+3. Test the production build.
+4. Summarize what was implemented.
+5. List the controls.
+6. List the important files.
+7. Report the final approximate build size.
+8. Mention any remaining limitations honestly.
