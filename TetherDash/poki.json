@@ -7,6 +7,7 @@
     "install": "npm install --no-audit --no-fund",
     "build": "npm run build:poki",
     "verify": ["npm run check"],
+    "lfs": ["TetherDash/assets/**"],
     "max_bytes": 20971520,
     "node_version": "22",
     "token_git_secret_name": "POKI_UPLOAD_TOKEN_TETHER_DASH"
