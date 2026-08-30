@@ -333,6 +333,7 @@ class CombatSystem {
     const x = mine.root.x, y = mine.root.y;
     this.lawn.grid[mine.lane][mine.col] = null;
     mine.dead = true;
+    this.lawn.stopArmedBlink(mine);
     mine.root.destroy();
     AudioSys.sfx('boom');
     this.scene.fx.flash(0xffe082);

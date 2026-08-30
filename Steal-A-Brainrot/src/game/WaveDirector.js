@@ -64,6 +64,11 @@ class WaveDirector {
     return v != null ? v : CFG.LEVEL.waveTimeoutMs;
   }
 
+  clearGapMs() {
+    const v = this.recipe.def.clearGapMs;
+    return v != null ? v : CFG.LEVEL.waveClearGapMs;
+  }
+
   update(dtMs) {
     switch (this.state) {
       case 'prep':
@@ -74,7 +79,7 @@ class WaveDirector {
       case 'wave': {
         this.timer -= dtMs;
         const cleared = this.combat.allDead();
-        if (cleared && this._clearedAt === null) this._clearedAt = CFG.LEVEL.waveClearGapMs;
+        if (cleared && this._clearedAt === null) this._clearedAt = this.clearGapMs();
         if (this._clearedAt !== null) this._clearedAt -= dtMs;
         const moreWaves = this.waveIdx < this.totalWaves();
 

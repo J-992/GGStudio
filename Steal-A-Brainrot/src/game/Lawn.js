@@ -90,6 +90,7 @@ class Lawn {
     if (!u) return false;
     this.grid[lane][col] = null;
     u.dead = true;
+    this.stopArmedBlink(u);
     AudioSys.sfx('sell');
     this.scene.fx.sparks(u.root.x, u.root.y - 20, 0x8d6e63, 8);
     this.scene.tweens.add({
@@ -114,6 +115,7 @@ class Lawn {
   killUnit(unit) {
     if (unit.dead) return;
     unit.dead = true;
+    this.stopArmedBlink(unit);
     this.grid[unit.lane][unit.col] = null;
     AudioSys.sfx('hurt');
     this.scene.fx.sparks(unit.root.x, unit.root.y - LAYOUT.unitH * 0.4, 0xef5350, 10);
@@ -123,12 +125,41 @@ class Lawn {
     });
   }
 
-  // mine finished arming: surface with a hop
+  // mine finished arming: surface with a hop, then start blinking
   armMine(unit) {
     unit.armed = true;
     unit.img.setAlpha(1).setScale(LAYOUT.unitH / unit.img.height);
     this.scene.tweens.add({ targets: unit.root, y: unit.root.y - 10, duration: 120, yoyo: true, ease: 'Quad.easeOut' });
     this.scene.fx.ringPulse(unit.root.x, unit.root.y - 20, 0xffb300, 1.0);
+    this.startArmedBlink(unit);
+  }
+
+  // An armed mine and an arming mine looked near enough identical, so the only
+  // way to know whether the capybara would actually go off was to count the
+  // seconds since you planted it. Now it blinks red the moment it is live --
+  // one-shot traps are worth nothing if you cannot tell they are ready.
+  startArmedBlink(unit) {
+    this.stopArmedBlink(unit);
+    // A pulse rather than a hard on/off toggle: it reads as "live and waiting"
+    // instead of as a rendering glitch, and it is a tween like every other
+    // looping visual here rather than a lone clock event to keep in sync.
+    unit.armBlink = this.scene.tweens.addCounter({
+      from: 0, to: 1, duration: 420, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+      onUpdate: (tw) => {
+        if (unit.dead || !unit.img || !unit.img.active) return;
+        // white -> 0xff1744, so the capybara reddens without going black
+        const v = tw.getValue();
+        unit.img.setTint(Phaser.Display.Color.GetColor(
+          255, Math.round(255 - 232 * v), Math.round(255 - 187 * v)));
+      },
+    });
+  }
+
+  stopArmedBlink(unit) {
+    if (!unit.armBlink) return;
+    unit.armBlink.stop();
+    unit.armBlink = null;
+    if (!unit.dead && unit.img && unit.img.active) unit.img.clearTint();
   }
 
   // ---------------------------------------------------------- placement UI
