@@ -4,6 +4,7 @@ import {
   CAMERA,
   CONTACT,
   ENEMY,
+  FEINT,
   FLOW,
   GUARD,
   HEALTH,
@@ -27,7 +28,7 @@ import { AudioEngine } from '../fx/Audio';
 import { IMPACT_COLOR, VFX } from '../fx/VFX';
 import { Props } from '../fx/Props';
 import { HUD } from '../ui/HUD';
-import { GameOverScreen } from '../ui/GameOver';
+import { GameOverScreen, type GameOverData } from '../ui/GameOver';
 import { MainMenu, type MenuData } from '../ui/MainMenu';
 import { CharacterSelect, type SelectData } from '../ui/CharacterSelect';
 import { PauseMenu } from '../ui/PauseMenu';
@@ -45,13 +46,16 @@ import { contactProfileFor, solveContactImpulse, type ContactProfile } from './C
 import type { Enemy } from './Enemy';
 import { Player } from './Player';
 import {
+  COSMETIC_MODEL_IDS,
   COSMETIC_SLOTS,
   itemsForSlot,
   sanitizeLoadout,
   type CosmeticSlot,
   type Loadout,
 } from './Cosmetics';
+import { commitDaily, dailiesFor, type Daily } from './Dailies';
 import { commitRun, unlockState, type RunStats } from './Progression';
+import { phaseIndexFor } from './PatternDirector';
 import { MODEL_WEAPONS, setWeaponModelSupplier } from './Weapons';
 import { evaluate } from './TimingEvaluator';
 
@@ -115,13 +119,14 @@ export class Game {
   private runStart = 0;
   private elapsed = 0;
   private score = 0;
-  private hearts = HEALTH.hearts;
+  private hearts: number = HEALTH.hearts;
   private recovery = 0;
   private stats: RunStats = { kills: 0, perfects: 0, flows: 0, score: 0 };
   private selected: CharacterId = 'fox';
   private attackLock = 0;
   private provedLeft = 0;
   private provedRight = 0;
+  private flowTutorialActive = false;
   private deathTimer = 0;
   private flashLight = 0;
   private measured = new Set<MeasureKey>();
@@ -178,6 +183,7 @@ export class Game {
       () => void this.replay(),
       (id) => void this.selectCharacter(id),
       () => this.showMenu(),
+      () => void this.continueRun(),
     );
     this.menu.setHandlers(
       () => void this.playFromMenu(),
@@ -264,13 +270,24 @@ export class Game {
     if (!returning) this.hud.show();
     if (save.runs > 0 && Date.now() - save.lastPlayed > 6 * 3600_000) this.hud.welcomeBack();
 
-    // Everything else streams in behind live gameplay, one file per idle slot:
-    // the other ninjas first, then the armoury.
+    // Everything else streams in behind live gameplay, one file per idle slot.
+    // The small original enemy cast lands first, then its real weapons; both
+    // are seen every run, unlike the optional hero catalogue and wardrobe.
     setWeaponModelSupplier((id) => this.assets.weapon(id));
     void this.assets
-      .loadDeferred(idleGate)
+      .loadEnemies(idleGate)
+      .then(() => this.installEnemyModels())
+      .then(() => this.assets.loadWeapons(MODEL_WEAPONS, idleGate))
+      .then(() => this.assets.loadDeferred(idleGate))
       .then(() => this.refreshFinisherClip())
-      .then(() => this.assets.loadWeapons(MODEL_WEAPONS, idleGate));
+      .then(() => this.assets.loadCosmetics(COSMETIC_MODEL_IDS, idleGate))
+      // A returning player's saved hat was skipped while its model was in
+      // flight, so the loadout is worn again once the files are on hand — and
+      // the character screen redraws, since its cards had nothing to render.
+      .then(() => {
+        this.player.setLoadout(this.loadout);
+        if (this.select.isVisible) this.select.refresh(this.selectData());
+      });
   }
 
   // ----------------------------------------------------------------- run
@@ -286,22 +303,34 @@ export class Game {
     this.attackLock = 0;
     this.deathTimer = 0;
     this.stats = { kills: 0, perfects: 0, flows: 0, score: 0 };
+    this.feintsHeld = 0;
+    this.continueUsed = false;
+    this.committed = null;
+    // Last run, not all-time best: a best set weeks ago is a wall, and the
+    // score you managed twenty seconds ago is a race.
+    this.chaseTarget = save.lastScore;
+    this.hud.setChase(this.chaseTarget, 0);
     this.provedLeft = 0;
     this.provedRight = 0;
+    this.flowTutorialActive = false;
     this.pendingPlayerHit = null;
 
     this.combo.reset();
-    this.flow.reset();
+    // A brand-new player's meter starts part-way up so they meet Flow inside
+    // their first few seconds. Every later run starts from nothing.
+    this.flow.reset(save.runs === 0 ? FLOW.firstRunHead : 0);
     this.props.clear();
     this.moments.reset();
     this.flowMode.abort();
     this.arena.resetDamage();
-    // A player who has completed the tutorial once never sits through it again:
-    // repeat runs open straight into real combat.
-    this.combat.reset(this.loopTime, save.seenTutorial);
-    this.tutorialDone = save.seenTutorial;
+    // A completed CURRENT lesson skips onboarding. When its content changes,
+    // veterans receive the corrected safe lesson once rather than being left
+    // with stale instructions forever.
+    const currentTutorialSeen = save.tutorialVersion >= TUTORIAL.version;
+    this.combat.reset(this.loopTime, currentTutorialSeen);
+    this.tutorialDone = currentTutorialSeen;
     this.hud.setTutorialText('');
-    if (save.seenTutorial) {
+    if (currentTutorialSeen) {
       this.provedLeft = TUTORIAL.proveCount;
       this.provedRight = TUTORIAL.proveCount;
     }
@@ -330,6 +359,7 @@ export class Game {
       best: save.best,
       bestCombo: save.bestCombo,
       runs: save.runs,
+      dailies: dailiesFor(save.daily),
       unlock: unlockState(save.mastery),
       selected: this.selected,
       available: (UNLOCKS.order as readonly CharacterId[]).filter((id) => this.assets.isLoaded(id)),
@@ -344,6 +374,9 @@ export class Game {
    */
   private showMenu(): void {
     this.state = 'menu';
+    // Menus hand the sky back to its own slow cycle — a title screen that sits
+    // in whatever weather the last run ended in reads as a bug.
+    this.arena.setPhase(null);
     this.gameOver.hide();
     this.select.hide();
     this.pauseMenu.hide();
@@ -375,15 +408,15 @@ export class Game {
     this.menuAngle += dtReal;
     if (this.select.isVisible) {
       // Closer, and turnable: the character screen is about looking at the
-      // ninja, so the drift is small and the player's own drag dominates.
-      // Slightly above eye level and looking down: the garden's bridge rail
-      // sits at hip height on this set, and a level camera puts it straight
-      // across the boots the player is trying to look at.
+      // ninja, so the drift is small and the player's own drag dominates. The
+      // near railing is hidden for the duration — it sits at hip height on this
+      // set and crossed the shins from every angle the turntable could reach —
+      // which is what lets the camera come in this far.
       const angle = this.selectSpin + Math.sin(this.menuAngle * 0.14) * 0.1;
-      const radius = 3.5;
+      const radius = 2.9;
       this.rig.cineShot(
         Math.sin(angle) * radius,
-        2.3,
+        1.75,
         Math.cos(angle) * radius,
         0,
         0.8,
@@ -402,7 +435,9 @@ export class Game {
       1.42,
       Math.cos(angle) * radius,
       0,
-      1.72,
+      // Looking higher still than the hero's head, which pushes him further
+      // down the frame — the panel grew when the day's goals moved into it.
+      2.12,
       0,
     );
   }
@@ -492,6 +527,53 @@ export class Game {
     this.platform.gameplayStart();
   }
 
+  /**
+   * One rewarded continue per run.
+   *
+   * It is a second chance at THIS run, not an advantage in it: the run resumes
+   * on one heart, at the difficulty it had reached, with the score and combo
+   * best intact. Nothing about the fight is made easier for having paid
+   * attention to an advert, which is the line between a continue and pay-to-win.
+   *
+   * Progress up to the first death is already saved, so a player who watches the
+   * ad and then closes the tab loses nothing they had earned.
+   */
+  private async continueRun(): Promise<void> {
+    this.audio.ui();
+    this.continueUsed = true;
+    this.platform.measure(MEASURE.continueInteract[0], MEASURE.continueInteract[1]);
+
+    const rewarded = await this.platform.rewardedBreak();
+    if (!rewarded) {
+      // No reward earned — the ad was skipped, blocked or unavailable. The
+      // offer is spent either way, so the screen simply loses the button
+      // rather than pretending it can be tried again.
+      this.gameOver.show({ ...this.gameOverData(), canContinue: false });
+      return;
+    }
+
+    this.gameOver.hide();
+    this.state = 'playing';
+    this.hearts = 1;
+    this.hud.setHealth(this.hearts);
+    this.player.reset();
+    this.recovery = HEALTH.recovery;
+    this.combo.reset();
+    this.flow.reset();
+    this.cancelPendingPlayerHit();
+    this.flowMode.abort();
+    this.arena.resetDamage();
+    // The schedule is pushed out so the first threat back is readable rather
+    // than landing on the frame control returns — the same grace a pause gets.
+    this.combat.clearThreats(this.player.worldX);
+    this.combat.delayTo(this.loopTime + PAUSE_GRACE);
+    this.runStart = this.loopTime - this.elapsed;
+
+    this.hud.show();
+    this.input.setEnabled(true);
+    this.platform.gameplayStart();
+  }
+
   private async selectCharacter(id: CharacterId): Promise<void> {
     this.audio.ui();
     this.platform.measure(MEASURE.selectorInteract[0], MEASURE.selectorInteract[1]);
@@ -506,14 +588,22 @@ export class Game {
   private applyCharacter(id: CharacterId): void {
     const asset = this.assets.get(id);
     if (!asset) return;
+    const playerModel = asset.scene;
     this.selected = id;
     const idle = asset.clips.find((c) => /idle/i.test(c.name)) ?? null;
-    this.player.setCharacter(asset.scene, asset.clips, idle);
+    this.player.setCharacter(playerModel, asset.clips, idle);
     // Each ninja keeps its own look, so switching back to one you dressed up
     // returns them wearing it rather than resetting them to the default kit.
     this.loadout = this.loadoutFor(id);
     this.player.setLoadout(this.loadout);
     this.refreshFinisherClip();
+  }
+
+  /** Installs the three authored cast members across every pooled fight mode. */
+  private installEnemyModels(): void {
+    this.combat.setDetailedEnemyModels((index) => this.assets.enemyInstance(index));
+    this.flowMode.setDetailedEnemyModels((index) => this.assets.enemyInstance(index + 1));
+    this.reel.setDetailedEnemyModels((index) => this.assets.enemyInstance(index + 2));
   }
 
   // ----------------------------------------------------- character screen
@@ -539,11 +629,13 @@ export class Game {
     this.audio.ui();
     this.selectSpin = 0;
     this.menu.hide();
+    this.arena.setNearRailVisible(false);
     this.select.show(this.selectData());
   }
 
   private closeCharacterSelect(): void {
     this.audio.ui();
+    this.arena.setNearRailVisible(true);
     this.select.hide();
     this.menu.show(this.menuData());
   }
@@ -732,6 +824,9 @@ export class Game {
     if (this.recovery > 0) this.recovery = Math.max(0, this.recovery - dt);
 
     this.combat.update(dt, now, this.elapsed);
+    // The sky walks forward with the difficulty, so a long run visibly goes
+    // somewhere instead of holding one afternoon for three minutes.
+    this.arena.setPhase(phaseIndexFor(this.elapsed));
     this.updateTutorialHint(now);
     this.trackRunDepth();
 
@@ -749,6 +844,8 @@ export class Game {
 
     const overdue = this.combat.findOverdue(now);
     if (overdue) this.onThreatLands(overdue);
+
+    for (const held of this.combat.collectHeldFeints(now)) this.onFeintHeld(held);
 
     // Flow arms itself the instant the meter fills. No third button, and no
     // waiting for a clean field — the live threats are swept up by the
@@ -843,10 +940,15 @@ export class Game {
     const gained = this.flow.onHit(perfect ? 'perfect' : 'good', this.combo.multiplier);
     const base = perfect ? SCORE.perfect : SCORE.good;
     const bonus = target.rare ? SCORE.rareBonus : 0;
-    this.addScore(Math.round((base + bonus) * this.combo.multiplier));
+    const earned = Math.round((base + bonus) * this.combo.multiplier);
+    this.addScore(earned);
 
     this.stats.kills += 1;
     if (perfect) this.stats.perfects += 1;
+    if (target.rare && !loadSave().seenRareTip) {
+      saveSave({ seenRareTip: true });
+      this.hud.setTutorialText('');
+    }
     this.moments.add({
       kind: target.rare ? 'rare' : perfect ? 'perfect' : 'good',
       side: target.side,
@@ -877,6 +979,7 @@ export class Game {
       perfect ? (this.combo.count >= 3 ? `PERFECT ×${this.combo.count}` : 'PERFECT!') : 'GOOD',
       perfect ? 'perfect' : 'good',
       lane === 'left' ? 0.3 : 0.7,
+      earned,
     );
 
     if (perfect) this.measureOnce('firstPerfect');
@@ -893,13 +996,18 @@ export class Game {
   ): void {
     const { target, lane } = pending;
     this.combat.breakGuard(target, now, this.player.worldX, impulse);
+    if (!loadSave().seenGuardTip) {
+      saveSave({ seenGuardTip: true });
+      this.hud.setTutorialText('');
+    }
 
     const milestone = this.combo.hit();
     // A break is progress, not a kill: it carries the combo and gives a little
     // Flow, but never a full hit's worth. Guards would otherwise accelerate
     // Flow — and Flow's invulnerability — faster than fighting normally does.
     this.flow.boost(GUARD.flowGain);
-    this.addScore(Math.round(GUARD.breakScore * this.combo.multiplier));
+    const earned = Math.round(GUARD.breakScore * this.combo.multiplier);
+    this.addScore(earned);
 
     this.vfx.impact(contactX, contactY, VFXCFG.slashScale.good * 0.9, IMPACT_COLOR.guard);
     this.vfx.sparkBurst(contactX, contactY, IMPACT_COLOR.guard);
@@ -915,6 +1023,7 @@ export class Game {
       target.guarded ? 'GUARD!' : 'GUARD BROKEN',
       'good',
       lane === 'left' ? 0.3 : 0.7,
+      earned,
     );
     this.measureOnce('firstGuardBreak');
     if (milestone) this.onMilestone(milestone);
@@ -946,11 +1055,38 @@ export class Game {
     this.hud.callout('MISS', 'miss', lane === 'left' ? 0.3 : 0.7);
   }
 
+  /**
+   * A feint that was allowed to pull up short.
+   *
+   * Paid in Flow and points, but never in combo: a combo is a run of connected
+   * strikes and holding is not one. It keeps the combo alive rather than
+   * extending it, which is the honest reading of what the player just did.
+   */
+  private onFeintHeld(enemy: Enemy): void {
+    const lane: Lane = enemy.side === 'L' ? 'left' : 'right';
+    if (!loadSave().seenFeintTip) {
+      saveSave({ seenFeintTip: true });
+      this.hud.setTutorialText('');
+    }
+    this.feintsHeld += 1;
+    this.flow.boost(FEINT.flowGain);
+    const earned = Math.round(FEINT.score * this.combo.multiplier);
+    this.addScore(earned);
+    this.hud.setFlow(this.flow.ratio, true);
+    this.hud.callout('HELD', 'good', lane === 'left' ? 0.3 : 0.7, earned);
+    this.audio.ui();
+  }
+
   private onThreatLands(enemy: Enemy): void {
     this.cancelPendingPlayerHit();
     const lane: Lane = enemy.side === 'L' ? 'left' : 'right';
     const x = enemy.group.position.x;
-    enemy.kill(this.player.worldX, 0.5);
+    const missedGuard = enemy.guarded;
+    const missedRare = enemy.rare;
+    this.combat.rearmAfterLanding(enemy, this.loopTime, this.player.worldX);
+
+    if (missedGuard && !loadSave().seenGuardTip) saveSave({ seenGuardTip: true });
+    if (missedRare && !loadSave().seenRareTip) saveSave({ seenRareTip: true });
 
     // Tutorial safety: the first threats stage a dramatic block instead of
     // taking a heart, so nobody can lose before they understand the mapping.
@@ -1005,6 +1141,10 @@ export class Game {
     this.audio.flowActivate();
     this.audio.setIntensity(1);
     this.hud.banner('FLOW');
+    this.flowTutorialActive = !loadSave().seenFlowTip;
+    if (this.flowTutorialActive) {
+      this.hud.setTutorialText('FLOW: FOLLOW THE GLOW — ONE QUICK PRESS EACH');
+    }
     this.hud.setHint(null, '');
     this.vfx.shockwave(this.player.worldX, 1, 2.4, IMPACT_COLOR.flow);
     this.rig.addTrauma(CAMERA.trauma.good);
@@ -1044,9 +1184,19 @@ export class Game {
           this.flashLight = VFXCFG.flash.good;
           this.audio.flowDash();
           this.audio.flowHit();
-          this.addScore(Math.round(FLOW.scorePerHit * this.combo.multiplier));
+          const flowEarned = Math.round(FLOW.scorePerHit * this.combo.multiplier);
+          this.addScore(flowEarned);
           this.combo.hit();
           this.hud.setCombo(this.combo.count, true);
+          // Gain only, no grade: a Flow chain fires every few hundred
+          // milliseconds and a word on each one would be noise. The number
+          // climbing beside each cut is the whole reward.
+          this.hud.callout('', 'flow', x < 0 ? 0.32 : 0.68, flowEarned);
+          if (this.flowTutorialActive) {
+            this.flowTutorialActive = false;
+            saveSave({ seenFlowTip: true });
+            this.hud.setTutorialText('');
+          }
           break;
         }
         case 'finisherReady':
@@ -1064,6 +1214,12 @@ export class Game {
           this.flashLight = VFXCFG.flash.finisher;
           this.audio.finisher();
           this.addScore(Math.round(FLOW.finisherScore * this.combo.multiplier));
+          this.hud.callout(
+            'FINISHER',
+            'flow',
+            x < 0 ? 0.32 : 0.68,
+            Math.round(FLOW.finisherScore * this.combo.multiplier),
+          );
           this.moments.add({
             kind: 'finisher',
             side: (ev.lane ?? 'left') === 'left' ? 'L' : 'R',
@@ -1098,6 +1254,8 @@ export class Game {
     this.arena.setFlowEmphasis(0);
     this.player.look(null);
     this.hud.setHint(null, '');
+    this.flowTutorialActive = false;
+    this.hud.setTutorialText('');
     this.audio.setIntensity(0.35);
     this.hud.setFlow(0, false);
     this.player.reset();
@@ -1174,8 +1332,47 @@ export class Game {
     this.addScore(Math.round(this.elapsed * SCORE.survivalPerSecond));
     this.stats.score = this.score;
 
-    const { state, newlyUnlocked } = commitRun(this.stats);
-    saveSave({ bestCombo: Math.max(save.bestCombo, this.combo.best) });
+    // Only what has happened since the last commit. On a run that never used
+    // its continue this is the whole run; on one that did, the first death
+    // already banked everything up to that point.
+    const prior = this.committed ?? { kills: 0, perfects: 0, flows: 0, score: 0, held: 0 };
+    const delta: RunStats = {
+      kills: this.stats.kills - prior.kills,
+      perfects: this.stats.perfects - prior.perfects,
+      flows: this.stats.flows - prior.flows,
+      score: this.stats.score - prior.score,
+    };
+
+    // Today's goals are folded in BEFORE the run is committed, so the Mastery
+    // they pay lands in the same unlock check as the run's own — finishing a
+    // goal and a ninja on the same run reads as one event, not two. Counters
+    // take the delta; a personal best within the run takes the real figure.
+    const daily = commitDaily(save.daily, {
+      ...delta,
+      score: this.stats.score,
+      bestCombo: this.combo.best,
+      held: this.feintsHeld - prior.held,
+    });
+    saveSave({ daily: daily.state });
+
+    const { state, newlyUnlocked } = commitRun(delta, daily.mastery, {
+      countRun: this.committed === null,
+      bestScore: this.stats.score,
+    });
+    this.committed = {
+      kills: this.stats.kills,
+      perfects: this.stats.perfects,
+      flows: this.stats.flows,
+      score: this.stats.score,
+      held: this.feintsHeld,
+    };
+    this.completedDailies = daily.completed;
+    saveSave({
+      bestCombo: Math.max(save.bestCombo, this.combo.best),
+      // The score to beat on the next run. Written even on a bad run: chasing
+      // your last attempt is the point, not chasing your best.
+      lastScore: this.score,
+    });
 
     if (newlyUnlocked.length > 0) {
       this.audio.unlockJingle();
@@ -1197,12 +1394,24 @@ export class Game {
   }
 
   private pendingUnlocks: CharacterId[] = [];
+  private completedDailies: Daily[] = [];
+  /** Feints correctly left alone this run; feeds the daily goal. */
+  private feintsHeld = 0;
+  /** True once this run has spent its one rewarded continue. */
+  private continueUsed = false;
+  /** What was already committed for this run; see Progression.CommitOptions. */
+  private committed: { kills: number; perfects: number; flows: number; score: number; held: number } | null =
+    null;
   private pendingPrevBest = 0;
   private pendingState = unlockState(0);
 
   private showGameOver(): void {
+    this.gameOver.show(this.gameOverData());
+  }
+
+  private gameOverData(): GameOverData {
     const save = loadSave();
-    this.gameOver.show({
+    return {
       score: this.score,
       best: save.best,
       previousBest: this.pendingPrevBest,
@@ -1210,40 +1419,54 @@ export class Game {
       flowChains: this.flow.chains,
       unlock: this.pendingState,
       newlyUnlocked: this.pendingUnlocks,
+      completedDailies: this.completedDailies,
+      canContinue: !this.continueUsed && this.platform.canReward,
       selected: this.selected,
       available: (UNLOCKS.order as readonly CharacterId[]).filter((id) => this.assets.isLoaded(id)),
-    });
+    };
   }
 
   // ------------------------------------------------------------ tutorial
 
   /**
-   * The guided tutorial: three one-line prompts, taught entirely in play.
-   *
-   *   1. attack LEFT   — until the first left kill
-   *   2. attack RIGHT  — until the first right kill
-   *   3. timing        — "strike at the last second" through the safe threats
-   *
-   * Then a single GO! and the run is live. First session only; a returning
-   * player opens straight into combat. Total cost to a fast learner: ~10 s.
+   * Core controls are taught under safe threats; later mechanics explain
+   * themselves contextually the first time they actually appear.
    */
   private updateTutorialHint(now: number): void {
-    if (this.tutorialDone) return;
-
     const touch = window.matchMedia('(pointer: coarse)').matches;
     const next = this.combat.nextThreat(now);
+
+    if (this.tutorialDone) {
+      const save = loadSave();
+      if (next?.feint && !save.seenFeintTip) {
+        // Ahead of the others: a feint punishes the reflex the whole rest of
+        // the game rewards, so it is the one mechanic that must never be
+        // discovered by being caught out.
+        this.hud.setTutorialText('UNARMED IN WHITE: DON’T SWING — LET IT COME AND GO');
+      } else if (next?.guarded && !save.seenGuardTip) {
+        this.hud.setTutorialText('ARMORED: BREAK THE PLATE — THEN TIME THE FOLLOW-UP');
+      } else if (next?.rare && !save.seenRareTip) {
+        this.hud.setTutorialText('GOLD ENEMY: BONUS SCORE — SAME PERFECT TIMING');
+      } else {
+        this.hud.setTutorialText('');
+      }
+      return;
+    }
+
     let text = '';
     if (this.provedLeft === 0 || this.provedRight === 0) {
       // The direction prompt follows the threat actually on screen, so a missed
       // first enemy can never leave the text pointing at an empty lane.
       const side = next?.side ?? 'L';
       const firstSide = this.provedLeft === 0 && this.provedRight === 0;
-      if (side === 'L') text = touch ? 'TAP LEFT WHEN THEY GET CLOSE' : 'PRESS ← WHEN THEY GET CLOSE';
-      else if (firstSide) text = touch ? 'TAP RIGHT WHEN THEY GET CLOSE' : 'PRESS → WHEN THEY GET CLOSE';
-      else text = touch ? 'NOW TAP RIGHT' : 'NOW PRESS →';
-      if (side === 'L' && this.provedLeft > 0) text = touch ? 'NOW TAP LEFT' : 'NOW PRESS ←';
+      if (side === 'L') text = touch ? 'TAP LEFT JUST BEFORE THEIR HIT LANDS' : 'PRESS ← JUST BEFORE THEIR HIT LANDS';
+      else if (firstSide) text = touch ? 'TAP RIGHT JUST BEFORE THEIR HIT LANDS' : 'PRESS → JUST BEFORE THEIR HIT LANDS';
+      else text = touch ? 'NOW TAP RIGHT AT THE LAST SECOND' : 'NOW PRESS → AT THE LAST SECOND';
+      if (side === 'L' && this.provedLeft > 0) text = touch ? 'NOW TAP LEFT AT THE LAST SECOND' : 'NOW PRESS ← AT THE LAST SECOND';
     } else if (this.combat.tutorialThreatsLeft > 0) {
-      text = 'STRIKE AT THE LAST SECOND — PERFECT!';
+      text = this.stats.perfects > 0
+        ? 'PERFECT! LAST-SECOND HITS CHARGE FLOW FASTER'
+        : 'STRIKE JUST AS THEIR ATTACK IS ABOUT TO CONNECT';
     } else {
       // Tutorial complete: one GO!, remember it, never show any of this again.
       this.tutorialDone = true;
@@ -1252,16 +1475,18 @@ export class Game {
       this.hud.banner('GO!');
       this.audio.ui();
       this.measureOnce('tutorialTiming');
-      if (!loadSave().seenTutorial) saveSave({ seenTutorial: true });
+      saveSave({ seenTutorial: true, tutorialVersion: TUTORIAL.version });
       return;
     }
     this.hud.setTutorialText(text);
     if (this.provedLeft >= 1) this.measureOnce('tutorialLeft');
     if (this.provedRight >= 1) this.measureOnce('tutorialRight');
 
-    // The pulsing lane zone appears only once the threat is close enough that
-    // acting on it is correct, so the affordance teaches timing, not spam.
-    if (next && next.impactAt - now < 1.1 && this.combat.tutorialThreatsLeft > 0) {
+    // The directional pulse starts shortly before impact. It teaches which
+    // side is dangerous without turning the exact Perfect frame into a visual
+    // quick-time prompt.
+    const untilImpact = next ? next.impactAt - now : Infinity;
+    if (next && untilImpact < 0.72 && this.combat.tutorialThreatsLeft > 0) {
       const lane: Lane = next.side === 'L' ? 'left' : 'right';
       this.hud.setHint(lane, lane === 'left' ? '←' : '→');
     } else {
@@ -1287,9 +1512,16 @@ export class Game {
 
   // ------------------------------------------------------------- plumbing
 
+  /** Previous run's score, chased on the HUD; 0 once it has been passed. */
+  private chaseTarget = 0;
+
   private addScore(amount: number): void {
     this.score += amount;
     this.hud.setScore(this.score);
+    if (this.chaseTarget > 0 && this.score >= this.chaseTarget) {
+      this.chaseTarget = 0;
+      this.hud.chasePassed();
+    }
   }
 
   private measureOnce(key: MeasureKey): void {
@@ -1395,6 +1627,7 @@ export class Game {
       equip: (slot: string, id: string) => this.equip(slot as CosmeticSlot, id),
       loadout: () => ({ ...this.loadout }),
       fit: () => this.player.wardrobeDebug,
+      mounts: () => this.player.wardrobeMounts,
       restart: () => {
         this.gameOver.hide();
         this.select.hide();

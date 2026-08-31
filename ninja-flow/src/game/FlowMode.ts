@@ -1,4 +1,4 @@
-import type { Scene } from 'three';
+import type { Object3D, Scene } from 'three';
 import { FLOW } from '../config';
 import type { Rng } from '../core/Rng';
 import { Enemy } from './Enemy';
@@ -100,6 +100,14 @@ export class FlowMode {
   /** All pooled actors, exposed so the arena can place them on its bridge. */
   get liveEnemies(): readonly Enemy[] {
     return this.pool;
+  }
+
+  setDetailedEnemyModels(factory: (index: number) => Object3D | null): void {
+    for (let index = 0; index < this.pool.length; index++) {
+      const enemy = this.pool[index];
+      const model = factory(index);
+      if (model) enemy.setDetailedModel(model);
+    }
   }
 
   start(heroX: number, now: number): void {

@@ -151,6 +151,21 @@ describe('armoury definitions', () => {
     }
   });
 
+  it('centres every authored grip exactly in the weapon socket', () => {
+    for (const weapon of WEAPONS) {
+      expect(weapon.hold.position, weapon.id).toEqual([0, 0, 0]);
+    }
+  });
+
+  it('extends two-handed procedural shafts through the support-hand side', () => {
+    for (const weapon of WEAPONS.filter((entry) => entry.grip === 'twoHand')) {
+      const built = buildWeapon(weapon.id, { metal: 0x9fb0c8, wrap: 0x1e1a2a, accent: 0xe8b64c });
+      const bounds = new Box3().setFromObject(built);
+      expect(bounds.max.y, `${weapon.id}:support reach`).toBeGreaterThan(0.45);
+      expect(bounds.min.y, `${weapon.id}:behind primary hand`).toBeGreaterThan(-0.2);
+    }
+  });
+
   it('covers shapes the downloaded packs do not include', () => {
     const procedural = WEAPONS.filter((w) => !w.model).map((w) => w.id);
     expect(procedural).toContain('kusarigama');

@@ -1,5 +1,5 @@
-import type { Scene } from 'three';
-import { ATTACK, DIFFICULTY, ENEMY, GUARD, TUTORIAL } from '../config';
+import type { Object3D, Scene } from 'three';
+import { ATTACK, DIFFICULTY, ENEMY, FEINT, GUARD, TUTORIAL } from '../config';
 import type { Rng } from '../core/Rng';
 import { Enemy } from './Enemy';
 import type { Props } from '../fx/Props';
@@ -29,6 +29,7 @@ export class CombatDirector {
   readonly patterns: PatternDirector;
   private readonly pool: Enemy[] = [];
   private queue: ScheduledThreat[] = [];
+  private poolCursor = 0;
   private tutorialRemaining = TUTORIAL.safeThreats;
 
   constructor(
@@ -48,6 +49,7 @@ export class CombatDirector {
   reset(now: number, veteran = false): void {
     for (const e of this.pool) e.retire();
     this.queue = [];
+    this.poolCursor = 0;
     this.tutorialRemaining = veteran ? 0 : TUTORIAL.safeThreats;
     // The opening beat is deliberately late: the player gets a moment to read
     // the arena before the first threat commits.
@@ -60,6 +62,15 @@ export class CombatDirector {
 
   get liveThreats(): readonly Enemy[] {
     return this.pool;
+  }
+
+  /** Installs skeleton-safe, player-quality skins on every pooled enemy. */
+  setDetailedEnemyModels(factory: (index: number) => Object3D | null): void {
+    for (let index = 0; index < this.pool.length; index++) {
+      const enemy = this.pool[index];
+      const model = factory(index);
+      if (model) enemy.setDetailedModel(model);
+    }
   }
 
   /** Threats currently alive and heading for the player. */
@@ -91,6 +102,10 @@ export class CombatDirector {
     let best: Enemy | null = null;
     for (const e of this.pool) {
       if (!e.isThreat || e.side !== side) continue;
+      // A feint is deliberately unhittable. Skipping it here is what turns a
+      // swing at one into an ordinary whiff, with the whiff's existing cost,
+      // rather than needing a punishment of its own.
+      if (e.feint) continue;
       if (!isTargetable(now, e.impactAt)) continue;
       if (!best) {
         best = e;
@@ -107,10 +122,28 @@ export class CombatDirector {
   /** Any threat whose strike moment has passed unanswered. */
   findOverdue(now: number): Enemy | null {
     for (const e of this.pool) {
-      if (!e.isThreat) continue;
+      if (!e.isThreat || e.feint) continue;
       if (now >= e.impactAt + ENEMY.enemyAttackDelay) return e;
     }
     return null;
+  }
+
+  /**
+   * Feints whose moment has passed untouched, retired as they are collected.
+   *
+   * Called once a frame; the caller pays out the reward. A feint that was
+   * swung at is already gone — the swing whiffed and the enemy withdrew — so
+   * anything returned here was genuinely held.
+   */
+  collectHeldFeints(now: number): Enemy[] {
+    const held: Enemy[] = [];
+    for (const e of this.pool) {
+      if (!e.isThreat || !e.feint) continue;
+      if (now < e.impactAt + FEINT.retreatAfter) continue;
+      held.push(e);
+      e.retire();
+    }
+    return held;
   }
 
   /** The most imminent threat, used for tutorial prompts and camera focus. */
@@ -185,6 +218,13 @@ export class CombatDirector {
         // rare target and never appears while tutorial safety is still on.
         threat.guard =
           this.tutorialRemaining > 0 || threat.rare ? 0 : this.guardFor(elapsed);
+        // A feint is neither guarded nor rare: it is never struck, so a plate
+        // on it would be undiscoverable and a bonus on it unclaimable.
+        threat.feint =
+          this.tutorialRemaining > 0 || threat.rare || threat.guard > 0
+            ? false
+            : this.feintFor(elapsed);
+        if (threat.feint) threat.guard = 0;
         this.queue.push(threat);
       }
       // The queue is built in ascending order by construction, so the pattern
@@ -194,7 +234,14 @@ export class CombatDirector {
   }
 
   private spawn(threat: ScheduledThreat, now: number): void {
-    const enemy = this.pool.find((e) => e.state === 'dead');
+    let enemy: Enemy | undefined;
+    for (let offset = 0; offset < this.pool.length; offset++) {
+      const index = (this.poolCursor + offset) % this.pool.length;
+      if (this.pool[index].state !== 'dead') continue;
+      enemy = this.pool[index];
+      this.poolCursor = (index + 1) % this.pool.length;
+      break;
+    }
     if (!enemy) return; // Pool exhausted — drop rather than allocate mid-run.
     enemy.spawn({
       side: threat.side,
@@ -204,6 +251,7 @@ export class CombatDirector {
       rare: threat.rare,
       rng: this.rng,
       guard: threat.guard,
+      feint: threat.feint,
     });
   }
 
@@ -220,7 +268,21 @@ export class CombatDirector {
     // pushed in front of it. Delaying the whole queue on every break would
     // hand the player a breather for winning an exchange, which is backwards:
     // the reward for breaking a guard is the opening, not a quieter fight.
-    let impact = now + GUARD.recoverSeconds;
+    const impact = this.fairReengageTime(enemy, now + GUARD.recoverSeconds);
+    enemy.breakGuard(now, impact - now, fromX, impulse);
+    return impact;
+  }
+
+  /** Keeps an attacker in play after it connects and schedules its next read. */
+  rearmAfterLanding(enemy: Enemy, now: number, fromX: number): number {
+    const impact = this.fairReengageTime(enemy, now + ENEMY.retrySeconds);
+    enemy.recoverAfterAttack(now, impact - now, fromX);
+    return impact;
+  }
+
+  /** Finds the first answer window that does not collide with booked combat. */
+  private fairReengageTime(enemy: Enemy, candidate: number): number {
+    let impact = candidate;
     const booked = [
       ...this.pool.filter((e) => e !== enemy && e.isThreat).map((e) => e.impactAt),
       ...this.queue.map((t) => t.impactAt),
@@ -230,11 +292,21 @@ export class CombatDirector {
     for (const other of booked) {
       if (Math.abs(other - impact) < MIN_ANSWER_GAP) impact = other + MIN_ANSWER_GAP;
     }
-    enemy.breakGuard(now, impact - now, fromX, impulse);
     return impact;
   }
 
   /** Whether the next threat should carry a guard, and how many plates. */
+  /** Whether the next threat is a feint. Ramps like the guard chance does. */
+  feintFor(elapsed: number): boolean {
+    if (elapsed < FEINT.fromSeconds) return false;
+    const ramp = Math.min(
+      1,
+      (elapsed - FEINT.fromSeconds) / Math.max(1, FEINT.chanceRampSeconds),
+    );
+    const chance = FEINT.chanceStart + (FEINT.chanceMax - FEINT.chanceStart) * ramp;
+    return this.rng.next() < chance;
+  }
+
   guardFor(elapsed: number): number {
     if (elapsed < GUARD.fromSeconds) return 0;
     const ramp = Math.min(

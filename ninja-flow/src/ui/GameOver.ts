@@ -1,4 +1,5 @@
 import { UNLOCKS, type CharacterId } from '../config';
+import type { Daily } from '../game/Dailies';
 import type { UnlockState } from '../game/Progression';
 import { LOCKED_MARK, NINJA_META } from './Ninjas';
 
@@ -12,6 +13,10 @@ export interface GameOverData {
   newlyUnlocked: CharacterId[];
   selected: CharacterId;
   available: CharacterId[];
+  /** Goals this run finished off, announced once. */
+  completedDailies: Daily[];
+  /** True when a rewarded continue is available and has not been used. */
+  canContinue: boolean;
 }
 
 /**
@@ -33,10 +38,13 @@ export class GameOverScreen {
   private readonly unlockFill: HTMLDivElement;
   private readonly roster: HTMLDivElement;
   private readonly playBtn: HTMLButtonElement;
+  private readonly continueBtn: HTMLButtonElement;
+  private readonly dailiesEl: HTMLDivElement;
 
   private onPlay: (() => void) | null = null;
   private onSelect: ((id: CharacterId) => void) | null = null;
   private onMenu: (() => void) | null = null;
+  private onContinue: (() => void) | null = null;
   private visible = false;
 
   constructor(parent: HTMLElement) {
@@ -50,11 +58,16 @@ export class GameOverScreen {
         <div class="stat__value" data-score>0</div>
       </div>
       <div class="over__chase"></div>
+      <div class="over__dailies"></div>
       <div class="over__stats">
         <div><div class="stat__label">BEST</div><div class="stat__value" data-best>0</div></div>
         <div><div class="stat__label">MAX COMBO</div><div class="stat__value" data-combo>0</div></div>
         <div><div class="stat__label">FLOW</div><div class="stat__value" data-flow>0</div></div>
       </div>
+      <button class="btn btn--continue" type="button" data-continue>
+        <span class="btn__main">CONTINUE</span>
+        <span class="btn__sub">WATCH AN AD · ONCE PER RUN</span>
+      </button>
       <button class="btn" type="button">PLAY AGAIN</button>
       <button class="chip chip--menu" type="button" data-menu>MENU</button>
       <div class="unlock">
@@ -74,9 +87,17 @@ export class GameOverScreen {
     this.unlockLabel = this.el.querySelector('.unlock__label')!;
     this.unlockFill = this.el.querySelector('.unlock__fill')!;
     this.roster = this.el.querySelector('.roster')!;
-    this.playBtn = this.el.querySelector('.btn')!;
+    this.playBtn = this.el.querySelector('.btn:not(.btn--continue)')!;
+    this.continueBtn = this.el.querySelector('[data-continue]')!;
+    this.dailiesEl = this.el.querySelector('.over__dailies')!;
 
     this.playBtn.addEventListener('click', () => this.onPlay?.());
+    this.continueBtn.addEventListener('click', () => {
+      // Disabled immediately: the ad takes a moment to open and a second tap
+      // in that window would spend the run's one continue on nothing.
+      this.continueBtn.disabled = true;
+      this.onContinue?.();
+    });
     this.el.querySelector('[data-menu]')!.addEventListener('click', () => this.onMenu?.());
   }
 
@@ -84,10 +105,12 @@ export class GameOverScreen {
     onPlay: () => void,
     onSelect: (id: CharacterId) => void,
     onMenu: () => void,
+    onContinue: () => void,
   ): void {
     this.onPlay = onPlay;
     this.onSelect = onSelect;
     this.onMenu = onMenu;
+    this.onContinue = onContinue;
   }
 
   get isVisible(): boolean {
@@ -125,6 +148,21 @@ export class GameOverScreen {
     } else {
       this.unlockLabel.textContent = 'ALL NINJAS UNLOCKED';
       this.unlockFill.style.width = '100%';
+    }
+
+    // One continue per run, offered with the score still on screen. It is a
+    // second chance at THIS run, never an advantage in it: nothing about the
+    // difficulty, the score or the unlock changes for taking it.
+    this.continueBtn.disabled = false;
+    this.continueBtn.style.display = data.canContinue ? '' : 'none';
+
+    this.dailiesEl.replaceChildren();
+    for (const daily of data.completedDailies) {
+      const row = document.createElement('div');
+      row.className = 'over__daily';
+      row.innerHTML = '<span class="over__daily-tick" aria-hidden="true"></span><span></span>';
+      row.querySelector('span:last-child')!.textContent = `GOAL DONE · ${daily.label}`;
+      this.dailiesEl.appendChild(row);
     }
 
     this.buildRoster(data);

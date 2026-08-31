@@ -175,6 +175,29 @@ describe('enemy move library', () => {
     expect(COMBAT_ATTACK_IDS).not.toContain('shuriken');
   });
 
+  it('articulates the weapon elbow through every live swing', () => {
+    const combat = ENEMY_ATTACKS.filter((a) => COMBAT_ATTACK_IDS.includes(a.id));
+    for (const attack of combat) {
+      const elbow = attack.track.map((key) => key.pose.forearmR?.[0]);
+      expect(elbow.every((angle) => angle !== undefined), attack.id).toBe(true);
+      const angles = elbow as number[];
+      expect(Math.max(...angles) - Math.min(...angles), attack.id).toBeGreaterThan(0.18);
+    }
+  });
+
+  it('carries elbow velocity smoothly through swing keys', () => {
+    const epsilon = 0.001;
+    for (const attack of ENEMY_ATTACKS.filter((a) => COMBAT_ATTACK_IDS.includes(a.id))) {
+      for (const key of attack.track.slice(1, -1)) {
+        const before = sampleEnemy(attack.track, key.t - epsilon, {}).forearmR?.[0] ?? 0;
+        const atKey = sampleEnemy(attack.track, key.t, {}).forearmR?.[0] ?? 0;
+        const after = sampleEnemy(attack.track, key.t + epsilon, {}).forearmR?.[0] ?? 0;
+        expect(Math.abs((atKey - before) - (after - atKey)), `${attack.id}@${key.t}`)
+          .toBeLessThan(0.002);
+      }
+    }
+  });
+
   it('gives every reaction a distinct exit', () => {
     const signatures = Object.values(REACTIONS).map((r) => `${r.out}/${r.up}/${r.spin}`);
     expect(new Set(signatures).size).toBe(signatures.length);

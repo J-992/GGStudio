@@ -6,6 +6,8 @@ export type Side = 'L' | 'R';
 export interface ScheduledThreat {
   /** Plates that must be broken before this threat can be cut down. */
   guard?: number;
+  /** A threat that pulls up short: swinging at it is the mistake. */
+  feint?: boolean;
   side: Side;
   /** Absolute run time at which this threat's strike should be answered. */
   impactAt: number;
@@ -39,6 +41,15 @@ export interface PhaseInfo {
   spacing: readonly [number, number];
   approach: number;
   complexity: number;
+}
+
+/** Which difficulty phase a run is in, 0-based. Drives the arena's sky. */
+export function phaseIndexFor(elapsed: number): number {
+  let index = 0;
+  for (let i = 0; i < DIFFICULTY.phases.length; i++) {
+    if (elapsed >= DIFFICULTY.phases[i].at) index = i;
+  }
+  return index;
 }
 
 export function phaseFor(elapsed: number): PhaseInfo {

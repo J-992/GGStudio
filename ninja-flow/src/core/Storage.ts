@@ -18,8 +18,18 @@ export interface SaveData {
   runs: number;
   lastPlayed: number;
   seenTutorial: boolean;
+  /** Content version of the completed core lesson. */
+  tutorialVersion: number;
+  seenFlowTip: boolean;
+  seenGuardTip: boolean;
+  seenFeintTip: boolean;
+  seenRareTip: boolean;
   /** Cosmetic loadout per character, keyed by slot. Validated by Cosmetics. */
   loadouts: Record<string, Record<string, string>>;
+  /** Today's goals: the day it belongs to, progress per goal, and payouts made. */
+  daily: { day: string; progress: Record<string, number>; claimed: string[] };
+  /** Score of the previous finished run, chased on the HUD during the next one. */
+  lastScore: number;
 }
 
 const DEFAULTS: SaveData = {
@@ -32,7 +42,14 @@ const DEFAULTS: SaveData = {
   runs: 0,
   lastPlayed: 0,
   seenTutorial: false,
+  tutorialVersion: 0,
+  seenFlowTip: false,
+  seenGuardTip: false,
+  seenFeintTip: false,
+  seenRareTip: false,
   loadouts: {},
+  daily: { day: '', progress: {}, claimed: [] },
+  lastScore: 0,
 };
 
 let memory: SaveData | null = null;
@@ -102,6 +119,9 @@ function sanitizeLoadouts(input: unknown): Record<string, Record<string, string>
 
 function sanitize(input: Record<string, unknown>): SaveData {
   const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+  // Saves written before tutorial versioning still remember that the original
+  // lesson was completed, but receive the corrected lesson once.
+  const legacyTutorialVersion = input.seenTutorial === true ? 1 : 0;
   return {
     best: Math.max(0, num(input.best, 0)),
     bestCombo: Math.max(0, num(input.bestCombo, 0)),
@@ -114,8 +134,38 @@ function sanitize(input: Record<string, unknown>): SaveData {
     runs: Math.max(0, num(input.runs, 0)),
     lastPlayed: num(input.lastPlayed, 0),
     seenTutorial: input.seenTutorial === true,
+    tutorialVersion: Math.max(0, num(input.tutorialVersion, legacyTutorialVersion)),
+    seenFlowTip: input.seenFlowTip === true,
+    seenGuardTip: input.seenGuardTip === true,
+    seenFeintTip: input.seenFeintTip === true,
+    seenRareTip: input.seenRareTip === true,
     // Kept as loose strings on purpose: the wardrobe validates ids against the
     // live catalogue, so a save written before an item was renamed still loads.
     loadouts: sanitizeLoadouts(input.loadouts),
+    daily: sanitizeDaily(input.daily),
+    lastScore: Math.max(0, num(input.lastScore, 0)),
+  };
+}
+
+/**
+ * Daily progress is a plain bag of counters, so it is validated shape-first and
+ * never trusted for its contents: the goal ids come from the date, and an entry
+ * for a goal that is not in today's set is simply never read.
+ */
+function sanitizeDaily(input: unknown): SaveData['daily'] {
+  if (!input || typeof input !== 'object') return { ...DEFAULTS.daily };
+  const raw = input as Record<string, unknown>;
+  const progress: Record<string, number> = {};
+  if (raw.progress && typeof raw.progress === 'object') {
+    for (const [k, v] of Object.entries(raw.progress as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) progress[k] = v;
+    }
+  }
+  return {
+    day: typeof raw.day === 'string' ? raw.day : '',
+    progress,
+    claimed: Array.isArray(raw.claimed)
+      ? raw.claimed.filter((v): v is string => typeof v === 'string')
+      : [],
   };
 }

@@ -4,11 +4,15 @@ import {
   Color,
   ConeGeometry,
   CylinderGeometry,
+  Euler,
+  FrontSide,
   Group,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
+  Quaternion,
+  SkinnedMesh,
   SphereGeometry,
   TorusGeometry,
   Vector3,
@@ -25,7 +29,7 @@ import {
   type EnemyPose,
   type ReactionKind,
 } from './EnemyMoves';
-import { ENEMY, GUARD, PHYSICS } from '../config';
+import { ENEMY, FEINT, GUARD, PHYSICS } from '../config';
 import {
   WEAPONS,
   buildWeapon,
@@ -38,21 +42,18 @@ import { Inertia, RigidBody, Spring } from '../fx/Physics';
 import type { Props } from '../fx/Props';
 import type { Side } from './PatternDirector';
 import type { ContactImpulse } from './CombatContact';
+import { normalizeHeight, RigAdapter, type Pose } from './Rig';
 
 /**
- * Procedural chibi enemies, styled to sit beside the Meshy hero ninjas.
+ * Original rigged enemies driven by a lightweight procedural combat controller.
  *
- * The heroes are big-headed stylized animals in dark gold-trimmed robes, so the
- * enemy family follows the same silhouette language: an oversized round head on
- * a small kimono body, stubby limbs, a trailing scarf, and per-clan headgear —
- * fox-point ears, round ears, oni horns, or a straw kasa. That keeps a
- * downloaded-premium hero and a zero-byte procedural enemy reading as one cast.
- *
- * All geometries and materials are module-level singletons; a hundred enemies
- * over a run allocate nothing after the first frame.
+ * A zero-download puppet remains the instant fallback. The streamed cast — a
+ * ronin, oni, and tengu authored specifically for this game — shares its joint
+ * contract and explicit hand sockets, so one choreography layer and the full
+ * armoury work across all three bodies without model-specific attack code.
  */
 
-export type EnemyState = 'idle' | 'approach' | 'windup' | 'contact' | 'guardRecoil' | 'dying' | 'dead';
+export type EnemyState = 'idle' | 'approach' | 'windup' | 'contact' | 'reengage' | 'dying' | 'dead';
 
 const GEO = {
   /** Kimono body: narrow shoulders flaring to a hem. */
@@ -93,8 +94,48 @@ const CLANS: readonly Palette[] = [
 
 const RARE_PALETTE: Palette = { cloth: 0x3a2c10, trim: 0xffd35c, fur: 0xffe6a8, metal: 0xffd35c };
 
+/**
+ * Guarded enemies get their own colours, not just a plate.
+ *
+ * At the distance this game is played from, a player reads silhouette and
+ * colour and nothing finer. A guarded enemy carrying a small grey object looked
+ * exactly like an unguarded one until it was close enough that the extra beat
+ * of timing was already a surprise. Cold steel against four warm clan palettes
+ * makes the answer to "does this one take two hits" readable from spawn.
+ */
+const GUARD_PALETTE: Palette = { cloth: 0x2a3d52, trim: 0x7fd4ff, fur: 0x93a4b5, metal: 0xd6e4f2 };
+
+/**
+ * Resting glow on a guard plate.
+ *
+ * Not just the struck flash: the plate is the thing the player has to aim at
+ * first, so it has to catch the eye on the approach rather than announce itself
+ * on contact. The block flash settles back to this rather than to nothing.
+ */
+const PLATE_GLOW = 0.18;
+
+/**
+ * Feints wear bone-white and carry nothing.
+ *
+ * Two cues, both readable in one frame at the distance the game is played at:
+ * a colour that appears nowhere else on the board, and empty hands. The second
+ * is the one that makes the rule guessable without being told — a threat with
+ * no weapon cannot land a hit, so there is nothing to answer.
+ */
+const FEINT_PALETTE: Palette = { cloth: 0xd9d6cc, trim: 0xa9a396, fur: 0xefece4, metal: 0xbfbcb2 };
+
 type EarStyle = 'points' | 'round' | 'horns' | 'kasa';
 const EAR_STYLES: readonly EarStyle[] = ['points', 'round', 'horns', 'kasa'];
+
+/**
+ * Keeps every weapon user close enough to read as hand-to-hand combat while
+ * preserving a modest reach advantage for polearms and a closer stop for
+ * compact weapons.
+ */
+export function strikeDistanceFor(reach: number): number {
+  const distance = ENEMY.strikeDistance + (reach - 1) * ENEMY.reachDistanceScale;
+  return MathUtils.clamp(distance, ENEMY.strikeDistanceMin, ENEMY.strikeDistanceMax);
+}
 
 const matCache = new Map<string, MeshStandardMaterial>();
 function mat(color: number, opts: { rough?: number; metal?: number; emissive?: number } = {}): MeshStandardMaterial {
@@ -123,15 +164,47 @@ function part(geo: BufferGeometry, material: Material, parent: Object3D): Mesh {
 export type WeaponKind = 'katana' | 'kama' | 'tanto';
 
 const WORLD = new Vector3();
+const SECONDARY_WORLD = new Vector3();
+const LOCAL_GRIP_DIRECTION = new Vector3();
+const UP = new Vector3(0, 1, 0);
+const WORLD_QUAT = new Quaternion();
+const ROOT_QUAT = new Quaternion();
+const LINE_QUAT = new Quaternion();
+const HOLD_INVERSE = new Quaternion();
+const WEAPON_MOUNT = new Quaternion().setFromEuler(new Euler(Math.PI * 0.94, 0, 0.2));
+const PLATE_MOUNT = new Quaternion().setFromEuler(new Euler(0, 0, Math.PI * 0.08));
+
+/** Makes a weapon's post-hold +Y axis pass exactly through both hand sockets. */
+export function solveTwoHandGrip(
+  primary: Vector3,
+  secondary: Vector3,
+  hold: Quaternion,
+  out: Quaternion,
+): boolean {
+  LOCAL_GRIP_DIRECTION.subVectors(secondary, primary);
+  if (LOCAL_GRIP_DIRECTION.lengthSq() < 1e-5) return false;
+  LOCAL_GRIP_DIRECTION.normalize();
+  LINE_QUAT.setFromUnitVectors(UP, LOCAL_GRIP_DIRECTION);
+  HOLD_INVERSE.copy(hold).invert();
+  out.copy(LINE_QUAT).multiply(HOLD_INVERSE);
+  return true;
+}
 
 /**
- * Weapons are modelled at human scale — a katana is a metre of steel. These
- * bodies are chibi, so a metre of steel is taller than they are. Held weapons
- * are brought down to a size that still reads oversized and heroic without the
- * enemy disappearing behind its own sword.
+ * Weapons are authored in metres: a 1.04 m katana against a 1.52 m fighter is
+ * already correctly proportioned. Keeping the scale at one preserves the real
+ * differences between a tanto, katana, and nagamaki.
  */
-const ENEMY_WEAPON_SCALE = 0.62;
+const ENEMY_WEAPON_SCALE = 1;
+const DETAILED_HEIGHT = 1.52;
 let attackCursor = 0;
+
+interface DetailedMaterialBase {
+  color: Color;
+  emissive: Color;
+  emissiveIntensity: number;
+  roughness: number;
+}
 
 /**
  * Picks an attack the equipped weapon can actually perform.
@@ -150,9 +223,10 @@ function pickAttack(cinematic: boolean, suited: readonly string[]): EnemyAttack 
 let weaponCursor = 0;
 
 function nextWeapon(cinematic: boolean): WeaponDef {
-  // The reel gets the whole armoury; live combat leaves out the longest reaches
-  // so a threat's strike distance stays close to what the player has learned.
-  const pool = cinematic ? WEAPONS : WEAPONS.filter((w) => w.reach <= 1.05);
+  // Every model-backed weapon belongs in live rotation now that the enemy rig
+  // has a verified two-hand socket. The reel also gets the extra procedural
+  // polearms, whose larger silhouettes suit its wider staging.
+  const pool = cinematic ? WEAPONS : WEAPONS.filter((w) => w.model || w.reach <= 1.05);
   return pool[weaponCursor++ % pool.length];
 }
 
@@ -163,6 +237,15 @@ function attackById(id: string): EnemyAttack {
 export class Enemy {
   readonly group = new Group();
   state: EnemyState = 'dead';
+  private readonly bodyVisual = new Group();
+  private detailedModel: Object3D | null = null;
+  private detailedRig: RigAdapter | null = null;
+  private detailedWeaponGrip: Object3D | null = null;
+  private detailedOffhandGrip: Object3D | null = null;
+  private readonly detailedPose: Pose = {};
+  private readonly detailedMaterials: MeshStandardMaterial[] = [];
+  private readonly detailedMaterialBases = new Map<MeshStandardMaterial, DetailedMaterialBase>();
+  private readonly fallbackMeshes: Mesh[] = [];
   private attack: EnemyAttack = ENEMY_ATTACKS[0];
   private readonly attackPose: EnemyPose = {};
   private reaction: ReactionKind = 'launch';
@@ -178,6 +261,12 @@ export class Enemy {
   private posed = false;
   /** Plates left to break before this enemy can be cut down. */
   guard = 0;
+  /**
+   * True for a threat that never strikes. It is skipped by target selection and
+   * by the overdue sweep, so the only way it interacts with the player is by
+   * tempting a swing that then finds nothing.
+   */
+  feint = false;
   private guardMax = 0;
   private blockFlash = 0;
   private squash = 0;
@@ -234,20 +323,22 @@ export class Enemy {
   /** Palette metal, so dropped steel matches the clan it came from. */
   private metalColor = 0x9fb0c8;
   private weaponDef: WeaponDef = weaponById('katana');
+  private readonly weaponHoldQuaternion = new Quaternion();
   private readonly deathScale = new Vector3(1, 1, 1);
   private windupProgress = 0;
   private telegraph = 0;
-  private guardRecoilVelocity = 0;
-  private guardRecoilUntil = 0;
+  private reengageVelocity = 0;
+  private reengageUntil = 0;
 
   constructor(props: Props | null = null) {
     this.props = props;
     this.group.add(this.root);
+    this.root.add(this.bodyVisual);
 
-    this.robe = part(GEO.robe, mat(0x232840), this.root);
+    this.robe = part(GEO.robe, mat(0x232840), this.bodyVisual);
     this.robe.position.y = 0.48;
 
-    this.sash = part(GEO.sash, mat(0xe8b64c), this.root);
+    this.sash = part(GEO.sash, mat(0xe8b64c), this.bodyVisual);
     this.sash.rotation.x = Math.PI / 2;
     this.sash.position.y = 0.5;
     this.sash.scale.y = 1.15;
@@ -255,7 +346,7 @@ export class Enemy {
     // Chibi proportions: the head is nearly half the character, like the heroes.
     this.head = new Group();
     this.head.position.y = 1.06;
-    this.root.add(this.head);
+    this.bodyVisual.add(this.head);
 
     this.skull = part(GEO.head, mat(0x8e6f5a, { rough: 0.85 }), this.head);
     this.skull.scale.set(1, 0.94, 0.96);
@@ -319,12 +410,12 @@ export class Enemy {
     this.legs = [leftLeg.hip, rightLeg.hip];
     this.shins = [leftLeg.knee, rightLeg.knee];
 
-    this.scarf = part(GEO.scarf, mat(0xe8b64c), this.root);
+    this.scarf = part(GEO.scarf, mat(0xe8b64c), this.bodyVisual);
     this.scarf.geometry = GEO.scarf;
     this.scarf.position.set(0, 0.86, -0.24);
     this.scarf.rotation.x = -0.4;
 
-    this.tail = part(GEO.tail, mat(0x8e6f5a, { rough: 0.85 }), this.root);
+    this.tail = part(GEO.tail, mat(0x8e6f5a, { rough: 0.85 }), this.bodyVisual);
     this.tail.position.set(0, 0.32, -0.3);
     this.tail.scale.set(1, 0.8, 1.4);
 
@@ -371,13 +462,81 @@ export class Enemy {
     this.aura.visible = false;
     this.root.add(this.aura);
 
+    // When the premium skin arrives, the low-detail anatomy disappears but
+    // its animated joints keep driving weapons, plates and silhouette accents.
+    this.bodyVisual.traverse((o) => {
+      if (!(o instanceof Mesh)) return;
+      if (isBelow(o, this.weapon) || isBelow(o, this.plate)) return;
+      this.fallbackMeshes.push(o);
+    });
+
     this.group.visible = false;
+  }
+
+  /**
+   * Replaces the instant-loading puppet body with a rigged player-quality skin.
+   * The clone owns its skeleton and materials but shares geometry and textures.
+   */
+  setDetailedModel(model: Object3D): void {
+    if (this.detailedModel) this.root.remove(this.detailedModel);
+    for (const material of this.detailedMaterials) material.dispose();
+    this.detailedMaterials.length = 0;
+    this.detailedMaterialBases.clear();
+
+    model.removeFromParent();
+    model.position.set(0, 0, 0);
+    model.rotation.set(0, 0, 0);
+    model.scale.set(1, 1, 1);
+    normalizeHeight(model, DETAILED_HEIGHT);
+
+    const uniqueMaterials = new Set<MeshStandardMaterial>();
+    model.traverse((o) => {
+      if (!(o instanceof Mesh || o instanceof SkinnedMesh)) return;
+      o.castShadow = true;
+      o.receiveShadow = false;
+      const source = Array.isArray(o.material) ? o.material : [o.material];
+      const cloned = source.map((material) => material.clone());
+      o.material = Array.isArray(o.material) ? cloned : cloned[0];
+      for (const material of cloned) {
+        material.side = FrontSide;
+        if (material instanceof MeshStandardMaterial) uniqueMaterials.add(material);
+      }
+    });
+
+    this.root.add(model);
+    this.detailedModel = model;
+    this.detailedRig = new RigAdapter(model, DETAILED_HEIGHT);
+    this.detailedWeaponGrip = model.getObjectByName('WeaponGripR') ?? null;
+    this.detailedOffhandGrip = model.getObjectByName('WeaponGripL') ?? null;
+    this.detailedMaterials.push(...uniqueMaterials);
+    for (const material of this.detailedMaterials) {
+      this.detailedMaterialBases.set(material, {
+        color: material.color.clone(),
+        emissive: material.emissive.clone(),
+        emissiveIntensity: material.emissiveIntensity,
+        roughness: material.roughness,
+      });
+    }
+    for (const mesh of this.fallbackMeshes) mesh.visible = false;
+
+    // These mounts stay outside the internally-scaled imported model. Their
+    // transforms are copied from its hands each frame, keeping full-size GLB
+    // weapons and the breakable plate correctly aligned.
+    this.weapon.removeFromParent();
+    this.plate.removeFromParent();
+    this.root.add(this.weapon, this.plate);
+    this.applyDetailedPalette(CLANS[0], false);
+    this.syncDetailedVisual();
+  }
+
+  get highDetail(): boolean {
+    return this.detailedRig !== null;
   }
 
   private makeArm(x: number): { shoulder: Group; elbow: Group } {
     const shoulder = new Group();
     shoulder.position.set(x, 0.72, 0);
-    this.root.add(shoulder);
+    this.bodyVisual.add(shoulder);
     const upper = part(GEO.arm, mat(0x232840), shoulder);
     upper.scale.y = 0.62;
     upper.position.y = -0.095;
@@ -396,7 +555,7 @@ export class Enemy {
   private makeLeg(x: number): { hip: Group; knee: Group } {
     const hip = new Group();
     hip.position.set(x, 0.22, 0);
-    this.root.add(hip);
+    this.bodyVisual.add(hip);
     const thigh = part(GEO.leg, mat(0x232840), hip);
     thigh.scale.y = 0.64;
     thigh.position.y = -0.064;
@@ -426,6 +585,8 @@ export class Enemy {
     attack?: string;
     /** Plates this enemy must have broken before it can be cut down. */
     guard?: number;
+    /** A feint: runs in, pulls up short, and must NOT be struck. */
+    feint?: boolean;
   }): void {
     const { side, impactAt, spawnAt, approach, rare, rng } = opts;
     this.cinematic = opts.cinematic === true;
@@ -463,33 +624,54 @@ export class Enemy {
     (this.aura.material as MeshBasicMaterial).color.setHex(0xffd35c);
     (this.aura.material as MeshBasicMaterial).opacity = 0.16;
     this.guard = opts.guard ?? 0;
+    this.feint = opts.feint === true;
+    if (this.feint) this.guard = 0;
     this.guardMax = this.guard;
     this.blockFlash = 0;
     this.fromDistance = ENEMY.spawnDistance;
     this.plate.visible = this.guard > 0;
-    for (const m of this.plateParts) (m.material as MeshStandardMaterial).emissiveIntensity = 0;
+    // The plate grows with the number of hits it will take, so a two-plate
+    // enemy is visibly carrying more than a one-plate enemy rather than
+    // revealing it only after the first break.
+    this.plate.scale.setScalar(this.guard > 1 ? 1.55 : 1.3);
+    for (const m of this.plateParts) {
+      (m.material as MeshStandardMaterial).emissiveIntensity = PLATE_GLOW;
+    }
 
-    const palette = rare ? RARE_PALETTE : rng.pick(CLANS);
+    // Rare wins over guarded: a rare guarded enemy is the biggest prize on the
+    // board and should look like gold, with the plate carrying the second read.
+    // The clan roll happens exactly when it did before — the seeded stream must
+    // draw the same number of values whatever the enemy turns out to look like.
+    const clan = rare ? RARE_PALETTE : rng.pick(CLANS);
+    const palette = this.feint
+      ? FEINT_PALETTE
+      : !rare && this.guard > 0
+        ? GUARD_PALETTE
+        : clan;
 
     // Silhouette variation: headgear family, build, and tail presence read at a
     // glance and cost nothing — that variety is what keeps minutes of the same
     // enemy fresh.
     const earStyle: EarStyle = rare ? 'horns' : rng.pick(EAR_STYLES);
     for (const style of EAR_STYLES) {
-      for (const m of this.ears[style]) m.visible = style === earStyle;
+      for (const m of this.ears[style]) m.visible = !this.detailedModel && style === earStyle;
     }
-    this.tail.visible = earStyle === 'points' || earStyle === 'round';
+    this.tail.visible = !this.detailedModel && (earStyle === 'points' || earStyle === 'round');
 
     this.applyPalette(palette, rare, earStyle);
 
     const build = rng.range(0.9, 1.14);
-    this.root.scale.set(build, rare ? build * 1.14 : build, build);
+    // A rare target is worth nine ordinary ones, so it is unmistakably bigger.
+    this.root.scale.set(build, rare ? build * 1.22 : build, build);
 
     // The weapon is chosen first — rotated, never rolled, so cosmetic variety
     // stays out of the seeded gameplay stream — and the attack is then picked
     // from the moves that weapon actually suits.
     const weapon = rare ? weaponById('katana-ornate') : nextWeapon(this.cinematic);
     this.setWeapon(weapon.id, palette, rare);
+    // Empty hands: the feint's whole promise is that it cannot hurt you, and
+    // the silhouette has to say so before the player has to decide.
+    this.weapon.visible = !this.feint;
     this.attack = opts.attack
       ? attackById(opts.attack)
       : pickAttack(this.cinematic, weapon.attacks);
@@ -501,6 +683,7 @@ export class Enemy {
     this.group.rotation.set(0, side === 'L' ? Math.PI / 2 : -Math.PI / 2, 0);
     this.root.rotation.set(0, 0, 0);
     this.group.visible = true;
+    this.syncDetailedVisual();
   }
 
   private applyPalette(p: Palette, rare: boolean, earStyle: EarStyle): void {
@@ -531,6 +714,106 @@ export class Enemy {
         else if (child.geometry === GEO.foot) child.material = trim;
       }
     }
+    this.applyDetailedPalette(p, rare);
+  }
+
+  /** Preserves the authored variant palette while retaining gameplay colours. */
+  private applyDetailedPalette(p: Palette, rare: boolean): void {
+    if (this.detailedMaterials.length === 0) return;
+    for (const material of this.detailedMaterials) {
+      const base = this.detailedMaterialBases.get(material);
+      if (!base) continue;
+      const role = material.name.toLowerCase();
+      material.color.copy(base.color);
+      material.emissive.copy(base.emissive);
+      material.emissiveIntensity = base.emissiveIntensity;
+      material.roughness = base.roughness;
+      // Cloth picks up a little clan identity; metal, skin, and the signature
+      // ronin/oni/tengu accents stay exactly as they were authored.
+      if (role.includes('cloth')) material.color.lerp(new Color(p.cloth), rare ? 0.38 : 0.18);
+      if (rare && (role.includes('accent') || role.includes('eyes'))) {
+        material.emissive.setHex(p.trim);
+        material.emissiveIntensity = role.includes('eyes') ? 2.8 : 0.35;
+      }
+      material.needsUpdate = true;
+    }
+  }
+
+  /** Mirrors the proven combat puppet pose onto the imported humanoid rig. */
+  private syncDetailedVisual(): void {
+    const rig = this.detailedRig;
+    if (!rig) return;
+    rig.restoreBasePose();
+    this.detailedPose.armL = rotationOf(this.arms[0]);
+    this.detailedPose.forearmL = rotationOf(this.forearms[0]);
+    this.detailedPose.armR = rotationOf(this.arms[1]);
+    this.detailedPose.forearmR = rotationOf(this.forearms[1]);
+    if (this.weaponDef.grip === 'twoHand') {
+      // The support arm follows the driving arm with a smaller arc. The shaft
+      // is solved through both sockets below, so this coupled motion keeps both
+      // fists on the handle without making the off hand look nailed in place.
+      const armR = this.detailedPose.armR;
+      const forearmR = this.detailedPose.forearmR;
+      this.detailedPose.armL = [
+        MathUtils.clamp(-0.5 + armR[0] * 0.2, -1.08, -0.36),
+        0.18 + armR[1] * 0.16,
+        -0.58 + armR[2] * 0.2,
+      ];
+      this.detailedPose.forearmL = [
+        MathUtils.clamp(-0.34 + forearmR[0] * 0.28, -0.62, -0.18),
+        0.1 + forearmR[1] * 0.12,
+        -0.42 + forearmR[2] * 0.18,
+      ];
+    }
+    this.detailedPose.upLegL = rotationOf(this.legs[0]);
+    this.detailedPose.legL = rotationOf(this.shins[0]);
+    this.detailedPose.upLegR = rotationOf(this.legs[1]);
+    this.detailedPose.legR = rotationOf(this.shins[1]);
+    this.detailedPose.head = rotationOf(this.head);
+    rig.applyPose(this.detailedPose, 1);
+
+    this.detailedModel?.updateWorldMatrix(true, true);
+    this.syncWeaponMount();
+    this.syncRigMount(this.plate, 'handL', PLATE_MOUNT, this.detailedOffhandGrip);
+  }
+
+  /**
+   * One-handed steel inherits the authored fist frame. For two-handed weapons,
+   * the shaft is solved through both exported sockets so neither hand floats
+   * beside the handle as the attack pose changes.
+   */
+  private syncWeaponMount(): void {
+    this.syncRigMount(this.weapon, 'handR', WEAPON_MOUNT, this.detailedWeaponGrip);
+    if (
+      this.weaponDef.grip !== 'twoHand'
+      || !this.detailedWeaponGrip
+      || !this.detailedOffhandGrip
+    ) return;
+
+    this.detailedWeaponGrip.getWorldPosition(WORLD);
+    this.detailedOffhandGrip.getWorldPosition(SECONDARY_WORLD);
+    this.root.worldToLocal(WORLD);
+    this.root.worldToLocal(SECONDARY_WORLD);
+    solveTwoHandGrip(WORLD, SECONDARY_WORLD, this.weaponHoldQuaternion, this.weapon.quaternion);
+  }
+
+  private syncRigMount(
+    mount: Object3D,
+    bone: 'handL' | 'handR',
+    correction: Quaternion,
+    socket: Object3D | null,
+  ): void {
+    const target = socket ?? this.detailedRig?.get(bone);
+    if (!target) return;
+    target.getWorldPosition(WORLD);
+    this.root.worldToLocal(WORLD);
+    mount.position.copy(WORLD);
+    target.getWorldQuaternion(WORLD_QUAT);
+    this.root.getWorldQuaternion(ROOT_QUAT).invert();
+    mount.quaternion.copy(ROOT_QUAT.multiply(WORLD_QUAT));
+    // Legacy player rigs have no authored socket and keep their old correction;
+    // the new enemy cast exports the complete grip frame from Blender.
+    if (!socket) mount.quaternion.multiply(correction);
   }
 
   /**
@@ -545,23 +828,21 @@ export class Enemy {
     this.weapon.clear();
     const def = weaponById(id);
     this.weaponDef = def;
+    this.weaponHoldQuaternion.setFromEuler(
+      new Euler(def.hold.rotation[0], def.hold.rotation[1], def.hold.rotation[2]),
+    );
     // A streamed model is used the moment it lands; until then the procedural
     // build stands in, so an enemy is never empty-handed mid-run.
     const model = def.model ? weaponModel(id) : null;
-    if (model) {
-      model.position.set(def.hold.position[0], def.hold.position[1], def.hold.position[2]);
-      model.rotation.set(def.hold.rotation[0], def.hold.rotation[1], def.hold.rotation[2]);
-      this.weapon.add(model);
-    } else {
-      this.weapon.add(
-        buildWeapon(id, {
-          metal: p.metal,
-          wrap: 0x1e1a2a,
-          accent: p.trim,
-          glow: rare ? p.trim : undefined,
-        }),
-      );
-    }
+    const equipped = model ?? buildWeapon(id, {
+      metal: p.metal,
+      wrap: 0x1e1a2a,
+      accent: p.trim,
+      glow: rare ? p.trim : undefined,
+    });
+    equipped.position.set(def.hold.position[0], def.hold.position[1], def.hold.position[2]);
+    equipped.rotation.set(def.hold.rotation[0], def.hold.rotation[1], def.hold.rotation[2]);
+    this.weapon.add(equipped);
   }
 
   /**
@@ -580,6 +861,7 @@ export class Enemy {
       this.root.rotation.set(this.body.rotation.x, this.body.rotation.y, this.body.rotation.z);
       const life = ENEMY.despawnAfter * this.lingerScale;
       this.updateDeathPose(dt);
+      this.syncDetailedVisual();
       // Keep physical proportions through the reaction. The old continuous
       // shrink made launched bodies look like balloons losing air; scale-down
       // is now confined to the final few frames before the pooled despawn.
@@ -603,24 +885,28 @@ export class Enemy {
     // Gameplay has accepted the hit, but the target remains intact until the
     // animated foot/hand/blade reaches it. Holding the last defensive pose is
     // what makes the upcoming launch begin from visible physical contact.
-    if (this.state === 'contact') return;
+    if (this.state === 'contact') {
+      this.syncDetailedVisual();
+      return;
+    }
 
-    if (this.state === 'guardRecoil') {
+    if (this.state === 'reengage') {
       // Integrate the measured horizontal impulse, then hand the body back to
       // the scheduled approach. This keeps the plate hit physical without
       // allowing a cosmetic bounce to change its next fair impact time.
-      this.group.position.x += this.guardRecoilVelocity * dt;
-      this.guardRecoilVelocity *= Math.exp(-GUARD.recoilDamping * dt);
+      this.group.position.x += this.reengageVelocity * dt;
+      this.reengageVelocity *= Math.exp(-GUARD.recoilDamping * dt);
       const side = Math.sign(this.group.position.x) || (this.side === 'L' ? -1 : 1);
       this.group.position.x = side * Math.min(ENEMY.spawnDistance, Math.abs(this.group.position.x));
-      this.updateGuardRecoilPose(dt);
-      if (now >= this.guardRecoilUntil) {
+      this.updateReengagePose(dt);
+      if (now >= this.reengageUntil) {
         this.fromDistance = Math.abs(this.group.position.x);
         this.spawnAt = now;
         this.approach = Math.max(0.12, this.impactAt - now);
         this.state = 'approach';
         this.inertia.reset(this.group.position.x, this.root.position.y);
       }
+      this.syncDetailedVisual();
       return;
     }
 
@@ -629,12 +915,23 @@ export class Enemy {
     // frame spike can never desync an enemy from its own impact time. A posed
     // body — a Flow-chain target — keeps the placement its owner gave it.
     if (!this.posed) {
-      const t = (now - this.spawnAt) / this.approach;
-      const eased = t < 1 ? easeOutSine(Math.max(0, t)) : 1;
-      // A longer weapon strikes from further out, so its owner stops short.
-      const strikeAt = ENEMY.strikeDistance * this.weaponDef.reach;
-      const distance = this.fromDistance + (strikeAt - this.fromDistance) * eased;
-      this.group.position.x = dir * distance;
+      const strikeAt = strikeDistanceFor(this.weaponDef.reach);
+      if (this.feint && now >= this.impactAt) {
+        // Pulled up short and backing out. Holding your nerve has to LOOK like
+        // the right call — an enemy that simply stopped would read as the game
+        // forgetting about it.
+        const back = easeInQuad(clamp01((now - this.impactAt) / FEINT.retreatAfter));
+        this.group.position.x = dir * (strikeAt + (this.fromDistance - strikeAt) * back);
+      } else {
+        // Constant forward pressure keeps the exchange feeling like a charge.
+        // The authored windup supplies the readable tell; locomotion must not
+        // ease into a crawl during the most important half-second.
+        const progress = clamp01((now - this.spawnAt) / this.approach);
+        // Reach still matters, but even a polearm user must enter the fight
+        // instead of attacking from a detached-looking body length away.
+        const distance = this.fromDistance + (strikeAt - this.fromDistance) * progress;
+        this.group.position.x = dir * distance;
+      }
     }
 
     if (this.flowMark !== 'none') this.updateFlowMark(now);
@@ -643,7 +940,12 @@ export class Enemy {
     // it on one frame. A fighter planting their feet before a cut is far more
     // legible than a puppet snapping from run pose to attack pose.
     const toImpact = this.impactAt - now;
-    this.telegraph = toImpact < 0.62 ? clamp01(1 - toImpact / 0.62) : 0;
+    const raw = toImpact < 0.62 ? clamp01(1 - toImpact / 0.62) : 0;
+    // A feint leans in but never finishes the motion. Capping the telegraph is
+    // what makes it a fake rather than a strike that happens to miss: the body
+    // commits far enough to be tempting and stops short of the frame that would
+    // land.
+    this.telegraph = this.feint ? Math.min(0.55, raw) : raw;
     // A heavy weapon commits later and harder: the same telegraph window, but
     // the body holds its run posture longer before the shape of the strike
     // takes over. The impact frame is untouched, so the read never changes.
@@ -698,12 +1000,18 @@ export class Enemy {
       const mirror = this.side === 'L' ? -1 : 1;
       if (p.armR) blendRotation(this.arms[1], p.armR, windupBlend);
       if (p.armL) blendRotation(this.arms[0], p.armL, windupBlend);
+      if (p.forearmR) blendRotation(this.forearms[1], p.forearmR, windupBlend);
+      if (p.forearmL) blendRotation(this.forearms[0], p.forearmL, windupBlend);
       if (p.legR) blendRotation(this.legs[1], p.legR, windupBlend);
       if (p.legL) blendRotation(this.legs[0], p.legL, windupBlend);
       // Elbows and knees give the attack pose a relaxed preparation, then
       // naturally straighten into the contact frame rather than staying rigid.
-      this.forearms[1].rotation.x = MathUtils.lerp(this.forearms[1].rotation.x, -0.16, windupBlend);
-      this.forearms[0].rotation.x = MathUtils.lerp(this.forearms[0].rotation.x, -0.1, windupBlend);
+      if (!p.forearmR) {
+        this.forearms[1].rotation.x = MathUtils.lerp(this.forearms[1].rotation.x, -0.16, windupBlend);
+      }
+      if (!p.forearmL) {
+        this.forearms[0].rotation.x = MathUtils.lerp(this.forearms[0].rotation.x, -0.1, windupBlend);
+      }
       this.shins[0].rotation.x = MathUtils.lerp(this.shins[0].rotation.x, 0.08, windupBlend);
       this.shins[1].rotation.x = MathUtils.lerp(this.shins[1].rotation.x, 0.08, windupBlend);
       if (p.head) blendRotation(this.head, mirrored(p.head, mirror), windupBlend);
@@ -744,7 +1052,7 @@ export class Enemy {
       // The struck plate glows down from white as the recoil settles.
       for (const m of this.plateParts) {
         const mat = m.material as MeshStandardMaterial;
-        mat.emissiveIntensity = this.blockFlash * 2.4;
+        mat.emissiveIntensity = PLATE_GLOW + this.blockFlash * 2.4;
       }
       // Recoil from the blocked strike: rocked back, plate shoved aside.
       this.blockFlash = Math.max(0, this.blockFlash - dt * 3.2);
@@ -754,6 +1062,7 @@ export class Enemy {
       this.arms[0].rotation.z = 0.25 + b * 0.9;
       this.head.rotation.x = -b * 0.4;
     }
+    this.syncDetailedVisual();
   }
 
   /**
@@ -936,26 +1245,39 @@ export class Enemy {
 
     // Re-engage from where it stands rather than from the spawn line. The same
     // contact impulse that rocks the hero now drives this short recoil phase.
+    const measured = impulse ? Math.abs(impulse.linear.x) : GUARD.recoilDistance / GUARD.recoilSeconds;
+    this.beginReengage(now, seconds, fromX, Math.max(3.5, measured * 0.58));
+  }
+
+  /** Resets after connecting with the hero instead of disappearing. */
+  recoverAfterAttack(now: number, seconds: number, fromX: number): void {
+    this.blockFlash = 0;
+    this.beginReengage(now, seconds, fromX, ENEMY.retryRetreatSpeed);
+  }
+
+  private beginReengage(now: number, seconds: number, fromX: number, speed: number): void {
     const away = Math.sign(this.group.position.x - fromX) || 1;
     this.impactAt = now + seconds;
-    const measured = impulse ? Math.abs(impulse.linear.x) : GUARD.recoilDistance / GUARD.recoilSeconds;
-    this.guardRecoilVelocity = away * Math.max(3.5, measured * 0.58);
-    this.guardRecoilUntil = now + Math.min(GUARD.recoilSeconds, seconds * 0.4);
-    this.state = 'guardRecoil';
+    this.reengageVelocity = away * speed;
+    this.reengageUntil = now + Math.min(ENEMY.retryRetreatSeconds, seconds * 0.4);
+    this.state = 'reengage';
     this.telegraph = 0;
     this.windupProgress = 0;
     this.threw = false;
   }
 
-  private updateGuardRecoilPose(dt: number): void {
+  private updateReengagePose(dt: number): void {
     this.blockFlash = Math.max(0, this.blockFlash - dt * 3.2);
     const b = this.blockFlash;
-    this.root.rotation.x = -b * 0.5;
-    this.root.position.y = b * 0.12;
-    this.arms[0].rotation.z = 0.25 + b * 0.9;
-    this.head.rotation.x = -b * 0.4;
+    dampRotation(this.root, [-b * 0.5, 0, 0], 10, dt);
+    this.root.position.y = MathUtils.damp(this.root.position.y, b * 0.12, 10, dt);
+    dampRotation(this.arms[0], [-0.28, 0, 0.25 + b * 0.9], 10, dt);
+    dampRotation(this.arms[1], [-0.42, 0, -0.2], 10, dt);
+    dampRotation(this.legs[0], [0.18, 0, 0.08], 10, dt);
+    dampRotation(this.legs[1], [-0.12, 0, -0.08], 10, dt);
+    dampRotation(this.head, [-b * 0.4, 0, 0], 10, dt);
     for (const m of this.plateParts) {
-      (m.material as MeshStandardMaterial).emissiveIntensity = b * 2.4;
+      (m.material as MeshStandardMaterial).emissiveIntensity = PLATE_GLOW + b * 2.4;
     }
   }
 
@@ -1050,7 +1372,7 @@ export class Enemy {
   }
 
   get isThreat(): boolean {
-    return this.state === 'approach' || this.state === 'windup' || this.state === 'guardRecoil';
+    return this.state === 'approach' || this.state === 'windup' || this.state === 'reengage';
   }
 
   get windup(): number {
@@ -1058,10 +1380,22 @@ export class Enemy {
   }
 }
 
+function rotationOf(object: Object3D): readonly [number, number, number] {
+  return [object.rotation.x, object.rotation.y, object.rotation.z];
+}
+
+function isBelow(object: Object3D, ancestor: Object3D): boolean {
+  let current: Object3D | null = object;
+  while (current) {
+    if (current === ancestor) return true;
+    current = current.parent;
+  }
+  return false;
+}
+
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const clampLag = (v: number) =>
   v < -PHYSICS.maxLag ? -PHYSICS.maxLag : v > PHYSICS.maxLag ? PHYSICS.maxLag : v;
-const easeOutSine = (t: number) => Math.sin(clamp01(t) * Math.PI * 0.5);
 const easeInQuad = (t: number) => t * t;
 const smoothstep = (t: number) => {
   const x = clamp01(t);

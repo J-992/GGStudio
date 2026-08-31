@@ -49,21 +49,49 @@ export function unlockState(mastery: number): UnlockState {
   return { unlocked, next: UNLOCKS.order[nextIndex], progress, mastery };
 }
 
-/** Commits a finished run and reports which ninjas were newly unlocked. */
-export function commitRun(stats: RunStats): { state: UnlockState; newlyUnlocked: CharacterId[] } {
+/**
+ * Commits a finished run and reports which ninjas were newly unlocked.
+ *
+ * @param bonusMastery Mastery earned outside the run itself — today's completed
+ *        goals. It is added here rather than saved separately so that finishing
+ *        a goal and unlocking a ninja on the same run resolve in one check, and
+ *        the player is told about both at once.
+ */
+export function commitRun(
+  stats: RunStats,
+  bonusMastery = 0,
+  opts: CommitOptions = {},
+): { state: UnlockState; newlyUnlocked: CharacterId[] } {
   const save = loadSave();
   const before = unlockState(save.mastery);
-  const mastery = save.mastery + masteryFor(stats);
+  const mastery = save.mastery + masteryFor(stats) + Math.max(0, Math.round(bonusMastery));
   const after = unlockState(mastery);
   const newlyUnlocked = after.unlocked.filter((id) => !before.unlocked.includes(id));
 
   saveSave({
     mastery,
     unlocked: after.unlocked,
-    best: Math.max(save.best, stats.score),
-    runs: save.runs + 1,
+    best: Math.max(save.best, opts.bestScore ?? stats.score),
+    runs: save.runs + (opts.countRun === false ? 0 : 1),
     lastPlayed: Date.now(),
   });
 
   return { state: after, newlyUnlocked };
+}
+
+/**
+ * A run that used its continue commits twice: once when it first ended, and
+ * again when it ended for good.
+ *
+ * Saving on the first death is not negotiable — players close the tab on the
+ * results screen and their progress has to already be on disk. So the second
+ * commit passes only what has happened SINCE the first: `stats` are deltas,
+ * `countRun` is false because it is still one run, and `bestScore` carries the
+ * run's real final total, which is the only figure that is not a delta.
+ */
+export interface CommitOptions {
+  /** False on the second commit of a continued run. */
+  countRun?: boolean;
+  /** Full run score, for the personal best. Defaults to `stats.score`. */
+  bestScore?: number;
 }

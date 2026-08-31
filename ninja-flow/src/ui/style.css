@@ -363,6 +363,23 @@ body {
   text-shadow: 0 3px 16px rgba(0, 0, 0, 0.8);
   animation: callout 0.62s ease-out forwards;
   white-space: nowrap;
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  line-height: 1.05;
+}
+
+/* The score gain rides under the grade at a fraction of its size: it is there
+   to be caught in peripheral vision, not read. */
+.callout__grade:empty {
+  display: none;
+}
+
+.callout__gain {
+  font-size: 0.52em;
+  letter-spacing: 0.06em;
+  opacity: 0.92;
+  font-variant-numeric: tabular-nums;
 }
 
 .callout--good {
@@ -679,7 +696,6 @@ body {
   .ninja {
     width: 54px;
     height: 54px;
-    font-size: 22px;
   }
 }
 
@@ -790,8 +806,10 @@ body {
      the ninja you are picking is standing. */
   place-content: start center;
   justify-items: center;
-  gap: 12px;
-  padding: calc(4vh + var(--safe-t)) 18px calc(16px + var(--safe-b));
+  /* Tightened when the day's goals moved in: the panel and the ninja share one
+     screen, and the panel is the half that gives ground. */
+  gap: 9px;
+  padding: calc(3vh + var(--safe-t)) 18px calc(16px + var(--safe-b));
   background: linear-gradient(
     180deg,
     rgba(9, 7, 18, 0.86) 0%,
@@ -1075,6 +1093,24 @@ body {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.4;
+}
+
+.mark--empty {
+  color: rgba(255, 255, 255, 0.36);
+}
+
+.mark__ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-dasharray: 2.6 2.2;
+}
+
+.mark__slash {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
 }
 
 /* ------------------------------------------------- menu character button */
@@ -1368,6 +1404,21 @@ body {
   background: linear-gradient(140deg, var(--a) 0%, var(--a) 46%, var(--b) 100%);
   border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: inset 0 -6px 12px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+/*
+ * The rendered piece sits ON the item's colour plate rather than replacing it,
+ * so a card still reads as a colour at a glance and as a thing on closer look.
+ * The render already fills its own frame, so this fills the tile exactly — any
+ * scaling up here just clips a helmet's crest against the plate's edge.
+ */
+.card__icon {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
 }
 
 .card__art .mark {
@@ -1393,4 +1444,163 @@ body {
     width: 38px;
     height: 38px;
   }
+}
+
+/* ------------------------------------------------------- score chase marker */
+
+/* Last run's total, not the all-time best: a target that is always in reach.
+   It removes itself the moment it is passed, so it can never nag. */
+.score__chase {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--flow);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.score__chase.on {
+  opacity: 0.9;
+}
+
+/* -------------------------------------------------------------- daily goals */
+
+/* Deliberately quiet and low in the panel: a reason to come back, not the
+   reason to be here. Nothing here decays and there is no streak to break. */
+.dailies {
+  display: grid;
+  gap: 5px;
+  width: min(340px, 92vw);
+}
+
+.dailies__label {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--ink-dim);
+  text-align: center;
+}
+
+.dailies__list {
+  display: grid;
+  gap: 4px;
+}
+
+.daily {
+  position: relative;
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 7px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  overflow: hidden;
+}
+
+.daily__tick {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+}
+
+.daily__text {
+  color: rgba(255, 255, 255, 0.82);
+  letter-spacing: 0.03em;
+}
+
+.daily__count {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+  letter-spacing: 0.08em;
+}
+
+/* The progress bar is the row's own underline rather than a separate element,
+   so three goals stack without turning the menu into a dashboard. */
+.daily__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.daily__fill {
+  display: block;
+  height: 100%;
+  background: var(--flow);
+  transition: width 0.4s ease;
+}
+
+.daily--done .daily__tick {
+  border-color: var(--flow);
+  background: var(--flow);
+}
+
+.daily--done .daily__text {
+  color: rgba(255, 255, 255, 0.55);
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 255, 255, 0.3);
+}
+
+.daily--done .daily__count {
+  color: var(--flow);
+}
+
+/* ------------------------------------------------ game over: goals + revive */
+
+.over__dailies {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+}
+
+.over__daily {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--flow);
+}
+
+.over__daily-tick {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--flow);
+}
+
+/* The continue is offered ABOVE play-again but styled below it: a second
+   chance is worth taking, and it is never the louder of the two buttons. */
+.btn--continue {
+  display: grid;
+  gap: 2px;
+  padding: 10px 30px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: none;
+}
+
+.btn--continue:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.btn--continue:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn__main {
+  font-size: clamp(13px, 3.4vw, 16px);
+  letter-spacing: 0.14em;
+}
+
+.btn__sub {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: rgba(255, 255, 255, 0.5);
 }

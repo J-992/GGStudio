@@ -264,6 +264,34 @@ describe('Progression', () => {
     expect(s.unlocked).toHaveLength(UNLOCKS.order.length);
   });
 
+  /**
+   * A continued run commits twice — once when it first ended, so nothing is
+   * lost if the tab closes on the results screen, and again when it ended for
+   * good. The second commit must add only what happened after the continue.
+   */
+  it('counts a continued run once and its progress once', () => {
+    const first = commitRun({ kills: 10, perfects: 4, flows: 1, score: 1000 });
+    const afterFirst = loadSave();
+
+    const second = commitRun(
+      { kills: 6, perfects: 3, flows: 1, score: 700 },
+      0,
+      { countRun: false, bestScore: 1700 },
+    );
+    const afterSecond = loadSave();
+
+    // One run, not two.
+    expect(afterSecond.runs).toBe(afterFirst.runs);
+    // Mastery is the sum of the two halves, never the whole run counted twice.
+    expect(afterSecond.mastery - afterFirst.mastery).toBe(
+      masteryFor({ kills: 6, perfects: 3, flows: 1, score: 700 }),
+    );
+    // The personal best is the run's real total, not either half of it.
+    expect(afterSecond.best).toBeGreaterThanOrEqual(1700);
+    expect(second.state.mastery).toBe(afterSecond.mastery);
+    expect(first.state.mastery).toBe(afterFirst.mastery);
+  });
+
   it('reports newly unlocked ninjas exactly once', () => {
     const first = commitRun({ kills: 200, perfects: 100, flows: 4, score: 20_000 });
     expect(first.newlyUnlocked.length).toBeGreaterThan(0);

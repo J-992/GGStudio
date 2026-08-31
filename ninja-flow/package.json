@@ -15,7 +15,9 @@
     "assets": "node tools/build-assets.mjs",
     "verify:rigs": "node tools/verify-rigs.mjs",
     "verify": "npm run typecheck && npm run test && npm run build",
-    "weapons": "node tools/build-weapons.mjs"
+    "weapons": "node tools/build-weapons.mjs",
+    "enemies:optimize": "node tools/optimize-enemies.mjs",
+    "accessories": "node tools/build-accessories.mjs"
   },
   "dependencies": {
     "three": "^0.185.1"

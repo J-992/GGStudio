@@ -1,6 +1,11 @@
 import { AnimationClip, Group, LoadingManager, Mesh } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { UNLOCKS, type CharacterId } from '../config';
+import { registerCosmeticModel } from '../game/CosmeticModels';
+
+export const ENEMY_MODEL_IDS = ['ronin', 'oni', 'tengu'] as const;
+export type EnemyModelId = (typeof ENEMY_MODEL_IDS)[number];
 
 /**
  * Progressive asset loading.
@@ -26,6 +31,7 @@ export interface CharacterAsset {
 const BASE = import.meta.env.BASE_URL;
 const MODEL_URL = (id: string) => `${BASE}models/${id}.glb`;
 const ANIM_URL = (id: string) => `${BASE}anims/${id}.glb`;
+const ENEMY_URL = (id: string) => `${BASE}enemies/enemy-${id}.glb`;
 
 export class Assets {
   private readonly loader: GLTFLoader;
@@ -36,6 +42,9 @@ export class Assets {
   private deferredDone = false;
   private readonly weapons = new Map<string, Group>();
   private weaponsPending: Promise<void> | null = null;
+  private readonly enemies = new Map<EnemyModelId, Group>();
+  private enemiesPending: Promise<void> | null = null;
+  private cosmeticsPending: Promise<void> | null = null;
 
   constructor() {
     const manager = new LoadingManager();
@@ -100,6 +109,47 @@ export class Assets {
     return this.weaponsPending;
   }
 
+  /** Streams the original enemy cast before the optional hero catalogue. */
+  loadEnemies(idleGate: () => Promise<void>): Promise<void> {
+    if (this.enemiesPending) return this.enemiesPending;
+    this.enemiesPending = (async () => {
+      for (const id of ENEMY_MODEL_IDS) {
+        await idleGate();
+        try {
+          const { scene } = await this.loadGLB(ENEMY_URL(id), () => {});
+          scene.updateWorldMatrix(true, true);
+          this.enemies.set(id, scene);
+        } catch {
+          // The procedural combat puppet remains visible if an optional model
+          // fails to load, so a broken cosmetic can never stop a fight.
+        }
+      }
+    })();
+    return this.enemiesPending;
+  }
+
+  /**
+   * Streams the wardrobe's model-backed pieces. Deferred like the weapons and
+   * for the same reason: the character screen is a second-visit surface, so a
+   * first load has no business carrying a hat nobody has chosen yet.
+   */
+  loadCosmetics(ids: readonly string[], idleGate: () => Promise<void>): Promise<void> {
+    if (this.cosmeticsPending) return this.cosmeticsPending;
+    this.cosmeticsPending = (async () => {
+      for (const id of ids) {
+        await idleGate();
+        try {
+          const { scene } = await this.loadGLB(`${BASE}cosmetics/${id}.glb`, () => {});
+          registerCosmeticModel(id, scene);
+        } catch {
+          // A missing accessory simply stays unequippable; the catalogue entry
+          // is still listed, and picking it leaves the character unchanged.
+        }
+      }
+    })();
+    return this.cosmeticsPending;
+  }
+
   /** A fresh instance of a loaded weapon, or null if it has not landed yet. */
   weapon(id: string): Group | null {
     const template = this.weapons.get(id);
@@ -108,6 +158,13 @@ export class Assets {
 
   get(id: CharacterId): CharacterAsset | null {
     return this.characters.get(id) ?? null;
+  }
+
+  /** A skeleton-safe cast member; geometry/material data stays GPU-shared. */
+  enemyInstance(index: number): Group | null {
+    const id = ENEMY_MODEL_IDS[index % ENEMY_MODEL_IDS.length];
+    const template = this.enemies.get(id);
+    return template ? (cloneSkeleton(template) as Group) : null;
   }
 
   isLoaded(id: CharacterId): boolean {

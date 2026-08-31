@@ -163,7 +163,7 @@ export function simulateRun(profile: PlayerProfile, seed: number, maxSeconds = 4
     if (overdue) {
       const safe = director.tutorialThreatsLeft > 0 || recovery > 0;
       director.consumeTutorialThreat();
-      overdue.kill(0, 0.5);
+      director.rearmAfterLanding(overdue, now, 0);
       combo.break();
       if (!safe) {
         hearts -= 1;

@@ -215,6 +215,11 @@ export class Player {
     return this.wardrobe?.debugLimbs ?? {};
   }
 
+  /** Where the wardrobe actually put each piece, for scripted fitting checks. */
+  get wardrobeMounts(): unknown[] {
+    return this.wardrobe?.debugMounts ?? [];
+  }
+
   /** Arms a long authored clip for the next Flow finisher. */
   setFinisherClip(clip: AnimationClip | null): void {
     if (!this.mixer || !clip) {

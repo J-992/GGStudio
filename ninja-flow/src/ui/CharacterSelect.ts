@@ -4,11 +4,13 @@ import {
   SLOT_LABEL,
   itemById,
   itemsForSlot,
+  paletteFor,
   type CosmeticSlot,
   type Loadout,
 } from '../game/Cosmetics';
 import type { UnlockState } from '../game/Progression';
-import { LOCKED_MARK, NINJA_META } from './Ninjas';
+import { cosmeticIcon, releaseCosmeticIcons } from './CosmeticIcons';
+import { EMPTY_MARK, LOCKED_MARK, NINJA_META } from './Ninjas';
 
 export interface SelectData {
   selected: CharacterId;
@@ -148,6 +150,10 @@ export class CharacterSelect {
   hide(): void {
     this.visible = false;
     this.el.classList.remove('visible');
+    // The icon renderer holds a WebGL context the arena would rather have.
+    // Everything it drew is already a cached image, so giving it back costs
+    // nothing on the way in again.
+    releaseCosmeticIcons();
     setTimeout(() => {
       if (!this.visible) this.el.style.display = 'none';
     }, 240);
@@ -232,14 +238,25 @@ export class CharacterSelect {
 
   private buildItems(data: SelectData, slot: CosmeticSlot): void {
     const equippedId = data.loadout[slot];
+    // A built piece is drawn in the colours the equipped outfit would give it,
+    // so the card shows what you would actually get. An outfit card shows its
+    // own colours instead — that is the thing it is offering.
+    const worn = paletteFor(data.loadout);
     for (const item of itemsForSlot(slot)) {
+      const palette = item.palette ?? worn;
+      const paletteKey = item.palette ? item.id : data.loadout.outfit;
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'card';
       card.style.setProperty('--a', item.swatch[0]);
       card.style.setProperty('--b', item.swatch[1]);
+      const icon = cosmeticIcon(item, palette, paletteKey);
+      // Nothing to draw means one of two things. An entry that puts nothing on
+      // the character gets the empty mark; an outfit is a set of colours, and
+      // its plate already says everything there is to say.
+      const art = icon ? `<img class="card__icon" src="${icon}" alt="">` : item.palette ? '' : EMPTY_MARK;
       card.innerHTML = `
-        <span class="card__art card__art--swatch"></span>
+        <span class="card__art card__art--swatch">${art}</span>
         <span class="card__name"></span>
       `;
       card.querySelector('.card__name')!.textContent = item.name;

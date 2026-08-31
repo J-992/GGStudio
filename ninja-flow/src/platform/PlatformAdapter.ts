@@ -130,6 +130,17 @@ export class PlatformAdapter {
     }
   }
 
+  /**
+   * Whether a rewarded ad can be offered at all.
+   *
+   * Checked before the button is drawn rather than after it is pressed: an
+   * offer of a second chance that then silently does nothing is worse than not
+   * offering one.
+   */
+  get canReward(): boolean {
+    return this.sdk !== null && this.adsEnabled;
+  }
+
   /** Feature-flagged revive path. Returns false when no reward was earned. */
   async rewardedBreak(): Promise<boolean> {
     if (!this.sdk || !this.adsEnabled) return false;
@@ -213,6 +224,7 @@ export const MEASURE = {
   replayInteract: ['button', 'replay-interact'],
   secondNinja: ['character', 'second-ninja-unlocked'],
   selectorInteract: ['character', 'selector-interact'],
+  continueInteract: ['revive', 'continue-interact'],
 } as const satisfies Record<string, readonly [string, string]>;
 
 export type MeasureKey = keyof typeof MEASURE;

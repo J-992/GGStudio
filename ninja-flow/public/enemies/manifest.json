@@ -1,0 +1,44 @@
+[
+  {
+    "id": "ronin",
+    "file": "enemy-ronin.glb",
+    "bytes": 246912,
+    "vertices": 4280,
+    "triangles": 1820,
+    "materials": 7,
+    "joints": 22,
+    "sockets": [
+      "WeaponGripR",
+      "WeaponGripL"
+    ],
+    "optimization": "lossless-dedup"
+  },
+  {
+    "id": "oni",
+    "file": "enemy-oni.glb",
+    "bytes": 261208,
+    "vertices": 4544,
+    "triangles": 1916,
+    "materials": 7,
+    "joints": 22,
+    "sockets": [
+      "WeaponGripR",
+      "WeaponGripL"
+    ],
+    "optimization": "lossless-dedup"
+  },
+  {
+    "id": "tengu",
+    "file": "enemy-tengu.glb",
+    "bytes": 243628,
+    "vertices": 4220,
+    "triangles": 1792,
+    "materials": 7,
+    "joints": 22,
+    "sockets": [
+      "WeaponGripR",
+      "WeaponGripL"
+    ],
+    "optimization": "lossless-dedup"
+  }
+]

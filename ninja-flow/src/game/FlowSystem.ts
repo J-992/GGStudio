@@ -62,8 +62,9 @@ export class FlowSystem {
     if (completed) this._chains += 1;
   }
 
-  reset(): void {
-    this._value = 0;
+  /** @param startAt initial meter value; see FLOW.firstRunHead. */
+  reset(startAt = 0): void {
+    this._value = Math.max(0, Math.min(FLOW.max, startAt));
     this.perfectStreak = 0;
     this._chains = 0;
   }

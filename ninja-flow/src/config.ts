@@ -101,6 +101,16 @@ export const FLOW = {
   recoverPause: 0.8,
   scorePerHit: 260,
   finisherScore: 1500,
+  /**
+   * Flow the meter starts with on a player's very first run, and only then.
+   *
+   * Flow Mode is the game's best moment and the thing its name promises, and a
+   * scrappy first-timer takes about thirty seconds to earn one — long enough on
+   * a portal to lose them before they ever see it. Starting the first run part
+   * way up brings the signature mechanic inside the first ten seconds without
+   * touching the economy of any later run.
+   */
+  firstRunHead: 55,
 } as const;
 
 export const COMBO = {
@@ -141,7 +151,7 @@ export const SCORE = {
 export const PAUSE_GRACE = 1.1;
 
 export const HEALTH = {
-  hearts: 3,
+  hearts: 4,
   /** Invulnerable recovery after taking a hit. */
   recovery: 0.65,
 } as const;
@@ -150,10 +160,23 @@ export const ENEMY = {
   /** Distance from arena centre where enemies spawn. */
   /** Both lanes begin at the visible ends of the imported bridge. */
   spawnDistance: 6.4,
-  /** Distance at which an enemy's strike lands on the player. */
-  strikeDistance: 1.55,
+  /**
+   * Body-to-centre distance at which an average weapon lands its strike.
+   * Enemies should feel inside the hero's personal space before committing,
+   * rather than stopping at the edge of the bridge action.
+   */
+  strikeDistance: 1.12,
+  /** Weapon reach changes the stop point, but never by a full body length. */
+  reachDistanceScale: 0.45,
+  strikeDistanceMin: 0.96,
+  strikeDistanceMax: 1.3,
   /** How long after ideal impact the enemy's own attack resolves. */
   enemyAttackDelay: 0.22,
+  /** Time before an enemy that hit the player completes its next strike. */
+  retrySeconds: 0.95,
+  /** Brief reset step after landing a hit, before the next approach begins. */
+  retryRetreatSeconds: 0.28,
+  retryRetreatSpeed: 3.2,
   launchSpeed: 13,
   launchSpin: 14,
   despawnAfter: 1.6,
@@ -221,6 +244,37 @@ export const GUARD = {
 } as const;
 
 /**
+ * Feints.
+ *
+ * The third thing the player has to read, and the only one that asks for the
+ * opposite instinct to everything else in the game. A feint runs at you like
+ * any other threat and pulls up short: swinging at it whiffs, with the whiff's
+ * full cost, while holding your nerve is worth Flow and points.
+ *
+ * It is only fair because it is readable BEFORE the moment of decision, never
+ * at it. A feint carries no weapon and wears bone-white against four warm clan
+ * palettes, so the answer to "is this one real" is settled at spawn — the
+ * pressure comes from having to notice under time pressure, not from a guess.
+ *
+ * Introduced well after guards, so a player is only ever learning one new read
+ * at a time, and its share ramps rather than arriving all at once.
+ */
+export const FEINT = {
+  /** No feints before this point in a run. */
+  fromSeconds: 70,
+  /** Share of threats that are feints, at introduction and at full ramp. */
+  chanceStart: 0.1,
+  chanceMax: 0.22,
+  chanceRampSeconds: 90,
+  /** Flow for holding. Below a kill's — it is the right call, not a feat. */
+  flowGain: 5,
+  /** Points for holding, before the combo multiplier. */
+  score: 120,
+  /** Time between the feint's moment and it clearing the lane. */
+  retreatAfter: 0.2,
+} as const;
+
+/**
  * Physics for everything that gets knocked around.
  *
  * These numbers are deliberately not real-world: gravity is roughly 2.6x Earth
@@ -278,20 +332,34 @@ export const CONTACT = {
 } as const;
 
 export const TUTORIAL = {
+  /** Bump when the lesson changes so existing players see the correction once. */
+  version: 3,
   /** Threats that cannot damage the player, no matter how badly missed. */
   safeThreats: 6 as number,
   /** Extra approach time granted to the very first threats. */
   slowFactor: 1.5,
   slowDecay: 0.12,
   /** Prompts fade out once the player has proven each side this many times. */
-  proveCount: 2,
+  proveCount: 1,
 } as const;
 
 export const CAMERA = {
   fov: { landscape: 42, portrait: 58 },
-  distance: { landscape: 7.6, portrait: 9.4 },
-  height: 2.85,
-  lookHeight: 1.25,
+  /*
+   * Closer than it used to be (7.6 / 9.4), and looking higher up the body.
+   *
+   * The fight happened in a band across the middle of the frame with the hero
+   * about a quarter of the screen's height, roughly half the picture given over
+   * to empty sky, and the bridge's near railing crossing everybody at the
+   * waist. All three are the same problem — the camera was framing the garden
+   * rather than the fight — and all three are fixed here and in
+   * `Arena.setNearRailVisible`, which now runs for gameplay as well as for the
+   * character screen.
+   */
+  distance: { landscape: 6.5, portrait: 8.3 },
+  height: 3.0,
+  /** Raised with the camera, which lifts the horizon and drops the dead sky. */
+  lookHeight: 1.5,
   /** Slight off-axis so the arena reads as 2.5D rather than flat. */
   yawOffset: 0.1,
   trauma: { good: 0.18, perfect: 0.42, finisher: 0.75, damage: 0.55 },

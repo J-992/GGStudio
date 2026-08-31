@@ -108,6 +108,8 @@ export class Arena {
   private readonly skyLight: HemisphereLight;
   private readonly stormLight: DirectionalLight;
   private readonly fog: Fog;
+  /** True while the run's difficulty owns the sky; see `setPhase`. */
+  private phaseDriven = false;
   private readonly sky = new Color(WEATHER[0].sky);
   private readonly displayedSky = new Color(WEATHER[0].sky);
   private readonly weatherTarget = new Color(WEATHER[0].sky);
@@ -257,11 +259,41 @@ export class Arena {
     return this.loadPromise;
   }
 
+  /**
+   * Walks the sky forward with the run's difficulty rather than with a timer.
+   *
+   * The set never changed, so a three-minute run looked identical at second ten
+   * and second a hundred and seventy — which quietly tells a player they are not
+   * getting anywhere. Tying the weather to the difficulty phase makes progress
+   * something you can see out of the window: the fight starts in sun, and by the
+   * time the spacing is at its floor it is happening in a thunderstorm.
+   *
+   * @param phase 0-based difficulty phase, or null in menus, where the old
+   *              free-running cycle is the right behaviour
+   */
+  setPhase(phase: number | null): void {
+    if (phase === null) {
+      this.phaseDriven = false;
+      return;
+    }
+    this.phaseDriven = true;
+    // Six phases across four skies: sun holds through the gentle opening, and
+    // the last two phases share the storm so the peak has one look, not a
+    // change every twenty seconds.
+    const step = [0, 0, 1, 2, 3, 3][Math.min(phase, 5)];
+    if (step === this.weatherIndex) return;
+    this.weatherIndex = step;
+    this.weatherClock = 0;
+    if (step === 3) this.lightningIn = 0.6;
+  }
+
   update(dt: number): void {
     this.weatherTime += dt;
     this.weatherClock += dt;
     const active = WEATHER[this.weatherIndex];
-    if (this.weatherClock >= active.duration) {
+    // Under phase control the sky is held by the run's difficulty, so the
+    // free-running cycle stands down rather than fighting it.
+    if (!this.phaseDriven && this.weatherClock >= active.duration) {
       this.weatherClock -= active.duration;
       this.weatherIndex = (this.weatherIndex + 1) % WEATHER.length;
     }
@@ -296,6 +328,11 @@ export class Arena {
   }
 
   /** Dev/test capture of the exact splash used by a real body impact. */
+  /** Hides the player-side railing so the character screen has a clear view. */
+  setNearRailVisible(visible: boolean): void {
+    this.impacts.setNearRailVisible(visible);
+  }
+
   previewSplash(x: number, z: number, energy = 12): void {
     this.impacts.previewSplash(x, z, energy);
   }

@@ -71,3 +71,16 @@ export const LOCKED_MARK = `
     <path class="mark__lockBody" d="M9 11.6h6v5.2H9z"/>
     <path class="mark__lockShackle" d="M10.3 11.6V10a1.7 1.7 0 0 1 3.4 0v1.6"/>
   </svg>`;
+
+/**
+ * The mark for a slot's "wear nothing" entry.
+ *
+ * Every other card in the grid is a render of the piece it equips, so taking
+ * something off needs a card that reads as deliberately empty rather than as a
+ * render that failed: a dashed ring with a stroke through it.
+ */
+export const EMPTY_MARK = `
+  <svg viewBox="0 0 24 24" class="mark mark--empty" aria-hidden="true">
+    <circle class="mark__ring" cx="12" cy="12" r="7.4"/>
+    <path class="mark__slash" d="M7.1 16.9 16.9 7.1"/>
+  </svg>`;

@@ -106,6 +106,25 @@ export class Wardrobe {
     return this.holders.length;
   }
 
+  /**
+   * Where each mounted piece ended up, in world metres. `debugLimbs` says what
+   * the fitter measured; this says what it did with it, which is the half that
+   * catches a piece placed inside a knee or scaled to the size of a tree.
+   */
+  get debugMounts(): { bone: string; scale: number; world: number[]; size: number[] }[] {
+    const out: { bone: string; scale: number; world: number[]; size: number[] }[] = [];
+    for (const holder of this.holders) {
+      const size = new Box3().setFromObject(holder).getSize(new Vector3());
+      out.push({
+        bone: holder.parent?.name ?? '?',
+        scale: +holder.scale.x.toFixed(4),
+        world: holder.getWorldPosition(new Vector3()).toArray().map((n) => +n.toFixed(3)),
+        size: size.toArray().map((n) => +n.toFixed(3)),
+      });
+    }
+    return out;
+  }
+
   apply(loadout: Loadout): void {
     this.clear();
     this.loadout = loadout;
@@ -116,7 +135,7 @@ export class Wardrobe {
       const item = itemById(loadout[slot]);
       if (!item?.build) continue;
       for (const anchor of item.anchors) {
-        this.mount(anchor, item.build(palette, anchor));
+        this.mount(anchor, item.build(palette, anchor), item.model === true);
       }
     }
 
@@ -155,9 +174,13 @@ export class Wardrobe {
     this.loadout = null;
   }
 
-  private mount(anchor: CosmeticAnchor, item: Object3D): void {
+  private mount(anchor: CosmeticAnchor, item: Object3D, shared = false): void {
     const bone = this.resolve(anchor);
     if (!bone) return;
+    // An empty piece is a model that has not finished streaming. Mounting it
+    // would put a zero-size holder on the bone and leave the wardrobe claiming
+    // to be wearing something it cannot draw.
+    if (item.children.length === 0) return;
 
     const holder = new Group();
     holder.quaternion.copy(this.bindOrientation(bone)).invert();
@@ -196,6 +219,10 @@ export class Wardrobe {
       item.rotation.set(anchor.rotation[0], anchor.rotation[1], anchor.rotation[2]);
     }
     parent.add(item);
+    // Model-backed pieces are clones that share their prototype's materials, so
+    // they are never collected for disposal: unequipping one hat would otherwise
+    // take the texture out from under every other copy of it.
+    if (shared) return;
     item.traverse((o) => {
       if (!(o instanceof Mesh)) return;
       const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -228,13 +255,29 @@ export class Wardrobe {
     ITEM_BOX.setFromObject(item);
     const itemSize = ITEM_BOX.getSize(SCRATCH_SIZE2);
     if (itemSize.x < 1e-6) return { position, scale: 1 };
-    const scale = (limbWidth * fit.width) / itemSize.x;
+    // Height wins when it is given: a crested helmet is mostly crest, so sizing
+    // it across gives something two heads tall.
+    const scale =
+      fit.height !== undefined && itemSize.y > 1e-6
+        ? (Math.max(limbSize.y, 1e-4) * fit.height) / itemSize.y
+        : (limbWidth * fit.width) / itemSize.x;
     const center = ITEM_BOX.getCenter(SCRATCH_CENTER2).multiplyScalar(scale);
     const low = ITEM_BOX.min.y * scale;
     const high = ITEM_BOX.max.y * scale;
     const backFace = ITEM_BOX.max.z * scale;
 
-    if (fit.place === 'top') {
+    if (fit.place === 'face') {
+      // A mask straddles the front of the head: its own centre goes on the
+      // head's front face, so roughly half of it is buried in the skull and
+      // half stands proud. Meeting the two surfaces instead — the mask's back
+      // against the head's front — leaves it floating a full mask-depth off the
+      // nose, which is what the first version did.
+      position.set(
+        limbCenter.x - center.x,
+        limbCenter.y - center.y,
+        limb.box.max.z - center.z,
+      );
+    } else if (fit.place === 'top') {
       // The item's own underside meets the top of the limb, so a hat sits on a
       // head instead of intersecting it by however tall the hat happens to be.
       position.set(limbCenter.x - center.x, limb.crownY - low, limbCenter.z - center.z);
@@ -348,6 +391,7 @@ export class Wardrobe {
     for (const limb of limbs.values()) {
       if (limb.crownY === -Infinity) limb.crownY = limb.box.max.y;
     }
+    symmetrise(limbs);
     return limbs;
   }
 
@@ -393,22 +437,86 @@ export class Wardrobe {
     return SCRATCH_QUAT.copy(found);
   }
 
+  /**
+   * Lays an outfit's colour over the CHARACTER, and only the character.
+   *
+   * What is being worn is deliberately excluded. A built piece already takes
+   * the clan palette through its builder, so tinting it again just washes it
+   * out; a model-backed piece is something the ninja found rather than
+   * something the clan issued, and a kitsune mask that comes out ember-orange
+   * because of the trousers is not a mask any more. `traverse` has no way to
+   * skip a subtree, so this walks the tree itself and stops at each mount.
+   */
   private tint(color: number | null): void {
-    this.model.traverse((o) => {
-      if (!(o instanceof Mesh)) return;
-      const mats = Array.isArray(o.material) ? o.material : [o.material];
-      for (const m of mats) {
-        if (!m || !('color' in m)) continue;
-        const target = m as Material & { color: Color };
-        let base = this.baseColors.get(m);
-        if (!base) {
-          base = target.color.clone();
-          this.baseColors.set(m, base);
+    const worn = new Set<Object3D>(this.holders);
+    const walk = (o: Object3D): void => {
+      if (worn.has(o)) return;
+      if (o instanceof Mesh) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) {
+          if (!m || !('color' in m)) continue;
+          const target = m as Material & { color: Color };
+          let base = this.baseColors.get(m);
+          if (!base) {
+            base = target.color.clone();
+            this.baseColors.set(m, base);
+          }
+          if (color === null) target.color.copy(base);
+          else target.color.copy(base).multiply(SCRATCH_COLOR.setHex(color));
         }
-        if (color === null) target.color.copy(base);
-        else target.color.copy(base).multiply(SCRATCH_COLOR.setHex(color));
       }
-    });
+      for (const child of o.children) walk(child);
+    };
+    walk(this.model);
+  }
+}
+
+/**
+ * Averages each left/right pair of limbs into one shape.
+ *
+ * Skin weights are never perfectly symmetric — a stray vertex on one arm, a
+ * slightly different bind pose — and the fitter sizes each side independently,
+ * so a pair of pauldrons came out a third bigger on one shoulder than the
+ * other. Nothing in the catalogue wants that, and no player would read it as
+ * anything but a bug, so the two sides are reconciled here rather than in every
+ * mirrored entry.
+ *
+ * The pairing is by bone name with Left and Right swapped, which is how every
+ * rig this game loads names its sides. A bone with no partner is left alone.
+ */
+function symmetrise(limbs: Map<Object3D, Limb>): void {
+  const byName = new Map<string, Object3D>();
+  for (const bone of limbs.keys()) byName.set(bone.name, bone);
+  const done = new Set<Object3D>();
+
+  for (const [name, bone] of byName) {
+    if (done.has(bone)) continue;
+    const partnerName = name.includes('Left')
+      ? name.replace('Left', 'Right')
+      : name.includes('Right')
+        ? name.replace('Right', 'Left')
+        : null;
+    const partner = partnerName ? byName.get(partnerName) : undefined;
+    if (!partner || partner === bone) continue;
+
+    const a = limbs.get(bone)!;
+    const b = limbs.get(partner)!;
+    // The two boxes are measured around their own bone origins, so the partner
+    // reads as this one reflected in x before the two are averaged.
+    const mirrored = new Box3(
+      new Vector3(-b.box.max.x, b.box.min.y, b.box.min.z),
+      new Vector3(-b.box.min.x, b.box.max.y, b.box.max.z),
+    );
+    const min = a.box.min.clone().add(mirrored.min).multiplyScalar(0.5);
+    const max = a.box.max.clone().add(mirrored.max).multiplyScalar(0.5);
+    const crownY = (a.crownY + b.crownY) * 0.5;
+
+    a.box.set(min, max);
+    a.crownY = crownY;
+    b.box.set(new Vector3(-max.x, min.y, min.z), new Vector3(-min.x, max.y, max.z));
+    b.crownY = crownY;
+    done.add(bone);
+    done.add(partner);
   }
 }
 

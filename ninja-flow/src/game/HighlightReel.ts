@@ -1,4 +1,4 @@
-import { MathUtils, type Scene } from 'three';
+import { MathUtils, type Object3D, type Scene } from 'three';
 import { ATTACK, CAMERA, HIGHLIGHTS, HITSTOP, VFX as VFXCFG } from '../config';
 import type { Rng } from '../core/Rng';
 import type { Lane } from '../input/InputManager';
@@ -180,6 +180,14 @@ export class HighlightReel {
   /** All staged actors, exposed so the arena can place them on its bridge. */
   get liveEnemies(): readonly Enemy[] {
     return this.enemies;
+  }
+
+  setDetailedEnemyModels(factory: (index: number) => Object3D | null): void {
+    for (let index = 0; index < this.enemies.length; index++) {
+      const enemy = this.enemies[index];
+      const model = factory(index);
+      if (model) enemy.setDetailedModel(model);
+    }
   }
 
   start(moments: Moment[], now: number): void {

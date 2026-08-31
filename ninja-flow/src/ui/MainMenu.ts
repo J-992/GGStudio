@@ -1,4 +1,5 @@
 import type { CharacterId } from '../config';
+import type { Daily } from '../game/Dailies';
 import type { UnlockState } from '../game/Progression';
 import { NINJA_META } from './Ninjas';
 
@@ -11,6 +12,8 @@ export interface MenuData {
   /** Ninjas whose model has finished streaming in. */
   available: CharacterId[];
   muted: boolean;
+  /** Today's three goals, with progress. */
+  dailies: Daily[];
 }
 
 /**
@@ -35,6 +38,7 @@ export class MainMenu {
   private readonly runsEl: HTMLSpanElement;
   private readonly unlockLabel: HTMLDivElement;
   private readonly unlockFill: HTMLDivElement;
+  private readonly dailiesEl: HTMLDivElement;
   private readonly soundBtn: HTMLButtonElement;
   private readonly helpEl: HTMLDivElement;
   private readonly creditsEl: HTMLDivElement;
@@ -73,6 +77,11 @@ export class MainMenu {
         <div class="unlock__track"><div class="unlock__fill"></div></div>
       </div>
 
+      <div class="dailies">
+        <div class="dailies__label">TODAY</div>
+        <div class="dailies__list"></div>
+      </div>
+
       <div class="menu__stats">
         <div><div class="stat__label">BEST</div><div class="stat__value" data-best>0</div></div>
         <div><div class="stat__label">TOP COMBO</div><div class="stat__value" data-combo>0</div></div>
@@ -89,12 +98,16 @@ export class MainMenu {
         <p><b>Two buttons, that's it.</b> Enemies run at you from both sides. Hit the
         one that's about to strike — <b>←</b> or <b>A</b> for the left, <b>→</b> or
         <b>D</b> for the right. On a phone, tap the left or right half of the screen.</p>
-        <p><b>Wait for them.</b> Striking early whiffs and leaves you wide open, so
-        swinging wildly is worse than doing nothing. The later you leave it, the
-        better the hit.</p>
-        <p><b>Some carry a plate.</b> Break it first, then take them on the way back in.</p>
-        <p><b>Fill the Flow bar</b> and you go into Flow: a run of targets, one press
-        each, side by side. The glowing one is the one to hit.</p>
+        <p><b>Perfect is a last-second counter.</b> Wait until the enemy is close and
+        their attack is about to connect, then hit that side. A little early or late
+        is Good; much too early whiffs. Perfects score more, launch harder and charge
+        Flow faster.</p>
+        <p><b>Armored enemies carry a plate.</b> Time one hit to break it, then time the
+        follow-up when they come back in. Gold enemies are rare bonus targets.</p>
+        <p><b>Flow starts automatically when its bar fills.</b> Follow the glowing target
+        with one quick left/right press each; finish the full chain for the cinematic hit.</p>
+        <p><b>Make the fighter yours.</b> Use Change Ninja &amp; Gear between runs. After a
+        strong run, the game replays your best hits; tap or press to skip the highlight reel.</p>
       </div>
 
       <div class="menu__help menu__help--credits">
@@ -118,6 +131,7 @@ export class MainMenu {
     this.runsEl = this.el.querySelector('[data-runs]')!;
     this.unlockLabel = this.el.querySelector('.unlock__label')!;
     this.unlockFill = this.el.querySelector('.unlock__fill')!;
+    this.dailiesEl = this.el.querySelector('.dailies__list')!;
     this.soundBtn = this.el.querySelector('[data-sound]')!;
     this.helpEl = this.el.querySelector('.menu__help')!;
     this.creditsEl = this.el.querySelector('.menu__help--credits')!;
@@ -167,6 +181,7 @@ export class MainMenu {
     }
 
     this.paintCharacter(data);
+    this.paintDailies(data.dailies);
     void this.el.offsetWidth;
     this.el.classList.add('visible');
   }
@@ -190,6 +205,34 @@ export class MainMenu {
     setTimeout(() => {
       if (!this.visible) this.el.style.display = 'none';
     }, 260);
+  }
+
+  /**
+   * Today's three goals.
+   *
+   * Deliberately small and low in the panel: they are a reason to come back,
+   * not the reason to be here. A player who ignores them entirely loses
+   * nothing — there is no streak to break and no progress that decays.
+   */
+  private paintDailies(dailies: Daily[]): void {
+    this.dailiesEl.replaceChildren();
+    for (const daily of dailies) {
+      const row = document.createElement('div');
+      row.className = daily.done ? 'daily daily--done' : 'daily';
+      const pct = Math.round((daily.progress / daily.target) * 100);
+      row.innerHTML = `
+        <span class="daily__tick" aria-hidden="true"></span>
+        <span class="daily__text"></span>
+        <span class="daily__count"></span>
+        <span class="daily__bar"><span class="daily__fill"></span></span>
+      `;
+      row.querySelector('.daily__text')!.textContent = daily.label;
+      row.querySelector('.daily__count')!.textContent = daily.done
+        ? 'DONE'
+        : `${daily.progress}/${daily.target}`;
+      (row.querySelector('.daily__fill') as HTMLElement).style.width = `${pct}%`;
+      this.dailiesEl.appendChild(row);
+    }
   }
 
   private paintCharacter(data: MenuData): void {

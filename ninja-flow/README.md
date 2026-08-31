@@ -1,9 +1,9 @@
 # NINJA FLOW
 
 A 2.5D reaction-timing fighting game built for Poki. Enemies rush a ninja from
-both sides; you have exactly two inputs. Time a strike to the moment an attack
-would land and you get a Perfect. Fill the Flow meter and the game hands you an
-interactive slow-motion combo chain with a cinematic finisher.
+both sides; you have exactly two inputs. Strike at the last second, just as an
+enemy attack would land, to get a Perfect. Fill the Flow meter and the game
+hands you an interactive slow-motion combo chain with a cinematic finisher.
 
 ## Controls
 
@@ -20,7 +20,7 @@ npm install
 npm run dev        # dev server
 npm run build      # production build in dist/
 npm run preview    # serve the production build
-npm test           # 156 deterministic tests (timing, fairness, balance, moves,
+npm test           # deterministic tests (timing, fairness, balance, moves,
                    #   guards, physics, Flow cues, Poki events)
 npm run verify     # typecheck + tests + build
 npm run assets     # rebuild public/models + public/anims from raw Meshy exports

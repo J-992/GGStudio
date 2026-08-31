@@ -1,0 +1,93 @@
+<!--
+  Wardrobe fitting bench.
+
+  `npm run dev`, then open /tools/wardrobe-view.html. It loads a character the
+  way Player does — same height normalisation, same RigAdapter, same Wardrobe —
+  and renders it big, on a plain ground, with no arena in the way. Fitting a
+  cosmetic in the game itself means squinting past a bridge rail at a ninja
+  forty pixels tall, which is how a pair of pauldrons shipped a third bigger on
+  one shoulder than the other for an afternoon.
+
+    ?chars=fox,cat,bunny,masked   one row per character
+    ?loadout={"head":"head-kasa"} one full loadout, seen from four angles
+    ?items=head:head-kasa,feet:feet-geta   one cell per item instead
+    ?yaw=-0.35                    turn, in radians, for the item view
+
+  Note the browser's WebGL context limit: about sixteen cells render before the
+  earliest ones go white. Ask for fewer.
+-->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>wardrobe</title>
+<style>
+ body{margin:0;background:#141821;color:#cfd6e4;font:12px/1.3 ui-monospace,monospace}
+ #grid{display:grid;grid-template-columns:repeat(5,1fr);gap:2px}
+ .cell{position:relative;background:#242a36}
+ .lab{position:absolute;left:5px;top:4px;color:#ffd479;text-shadow:0 1px 2px #000;white-space:pre}
+</style></head>
+<body><div id="grid"></div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { RigAdapter, normalizeHeight } from '/src/game/Rig.ts';
+import { Wardrobe } from '/src/game/Wardrobe.ts';
+import { registerCosmeticModel } from '/src/game/CosmeticModels.ts';
+import { sanitizeLoadout, COSMETIC_MODEL_IDS } from '/src/game/Cosmetics.ts';
+
+const q = new URLSearchParams(location.search);
+const CHARS = (q.get('chars') || 'fox').split(',');
+const LOADOUT = JSON.parse(q.get('loadout') || '{}');
+// ?items=slot:id,slot:id  renders one column per item instead of four views.
+const ITEMS = (q.get('items') || '').split(',').filter(Boolean).map((s) => s.split(':'));
+const VIEWS = ITEMS.length
+  ? ITEMS.map(([slot, id]) => [id, q.get('yaw') ? +q.get('yaw') : -0.6, { [slot]: id }])
+  : [['front', 0], ['3/4', -0.9], ['side', -Math.PI / 2], ['back', Math.PI]].map(([n, y]) => [n, y, null]);
+const S = 300;
+const loader = new GLTFLoader();
+
+for (const id of COSMETIC_MODEL_IDS) {
+  try { registerCosmeticModel(id, (await loader.loadAsync(`/cosmetics/${id}.glb`)).scene); }
+  catch (e) { console.warn('missing', id, e); }
+}
+
+const grid = document.getElementById('grid');
+for (const char of CHARS) {
+  const gltf = await loader.loadAsync(`/models/${char}.glb`);
+  const model = gltf.scene;
+  model.position.set(0, 0, 0); model.rotation.set(0, 0, 0); model.scale.set(1, 1, 1);
+  normalizeHeight(model, 1.72);
+  model.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) {
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) if (m) m.side = THREE.FrontSide;
+  }});
+  const holder = new THREE.Group();
+  holder.add(model);
+  holder.updateWorldMatrix(true, true);
+  const rig = new RigAdapter(model, 1.72);
+  const wardrobe = new Wardrobe(model, rig);
+  window.__mounts = (window.__mounts || {});
+
+  for (const [name, yaw, extra] of VIEWS) {
+    wardrobe.apply(sanitizeLoadout({ ...LOADOUT, ...(extra || {}) }));
+    window.__mounts[`${char}/${name}`] = wardrobe.debugMounts;
+    const cell = document.createElement('div'); cell.className = 'cell';
+    const lab = document.createElement('div'); lab.className = 'lab';
+    lab.textContent = `${char}  ${name}`;
+    cell.appendChild(lab); grid.appendChild(cell);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(S, S); renderer.setClearColor(0x242a36);
+    cell.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    const clone = holder.clone(true);
+    clone.rotation.y = yaw;
+    scene.add(clone);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 2.4));
+    const d = new THREE.DirectionalLight(0xffffff, 2.0); d.position.set(2, 4, 3); scene.add(d);
+    const d2 = new THREE.DirectionalLight(0xffffff, 0.9); d2.position.set(-3, 2, -2); scene.add(d2);
+    const r = 1.02;
+    const cam = new THREE.OrthographicCamera(-r, r, r, -r, -12, 12);
+    cam.position.set(0, 0.95, 5); cam.lookAt(0, 0.95, 0);
+    renderer.render(scene, cam);
+  }
+}
+document.title = 'ready';
+</script></body></html>

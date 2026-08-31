@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Scene } from 'three';
-import { ATTACK, FLOW } from '../config';
+import { ATTACK, FEINT, FLOW } from '../config';
 import { CombatDirector } from '../game/CombatDirector';
 import { Rng } from '../core/Rng';
 
@@ -141,6 +141,41 @@ describe('CombatDirector fairness', () => {
   });
 });
 
+describe('a threat that lands', () => {
+  it('stays alive and receives a fresh, answerable impact time', () => {
+    const director = new CombatDirector(new Scene(), new Rng(17));
+    director.reset(0, true);
+    const enemy = director.liveThreats[0];
+    enemy.spawn({
+      side: 'L',
+      impactAt: 2,
+      spawnAt: 0,
+      approach: 2,
+      rare: false,
+      rng: new Rng(3),
+    });
+    const other = director.liveThreats[1];
+    other.spawn({
+      side: 'R',
+      impactAt: 3.2,
+      spawnAt: 1.2,
+      approach: 2,
+      rare: false,
+      rng: new Rng(4),
+    });
+
+    const landedAt = 2.25;
+    const nextImpact = director.rearmAfterLanding(enemy, landedAt, 0);
+
+    expect(enemy.isThreat).toBe(true);
+    expect(enemy.state).not.toBe('dying');
+    expect(nextImpact).toBeGreaterThanOrEqual(landedAt + ATTACK.total);
+    expect(nextImpact - other.impactAt).toBeGreaterThanOrEqual(MIN_GAP);
+    expect(enemy.impactAt).toBe(nextImpact);
+    expect(director.findOverdue(landedAt)).toBeNull();
+  });
+});
+
 describe('guarded threats', () => {
   /**
    * Breaking a plate buys a second exchange. That second exchange is a threat
@@ -254,6 +289,90 @@ describe('guarded threats', () => {
           director.consumeTutorialThreat();
         }
       }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Feints invert the game's core instinct, so they carry their own fairness
+ * rules: one can never cost a heart, one can never be struck, and one can never
+ * appear before the player has had a couple of minutes with the ordinary read.
+ */
+describe('feints', () => {
+  function spawnFeint() {
+    const scene = new Scene();
+    const director = new CombatDirector(scene, new Rng(7));
+    director.reset(0, true);
+    const enemy = director.liveThreats[0];
+    enemy.spawn({
+      side: 'L',
+      impactAt: 2,
+      spawnAt: 0,
+      approach: 2,
+      rare: false,
+      rng: new Rng(1),
+      feint: true,
+    });
+    return { director, enemy };
+  }
+
+  it('can never be struck, so a swing at one is an ordinary whiff', () => {
+    const { director } = spawnFeint();
+    // Dead on its impact time — the frame a real threat is most targetable.
+    expect(director.findTarget('left', 2)).toBeNull();
+  });
+
+  it('can never take a heart, however long it is left alone', () => {
+    const { director } = spawnFeint();
+    for (let t = 2; t < 6; t += 0.05) {
+      expect(director.findOverdue(t), `overdue at ${t.toFixed(2)}`).toBeNull();
+    }
+  });
+
+  it('is collected once, after its moment, and then it is gone', () => {
+    const { director, enemy } = spawnFeint();
+    expect(director.collectHeldFeints(2)).toHaveLength(0);
+    const held = director.collectHeldFeints(2 + FEINT.retreatAfter + 0.01);
+    expect(held).toHaveLength(1);
+    expect(held[0]).toBe(enemy);
+    expect(director.collectHeldFeints(9)).toHaveLength(0);
+  });
+
+  it('never appears before its unlock, and always appears after the ramp', () => {
+    const director = new CombatDirector(new Scene(), new Rng(3));
+    for (let t = 0; t < FEINT.fromSeconds; t += 5) {
+      expect(director.feintFor(t), `feint at ${t}s`).toBe(false);
+    }
+    let seen = 0;
+    for (let i = 0; i < 400; i++) if (director.feintFor(FEINT.fromSeconds + 200)) seen++;
+    expect(seen).toBeGreaterThan(0);
+    expect(seen / 400).toBeLessThan(FEINT.chanceMax * 1.5);
+  });
+
+  it('is never also rare or guarded — an unhittable bonus is unclaimable', () => {
+    const scene = new Scene();
+    const director = new CombatDirector(scene, new Rng(11));
+    director.reset(0, true);
+    const dt = 1 / 60;
+    let now = 0;
+    let checked = 0;
+    while (now < 240) {
+      now += dt;
+      director.update(dt, now, now);
+      for (const e of director.liveThreats) {
+        if (!e.isThreat) continue;
+        if (e.feint) {
+          checked++;
+          expect(e.rare).toBe(false);
+          expect(e.guard).toBe(0);
+        }
+        if (now >= e.impactAt + 0.3) {
+          e.kill(0, 1);
+          director.consumeTutorialThreat();
+        }
+      }
+      director.collectHeldFeints(now);
     }
     expect(checked).toBeGreaterThan(0);
   });

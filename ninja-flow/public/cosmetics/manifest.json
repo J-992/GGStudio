@@ -1,0 +1,134 @@
+[
+  {
+    "id": "head-warhelm",
+    "name": "Black kabuto",
+    "source": "low_poly_samurai_helmet.glb",
+    "bytes": 79056,
+    "verts": 3024,
+    "size": [
+      0.792,
+      1,
+      0.892
+    ]
+  },
+  {
+    "id": "head-onimen",
+    "name": "Oni men",
+    "source": "oni_mask__stylized_samurai_demon_mask_low_poly.glb",
+    "bytes": 28740,
+    "verts": 968,
+    "size": [
+      1,
+      0.89,
+      0.43
+    ]
+  },
+  {
+    "id": "head-kitsune",
+    "name": "Kitsune mask",
+    "source": "inari_fox_mask.glb",
+    "bytes": 78432,
+    "verts": 2063,
+    "size": [
+      0.644,
+      1,
+      0.763
+    ]
+  },
+  {
+    "id": "head-drifter",
+    "name": "Drifter hat",
+    "source": "low_poly_cowboy_hat.glb",
+    "bytes": 78792,
+    "verts": 2164,
+    "size": [
+      1,
+      0.357,
+      0.985
+    ]
+  },
+  {
+    "id": "head-sunhat",
+    "name": "Sun hat",
+    "source": "summer_hat.glb",
+    "bytes": 83292,
+    "verts": 1877,
+    "size": [
+      0.917,
+      0.29,
+      1
+    ]
+  },
+  {
+    "id": "head-cap",
+    "name": "Ball cap",
+    "source": "low_poly_game_ready_simple_cap.glb",
+    "bytes": 24220,
+    "verts": 722,
+    "size": [
+      0.674,
+      0.501,
+      1
+    ]
+  },
+  {
+    "id": "head-cans",
+    "name": "Headphones",
+    "source": "low_poly_headphones.glb",
+    "bytes": 219376,
+    "verts": 11264,
+    "size": [
+      1,
+      0.767,
+      0.327
+    ]
+  },
+  {
+    "id": "arms-pauldrons",
+    "name": "Steel pauldrons",
+    "source": "lowpoly_shoulders_armor.glb",
+    "bytes": 19852,
+    "verts": 624,
+    "size": [
+      0.963,
+      1,
+      0.664
+    ]
+  },
+  {
+    "id": "back-makimono",
+    "name": "Makimono",
+    "source": "scroll_low_poly.glb",
+    "bytes": 36016,
+    "verts": 969,
+    "size": [
+      1,
+      0.171,
+      0.171
+    ]
+  },
+  {
+    "id": "feet-boots",
+    "name": "Trail boots",
+    "source": "boots_low-poly_shoes.glb",
+    "bytes": 27244,
+    "verts": 1294,
+    "size": [
+      0.559,
+      0.761,
+      1
+    ]
+  },
+  {
+    "id": "feet-sneakers",
+    "name": "Sneakers",
+    "source": "low_poly_sneakers.glb",
+    "bytes": 27556,
+    "verts": 1053,
+    "size": [
+      0.552,
+      0.391,
+      1
+    ]
+  }
+]

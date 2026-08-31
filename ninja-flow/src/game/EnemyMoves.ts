@@ -25,6 +25,9 @@ export interface EnemyPose {
   /** Weapon arm. */
   armR?: readonly [number, number, number];
   armL?: readonly [number, number, number];
+  /** Elbows are authored separately so a swing can load, lead, and extend. */
+  forearmR?: readonly [number, number, number];
+  forearmL?: readonly [number, number, number];
   legR?: readonly [number, number, number];
   legL?: readonly [number, number, number];
   scarf?: readonly [number, number, number];
@@ -45,18 +48,19 @@ export interface EnemyAttack {
 
 /** OVERHEAD — the blade goes up over the head and comes down. */
 const CHOP: EnemyKey[] = [
-  { t: 0, pose: { armR: [-0.35, 0, 0] } },
-  { t: 0.55, pose: { armR: [-1.6, 0, -0.35], root: [-0.16, 0, 0], head: [0.16, 0, 0] } },
-  { t: 1, pose: { armR: [-2.55, 0, -0.5], root: [-0.24, 0, 0], head: [0.24, 0, 0], scarf: [-0.7, 0, 0] } },
+  { t: 0, pose: { armR: [-0.35, 0, 0], forearmR: [-0.34, 0, 0] } },
+  { t: 0.55, pose: { armR: [-1.6, 0, -0.35], forearmR: [-0.66, 0.08, -0.12], root: [-0.16, 0, 0], head: [0.16, 0, 0] } },
+  { t: 1, pose: { armR: [-2.55, 0, -0.5], forearmR: [-0.08, -0.04, 0.16], root: [-0.24, 0, 0], head: [0.24, 0, 0], scarf: [-0.7, 0, 0] } },
 ];
 
 /** SIDE CUT — coiled across the body, then whipped through flat. */
 const SIDE_CUT: EnemyKey[] = [
-  { t: 0, pose: { armR: [-0.35, 0, 0] } },
+  { t: 0, pose: { armR: [-0.35, 0, 0], forearmR: [-0.3, 0, 0.08] } },
   {
     t: 0.6,
     pose: {
       armR: [-0.9, 0, -1.1],
+      forearmR: [-0.64, 0.18, 0.3],
       armL: [0.5, 0, 0],
       root: [0, 0.42, 0.1],
       head: [0, 0, -0.16],
@@ -66,6 +70,7 @@ const SIDE_CUT: EnemyKey[] = [
     t: 1,
     pose: {
       armR: [-1.2, 0, -2.0],
+      forearmR: [-0.08, -0.12, -0.34],
       armL: [0.8, 0, 0],
       root: [0, 0.62, 0.2],
       head: [0, 0, -0.28],
@@ -76,11 +81,12 @@ const SIDE_CUT: EnemyKey[] = [
 
 /** LUNGE — weight pulled back, then the whole body behind a thrust. */
 const LUNGE: EnemyKey[] = [
-  { t: 0, pose: { armR: [-0.35, 0, 0] } },
+  { t: 0, pose: { armR: [-0.35, 0, 0], forearmR: [-0.38, 0, 0] } },
   {
     t: 0.6,
     pose: {
       armR: [-0.2, 0, 0.2],
+      forearmR: [-0.65, 0.05, 0.08],
       offset: [-0.18, 0, 0],
       root: [0.2, 0, 0],
       legR: [0.4, 0, 0],
@@ -91,6 +97,7 @@ const LUNGE: EnemyKey[] = [
     t: 1,
     pose: {
       armR: [-1.9, 0, 0.15],
+      forearmR: [-0.02, -0.04, -0.06],
       offset: [0.34, -0.06, 0],
       root: [0.34, 0, 0],
       legR: [-0.5, 0, 0],
@@ -103,11 +110,12 @@ const LUNGE: EnemyKey[] = [
 
 /** LEAP — a hop into a falling strike. */
 const LEAP_STRIKE: EnemyKey[] = [
-  { t: 0, pose: { armR: [-0.35, 0, 0] } },
+  { t: 0, pose: { armR: [-0.35, 0, 0], forearmR: [-0.36, 0, 0] } },
   {
     t: 0.42,
     pose: {
       armR: [-1.3, 0, -0.2],
+      forearmR: [-0.64, 0.06, -0.1],
       offset: [0, 0.12, 0],
       legR: [0.9, 0, 0],
       legL: [0.9, 0, 0],
@@ -118,6 +126,7 @@ const LEAP_STRIKE: EnemyKey[] = [
     t: 0.72,
     pose: {
       armR: [-2.3, 0, -0.3],
+      forearmR: [-0.42, 0, 0.08],
       offset: [0.1, 0.62, 0],
       legR: [0.5, 0, 0],
       legL: [0.7, 0, 0],
@@ -129,6 +138,7 @@ const LEAP_STRIKE: EnemyKey[] = [
     t: 1,
     pose: {
       armR: [-2.7, 0, -0.4],
+      forearmR: [-0.06, -0.04, 0.18],
       offset: [0.2, 0, 0],
       legR: [-0.4, 0, 0],
       legL: [-0.2, 0, 0],
@@ -140,12 +150,13 @@ const LEAP_STRIKE: EnemyKey[] = [
 
 /** SPIN — a full turn carrying the blade around. */
 const SPIN_CUT: EnemyKey[] = [
-  { t: 0, pose: { armR: [-0.35, 0, 0] } },
-  { t: 0.5, pose: { armR: [-0.8, 0, -1.4], root: [0, -2.2, 0], tail: [0, 0.5, 0] } },
+  { t: 0, pose: { armR: [-0.35, 0, 0], forearmR: [-0.32, 0, 0.08] } },
+  { t: 0.5, pose: { armR: [-0.8, 0, -1.4], forearmR: [-0.62, 0.2, 0.28], root: [0, -2.2, 0], tail: [0, 0.5, 0] } },
   {
     t: 1,
     pose: {
       armR: [-1.0, 0, -1.9],
+      forearmR: [-0.06, -0.16, -0.3],
       root: [0, -6.2832, 0],
       head: [0, 0, -0.2],
       scarf: [-0.6, 0, 0],
@@ -155,11 +166,12 @@ const SPIN_CUT: EnemyKey[] = [
 
 /** SHURIKEN — the arm cocks back and the star leaves the hand. */
 const SHURIKEN: EnemyKey[] = [
-  { t: 0, pose: { armR: [-0.35, 0, 0] } },
+  { t: 0, pose: { armR: [-0.35, 0, 0], forearmR: [-0.3, 0, 0] } },
   {
     t: 0.62,
     pose: {
       armR: [-2.1, 0, 0.5],
+      forearmR: [-0.64, -0.08, 0.18],
       root: [0, 0.5, 0],
       head: [0, 0.16, 0],
       offset: [-0.1, 0, 0],
@@ -169,21 +181,23 @@ const SHURIKEN: EnemyKey[] = [
     t: 0.82,
     pose: {
       armR: [-0.5, 0, -0.4],
+      forearmR: [-0.04, 0.08, -0.2],
       root: [0, -0.3, 0],
       offset: [0.08, 0, 0],
       scarf: [-0.9, 0, 0],
     },
   },
-  { t: 1, pose: { armR: [-0.3, 0, -0.2], root: [0, -0.2, 0] } },
+  { t: 1, pose: { armR: [-0.3, 0, -0.2], forearmR: [-0.16, 0, -0.08], root: [0, -0.2, 0] } },
 ];
 
 /** SWEEP — drops low and takes the ankles. */
 const SWEEP: EnemyKey[] = [
-  { t: 0, pose: { armR: [-0.35, 0, 0] } },
+  { t: 0, pose: { armR: [-0.35, 0, 0], forearmR: [-0.34, 0, 0.06] } },
   {
     t: 0.6,
     pose: {
       armR: [-0.6, 0, -0.5],
+      forearmR: [-0.62, 0.12, 0.22],
       offset: [0, -0.14, 0],
       root: [0.3, 0.2, 0],
       legR: [0.8, 0, 0],
@@ -194,6 +208,7 @@ const SWEEP: EnemyKey[] = [
     t: 1,
     pose: {
       armR: [-0.9, 0, -1.6],
+      forearmR: [-0.04, -0.1, -0.26],
       offset: [0.16, -0.2, 0],
       root: [0.42, 0.5, 0],
       legR: [0.2, 0, 0],
@@ -205,14 +220,15 @@ const SWEEP: EnemyKey[] = [
 
 /** DOUBLE — a fast one-two, the second arriving on the beat. */
 const DOUBLE_SLASH: EnemyKey[] = [
-  { t: 0, pose: { armR: [-0.35, 0, 0] } },
-  { t: 0.34, pose: { armR: [-1.5, 0, -0.6], root: [0, 0.3, 0] } },
-  { t: 0.52, pose: { armR: [-0.6, 0, -1.4], root: [0, -0.2, 0], scarf: [-0.6, 0, 0] } },
-  { t: 0.76, pose: { armR: [-1.8, 0, 0.3], root: [0, 0.36, 0] } },
+  { t: 0, pose: { armR: [-0.35, 0, 0], forearmR: [-0.3, 0, 0.08] } },
+  { t: 0.34, pose: { armR: [-1.5, 0, -0.6], forearmR: [-0.64, 0.12, 0.24], root: [0, 0.3, 0] } },
+  { t: 0.52, pose: { armR: [-0.6, 0, -1.4], forearmR: [-0.06, -0.1, -0.26], root: [0, -0.2, 0], scarf: [-0.6, 0, 0] } },
+  { t: 0.76, pose: { armR: [-1.8, 0, 0.3], forearmR: [-0.62, 0.1, 0.2], root: [0, 0.36, 0] } },
   {
     t: 1,
     pose: {
       armR: [-0.8, 0, -1.9],
+      forearmR: [-0.04, -0.12, -0.3],
       root: [0, -0.34, 0],
       head: [0, 0, -0.2],
       scarf: [-0.8, 0, 0],

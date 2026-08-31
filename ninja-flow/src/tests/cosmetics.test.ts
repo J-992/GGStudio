@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BoxGeometry,
   BufferAttribute,
   BufferGeometry,
   Bone,
@@ -22,6 +23,7 @@ import {
   paletteFor,
   sanitizeLoadout,
 } from '../game/Cosmetics';
+import { clearCosmeticModels, registerCosmeticModel } from '../game/CosmeticModels';
 import { Wardrobe } from '../game/Wardrobe';
 import { RigAdapter } from '../game/Rig';
 
@@ -83,6 +85,48 @@ const worn = (model: Object3D): Object3D[] => {
   return out;
 };
 
+/**
+ * A skinned stand-in whose two shoulders are deliberately DIFFERENT sizes, the
+ * way real skin weights are: the right shoulder gets a vertex further out than
+ * the left. A pair of pauldrons measured off this rig came out a third bigger
+ * on one side before the wardrobe reconciled the two.
+ */
+function makeLopsidedCharacter(): { model: Object3D; rig: RigAdapter } {
+  const model = new Group();
+  const hips = makeBone('Hips', model, 0.9);
+  const spine = makeBone('Spine', hips, 0.12);
+  const chest = makeBone('Spine01', spine, 0.14);
+  const upperChest = makeBone('Spine02', chest, 0.14);
+  const head = makeBone('Head', upperChest, 0.18);
+  const shoulderL = makeBone('LeftShoulder', upperChest, 0.1);
+  const shoulderR = makeBone('RightShoulder', upperChest, 0.1);
+  const bones = [hips, spine, chest, upperChest, head, shoulderL, shoulderR];
+
+  // Two vertices per shoulder, the right one reaching 0.3 out and the left only
+  // 0.2, plus one on the head so it measures as a limb too.
+  const positions = new Float32Array([
+    -0.3, 1.5, 0, -0.05, 1.5, 0,
+    0.2, 1.5, 0, 0.05, 1.5, 0,
+    0, 1.75, 0,
+  ]);
+  const index = new Uint16Array(5 * 4);
+  const weight = new Float32Array(5 * 4);
+  const owners = [6, 6, 5, 5, 4];
+  for (let v = 0; v < 5; v++) {
+    index[v * 4] = owners[v];
+    weight[v * 4] = 1;
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('skinIndex', new BufferAttribute(index, 4));
+  geometry.setAttribute('skinWeight', new BufferAttribute(weight, 4));
+  const skinned = new SkinnedMesh(geometry, new MeshStandardMaterial());
+  model.add(skinned);
+  model.updateMatrixWorld(true);
+  skinned.bind(new Skeleton(bones));
+  return { model, rig: new RigAdapter(model, 1.72) };
+}
+
 describe('the cosmetics catalogue', () => {
   it('has one unique id per item, filed under the slot it claims', () => {
     const ids = new Set(COSMETICS.map((c) => c.id));
@@ -94,7 +138,9 @@ describe('the cosmetics catalogue', () => {
 
   it('offers a real choice in every slot, and a way back to nothing', () => {
     for (const slot of COSMETIC_SLOTS) {
-      expect(itemsForSlot(slot).length).toBeGreaterThanOrEqual(5);
+      // A tab with one thing in it is not a choice. Four is the floor because
+      // the arms slot has four; the rest carry more.
+      expect(itemsForSlot(slot).length, `${slot} is too thin`).toBeGreaterThanOrEqual(4);
       expect(itemById(DEFAULT_ITEM[slot])?.slot).toBe(slot);
     }
   });
@@ -103,6 +149,9 @@ describe('the cosmetics catalogue', () => {
     const palette = paletteFor(defaultLoadout());
     const seen = new Set<unknown>();
     for (const item of COSMETICS) {
+      // Model-backed pieces build nothing until their GLB has streamed in, which
+      // is the whole point of the empty-group contract; they are covered below.
+      if (item.model) continue;
       for (const anchor of item.anchors) {
         const built = item.build?.(palette, anchor);
         expect(built, `${item.id} declares an anchor but builds nothing`).toBeTruthy();
@@ -120,6 +169,44 @@ describe('the cosmetics catalogue', () => {
         for (const m of mine) seen.add(m);
         expect(meshes, `${item.id} built an empty group`).toBeGreaterThan(0);
       }
+    }
+  });
+
+  it('leaves a model-backed piece empty until its model has landed, then fills it', () => {
+    const palette = paletteFor(defaultLoadout());
+    const item = COSMETICS.find((c) => c.model && c.anchors.length > 0)!;
+    const anchor = item.anchors[0];
+    expect(item.build!(palette, anchor).children.length).toBe(0);
+
+    const prototype = new Mesh(new BoxGeometry(1, 1, 1), new MeshStandardMaterial());
+    registerCosmeticModel(item.id, prototype);
+    try {
+      const built = item.build!(palette, anchor);
+      expect(built.children.length).toBe(1);
+      let meshes = 0;
+      built.traverse((o) => {
+        if (o instanceof Mesh) meshes++;
+      });
+      expect(meshes).toBe(1);
+      // Clones share the prototype's material on purpose — the wardrobe knows
+      // not to dispose them — so this asserts sharing rather than forbidding it.
+      expect((built.children[0] as Mesh).material).toBe(prototype.material);
+    } finally {
+      clearCosmeticModels();
+    }
+  });
+
+  it('reflects a paired model onto the left side rather than shipping two files', () => {
+    const palette = paletteFor(defaultLoadout());
+    const item = COSMETICS.find((c) => c.id === 'feet-boots')!;
+    registerCosmeticModel(item.id, new Mesh(new BoxGeometry(1, 1, 1), new MeshStandardMaterial()));
+    try {
+      const right = item.build!(palette, item.anchors.find((a) => a.mirror === 1)!);
+      const left = item.build!(palette, item.anchors.find((a) => a.mirror === -1)!);
+      expect(right.scale.x).toBe(1);
+      expect(left.scale.x).toBe(-1);
+    } finally {
+      clearCosmeticModels();
     }
   });
 });
@@ -180,6 +267,22 @@ describe('the wardrobe', () => {
     wardrobe.apply(defaultLoadout());
     expect(wardrobe.mountCount).toBe(0);
     expect(worn(model).length).toBe(0);
+  });
+
+
+  it('measures a left/right pair to the same size, however the weights fell', () => {
+    const { model, rig } = makeLopsidedCharacter();
+    const limbs = new Wardrobe(model, rig).debugLimbs;
+    const right = limbs.RightShoulder;
+    const left = limbs.LeftShoulder;
+    expect(right).toBeTruthy();
+    expect(left).toBeTruthy();
+    for (let i = 0; i < 3; i++) {
+      expect(Math.abs(right.size[i] - left.size[i]), `axis ${i}`).toBeLessThan(1e-6);
+    }
+    // The reconciled width is the average of the two (0.25 and 0.15), not the
+    // larger of them: neither side wins, they meet.
+    expect(right.size[0]).toBeCloseTo(0.2, 3);
   });
 
   it('restores the character’s own colours when a tint comes off', () => {

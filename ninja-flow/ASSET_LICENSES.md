@@ -40,6 +40,38 @@ simplified, textures compressed to 256px WebP, and normalised so the grip sits
 at the origin with the blade along +Y. Originals are kept outside the
 repository in `.assets_raw/weapons/`.
 
+## 3D accessories
+
+Supplied by the project owner as a folder of downloaded GLBs. **The source and
+licence of each one still has to be filled in below before the game is
+published** — every row is marked so it cannot be missed, and none of these are
+credited in-game yet because there is nothing yet to credit them as.
+
+| Asset | Files | Source | License |
+| --- | --- | --- | --- |
+| Samurai helmet | `public/cosmetics/head-warhelm.glb` | Supplied by the project owner as `low_poly_samurai_helmet.glb` | **Confirm before publishing** |
+| Oni mask | `public/cosmetics/head-onimen.glb` | Supplied as `oni_mask__stylized_samurai_demon_mask_low_poly.glb` | **Confirm before publishing** |
+| Inari fox mask | `public/cosmetics/head-kitsune.glb` | Supplied as `inari_fox_mask.glb` | **Confirm before publishing** |
+| Cowboy hat | `public/cosmetics/head-drifter.glb` | Supplied as `low_poly_cowboy_hat.glb` | **Confirm before publishing** |
+| Summer hat | `public/cosmetics/head-sunhat.glb` | Supplied as `summer_hat.glb` | **Confirm before publishing** |
+| Cap | `public/cosmetics/head-cap.glb` | Supplied as `low_poly_game_ready_simple_cap.glb` | **Confirm before publishing** |
+| Headphones | `public/cosmetics/head-cans.glb` | Supplied as `low_poly_headphones.glb` | **Confirm before publishing** |
+| Shoulder armour | `public/cosmetics/arms-pauldrons.glb` | Supplied as `lowpoly_shoulders_armor.glb` | **Confirm before publishing** |
+| Scroll | `public/cosmetics/back-makimono.glb` | Supplied as `scroll_low_poly.glb` | **Confirm before publishing** |
+| Boots | `public/cosmetics/feet-boots.glb` | Supplied as `boots_low-poly_shoes.glb` | **Confirm before publishing** |
+| Sneakers | `public/cosmetics/feet-sneakers.glb` | Supplied as `low_poly_sneakers.glb` | **Confirm before publishing** |
+
+The shipped GLBs are processed derivatives produced by
+`tools/build-accessories.mjs`: turned so +Y is up and +Z is forward, centred and
+scaled so the longest side is 1, cut down to one half where the source modelled
+a pair, stripped of every map but base colour, and compressed to 256px WebP.
+That takes the set from 39 MB of downloads to 686 KB. Originals are kept outside
+the repository in `.assets_raw/accessories/`.
+
+If a licence turns out not to permit distribution, delete the file and its entry
+in `MODEL_ITEMS` (`src/game/Cosmetics.ts`); the wardrobe treats a missing model
+as an item that simply cannot be worn, so nothing else has to change.
+
 ## Everything else is original code in this repository
 
 | Asset | Source | License |
@@ -49,7 +81,7 @@ repository in `.assets_raw/weapons/`.
 | All sound effects and music | Synthesised at runtime with WebAudio, `src/fx/Audio.ts` — no samples | Original, MIT (this repo) |
 | UI, loading screen, icons | HTML/CSS/inline SVG in `src/ui/` | Original, MIT (this repo) |
 | Combat/attack animations | Procedural skeletal poses, `src/game/Poses.ts` | Original, MIT (this repo) |
-| Cosmetics (hats, outfits, back pieces, footwear) | Procedural geometry, `src/game/Cosmetics.ts` | Original, MIT (this repo) |
+| Cosmetics (outfits, shoulder pieces, hats, back pieces, footwear) | Procedural geometry, `src/game/Cosmetics.ts` | Original, MIT (this repo) |
 | Roster icons | Inline SVG, `src/ui/Ninjas.ts` — no emoji, so every platform shows the same mark | Original, MIT (this repo) |
 | Fonts | System font stack only — no font files shipped | n/a |
 

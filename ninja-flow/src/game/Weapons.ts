@@ -133,6 +133,15 @@ function part(geometry: BufferGeometry, material: Material, parent: Group): Mesh
   return mesh;
 }
 
+/** Moves an assembled weapon so its authored grip point is the local origin. */
+function translateContents(group: Group, x: number, y: number, z = 0): void {
+  for (const child of group.children) {
+    child.position.x += x;
+    child.position.y += y;
+    child.position.z += z;
+  }
+}
+
 /** The wrapped handle every bladed weapon shares. */
 function buildGrip(parent: Group, wrap: Material, metal: Material, length: number): void {
   const core = part(GEO.gripCore, wrap, parent);
@@ -164,6 +173,9 @@ function sword(blade: BufferGeometry, gripLength: number, guard: 'disc' | 'squar
     const collar = part(GEO.collar, accent, g);
     collar.position.y = -0.02;
     buildGrip(g, wrap, accent, gripLength);
+    // buildGrip runs from the guard down to the pommel. Shift the complete
+    // weapon so the fist closes around the middle of that handle.
+    translateContents(g, 0, gripLength * 0.5);
     return g;
   };
 }
@@ -173,23 +185,25 @@ function polearm(head: BufferGeometry | null, length: number, capped: boolean) {
     const g = new Group();
     const shaft = part(GEO.pole, wrap, g);
     shaft.scale.y = length;
-    shaft.position.y = -length * 0.42;
-    // Grip bindings at the balance points.
-    for (const y of [-length * 0.12, -length * 0.55, -length * 0.82]) {
+    // The primary fist sits near the butt and the support fist is farther up
+    // +Y. This direction matches solveTwoHandGrip and the model weapon files.
+    shaft.position.y = length * 0.42;
+    // Grip bindings at the hand positions and balance point.
+    for (const y of [length * 0.04, length * 0.3, length * 0.62]) {
       const band = part(GEO.collar, accent, g);
       band.position.y = y;
       band.scale.setScalar(0.78);
     }
     if (head) {
       const blade = part(head, metal, g);
-      blade.position.y = length * 0.1;
+      blade.position.y = length * 0.9;
       blade.rotation.z = -0.16;
       const collar = part(GEO.collar, accent, g);
-      collar.position.y = length * 0.08;
+      collar.position.y = length * 0.89;
     }
     if (capped) {
       const cap = part(GEO.collar, metal, g);
-      cap.position.y = -length * 0.92;
+      cap.position.y = -length * 0.08;
       cap.scale.setScalar(0.9);
     }
     return g;
@@ -211,63 +225,63 @@ export const WEAPONS: readonly WeaponDef[] = [
   // --- model-backed steel ------------------------------------------------
   {
     id: 'katana', name: 'Katana', model: true, build: sword(BLADE.katana, 0.22, 'disc'),
-    grip: 'oneHand', hold: { position: [0, -0.06, 0.03], rotation: [0.24, 0, 0.3] },
+    grip: 'oneHand', hold: { position: [0, 0, 0], rotation: [0.24, 0, 0.3] },
     reach: 1, attacks: ['chop', 'sideCut', 'doubleSlash'], debris: 'blade', heft: 0.5,
   },
   {
     id: 'katana-ornate', name: 'Ornate katana', model: true, build: sword(BLADE.katana, 0.22, 'disc'),
-    grip: 'oneHand', hold: { position: [0, -0.06, 0.03], rotation: [0.24, 0, 0.3] },
+    grip: 'oneHand', hold: { position: [0, 0, 0], rotation: [0.24, 0, 0.3] },
     reach: 1, attacks: ['chop', 'spinCut', 'sideCut'], debris: 'blade', heft: 0.55,
   },
   {
     id: 'katana-worn', name: 'Worn katana', model: true, build: sword(BLADE.katana, 0.22, 'disc'),
-    grip: 'oneHand', hold: { position: [0, -0.06, 0.03], rotation: [0.24, 0, 0.3] },
+    grip: 'oneHand', hold: { position: [0, 0, 0], rotation: [0.24, 0, 0.3] },
     reach: 1, attacks: ['chop', 'sideCut'], debris: 'blade', heft: 0.5,
   },
   {
     id: 'katana-scifi', name: 'Sci-fi katana', model: true, build: sword(BLADE.katana, 0.22, 'disc'),
-    grip: 'oneHand', hold: { position: [0, -0.06, 0.03], rotation: [0.24, 0, 0.3] },
+    grip: 'oneHand', hold: { position: [0, 0, 0], rotation: [0.24, 0, 0.3] },
     reach: 1.02, attacks: ['sideCut', 'doubleSlash'], debris: 'blade', heft: 0.45,
   },
   {
     id: 'wakizashi', name: 'Wakizashi', model: true, build: sword(BLADE.wakizashi, 0.17, 'disc'),
-    grip: 'oneHand', hold: { position: [0, -0.05, 0.03], rotation: [0.2, 0, 0.28] },
+    grip: 'oneHand', hold: { position: [0, 0, 0], rotation: [0.2, 0, 0.28] },
     reach: 0.88, attacks: ['doubleSlash', 'lunge', 'sideCut'], debris: 'blade', heft: 0.34,
   },
   {
     id: 'wakizashi-serrated', name: 'Serrated wakizashi', model: true,
     build: sword(BLADE.wakizashi, 0.17, 'disc'), grip: 'oneHand',
-    hold: { position: [0, -0.05, 0.03], rotation: [0.2, 0, 0.28] },
+    hold: { position: [0, 0, 0], rotation: [0.2, 0, 0.28] },
     reach: 0.88, attacks: ['doubleSlash', 'lunge'], debris: 'blade', heft: 0.36,
   },
   {
     id: 'ninjato', name: 'Ninjato', model: true, build: sword(BLADE.katana, 0.2, 'square'),
-    grip: 'oneHand', hold: { position: [0, -0.06, 0.03], rotation: [0.22, 0, 0.3] },
+    grip: 'oneHand', hold: { position: [0, 0, 0], rotation: [0.22, 0, 0.3] },
     reach: 0.94, attacks: ['lunge', 'sideCut', 'doubleSlash'], debris: 'blade', heft: 0.42,
   },
   {
     id: 'ninjato-gold', name: 'Gilded ninjato', model: true, build: sword(BLADE.katana, 0.2, 'square'),
-    grip: 'oneHand', hold: { position: [0, -0.06, 0.03], rotation: [0.22, 0, 0.3] },
+    grip: 'oneHand', hold: { position: [0, 0, 0], rotation: [0.22, 0, 0.3] },
     reach: 0.94, attacks: ['spinCut', 'sideCut'], debris: 'blade', heft: 0.44,
   },
   {
     id: 'nagamaki', name: 'Nagamaki', model: true, build: polearm(BLADE.naginata, 1.15, true),
-    grip: 'twoHand', hold: { position: [0, -0.02, 0.04], rotation: [0.32, 0, 0.16] },
+    grip: 'twoHand', hold: { position: [0, 0, 0], rotation: [0.32, 0, 0.16] },
     reach: 1.32, attacks: ['sweep', 'lunge', 'spinCut'], debris: 'pole', heft: 0.85,
   },
   {
     id: 'tanto', name: 'Tanto', model: true, build: sword(BLADE.tanto, 0.14, 'none'),
-    grip: 'oneHand', hold: { position: [0, -0.04, 0.03], rotation: [0.16, 0, 0.26] },
+    grip: 'oneHand', hold: { position: [0, 0, 0], rotation: [0.16, 0, 0.26] },
     reach: 0.72, attacks: ['lunge', 'doubleSlash'], debris: 'compact', heft: 0.2,
   },
   {
     id: 'tanto-hooked', name: 'Hooked tanto', model: true, build: sword(BLADE.tanto, 0.14, 'none'),
-    grip: 'oneHand', hold: { position: [0, -0.04, 0.03], rotation: [0.16, 0, 0.26] },
+    grip: 'oneHand', hold: { position: [0, 0, 0], rotation: [0.16, 0, 0.26] },
     reach: 0.74, attacks: ['sweep', 'lunge'], debris: 'compact', heft: 0.22,
   },
   {
     id: 'tanto-broad', name: 'Broad tanto', model: true, build: sword(BLADE.tanto, 0.14, 'none'),
-    grip: 'oneHand', hold: { position: [0, -0.04, 0.03], rotation: [0.16, 0, 0.26] },
+    grip: 'oneHand', hold: { position: [0, 0, 0], rotation: [0.16, 0, 0.26] },
     reach: 0.76, attacks: ['chop', 'doubleSlash'], debris: 'compact', heft: 0.26,
   },
 
@@ -283,10 +297,11 @@ export const WEAPONS: readonly WeaponDef[] = [
       const collar = part(GEO.collar, accent, g);
       collar.position.y = -0.01;
       buildGrip(g, wrap, accent, 0.24);
+      translateContents(g, 0, 0.12);
       return g;
     },
     grip: 'oneHand',
-    hold: { position: [0, -0.18, 0.04], rotation: [0.2, 0, 0.3] },
+    hold: { position: [0, 0, 0], rotation: [0.2, 0, 0.3] },
     reach: 0.82,
     attacks: ['sweep', 'sideCut'],
     debris: 'compact',
@@ -312,10 +327,11 @@ export const WEAPONS: readonly WeaponDef[] = [
       }
       const weight = part(GEO.weight, accent, chain);
       weight.position.y = -0.4;
+      translateContents(g, 0, 0.11);
       return g;
     },
     grip: 'oneHand',
-    hold: { position: [0, -0.18, 0.04], rotation: [0.2, 0, 0.34] },
+    hold: { position: [0, 0, 0], rotation: [0.2, 0, 0.34] },
     reach: 0.95,
     attacks: ['spinCut', 'sweep'],
     debris: 'compact',
@@ -326,7 +342,7 @@ export const WEAPONS: readonly WeaponDef[] = [
     name: 'Naginata',
     build: polearm(BLADE.naginata, 1.15, true),
     grip: 'twoHand',
-    hold: { position: [0, -0.1, 0.05], rotation: [0.34, 0, 0.16] },
+    hold: { position: [0, 0, 0], rotation: [0.34, 0, 0.16] },
     reach: 1.35,
     attacks: ['sweep', 'lunge', 'spinCut'],
     debris: 'pole',
@@ -337,7 +353,7 @@ export const WEAPONS: readonly WeaponDef[] = [
     name: 'Bo staff',
     build: polearm(null, 1.5, true),
     grip: 'twoHand',
-    hold: { position: [0, -0.02, 0.05], rotation: [0.4, 0, 0.1] },
+    hold: { position: [0, 0, 0], rotation: [0.4, 0, 0.1] },
     reach: 1.3,
     attacks: ['sweep', 'spinCut', 'doubleSlash'],
     debris: 'pole',
@@ -357,10 +373,11 @@ export const WEAPONS: readonly WeaponDef[] = [
       const pivot = part(GEO.pommel, accent, g);
       pivot.scale.setScalar(0.8);
       buildGrip(g, wrap, accent, 0.1);
+      translateContents(g, 0, 0.05);
       return g;
     },
     grip: 'oneHand',
-    hold: { position: [0, -0.14, 0.05], rotation: [0.1, 0, 0.5] },
+    hold: { position: [0, 0, 0], rotation: [0.1, 0, 0.5] },
     reach: 0.78,
     attacks: ['chop', 'sideCut'],
     debris: 'compact',
@@ -381,10 +398,12 @@ export const WEAPONS: readonly WeaponDef[] = [
       const cap = part(GEO.collar, metal, g);
       cap.position.y = 0.37;
       cap.scale.setScalar(0.82);
+      // The cross-handle, not the long baton, is what sits in the fist.
+      translateContents(g, -0.1, 0.16);
       return g;
     },
     grip: 'oneHand',
-    hold: { position: [0, -0.16, 0.06], rotation: [0.16, 0, 0.22] },
+    hold: { position: [0, 0, 0], rotation: [0.16, 0, 0.22] },
     reach: 0.74,
     attacks: ['doubleSlash', 'sweep'],
     debris: 'compact',

@@ -14,6 +14,7 @@ export class HUD {
   private readonly hearts: HTMLDivElement[] = [];
   private readonly scoreEl: HTMLDivElement;
   private readonly bestEl: HTMLDivElement;
+  private readonly chaseEl: HTMLDivElement;
   private readonly comboEl: HTMLDivElement;
   private readonly flowEl: HTMLDivElement;
   private readonly flowFill: HTMLDivElement;
@@ -41,6 +42,7 @@ export class HUD {
         <div class="score">
           <div class="score__value">0</div>
           <div class="score__best"></div>
+          <div class="score__chase"></div>
         </div>
       </div>
       <div class="combo"></div>
@@ -68,6 +70,7 @@ export class HUD {
 
     this.scoreEl = this.root.querySelector('.score__value')!;
     this.bestEl = this.root.querySelector('.score__best')!;
+    this.chaseEl = this.root.querySelector('.score__chase')!;
     this.comboEl = this.root.querySelector('.combo')!;
     this.flowEl = this.root.querySelector('.flow')!;
     this.flowFill = this.root.querySelector('.flow__fill')!;
@@ -117,6 +120,29 @@ export class HUD {
 
   setBest(best: number): void {
     this.bestEl.textContent = best > 0 ? `BEST ${best.toLocaleString()}` : '';
+  }
+
+  /**
+   * The score to beat: the previous run's total, not the all-time best.
+   *
+   * A best score set weeks ago is not a target, it is a wall. Last run is
+   * always within reach by definition, so every run has something to race —
+   * and passing it is a real moment rather than a rounding error. It clears
+   * itself the instant it is beaten, so the HUD never nags.
+   */
+  setChase(target: number, current: number): void {
+    if (target <= 0 || current >= target) {
+      this.chaseEl.classList.remove('on');
+      return;
+    }
+    this.chaseEl.textContent = `LAST ${target.toLocaleString()}`;
+    this.chaseEl.classList.add('on');
+  }
+
+  /** Fires once, when the previous run's score is passed. */
+  chasePassed(): void {
+    this.chaseEl.classList.remove('on');
+    this.callout('BEAT LAST RUN', 'flow', 0.5);
   }
 
   setCombo(count: number, pop: boolean): void {
@@ -181,13 +207,38 @@ export class HUD {
     setTimeout(() => el.classList.remove('flash'), 90);
   }
 
-  callout(text: string, kind: 'good' | 'perfect' | 'flow' | 'miss', x = 0.5): void {
+  /**
+   * @param points score gained, shown under the grade at the point of impact
+   *
+   * The running total lives in the far corner of the screen, where nobody
+   * fighting is looking. The number a hit was worth belongs next to the hit —
+   * it is what makes a deep combo legible while it is happening rather than in
+   * the summary afterwards.
+   */
+  callout(
+    text: string,
+    kind: 'good' | 'perfect' | 'flow' | 'miss',
+    x = 0.5,
+    points = 0,
+  ): void {
     const el = document.createElement('div');
     el.className = `callout callout--${kind}`;
-    el.textContent = text;
     el.style.left = `${Math.round(x * 100)}%`;
     el.style.top = '42%';
     el.style.transform = 'translateX(-50%)';
+
+    const grade = document.createElement('span');
+    grade.className = 'callout__grade';
+    grade.textContent = text;
+    el.appendChild(grade);
+
+    if (points > 0) {
+      const gain = document.createElement('span');
+      gain.className = 'callout__gain';
+      gain.textContent = `+${points.toLocaleString()}`;
+      el.appendChild(gain);
+    }
+
     this.callouts.appendChild(el);
     setTimeout(() => el.remove(), 700);
   }

@@ -410,12 +410,20 @@ export class ArenaImpactSystem {
     return { kind: 'tree', x: track.targetX, y: 0.78, z: track.targetZ, energy };
   }
 
+  /** The player-side railing, hidden while the character screen is open. */
+  private readonly nearRail: Mesh[] = [];
+
   private buildBridgeRails(): void {
     const geometry = new BoxGeometry(1, 1, 1);
     const backMaterial = new MeshStandardMaterial({ color: 0xe75650, roughness: 0.74, metalness: 0.02 });
+    // The near railing is the one the impact system throws bodies into, so it
+    // has to stay — but it also sits directly between the camera and the fight,
+    // and at 0.84 it was a solid red bar across everyone's waist. It reads as a
+    // foreground element at this opacity and stops competing with the thing the
+    // player is trying to time.
     const frontMaterial = backMaterial.clone();
     frontMaterial.transparent = true;
-    frontMaterial.opacity = 0.84;
+    frontMaterial.opacity = 0.34;
     frontMaterial.depthWrite = false;
     const width = (BRIDGE_HALF_SPAN * 2) / BRIDGE_SECTIONS_PER_SIDE;
 
@@ -431,8 +439,22 @@ export class ArenaImpactSystem {
           this.makePostFragment(geometry, material, MathUtils.lerp(x0, x1, 0.5), z, 0.93, 1.65),
         );
         this.bridgeSections.push(section);
+        if (z > 0) for (const f of section.fragments) this.nearRail.push(f.mesh);
       }
     }
+  }
+
+  /**
+   * Drops the near railing out of shot.
+   *
+   * The character screen exists to look at the ninja, and this set puts a red
+   * rail across his shins from every angle the turntable can reach. Hiding the
+   * near side is the smallest thing that clears the view; the far rail stays, so
+   * the bridge still reads as a bridge. `reset` puts every fragment back on the
+   * next run, which is also what restores these.
+   */
+  setNearRailVisible(visible: boolean): void {
+    for (const mesh of this.nearRail) mesh.visible = visible;
   }
 
   private makeRailFragment(

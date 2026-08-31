@@ -12,6 +12,7 @@ import {
   Vector2,
   type BufferGeometry,
 } from 'three';
+import { cosmeticModel } from './CosmeticModels';
 import type { BoneKey } from './Rig';
 
 /**
@@ -30,12 +31,13 @@ import type { BoneKey } from './Rig';
  *      kernel does not: a cosmetic must never reshuffle a run.
  */
 
-export const COSMETIC_SLOTS = ['outfit', 'head', 'back', 'feet'] as const;
+export const COSMETIC_SLOTS = ['outfit', 'head', 'arms', 'back', 'feet'] as const;
 export type CosmeticSlot = (typeof COSMETIC_SLOTS)[number];
 
 export const SLOT_LABEL: Record<CosmeticSlot, string> = {
   outfit: 'OUTFIT',
   head: 'HEAD',
+  arms: 'ARMS',
   back: 'BACK',
   feet: 'FEET',
 };
@@ -68,8 +70,18 @@ export interface Palette {
 export interface CosmeticFit {
   /** Item width as a multiple of the measured limb's width. */
   readonly width: number;
-  /** Where the item's own box sits against the limb's box. */
-  readonly place: 'top' | 'center' | 'back';
+  /**
+   * Item height as a multiple of the measured limb's height. When present it
+   * wins over `width`, which is what a tall piece needs: a helmet with a crest
+   * is half crest, so sizing it by width gives something two heads high.
+   */
+  readonly height?: number;
+  /**
+   * Where the item's own box sits against the limb's box. `face` is for masks:
+   * the piece's back meets the front of the head rather than its underside
+   * meeting the top.
+   */
+  readonly place: 'top' | 'center' | 'back' | 'face';
   /** Nudge after placement, in multiples of the limb's width. */
   readonly nudge?: readonly [number, number, number];
 }
@@ -99,6 +111,14 @@ export interface CosmeticItem {
   /** Outfit slot only: the clan colours, and a tint laid over the body. */
   readonly palette?: Palette;
   readonly tint?: number;
+  /**
+   * A streamed GLB backs this item rather than the shape vocabulary below. Its
+   * own materials are kept as authored, so it does not take the clan palette —
+   * these are pieces the ninja found, not pieces the clan issued.
+   */
+  readonly model?: boolean;
+  /** Model slot only: authored as one half of a pair, reflected for the other. */
+  readonly mirrored?: boolean;
   readonly build?: (palette: Palette, anchor: CosmeticAnchor) => Object3D;
 }
 
@@ -137,6 +157,7 @@ const GEO = {
   sashTail: new BoxGeometry(0.085, 0.32, 0.014),
   shoulderPad: new SphereGeometry(0.105, 9, 6, 0, Math.PI * 2, 0, Math.PI * 0.5),
   collarBoss: new CylinderGeometry(0.05, 0.05, 0.03, 8),
+  lame: new BoxGeometry(0.19, 0.045, 0.1),
 } as const;
 
 /** A gourd profile — the one shape here worth lathing rather than boxing. */
@@ -195,13 +216,21 @@ function sash(palette: Palette): Object3D {
   return g;
 }
 
+/**
+ * A cloth shoulder pad.
+ *
+ * The trim band is deliberately kept NARROWER than the pad. The fitter sizes a
+ * piece by its own bounding box, so a decorative ring wider than the thing it
+ * decorates becomes the thing being fitted — an earlier version scaled its band
+ * to 1.5x and the character wore two hoops the width of his shoulders.
+ */
 function shoulderWrap(palette: Palette, anchor: CosmeticAnchor): Object3D {
   const g = new Group();
   const pad = standard(palette.cloth, 0.82);
   const trim = standard(palette.accent, 0.7);
   const mirror = anchor.mirror ?? 1;
-  piece(GEO.shoulderPad, pad, g, [0, 0, 0], [0.18, 0, mirror * -0.22]);
-  piece(GEO.wrapBand, trim, g, [0, -0.035, 0], [Math.PI * 0.5, 0, 0], [1.5, 1.5, 1]);
+  piece(GEO.shoulderPad, pad, g, [0, 0, 0], [0.18, 0, mirror * -0.22], [1.15, 0.8, 1.05]);
+  piece(GEO.wrapBand, trim, g, [0, -0.03, 0], [Math.PI * 0.5, 0, 0], [1.05, 1.05, 0.7]);
   return g;
 }
 
@@ -223,31 +252,20 @@ function outfit(
     swatch,
     palette,
     tint,
+    // An outfit is the clan's colours and the sash they are tied with. The
+    // shoulders belong to the ARMS slot, so what a player sees in that tab is
+    // everything that is actually on the character's arms.
     anchors: dressed
       ? [
           {
             bone: 'hips',
             offset: [0, 0.02, 0],
-            fit: { width: 1.06, place: 'center', nudge: [0, 0.06, 0] },
+            fit: { width: 0.72, place: 'center', nudge: [0, 0.08, 0.06] },
             sway: 0.25,
-          },
-          {
-            bone: 'shoulderR',
-            alt: ['armR'],
-            offset: [0, 0, 0],
-            fit: { width: 1.05, place: 'center', nudge: [0.08, 0.1, 0] },
-            mirror: 1,
-          },
-          {
-            bone: 'shoulderL',
-            alt: ['armL'],
-            offset: [0, 0, 0],
-            fit: { width: 1.05, place: 'center', nudge: [-0.08, 0.1, 0] },
-            mirror: -1,
           },
         ]
       : [],
-    build: (p, anchor) => (anchor.bone === 'hips' ? sash(p) : shoulderWrap(p, anchor)),
+    build: (p) => sash(p),
   };
 }
 
@@ -259,9 +277,9 @@ const HEAD_ANCHOR: CosmeticAnchor = {
   fit: { width: 1.6, place: 'top', nudge: [0, -0.06, 0] },
 };
 
-const headFit = (width: number, sink: number, sway?: number): CosmeticAnchor => ({
+const headFit = (width: number, sink: number, sway?: number, push = 0): CosmeticAnchor => ({
   ...HEAD_ANCHOR,
-  fit: { width, place: 'top', nudge: [0, -sink, 0] },
+  fit: { width, place: 'top', nudge: [0, -sink, push] },
   ...(sway === undefined ? {} : { sway }),
 });
 
@@ -482,6 +500,156 @@ function clothWraps(palette: Palette): Object3D {
 
 const GREAVE_FIT: CosmeticFit = { width: 1.25, place: 'center', nudge: [0, -0.1, 0.05] };
 
+// ---------------------------------------------------------------- shoulders
+
+/**
+ * Shoulder pieces hang off `shoulderR`/`shoulderL`, which is where the outfit's
+ * own wraps go. Equipping armour over a dressed outfit is deliberate: the plate
+ * is wider than the wrap, so it reads as armour over cloth rather than as two
+ * things fighting for the same spot on the arm.
+ */
+function sode(palette: Palette, anchor: CosmeticAnchor): Object3D {
+  const g = new Group();
+  const iron = standard(palette.metal, 0.45, 0.6);
+  const lace = standard(palette.accent, 0.85);
+  const mirror = anchor.mirror ?? 1;
+  for (let i = 0; i < 3; i++) {
+    piece(GEO.lame, iron, g, [mirror * i * 0.012, -i * 0.05, 0], [0, 0, mirror * (0.1 + i * 0.06)]);
+  }
+  piece(GEO.wrapBand, lace, g, [0, 0.05, 0], [Math.PI * 0.5, 0, 0], [1.6, 1.6, 0.9]);
+  return g;
+}
+
+function pads(palette: Palette, anchor: CosmeticAnchor): Object3D {
+  return shoulderWrap(palette, anchor);
+}
+
+const PAD_FIT: CosmeticFit = { width: 0.55, place: 'center', nudge: [0.22, -0.05, 0] };
+
+/**
+ * Both arms from one description.
+ *
+ * The x part of the nudge is written as "outboard", positive, once — and the
+ * sign is put on per side here. A character faces +Z, so their right arm is at
+ * NEGATIVE x and outboard on that side means -x. Writing the two anchors out by
+ * hand is how the shoulder pieces ended up pushed into the neck on one side and
+ * off the shoulder on the other.
+ */
+function armAnchors(
+  right: readonly [BoneKey, BoneKey],
+  left: readonly [BoneKey, BoneKey],
+  fit: CosmeticFit,
+): CosmeticAnchor[] {
+  const n = fit.nudge;
+  return [
+    {
+      bone: right[0],
+      alt: [right[1]],
+      offset: [0, 0, 0],
+      fit: n ? { ...fit, nudge: [-n[0], n[1], n[2]] } : fit,
+      mirror: 1,
+    },
+    { bone: left[0], alt: [left[1]], offset: [0, 0, 0], fit, mirror: -1 },
+  ];
+}
+
+const SHOULDERS = [
+  ['shoulderR', 'armR'],
+  ['shoulderL', 'armL'],
+] as const satisfies readonly (readonly [BoneKey, BoneKey])[];
+
+
+// ------------------------------------------------- model-backed accessories
+
+/**
+ * Wraps a streamed model so it can be mounted exactly like a built piece.
+ *
+ * The group is always returned, even with nothing inside it. An empty group is
+ * how a not-yet-landed model reports itself, and the wardrobe skips it rather
+ * than mounting a zero-size hat somewhere random on the skull.
+ */
+function modelPiece(id: string, anchor: CosmeticAnchor): Object3D {
+  const g = new Group();
+  const model = cosmeticModel(id);
+  if (model) g.add(model);
+  // A pair — boots, pauldrons — ships as the character's RIGHT half only (the
+  // -x one, cut by tools/build-accessories.mjs) and is reflected for the left.
+  // three flips triangle winding when a world matrix has a negative
+  // determinant, so the reflection lights correctly instead of turning inside
+  // out.
+  if (anchor.mirror === -1) g.scale.x = -1;
+  return g;
+}
+
+/** A head piece worn on top of the skull, sized by its own height. */
+const helmFit = (height: number, sink: number, push = 0): CosmeticAnchor => ({
+  ...HEAD_ANCHOR,
+  fit: { width: 1, height, place: 'top', nudge: [0, -sink, push] },
+});
+
+/** A mask: sits against the front of the face, not on top of the head. */
+const maskFit = (width: number, lift: number, push = 0): CosmeticAnchor => ({
+  ...HEAD_ANCHOR,
+  fit: { width, place: 'face', nudge: [0, lift, push] },
+});
+
+const PAULDRON_FIT: CosmeticFit = { width: 0.95, place: 'center', nudge: [0.14, -0.2, 0] };
+
+/**
+ * Declares a model-backed item. Every one of these is streamed from
+ * public/cosmetics/<id>.glb, so the id is also the filename.
+ */
+function modelItem(
+  id: string,
+  slot: CosmeticSlot,
+  name: string,
+  blurb: string,
+  swatch: readonly [string, string],
+  anchors: readonly CosmeticAnchor[],
+): CosmeticItem {
+  return {
+    id,
+    slot,
+    name,
+    blurb,
+    swatch,
+    model: true,
+    anchors,
+    build: (_palette, anchor) => modelPiece(id, anchor),
+  };
+}
+
+const MODEL_ITEMS: readonly CosmeticItem[] = [
+  modelItem('head-warhelm', 'head', 'BLACK KABUTO', 'Lacquered iron, gold maedate.', ['#15161a', '#d2a13c'],
+    [helmFit(1.15, 0.72, 0.1)]),
+  modelItem('head-onimen', 'head', 'ONI MEN', 'Teeth painted on. Mostly.', ['#8a4038', '#c9a894'],
+    [maskFit(0.95, -0.1, -0.1)]),
+  modelItem('head-kitsune', 'head', 'KITSUNE MASK', 'Fox face. Fox habits.', ['#efe9e2', '#d2392f'],
+    [maskFit(0.74, 0.06, -0.14)]),
+  modelItem('head-drifter', 'head', 'DRIFTER HAT', 'Picked up a long way from here.', ['#4a3a2b', '#8a6a44'],
+    [headFit(1.3, 0.16)]),
+  modelItem('head-sunhat', 'head', 'SUN HAT', 'Ribbon still tied from summer.', ['#d9b06a', '#8f2a2a'],
+    [headFit(1.28, 0.12)]),
+  modelItem('head-cap', 'head', 'BALL CAP', 'Not traditional. Still fits.', ['#b8bcc4', '#6f757f'],
+    [headFit(0.92, 0.3, undefined, -0.04)]),
+  modelItem('head-cans', 'head', 'HEADPHONES', 'Nothing gets through but the beat.', ['#1d1f24', '#b3a06a'],
+    [headWrap(1.16, 0.1)]),
+
+  modelItem('arms-pauldrons', 'arms', 'STEEL PAULDRONS', "Someone else's armour, taken.", ['#4a453f', '#8b857c'],
+    armAnchors(SHOULDERS[0], SHOULDERS[1], PAULDRON_FIT)),
+
+  modelItem('back-makimono', 'back', 'MAKIMONO', 'Rolled tight. Still sealed.', ['#d9cba6', '#6b2f2a'],
+    [{ ...BACK_ANCHOR, fit: { width: 1.4, place: 'back', nudge: [0, 0.1, -0.1] }, sway: 0.2 }]),
+
+  modelItem('feet-boots', 'feet', 'TRAIL BOOTS', "Made for ground you don't know.", ['#243044', '#cfd4dc'],
+    footAnchors([0, -0.02, 0.02], { width: 1.3, place: 'center', nudge: [0, 0.04, 0.12] })),
+  modelItem('feet-sneakers', 'feet', 'SNEAKERS', 'Silent on tile, hopeless in mud.', ['#1f5f8f', '#f0f2f4'],
+    footAnchors([0, -0.02, 0.02], { width: 1.3, place: 'center', nudge: [0, 0.02, 0.12] })),
+];
+
+/** The ids the asset streamer fetches; every model item is named by its file. */
+export const COSMETIC_MODEL_IDS: readonly string[] = MODEL_ITEMS.map((i) => i.id);
+
 // ------------------------------------------------------------------- catalog
 
 export const COSMETICS: readonly CosmeticItem[] = [
@@ -493,12 +661,16 @@ export const COSMETICS: readonly CosmeticItem[] = [
   outfit('fit-void', 'VOID', 'Whatever the lantern light misses.', 'void', ['#1a1424', '#b47cff'], 0x9c86c8),
 
   { id: 'head-none', slot: 'head', name: 'BARE', blurb: 'Nothing to knock off.', swatch: ['#20242f', '#333a4a'], anchors: [] },
-  { id: 'head-kasa', slot: 'head', name: 'STRAW KASA', blurb: 'Wide brim. Hides the eyes.', swatch: ['#c9a55e', '#8d6b32'], anchors: [headFit(2.1, 0.3)], build: kasa },
-  { id: 'head-kabuto', slot: 'head', name: 'IRON KABUTO', blurb: 'Crested helm with a neck guard.', swatch: ['#9aa4b8', '#d9a441'], anchors: [headFit(1.2, 0.86)], build: kabuto },
-  { id: 'head-band', slot: 'head', name: 'HACHIMAKI', blurb: 'Tied before every run.', swatch: ['#c4552c', '#7d1f22'], anchors: [headFit(1.16, 0.82, 0.4)], build: hachimaki },
+  { id: 'head-kasa', slot: 'head', name: 'STRAW KASA', blurb: 'Wide brim. Hides the eyes.', swatch: ['#c9a55e', '#8d6b32'], anchors: [headFit(1.42, 0.24)], build: kasa },
+  { id: 'head-kabuto', slot: 'head', name: 'IRON KABUTO', blurb: 'Crested helm with a neck guard.', swatch: ['#9aa4b8', '#d9a441'], anchors: [headFit(0.95, 0.5)], build: kabuto },
+  { id: 'head-band', slot: 'head', name: 'HACHIMAKI', blurb: 'Tied before every run.', swatch: ['#c4552c', '#7d1f22'], anchors: [headFit(0.92, 0.34, 0.4)], build: hachimaki },
   { id: 'head-ears', slot: 'head', name: 'SPIRIT EARS', blurb: 'Borrowed from something older.', swatch: ['#4c5468', '#ff9ddb'], anchors: [headFit(0.9, 0.06)], build: spiritEars },
-  { id: 'head-hood', slot: 'head', name: 'SHADOW HOOD', blurb: 'For work after dark.', swatch: ['#1a1424', '#3a2b57'], anchors: [headWrap(1.28, 0.14)], build: shadowHood },
+  { id: 'head-hood', slot: 'head', name: 'SHADOW HOOD', blurb: 'For work after dark.', swatch: ['#1a1424', '#3a2b57'], anchors: [headWrap(0.95, 0.06)], build: shadowHood },
   { id: 'head-horns', slot: 'head', name: 'ONI HORNS', blurb: 'Play the demon, be the demon.', swatch: ['#e6dcc8', '#b47cff'], anchors: [headFit(1.05, 0.1)], build: oniHorns },
+
+  { id: 'arms-none', slot: 'arms', name: 'BARE ARMS', blurb: 'Nothing over the shoulders.', swatch: ['#20242f', '#333a4a'], anchors: [] },
+  { id: 'arms-pads', slot: 'arms', name: 'SHOULDER PADS', blurb: 'Cloth, bound at the seam.', swatch: ['#2b2f3d', '#8d95a8'], anchors: armAnchors(SHOULDERS[0], SHOULDERS[1], PAD_FIT), build: pads },
+  { id: 'arms-sode', slot: 'arms', name: 'SODE PLATES', blurb: 'Three lames, laced loose.', swatch: ['#9aa4b8', '#d9a441'], anchors: armAnchors(SHOULDERS[0], SHOULDERS[1], { width: 0.6, place: 'center', nudge: [0.24, -0.12, 0] }), build: sode },
 
   { id: 'back-none', slot: 'back', name: 'CLEAR', blurb: 'Nothing on the back.', swatch: ['#20242f', '#333a4a'], anchors: [] },
   { id: 'back-cape', slot: 'back', name: 'TATTERED CAPE', blurb: 'Shorter than it started.', swatch: ['#2b2f3d', '#4fd9a8'], anchors: [backFit(1, 1.15)], build: cape },
@@ -515,6 +687,8 @@ export const COSMETICS: readonly CosmeticItem[] = [
       { bone: 'legL', alt: ['footL'], offset: [0, -0.1, 0.01], fit: GREAVE_FIT, mirror: -1 },
     ], build: greaves },
   { id: 'feet-wraps', slot: 'feet', name: 'CLOTH WRAPS', blurb: 'Ankle bindings, nothing else.', swatch: ['#d9d3c4', '#9c948a'], anchors: footAnchors([0, 0.04, 0.01], { width: 1.05, place: 'center', nudge: [0, 0.12, 0] }), build: clothWraps },
+
+  ...MODEL_ITEMS,
 ];
 
 const BY_ID = new Map(COSMETICS.map((c) => [c.id, c] as const));
@@ -522,6 +696,7 @@ const BY_ID = new Map(COSMETICS.map((c) => [c.id, c] as const));
 export const DEFAULT_ITEM: Record<CosmeticSlot, string> = {
   outfit: 'fit-ash',
   head: 'head-none',
+  arms: 'arms-none',
   back: 'back-none',
   feet: 'feet-none',
 };
