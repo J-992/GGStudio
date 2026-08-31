@@ -63,6 +63,7 @@ type GameState =
   | 'loading'
   | 'menu'
   | 'ready'
+  | 'waiting'
   | 'playing'
   | 'flow'
   | 'dying'
@@ -264,7 +265,7 @@ export class Game {
     // "which ninja" and "how far to the next one" are real questions.
     const returning = save.runs > 0;
     if (returning) this.showMenu();
-    else this.startRun();
+    else this.startRun(true);
 
     await this.loading.hide();
     if (!returning) this.hud.show();
@@ -292,9 +293,9 @@ export class Game {
 
   // ----------------------------------------------------------------- run
 
-  private startRun(): void {
+  private startRun(waitForInput = false): void {
     const save = loadSave();
-    this.state = 'playing';
+    this.state = waitForInput ? 'waiting' : 'playing';
     this.runStart = this.loopTime;
     this.elapsed = 0;
     this.score = 0;
@@ -344,6 +345,10 @@ export class Game {
     this.hud.setCombo(0, false);
     this.hud.setFlow(0, false);
     this.hud.setHint(null, '');
+    if (waitForInput) {
+      const touch = window.matchMedia('(pointer: coarse)').matches;
+      this.hud.setTutorialText(touch ? 'TAP LEFT OR RIGHT TO BEGIN' : 'PRESS ← OR → TO BEGIN');
+    }
     this.audio.setIntensity(0.25);
   }
 
@@ -823,7 +828,7 @@ export class Game {
     if (this.attackLock > 0) this.attackLock = Math.max(0, this.attackLock - dt);
     if (this.recovery > 0) this.recovery = Math.max(0, this.recovery - dt);
 
-    this.combat.update(dt, now, this.elapsed);
+    this.combat.update(dt, now, this.elapsed, this.tutorialDone);
     // The sky walks forward with the difficulty, so a long run visibly goes
     // somewhere instead of holding one afternoon for three minutes.
     this.arena.setPhase(phaseIndexFor(this.elapsed));
@@ -1088,12 +1093,10 @@ export class Game {
     if (missedGuard && !loadSave().seenGuardTip) saveSave({ seenGuardTip: true });
     if (missedRare && !loadSave().seenRareTip) saveSave({ seenRareTip: true });
 
-    // Tutorial safety: the first threats stage a dramatic block instead of
-    // taking a heart, so nobody can lose before they understand the mapping.
-    // Health only becomes real once BOTH sides have been demonstrated — a
-    // player who walks away mid-tutorial comes back alive, not dead.
-    const unproven = !this.tutorialDone && (this.provedLeft === 0 || this.provedRight === 0);
-    const safe = this.combat.tutorialThreatsLeft > 0 || unproven || this.recovery > 0;
+    // Tutorial safety is a finite practice window. Keeping it tied to an
+    // unproven side made an idle player block forever and eventually collect
+    // passive feint rewards, which looked exactly like autoplay.
+    const safe = this.combat.tutorialThreatsLeft > 0 || this.recovery > 0;
     this.combat.consumeTutorialThreat();
 
     if (safe) {
@@ -1531,15 +1534,26 @@ export class Game {
     this.platform.measure(category, action);
   }
 
-  private onFirstInput(): void {
+  private onFirstInput(): boolean {
     this.audio.unlock();
+    if (this.state === 'waiting') {
+      this.state = 'playing';
+      this.runStart = this.loopTime;
+      this.hud.setTutorialText('');
+      this.input.setEnabled(true);
+      this.platform.gameplayStart();
+      // This gesture begins the run; it is not also a blind opening swing.
+      return false;
+    }
     // Poki counts gameplay from a real interaction, never from page load — but
     // a tap on the menu is not gameplay starting, so the run must already be
     // live before this reports anything.
     if (this.state === 'playing' || this.state === 'flow') {
       this.platform.gameplayStart();
       this.input.setEnabled(true);
+      return true;
     }
+    return false;
   }
 
   private toggleMute(): void {

@@ -14,7 +14,7 @@ export class InputManager {
   private buffered: { lane: Lane; at: number } | null = null;
   private enabled = false;
   private firstInputFired = false;
-  private onFirstInput: (() => void) | null = null;
+  private onFirstInput: (() => boolean | void) | null = null;
   private disposers: Array<() => void> = [];
 
   constructor(private readonly surface: HTMLElement) {}
@@ -68,8 +68,11 @@ export class InputManager {
     if (!enabled) this.buffered = null;
   }
 
-  /** Fires once, on the player's genuine first gameplay input. */
-  setFirstInputHandler(fn: () => void): void {
+  /**
+   * Registers the one-time user-gesture hook. Returning false consumes that
+   * gesture, which lets a "tap to begin" wake the run without also whiffing.
+   */
+  setFirstInputHandler(fn: () => boolean | void): void {
     this.onFirstInput = fn;
   }
 
@@ -99,11 +102,12 @@ export class InputManager {
   }
 
   private press(lane: Lane): void {
+    let acceptAsGameplay = true;
     if (!this.firstInputFired) {
       this.firstInputFired = true;
-      this.onFirstInput?.();
+      acceptAsGameplay = this.onFirstInput?.() !== false;
     }
-    if (!this.enabled) return;
+    if (!this.enabled || !acceptAsGameplay) return;
     // One slot only. A newer press replaces an older one rather than stacking:
     // the player's latest intent is always the one that resolves.
     if (INPUT.maxBuffered >= 1) this.buffered = { lane, at: this.now() };

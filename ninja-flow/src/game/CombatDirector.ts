@@ -80,8 +80,8 @@ export class CombatDirector {
     return n;
   }
 
-  update(dt: number, now: number, elapsed: number): void {
-    this.fillSchedule(now, elapsed);
+  update(dt: number, now: number, elapsed: number, advancedMechanics = true): void {
+    this.fillSchedule(now, elapsed, advancedMechanics);
 
     // Spawn anything whose travel window has opened.
     while (this.queue.length > 0 && this.queue[0].impactAt - this.queue[0].approach <= now) {
@@ -195,12 +195,12 @@ export class CombatDirector {
     return latest;
   }
 
-  private fillSchedule(now: number, elapsed: number): void {
+  private fillSchedule(now: number, elapsed: number, advancedMechanics: boolean): void {
     // Keep roughly two patterns of lookahead so travel windows always exist.
     const horizon = now + 4;
     let guard = 0;
     while (this.patterns.scheduledUntil < horizon && guard++ < 8) {
-      const rareAllowed = elapsed >= ENEMY.rareUnlockAfter;
+      const rareAllowed = advancedMechanics && elapsed >= ENEMY.rareUnlockAfter;
       const batch = this.patterns.nextPattern(elapsed, this.tutorialRemaining, rareAllowed);
       for (const threat of batch) {
         // Two clamps, applied in order and then re-imposed on the schedule:
@@ -217,11 +217,13 @@ export class CombatDirector {
         // A guarded threat costs two exchanges, so it is never stacked onto a
         // rare target and never appears while tutorial safety is still on.
         threat.guard =
-          this.tutorialRemaining > 0 || threat.rare ? 0 : this.guardFor(elapsed);
+          !advancedMechanics || this.tutorialRemaining > 0 || threat.rare
+            ? 0
+            : this.guardFor(elapsed);
         // A feint is neither guarded nor rare: it is never struck, so a plate
         // on it would be undiscoverable and a bonus on it unclaimable.
         threat.feint =
-          this.tutorialRemaining > 0 || threat.rare || threat.guard > 0
+          !advancedMechanics || this.tutorialRemaining > 0 || threat.rare || threat.guard > 0
             ? false
             : this.feintFor(elapsed);
         if (threat.feint) threat.guard = 0;
