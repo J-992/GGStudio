@@ -26,6 +26,12 @@ type GameHarness = {
   elapsed: number;
   score: number;
   hearts: number;
+  input: {
+    attach(): void;
+    detach(): void;
+    consume(): { lane: 'left' | 'right'; ageSeconds: number } | null;
+    setFirstInputHandler(handler: () => void): void;
+  };
   combat: {
     activeCount(): number;
     consumeTutorialThreat(): void;
@@ -88,13 +94,17 @@ describe('first-run activation', () => {
     expect(game.combat.activeCount()).toBe(0);
   });
 
-  it('begins the waiting run on the first genuine control', () => {
+  it('begins the waiting run and attacks with the first arrow-key control', () => {
     const game = createGame();
     game.startRun(true);
+    game.input.setFirstInputHandler(() => game.onFirstInput());
+    game.input.attach();
 
-    game.onFirstInput();
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowLeft' }));
 
     expect(game.state).toBe('playing');
+    expect(game.input.consume()?.lane).toBe('left');
+    game.input.detach();
   });
 
   it('ends automatic block protection when the configured practice threats are spent', () => {

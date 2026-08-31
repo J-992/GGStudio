@@ -1534,7 +1534,7 @@ export class Game {
     this.platform.measure(category, action);
   }
 
-  private onFirstInput(): boolean {
+  private onFirstInput(): void {
     this.audio.unlock();
     if (this.state === 'waiting') {
       this.state = 'playing';
@@ -1542,8 +1542,7 @@ export class Game {
       this.hud.setTutorialText('');
       this.input.setEnabled(true);
       this.platform.gameplayStart();
-      // This gesture begins the run; it is not also a blind opening swing.
-      return false;
+      return;
     }
     // Poki counts gameplay from a real interaction, never from page load — but
     // a tap on the menu is not gameplay starting, so the run must already be
@@ -1551,9 +1550,7 @@ export class Game {
     if (this.state === 'playing' || this.state === 'flow') {
       this.platform.gameplayStart();
       this.input.setEnabled(true);
-      return true;
     }
-    return false;
   }
 
   private toggleMute(): void {
