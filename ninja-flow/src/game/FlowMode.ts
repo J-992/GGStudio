@@ -1,5 +1,5 @@
 import type { Object3D, Scene } from 'three';
-import { FLOW } from '../config';
+import { FLOW, TUTORIAL } from '../config';
 import type { Rng } from '../core/Rng';
 import { Enemy } from './Enemy';
 import type { Props } from '../fx/Props';
@@ -10,7 +10,7 @@ import type { Side } from './PatternDirector';
 export type FlowPhase = 'off' | 'activating' | 'chain' | 'finisherWindup' | 'finisher' | 'recover';
 
 export interface FlowEvent {
-  type: 'activate' | 'hit' | 'miss' | 'finisherReady' | 'finisherHit' | 'end';
+  type: 'activate' | 'hit' | 'wrong' | 'miss' | 'finisherReady' | 'finisherHit' | 'end';
   lane?: Lane;
   index?: number;
   /** World X of the struck target, for VFX placement. */
@@ -44,6 +44,7 @@ export class FlowMode {
   private finisher: Enemy | null = null;
   private events: FlowEvent[] = [];
   private dashFrom = 0;
+  private tutorial = false;
 
   constructor(
     scene: Scene,
@@ -63,7 +64,7 @@ export class FlowMode {
 
   /** True while the sequence still wants the player's LEFT/RIGHT input. */
   get acceptsInput(): boolean {
-    return this.phase === 'chain' || this.phase === 'finisherWindup';
+    return this.phase === 'activating' || this.phase === 'chain' || this.phase === 'finisherWindup';
   }
 
   /**
@@ -110,13 +111,14 @@ export class FlowMode {
     }
   }
 
-  start(heroX: number, now: number): void {
+  start(heroX: number, now: number, tutorial = false): void {
     this.phase = 'activating';
     this.timer = 0;
     this.index = 0;
     this.hits = 0;
     this.heroX = heroX;
     this.dashFrom = heroX;
+    this.tutorial = tutorial;
 
     const count = FLOW.minTargets + this.rng.int(FLOW.maxTargets - FLOW.minTargets + 1);
     this.targets = [];
@@ -156,6 +158,11 @@ export class FlowMode {
     if (this.phase === 'finisherWindup') {
       if (!this.finisher) return false;
       if (side !== this.finisher.side) {
+        if (this.tutorial) {
+          this.timer = 0;
+          this.events.push({ type: 'wrong', lane });
+          return true;
+        }
         this.fail();
         return true;
       }
@@ -176,9 +183,16 @@ export class FlowMode {
     const target = this.targets[this.index];
     if (!target) return false;
     if (side !== target.side) {
+      if (this.tutorial) {
+        this.timer = 0;
+        this.events.push({ type: 'wrong', lane });
+        return true;
+      }
       this.fail();
       return true;
     }
+
+    if (this.phase === 'activating') this.phase = 'chain';
 
     this.dashFrom = this.heroX;
     this.heroX = target.group.position.x * 0.55;
@@ -194,7 +208,7 @@ export class FlowMode {
 
     this.index += 1;
     this.timer = 0;
-    this.window = flowReactionWindow(this.index);
+    this.window = this.reactionWindow(this.index);
     this.markChain();
 
     if (this.index >= this.targets.length) this.beginFinisher();
@@ -211,7 +225,7 @@ export class FlowMode {
         if (this.timer >= FLOW.activationHold) {
           this.phase = 'chain';
           this.timer = 0;
-          this.window = flowReactionWindow(0);
+          this.window = this.reactionWindow(0);
         }
         break;
 
@@ -271,6 +285,7 @@ export class FlowMode {
     this.finisher = null;
     this.phase = 'off';
     this.heroX = 0;
+    this.tutorial = false;
   }
 
   /**
@@ -293,6 +308,12 @@ export class FlowMode {
       }
       e.setFlowMark(i === this.index ? 'target' : 'queued');
     }
+  }
+
+  private reactionWindow(index: number): number {
+    if (!this.tutorial) return flowReactionWindow(index);
+    if (index === 0) return TUTORIAL.flowFirstWindow;
+    return flowReactionWindow(index) * TUTORIAL.flowWindowScale;
   }
 
   private beginFinisher(): void {

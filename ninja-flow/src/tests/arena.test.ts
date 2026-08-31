@@ -42,4 +42,18 @@ describe('bridge combat floor', () => {
     expect(effects.petalMesh.material.color.getHexString()).toBe('e75650');
     expect(effects.petalMesh.instanceColor).toBeNull();
   });
+
+  it('can skip ambient buffer uploads on constrained frames', () => {
+    const arena = new Arena(new Scene());
+    const effects = arena as unknown as {
+      petalMesh: { instanceMatrix: { version: number } };
+    };
+    const before = effects.petalMesh.instanceMatrix.version;
+
+    arena.update(1 / 60, 0);
+    expect(effects.petalMesh.instanceMatrix.version).toBe(before);
+
+    arena.update(1 / 60, 1 / 30);
+    expect(effects.petalMesh.instanceMatrix.version).toBeGreaterThan(before);
+  });
 });

@@ -151,7 +151,7 @@ export class Arena {
     this.keyLight.position.set(5.5, 10, 7);
     this.keyLight.target.position.set(0, 0.8, -1.5);
     this.keyLight.castShadow = true;
-    this.keyLight.shadow.mapSize.set(1024, 1024);
+    this.keyLight.shadow.mapSize.set(512, 512);
     this.keyLight.shadow.camera.near = 1;
     this.keyLight.shadow.camera.far = 34;
     const shadowExtent = 11;
@@ -228,9 +228,10 @@ export class Arena {
           }
           garden.traverse((object) => {
             if (!(object instanceof Mesh)) return;
-            const parentName = object.parent?.name ?? '';
-            const isGround = parentName === 'Cube' || parentName === 'Plane003';
-            object.castShadow = !isGround;
+            // The static garden contributed almost one hundred extra shadow
+            // draws every frame. Fighters still cast onto the receiving set;
+            // the environment itself is already shaded by authored materials.
+            object.castShadow = false;
             object.receiveShadow = true;
 
             // Damage needs removable pieces. The impact layer reconstructs the
@@ -287,7 +288,7 @@ export class Arena {
     if (step === 3) this.lightningIn = 0.6;
   }
 
-  update(dt: number): void {
+  update(dt: number, ambientDt = dt): void {
     this.weatherTime += dt;
     this.weatherClock += dt;
     const active = WEATHER[this.weatherIndex];
@@ -299,9 +300,18 @@ export class Arena {
     }
 
     this.updateWeather(dt);
-    this.updatePetals(dt);
-    this.updateRain(dt);
+    if (ambientDt > 0) {
+      this.updatePetals(ambientDt);
+      this.updateRain(ambientDt);
+    }
     this.impacts.update(dt);
+  }
+
+  setShadowMapSize(size: number): void {
+    if (this.keyLight.shadow.mapSize.x === size) return;
+    this.keyLight.shadow.map?.dispose();
+    this.keyLight.shadow.map = null;
+    this.keyLight.shadow.mapSize.set(size, size);
   }
 
   /** Allows playtests to jump directly to a weather state. */

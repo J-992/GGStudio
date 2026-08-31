@@ -192,10 +192,11 @@ export class HUD {
   }
 
   /** Tutorial affordance: pulses a touch zone and shows the key to press. */
-  setHint(lane: Lane | null, keyLabel: string): void {
+  setHint(lane: Lane | null, keyLabel: string, perfect = false): void {
     for (const l of ['left', 'right'] as Lane[]) {
       const active = l === lane;
       this.zones[l].classList.toggle('hint', active);
+      this.zones[l].classList.toggle('perfect', active && perfect);
       this.zoneKeys[l].textContent = active ? keyLabel : '';
     }
   }

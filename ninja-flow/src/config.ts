@@ -333,11 +333,20 @@ export const CONTACT = {
 
 export const TUTORIAL = {
   /** Bump when the lesson changes so existing players see the correction once. */
-  version: 3,
+  version: 4,
   /** Threats that cannot damage the player, no matter how badly missed. */
-  safeThreats: 6 as number,
+  safeThreats: 8 as number,
   /** Extra approach time granted to the very first threats. */
-  slowFactor: 1.5,
+  slowFactor: 2.1,
+  /** Extra breathing room between first-run enemies. */
+  gapScale: 1.6,
+  /** Show GET READY this long before the reaction-compensated tap cue. */
+  readySeconds: 0.8,
+  /** Visual reaction lead: a normal response lands inside the ±100 ms window. */
+  perfectCueLeadMs: 230,
+  /** The first-ever Flow gives players time to read an unfamiliar state. */
+  flowFirstWindow: 3.5,
+  flowWindowScale: 1.35,
   slowDecay: 0.12,
   /** Prompts fade out once the player has proven each side this many times. */
   proveCount: 1,

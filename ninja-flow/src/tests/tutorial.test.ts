@@ -3,22 +3,36 @@ import { Scene } from 'three';
 import { TUTORIAL } from '../config';
 import { Rng } from '../core/Rng';
 import { CombatDirector } from '../game/CombatDirector';
+import { flowInstruction, perfectInstruction } from '../game/TutorialPrompts';
 import { HUD } from '../ui/HUD';
 import { MainMenu } from '../ui/MainMenu';
 
 describe('current tutorial and help', () => {
-  it('shows the approaching threat direction without revealing the exact Perfect frame', () => {
+  it('gives the exact Perfect cue a visually distinct tap-now state', () => {
     const parent = document.createElement('div');
     const hud = new HUD(parent, () => undefined, () => undefined);
 
-    hud.setHint('left', '←');
+    hud.setHint('left', '← NOW', true);
 
     const left = parent.querySelector<HTMLElement>('[data-lane="left"]');
     const right = parent.querySelector<HTMLElement>('[data-lane="right"]');
     expect(left?.classList.contains('hint')).toBe(true);
-    expect(left?.classList.contains('perfect')).toBe(false);
-    expect(left?.textContent).toContain('←');
+    expect(left?.classList.contains('perfect')).toBe(true);
+    expect(left?.textContent).toContain('NOW');
     expect(right?.classList.contains('hint')).toBe(false);
+  });
+
+  it('gives first-time players a slower, longer practice sequence', () => {
+    expect(TUTORIAL.safeThreats).toBeGreaterThanOrEqual(8);
+    expect(TUTORIAL.slowFactor).toBeGreaterThanOrEqual(2);
+  });
+
+  it('states the exact control required for Perfect and Flow', () => {
+    expect(perfectInstruction('left', false, 'tap')).toContain('PRESS ← NOW FOR PERFECT');
+    expect(perfectInstruction('right', true, 'tap')).toContain('TAP RIGHT NOW FOR PERFECT');
+    expect(flowInstruction('left', false)).toContain('PRESS ← NOW');
+    expect(flowInstruction('right', true)).toContain('TAP RIGHT NOW');
+    expect(flowInstruction('right', true)).toContain('GLOWING');
   });
 
   it('documents timing, guards, rare targets, Flow, gear, and the highlight reel', () => {

@@ -305,6 +305,26 @@ body {
   transition: opacity 0.08s ease;
 }
 
+.zone.perfect {
+  opacity: 1;
+  background: radial-gradient(ellipse at center, rgba(255, 216, 138, 0.48), transparent 64%);
+  animation: perfectCue 0.32s ease-in-out infinite alternate;
+}
+
+.zone.perfect .zone__key {
+  color: var(--perfect);
+  text-shadow: 0 0 24px rgba(255, 216, 138, 0.95), 0 3px 18px rgba(0, 0, 0, 0.9);
+}
+
+@keyframes perfectCue {
+  from {
+    opacity: 0.72;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes zonePulse {
   0%,
   100% {

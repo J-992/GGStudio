@@ -114,7 +114,7 @@ export class PatternDirector {
       if (tutorialLeft > 0) {
         const t = tutorialLeft / TUTORIAL.safeThreats;
         approach *= 1 + (TUTORIAL.slowFactor - 1) * t;
-        gap *= 1 + 0.35 * t;
+        gap *= 1 + (TUTORIAL.gapScale - 1) * t;
         tutorialLeft -= 1;
       }
 

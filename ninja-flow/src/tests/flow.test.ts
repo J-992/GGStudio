@@ -62,17 +62,33 @@ describe('Flow chain cue', () => {
     expect(checks).toBeGreaterThan(4);
   });
 
-  it('marks the first target before the chain starts taking input', () => {
-    // The activation hold is read time: the player must be able to see which
-    // way to press before the clock on that press begins. That means BOTH cues
-    // are up during the hold — the lit body and the side the game reports for
-    // the lane indicator — not just the one in the 3D scene.
+  it('accepts the first press as soon as the first target is marked', () => {
+    // Showing a glowing target while rejecting its matching press teaches the
+    // player that Flow controls do nothing. The visual cue and input window
+    // must become active on the same frame.
     const flow = makeFlow();
     expect(flow.phase).toBe('activating');
-    expect(flow.acceptsInput).toBe(false);
+    expect(flow.acceptsInput).toBe(true);
     const lit = flow.debugTargets().filter((t) => t.marked === 'target');
     expect(lit).toHaveLength(1);
     expect(flow.currentSide).toBe(lit[0].side);
+    expect(flow.press(lit[0].side === 'L' ? 'left' : 'right')).toBe(true);
+    expect(flow.hitCount).toBe(1);
+  });
+
+  it('lets the first-ever Flow retry a wrong side instead of ending immediately', () => {
+    const flow = new FlowMode(new Scene(), new Rng(12));
+    flow.start(0, 0, true);
+    const correct = flow.currentSide === 'L' ? 'left' : 'right';
+    const wrong = correct === 'left' ? 'right' : 'left';
+
+    expect(flow.press(wrong)).toBe(true);
+    expect(flow.hitCount).toBe(0);
+    expect(flow.drain().some((event) => event.type === 'wrong')).toBe(true);
+    expect(flow.active).toBe(true);
+
+    expect(flow.press(correct)).toBe(true);
+    expect(flow.hitCount).toBe(1);
   });
 
   it('never leaves the player without a cue at any point in the chain', () => {
@@ -166,7 +182,7 @@ describe('Flow chain cue', () => {
 });
 
 describe('Flow timing', () => {
-  it('holds input closed only as long as the read takes', () => {
+  it('keeps the activation hold as free read time without closing input', () => {
     expect(FLOW.activationHold).toBeGreaterThan(0.3);
     expect(FLOW.activationHold).toBeLessThan(0.8);
     const flow = makeFlow();
@@ -175,7 +191,7 @@ describe('Flow timing', () => {
     while (now < FLOW.activationHold - dt) {
       now += dt;
       flow.update(dt, now);
-      expect(flow.acceptsInput).toBe(false);
+      expect(flow.acceptsInput).toBe(true);
     }
     while (now < FLOW.activationHold + 0.05) {
       now += dt;

@@ -1,4 +1,12 @@
-import { ACESFilmicToneMapping, MathUtils, PCFSoftShadowMap, Scene, SRGBColorSpace, Vector3, WebGLRenderer } from 'three';
+import {
+  ACESFilmicToneMapping,
+  MathUtils,
+  PCFShadowMap,
+  Scene,
+  SRGBColorSpace,
+  Vector3,
+  WebGLRenderer,
+} from 'three';
 import {
   ATTACK,
   CAMERA,
@@ -20,6 +28,7 @@ import {
   DEV,
 } from '../config';
 import { Loop, type Frame } from '../core/Loop';
+import { FrameQuality } from '../core/FrameQuality';
 import { Rng } from '../core/Rng';
 import { loadSave, saveSave } from '../core/Storage';
 import { InputManager, type Lane } from '../input/InputManager';
@@ -59,6 +68,7 @@ import { commitRun, unlockState, type RunStats } from './Progression';
 import { phaseIndexFor } from './PatternDirector';
 import { MODEL_WEAPONS, setWeaponModelSupplier } from './Weapons';
 import { evaluate } from './TimingEvaluator';
+import { flowInstruction, perfectInstruction, type PerfectCuePhase } from './TutorialPrompts';
 
 type GameState =
   | 'loading'
@@ -116,6 +126,7 @@ export class Game {
   private readonly moments = new MomentLog();
   private readonly reel: HighlightReel;
   private readonly platform = new PlatformAdapter();
+  private readonly quality = new FrameQuality(window.devicePixelRatio);
 
   private state: GameState = 'loading';
   private runStart = 0;
@@ -135,6 +146,8 @@ export class Game {
   private focusX = 0;
   private pendingPlayerHit: PendingPlayerHit | null = null;
   private readonly contactAnchor = new Vector3();
+  private ambientDt = 0;
+  private ambientFrames = 0;
 
   constructor(canvas: HTMLCanvasElement, ui: HTMLElement) {
     this.renderer = new WebGLRenderer({
@@ -143,12 +156,12 @@ export class Game {
       powerPreference: 'high-performance',
       stencil: false,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(this.quality.profile.pixelRatio);
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    this.renderer.shadowMap.type = PCFShadowMap;
 
     this.rig = new CameraRig(window.innerWidth / window.innerHeight);
     this.arena = new Arena(this.scene);
@@ -703,7 +716,10 @@ export class Game {
   private update(frame: Frame): void {
     this.loopTime = frame.time;
     const { dt, dtReal } = frame;
-    if (dtReal > 0) this.fps += (1 / dtReal - this.fps) * 0.05;
+    if (dtReal > 0) {
+      this.fps += (1 / dtReal - this.fps) * 0.05;
+      if (this.quality.sample(dtReal)) this.applyFrameQuality();
+    }
 
     if (this.state === 'paused') {
       // Nothing advances behind a pause — not the arena, not the callout
@@ -715,7 +731,14 @@ export class Game {
 
     this.hud.update(dtReal);
     this.audio.update(dtReal);
-    this.arena.update(dt);
+    this.ambientDt += dt;
+    this.ambientFrames += 1;
+    const updateAmbient = this.ambientFrames >= this.quality.profile.ambientStride;
+    this.arena.update(dt, updateAmbient ? this.ambientDt : 0);
+    if (updateAmbient) {
+      this.ambientDt = 0;
+      this.ambientFrames = 0;
+    }
     this.vfx.update(dt);
     this.props.update(dt);
 
@@ -1158,18 +1181,17 @@ export class Game {
     this.cancelPendingPlayerHit();
     this.state = 'flow';
     this.combat.clearThreats(this.player.worldX);
-    this.flowMode.start(this.player.worldX, now);
+    this.flowTutorialActive = !loadSave().seenFlowTip;
+    this.flowMode.start(this.player.worldX, now, this.flowTutorialActive);
     this.loop.setTimeScale(FLOW.timeScale);
     this.rig.setFlow(true);
     this.arena.setFlowEmphasis(1);
     this.audio.flowActivate();
     this.audio.setIntensity(1);
     this.hud.banner('FLOW');
-    this.flowTutorialActive = !loadSave().seenFlowTip;
-    if (this.flowTutorialActive) {
-      this.hud.setTutorialText('FLOW: FOLLOW THE GLOW — ONE QUICK PRESS EACH');
-    }
-    this.hud.setHint(null, '');
+    const firstLane = this.flowLane;
+    if (this.flowTutorialActive) this.hud.setTutorialText(flowInstruction(firstLane, this.touchInput));
+    this.hud.setHint(firstLane, this.laneLabel(firstLane));
     this.vfx.shockwave(this.player.worldX, 1, 2.4, IMPACT_COLOR.flow);
     this.rig.addTrauma(CAMERA.trauma.good);
     this.measureOnce('firstFlow');
@@ -1193,6 +1215,7 @@ export class Game {
     const side = this.flowMode.currentSide;
     const lane: Lane | null = side === null ? null : side === 'L' ? 'left' : 'right';
     this.hud.setHint(lane, lane === null ? '' : lane === 'left' ? '←' : '→');
+    if (this.flowTutorialActive) this.hud.setTutorialText(flowInstruction(lane, this.touchInput));
     this.player.look(lane);
 
     for (const ev of this.flowMode.drain()) {
@@ -1216,13 +1239,12 @@ export class Game {
           // milliseconds and a word on each one would be noise. The number
           // climbing beside each cut is the whole reward.
           this.hud.callout('', 'flow', x < 0 ? 0.32 : 0.68, flowEarned);
-          if (this.flowTutorialActive) {
-            this.flowTutorialActive = false;
-            saveSave({ seenFlowTip: true });
-            this.hud.setTutorialText('');
-          }
           break;
         }
+        case 'wrong':
+          this.hud.callout('OTHER GLOWING SIDE', 'miss');
+          this.audio.whiff();
+          break;
         case 'finisherReady':
           this.hud.callout('FINISH!', 'flow');
           break;
@@ -1266,6 +1288,7 @@ export class Game {
   }
 
   private exitFlow(now: number, completed: boolean): void {
+    if (this.flowTutorialActive && completed) saveSave({ seenFlowTip: true });
     this.flow.consume(completed);
     if (completed) {
       this.stats.flows += 1;
@@ -1457,7 +1480,7 @@ export class Game {
    * themselves contextually the first time they actually appear.
    */
   private updateTutorialHint(now: number): void {
-    const touch = window.matchMedia('(pointer: coarse)').matches;
+    const touch = this.touchInput;
     const next = this.combat.nextThreat(now);
 
     if (this.tutorialDone) {
@@ -1477,23 +1500,27 @@ export class Game {
       return;
     }
 
-    // A tutorial enemy walks for over three seconds and can only be struck in
-    // the last fraction of that. Naming the lit side as the cue is what stops a
-    // first-timer swinging on sight, whiffing, and concluding the keys are
-    // broken — the glow below is switched on for exactly the connectable window.
+    // The TAP NOW cue appears slightly before the mathematical Perfect window
+    // so ordinary visual reaction time lands the actual press inside ±100 ms.
     const untilImpact = next ? next.impactAt - now : Infinity;
-    const connectable = untilImpact <= TIMING.goodEarlyMs / 1000;
+    const tapNow =
+      untilImpact <= TUTORIAL.perfectCueLeadMs / 1000 &&
+      untilImpact >= -TIMING.perfectMs / 1000;
+    const cuePhase: PerfectCuePhase = tapNow
+      ? 'tap'
+      : untilImpact <= TUTORIAL.readySeconds
+        ? 'ready'
+        : 'watch';
 
     let text = '';
     if (this.provedLeft === 0 || this.provedRight === 0) {
       // The direction prompt follows the threat actually on screen, so a missed
       // first enemy can never leave the text pointing at an empty lane.
-      const side = next?.side ?? 'L';
-      const control = side === 'L' ? (touch ? 'TAP LEFT' : 'PRESS ←') : touch ? 'TAP RIGHT' : 'PRESS →';
-      text = connectable ? `${control} NOW` : `WAIT — ${control} WHEN THEIR SIDE LIGHTS UP`;
+      const lane: Lane = (next?.side ?? 'L') === 'L' ? 'left' : 'right';
+      text = perfectInstruction(lane, touch, cuePhase);
     } else if (this.combat.tutorialThreatsLeft > 0) {
-      if (this.stats.perfects > 0) text = 'PERFECT! LAST-SECOND HITS CHARGE FLOW FASTER';
-      else text = connectable ? 'STRIKE NOW' : 'WAIT FOR THE GLOW — THEN STRIKE';
+      const lane: Lane = (next?.side ?? 'L') === 'L' ? 'left' : 'right';
+      text = perfectInstruction(lane, touch, cuePhase);
     } else {
       // Tutorial complete: one GO!, remember it, never show any of this again.
       this.tutorialDone = true;
@@ -1509,12 +1536,9 @@ export class Game {
     if (this.provedLeft >= 1) this.measureOnce('tutorialLeft');
     if (this.provedRight >= 1) this.measureOnce('tutorialRight');
 
-    // The pulse is on for the window a swing actually connects in, and off
-    // outside it. Lighting up half a second before the earliest hittable frame
-    // taught the wrong beat: the player pressed on the cue and whiffed.
-    if (next && connectable && untilImpact >= -TIMING.goodLateMs / 1000 && this.combat.tutorialThreatsLeft > 0) {
+    if (next && tapNow && this.combat.tutorialThreatsLeft > 0) {
       const lane: Lane = next.side === 'L' ? 'left' : 'right';
-      this.hud.setHint(lane, lane === 'left' ? '←' : '→');
+      this.hud.setHint(lane, touch ? 'TAP NOW' : lane === 'left' ? '← NOW' : '→ NOW', true);
     } else {
       this.hud.setHint(null, '');
     }
@@ -1639,6 +1663,7 @@ export class Game {
           return t ? { side: t.side, impactAt: t.impactAt, rare: t.rare, guard: t.guard } : null;
         })(),
         fps: this.fps,
+        quality: this.quality.profile.name,
         move: this.player.currentMove.id,
         blades: this.vfx.bladesInFlight,
         props: this.props.activeCount,
@@ -1682,10 +1707,32 @@ export class Game {
 
   private fps = 0;
 
+  private get touchInput(): boolean {
+    return window.matchMedia('(pointer: coarse)').matches;
+  }
+
+  private get flowLane(): Lane | null {
+    const side = this.flowMode.currentSide;
+    return side === null ? null : side === 'L' ? 'left' : 'right';
+  }
+
+  private laneLabel(lane: Lane | null): string {
+    if (!lane) return '';
+    return this.touchInput ? 'TAP' : lane === 'left' ? '←' : '→';
+  }
+
+  private applyFrameQuality(): void {
+    const profile = this.quality.profile;
+    this.renderer.shadowMap.enabled = profile.shadows;
+    this.arena.keyLight.castShadow = profile.shadows;
+    this.arena.setShadowMapSize(profile.shadowMapSize);
+    this.resize();
+  }
+
   private resize(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(this.quality.profile.pixelRatio);
     this.renderer.setSize(w, h, false);
     this.rig.resize(w, h);
   }
