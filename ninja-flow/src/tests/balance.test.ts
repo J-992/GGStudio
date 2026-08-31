@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PROFILES, median, runMany } from './RunModel';
+import { PROFILES, median, runMany, simulateRun } from './RunModel';
 import { UNLOCKS } from '../config';
 import { masteryFor } from '../game/Progression';
 
@@ -146,7 +146,12 @@ describe('Unlock pacing', () => {
     const runsNeededFor = (profile: (typeof PROFILES)[keyof typeof PROFILES]) => {
       let mastery = 0;
       let runsNeeded = 0;
-      for (const r of runMany(profile, RUNS)) {
+      // Simulate lazily: this assertion only needs the prefix up to the unlock.
+      // Building all 24 long runs first made the test scrape Vitest's five-second
+      // limit on GitHub's shared runners even though the answer was known much
+      // earlier.
+      for (let i = 0; i < RUNS; i++) {
+        const r = simulateRun(profile, 1000 + i * 37);
         mastery += masteryFor({
           kills: r.perfects + r.goods,
           perfects: r.perfects,
