@@ -12,6 +12,7 @@ import {
   HITSTOP,
   PAUSE_GRACE,
   SCORE,
+  TIMING,
   TUTORIAL,
   UNLOCKS,
   VFX as VFXCFG,
@@ -255,6 +256,8 @@ export class Game {
 
     this.input.attach();
     this.input.setFirstInputHandler(() => this.onFirstInput());
+    // Acknowledged on the DOM event, a frame or more before the swing resolves.
+    this.input.setPressListener((lane) => this.hud.flashZone(lane));
     this.loop.start();
     this.exposeDevHooks();
     this.state = 'ready';
@@ -347,7 +350,13 @@ export class Game {
     this.hud.setHint(null, '');
     if (waitForInput) {
       const touch = window.matchMedia('(pointer: coarse)').matches;
-      this.hud.setTutorialText(touch ? 'TAP LEFT OR RIGHT TO BEGIN' : 'PRESS ← OR → TO BEGIN');
+      // The pointer is named on desktop too. Embedded in a portal's iframe the
+      // first key press can land on the host page instead of the game, and a
+      // player who never reads "click" has no way past a screen that ignores
+      // the keyboard.
+      this.hud.setTutorialText(
+        touch ? 'TAP LEFT OR RIGHT TO BEGIN' : 'CLICK, OR PRESS ← OR →, TO BEGIN',
+      );
     }
     this.audio.setIntensity(0.25);
   }
@@ -835,16 +844,20 @@ export class Game {
     this.updateTutorialHint(now);
     this.trackRunDepth();
 
-    const press = this.input.consume();
-    if (press && this.attackLock <= 0) {
-      // Convert the real-time press stamp into game time so grading keeps
-      // sub-frame accuracy instead of quantising to the frame boundary.
-      const pressTime = now - press.ageSeconds * this.loop.timeScale;
-      this.resolveSwing(press.lane, pressTime);
-    } else if (press) {
-      // Committed: the press is dropped rather than queued, so mashing during
-      // recovery buys nothing.
-      this.hud.flashZone(press.lane);
+    // The buffer is only drained once control is actually back. Consuming it
+    // during the commitment threw the press away, which made INPUT.bufferMs
+    // dead config and turned a press landing a few milliseconds early into
+    // nothing at all — the single loudest source of "the keys don't respond".
+    // The buffer's own age cap still expires anything stale, so mashing
+    // through a long recovery still buys only one swing.
+    if (this.attackLock <= 0) {
+      const press = this.input.consume();
+      if (press) {
+        // Convert the real-time press stamp into game time so grading keeps
+        // sub-frame accuracy instead of quantising to the frame boundary.
+        const pressTime = now - press.ageSeconds * this.loop.timeScale;
+        this.resolveSwing(press.lane, pressTime);
+      }
     }
 
     const overdue = this.combat.findOverdue(now);
@@ -859,7 +872,6 @@ export class Game {
   }
 
   private resolveSwing(lane: Lane, pressTime: number): void {
-    this.hud.flashZone(lane);
     const target = this.combat.findTarget(lane, pressTime);
     const result = evaluate(pressTime, target ? target.impactAt : null);
 
@@ -1050,14 +1062,23 @@ export class Game {
   private onWhiff(lane: Lane): void {
     // A whiff is a real commitment: full animation, slower recovery, combo
     // reduced. This is the mechanic that makes reading beat mashing.
-    this.attackLock = ATTACK.total * ATTACK.whiffRecoveryScale;
+    //
+    // The lesson is the one exception. A first-timer's instinct is to swing the
+    // moment an enemy appears, and a tutorial enemy walks for over three
+    // seconds before it can be hit — charging the full recovery for that turned
+    // their next two presses into silence and read as broken controls. During
+    // the lesson an early swing costs the swing and nothing else.
+    const learning = !this.tutorialDone;
+    this.attackLock = ATTACK.total * (learning ? 1 : ATTACK.whiffRecoveryScale);
     this.player.attack(lane, false, false);
     this.audio.whiff();
-    this.combo.break();
-    this.flow.onHit('whiff', 1);
-    this.hud.setCombo(0, false);
-    this.hud.setFlow(this.flow.ratio, false);
-    this.hud.callout('MISS', 'miss', lane === 'left' ? 0.3 : 0.7);
+    if (!learning) {
+      this.combo.break();
+      this.flow.onHit('whiff', 1);
+      this.hud.setCombo(0, false);
+      this.hud.setFlow(this.flow.ratio, false);
+    }
+    this.hud.callout(learning ? 'TOO EARLY' : 'MISS', 'miss', lane === 'left' ? 0.3 : 0.7);
   }
 
   /**
@@ -1456,20 +1477,23 @@ export class Game {
       return;
     }
 
+    // A tutorial enemy walks for over three seconds and can only be struck in
+    // the last fraction of that. Naming the lit side as the cue is what stops a
+    // first-timer swinging on sight, whiffing, and concluding the keys are
+    // broken — the glow below is switched on for exactly the connectable window.
+    const untilImpact = next ? next.impactAt - now : Infinity;
+    const connectable = untilImpact <= TIMING.goodEarlyMs / 1000;
+
     let text = '';
     if (this.provedLeft === 0 || this.provedRight === 0) {
       // The direction prompt follows the threat actually on screen, so a missed
       // first enemy can never leave the text pointing at an empty lane.
       const side = next?.side ?? 'L';
-      const firstSide = this.provedLeft === 0 && this.provedRight === 0;
-      if (side === 'L') text = touch ? 'TAP LEFT JUST BEFORE THEIR HIT LANDS' : 'PRESS ← JUST BEFORE THEIR HIT LANDS';
-      else if (firstSide) text = touch ? 'TAP RIGHT JUST BEFORE THEIR HIT LANDS' : 'PRESS → JUST BEFORE THEIR HIT LANDS';
-      else text = touch ? 'NOW TAP RIGHT AT THE LAST SECOND' : 'NOW PRESS → AT THE LAST SECOND';
-      if (side === 'L' && this.provedLeft > 0) text = touch ? 'NOW TAP LEFT AT THE LAST SECOND' : 'NOW PRESS ← AT THE LAST SECOND';
+      const control = side === 'L' ? (touch ? 'TAP LEFT' : 'PRESS ←') : touch ? 'TAP RIGHT' : 'PRESS →';
+      text = connectable ? `${control} NOW` : `WAIT — ${control} WHEN THEIR SIDE LIGHTS UP`;
     } else if (this.combat.tutorialThreatsLeft > 0) {
-      text = this.stats.perfects > 0
-        ? 'PERFECT! LAST-SECOND HITS CHARGE FLOW FASTER'
-        : 'STRIKE JUST AS THEIR ATTACK IS ABOUT TO CONNECT';
+      if (this.stats.perfects > 0) text = 'PERFECT! LAST-SECOND HITS CHARGE FLOW FASTER';
+      else text = connectable ? 'STRIKE NOW' : 'WAIT FOR THE GLOW — THEN STRIKE';
     } else {
       // Tutorial complete: one GO!, remember it, never show any of this again.
       this.tutorialDone = true;
@@ -1485,11 +1509,10 @@ export class Game {
     if (this.provedLeft >= 1) this.measureOnce('tutorialLeft');
     if (this.provedRight >= 1) this.measureOnce('tutorialRight');
 
-    // The directional pulse starts shortly before impact. It teaches which
-    // side is dangerous without turning the exact Perfect frame into a visual
-    // quick-time prompt.
-    const untilImpact = next ? next.impactAt - now : Infinity;
-    if (next && untilImpact < 0.72 && this.combat.tutorialThreatsLeft > 0) {
+    // The pulse is on for the window a swing actually connects in, and off
+    // outside it. Lighting up half a second before the earliest hittable frame
+    // taught the wrong beat: the player pressed on the cue and whiffed.
+    if (next && connectable && untilImpact >= -TIMING.goodLateMs / 1000 && this.combat.tutorialThreatsLeft > 0) {
       const lane: Lane = next.side === 'L' ? 'left' : 'right';
       this.hud.setHint(lane, lane === 'left' ? '←' : '→');
     } else {

@@ -31,7 +31,9 @@ type GameHarness = {
     detach(): void;
     consume(): { lane: 'left' | 'right'; ageSeconds: number } | null;
     setFirstInputHandler(handler: () => void): void;
+    setEnabled(enabled: boolean): void;
   };
+  attackLock: number;
   combat: {
     activeCount(): number;
     consumeTutorialThreat(): void;
@@ -103,6 +105,24 @@ describe('first-run activation', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowLeft' }));
 
     expect(game.state).toBe('playing');
+    expect(game.input.consume()?.lane).toBe('left');
+    game.input.detach();
+  });
+
+  it('keeps a press buffered through the attack commitment instead of eating it', () => {
+    const game = createGame();
+    game.startRun();
+    game.input.attach();
+    game.input.setEnabled(true);
+    // Mid-swing: the player is committed and cannot act yet.
+    game.attackLock = 0.2;
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowLeft' }));
+    game.update({ dt: 1 / 60, dtReal: 1 / 60, time: 1 / 60 });
+
+    // The frame ran without consuming it, so the press is still waiting to
+    // resolve the moment control returns — silence here is what made the
+    // controls read as broken.
     expect(game.input.consume()?.lane).toBe('left');
     game.input.detach();
   });

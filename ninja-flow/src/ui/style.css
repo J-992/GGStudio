@@ -52,6 +52,9 @@ body {
   width: 100%;
   height: 100%;
   touch-action: none;
+  /* It carries a tabindex so the game can claim keyboard focus inside a portal
+     iframe; the focus ring itself has no place over the arena. */
+  outline: none;
 }
 
 #ui {

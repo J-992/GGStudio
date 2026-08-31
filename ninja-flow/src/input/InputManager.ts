@@ -15,6 +15,7 @@ export class InputManager {
   private enabled = false;
   private firstInputFired = false;
   private onFirstInput: (() => void) | null = null;
+  private onPress: ((lane: Lane) => void) | null = null;
   private disposers: Array<() => void> = [];
 
   constructor(private readonly surface: HTMLElement) {}
@@ -29,8 +30,17 @@ export class InputManager {
     };
 
     const pointer = (e: PointerEvent) => {
-      // Ignore synthetic mouse events that follow a touch on hybrid devices.
-      if (!e.isPrimary) return;
+      // The game usually runs inside a portal's iframe, where a key press only
+      // arrives once something in this document holds focus. Every touch of the
+      // arena reclaims it, so a player who clicks the game before typing never
+      // meets a dead keyboard.
+      this.claimFocus();
+      // Every finger counts. Two-thumb play is the normal way to hold a phone
+      // for this game, and the second thumb's pointer is never the primary one
+      // — filtering on `isPrimary` silently ate half a mobile player's taps.
+      // Only a non-left mouse button is ignored; the synthetic mouse event that
+      // follows a touch is already suppressed by preventDefault below.
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       e.preventDefault();
       const rect = this.surface.getBoundingClientRect();
       const lane: Lane = e.clientX - rect.left < rect.width / 2 ? 'left' : 'right';
@@ -38,21 +48,35 @@ export class InputManager {
     };
 
     const block = (e: Event) => e.preventDefault();
+    // Rubber-band scrolling is only stolen from the arena itself. A menu list
+    // or a wardrobe row is a real scroller and has to keep its own gestures.
+    const blockDrag = (e: TouchEvent) => {
+      if (e.target === this.surface) e.preventDefault();
+    };
+
+    // Claimed up front too: a first-time player is dropped straight into a run
+    // with nothing to click, and their very first arrow key has to count.
+    this.claimFocus();
+    const refocus = () => {
+      if (!document.hidden) this.claimFocus();
+    };
+    document.addEventListener('visibilitychange', refocus);
 
     window.addEventListener('keydown', key, { passive: false });
     this.surface.addEventListener('pointerdown', pointer, { passive: false });
     this.surface.addEventListener('contextmenu', block);
     this.surface.addEventListener('dragstart', block);
     // Stop rubber-band scrolling and double-tap zoom from stealing taps.
-    document.addEventListener('touchmove', block, { passive: false });
+    document.addEventListener('touchmove', blockDrag, { passive: false });
     document.addEventListener('gesturestart', block as EventListener);
 
     this.disposers = [
+      () => document.removeEventListener('visibilitychange', refocus),
       () => window.removeEventListener('keydown', key),
       () => this.surface.removeEventListener('pointerdown', pointer),
       () => this.surface.removeEventListener('contextmenu', block),
       () => this.surface.removeEventListener('dragstart', block),
-      () => document.removeEventListener('touchmove', block),
+      () => document.removeEventListener('touchmove', blockDrag as EventListener),
       () => document.removeEventListener('gesturestart', block as EventListener),
     ];
   }
@@ -77,6 +101,17 @@ export class InputManager {
   }
 
   /**
+   * Fires on every accepted press, at the DOM event rather than the next frame.
+   *
+   * Acknowledgement is not the same as resolution: a press that arrives mid
+   * commitment still waits its turn in the buffer, but the player must see the
+   * game react to their finger immediately or the control reads as dead.
+   */
+  setPressListener(fn: (lane: Lane) => void): void {
+    this.onPress = fn;
+  }
+
+  /**
    * Consumes a pending press, reporting how long ago it physically happened.
    *
    * The age is REAL seconds, measured from the DOM event rather than the frame
@@ -96,6 +131,22 @@ export class InputManager {
     return { lane, ageSeconds };
   }
 
+  /**
+   * Pulls keyboard focus into this document, and into the arena within it.
+   *
+   * Both halves matter and neither throws when it is not allowed: `window.focus`
+   * is what moves focus out of a host page and into the game's frame, and the
+   * surface's own focus is what keeps it off any button that was clicked last.
+   */
+  private claimFocus(): void {
+    try {
+      window.focus();
+      if (document.activeElement !== this.surface) this.surface.focus({ preventScroll: true });
+    } catch {
+      // A sandboxed or cross-origin host may refuse; the pointer still plays.
+    }
+  }
+
   /** Real-time clock, in seconds — unaffected by hit-stop or slow motion. */
   private now(): number {
     return performance.now() / 1000;
@@ -107,6 +158,7 @@ export class InputManager {
       this.onFirstInput?.();
     }
     if (!this.enabled) return;
+    this.onPress?.(lane);
     // One slot only. A newer press replaces an older one rather than stacking:
     // the player's latest intent is always the one that resolves.
     if (INPUT.maxBuffered >= 1) this.buffered = { lane, at: this.now() };

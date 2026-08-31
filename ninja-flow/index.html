@@ -19,7 +19,9 @@
   </head>
   <body>
     <div id="app">
-      <canvas id="scene"></canvas>
+      <!-- Focusable on purpose: embedded in a portal iframe, keyboard events
+           only reach the game once something inside it holds focus. -->
+      <canvas id="scene" tabindex="0"></canvas>
       <div id="ui"></div>
     </div>
     <script type="module" src="./src/main.ts"></script>
