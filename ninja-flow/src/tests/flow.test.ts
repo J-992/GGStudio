@@ -91,6 +91,18 @@ describe('Flow chain cue', () => {
     expect(flow.hitCount).toBe(1);
   });
 
+  it('waits indefinitely for a first-ever Flow input instead of failing the showcase', () => {
+    const flow = new FlowMode(new Scene(), new Rng(14));
+    flow.start(0, 0, true);
+    const wanted = flow.currentSide;
+
+    for (let i = 0; i < 12 * 60; i += 1) flow.update(1 / 60, i / 60);
+
+    expect(flow.active).toBe(true);
+    expect(flow.currentSide).toBe(wanted);
+    expect(flow.drain().some((event) => event.type === 'miss')).toBe(false);
+  });
+
   it('never leaves the player without a cue at any point in the chain', () => {
     // The invariant that was missing: from the moment Flow starts until it
     // ends, there is always a side being shown.

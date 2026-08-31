@@ -211,6 +211,7 @@ export const MEASURE = {
   tutorialLeft: ['tutorial', 'left-complete'],
   tutorialRight: ['tutorial', 'right-complete'],
   tutorialTiming: ['tutorial', 'timing-complete'],
+  timingAssist: ['timing', 'assist-used'],
   firstPerfect: ['milestone', 'first-perfect'],
   firstCombo10: ['milestone', 'first-combo-10'],
   firstGuardBreak: ['milestone', 'first-guard-break'],

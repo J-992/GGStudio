@@ -4,7 +4,7 @@ import type { Rng } from '../core/Rng';
 import { Enemy } from './Enemy';
 import type { Props } from '../fx/Props';
 import { PatternDirector, type ScheduledThreat, type Side } from './PatternDirector';
-import { isTargetable } from './TimingEvaluator';
+import { isTargetable, type TimingWindow } from './TimingEvaluator';
 import type { Lane } from '../input/InputManager';
 import type { ContactImpulse } from './CombatContact';
 
@@ -97,7 +97,7 @@ export class CombatDirector {
    * Priority: earliest impact on that side, then nearest — deterministic, so
    * the same screen always resolves the same way.
    */
-  findTarget(lane: Lane, now: number): Enemy | null {
+  findTarget(lane: Lane, now: number, window?: TimingWindow): Enemy | null {
     const side: Side = lane === 'left' ? 'L' : 'R';
     let best: Enemy | null = null;
     for (const e of this.pool) {
@@ -106,7 +106,7 @@ export class CombatDirector {
       // swing at one into an ordinary whiff, with the whiff's existing cost,
       // rather than needing a punishment of its own.
       if (e.feint) continue;
-      if (!isTargetable(now, e.impactAt)) continue;
+      if (!isTargetable(now, e.impactAt, window)) continue;
       if (!best) {
         best = e;
         continue;

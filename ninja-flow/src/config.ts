@@ -18,6 +18,21 @@ export const TIMING = {
    * the threat keeps coming. This is what makes mashing strictly worse.
    */
   whiffBeyondMs: 900,
+  /**
+   * Rolling assistance starts around the error measured in portal cold opens,
+   * then collapses back to the authored windows as the player's presses sharpen.
+   * PERFECT never changes; assistance only turns near misses into GOOD hits.
+   */
+  assist: {
+    initialErrorMs: 320,
+    maxEarlyMs: 600,
+    maxLateMs: 360,
+    earlyScale: 1.55,
+    earlyPaddingMs: 105,
+    lateScale: 0.85,
+    latePaddingMs: 80,
+    smoothing: 0.22,
+  },
 } as const;
 
 export const ATTACK = {
@@ -104,11 +119,10 @@ export const FLOW = {
   /**
    * Flow the meter starts with on a player's very first run, and only then.
    *
-   * Flow Mode is the game's best moment and the thing its name promises, and a
-   * scrappy first-timer takes about thirty seconds to earn one — long enough on
-   * a portal to lose them before they ever see it. Starting the first run part
-   * way up brings the signature mechanic inside the first ten seconds without
-   * touching the economy of any later run.
+   * Flow Mode is the game's best moment and the thing its name promises. The
+   * protected showcase starts part-way up so visible hits still move the meter,
+   * while TUTORIAL holds the activation for its deliberate 18–20 second hook.
+   * Ordinary runs start empty and keep the earned economy below.
    */
   firstRunHead: 55,
 } as const;
@@ -152,8 +166,11 @@ export const PAUSE_GRACE = 1.1;
 
 export const HEALTH = {
   hearts: 4,
-  /** Invulnerable recovery after taking a hit. */
-  recovery: 0.65,
+  /**
+   * Invulnerable recovery after taking a hit. Long enough to clear a full
+   * opening threat beat, so four hearts taper instead of vanishing in a burst.
+   */
+  recovery: 1.8,
 } as const;
 
 export const ENEMY = {
@@ -221,7 +238,7 @@ export const DIFFICULTY = {
  */
 export const GUARD = {
   /** No guarded enemy before this point in a run. */
-  fromSeconds: 40,
+  fromSeconds: 60,
   /** Share of threats carrying a guard, at introduction and at full ramp. */
   chanceStart: 0.14,
   chanceMax: 0.38,
@@ -347,6 +364,9 @@ export const TUTORIAL = {
   /** The first-ever Flow gives players time to read an unfamiliar state. */
   flowFirstWindow: 3.5,
   flowWindowScale: 1.35,
+  /** First Flow is a paced showcase: never too early, never hidden past churn. */
+  flowEarliestSeconds: 18,
+  flowForceSeconds: 20,
   slowDecay: 0.12,
   /** Prompts fade out once the player has proven each side this many times. */
   proveCount: 1,

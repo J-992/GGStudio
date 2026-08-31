@@ -19,6 +19,7 @@ vi.mock('three', async (importOriginal) => {
 
 import { Game } from '../game/Game';
 import { Rng } from '../core/Rng';
+import { loadSave, saveSave } from '../core/Storage';
 import { TUTORIAL } from '../config';
 
 type GameHarness = {
@@ -52,6 +53,7 @@ type GameHarness = {
   update(frame: { dt: number; dtReal: number; time: number }): void;
   onFirstInput(): void;
   onThreatLands(enemy: GameHarness['combat']['liveThreats'][number]): void;
+  exitFlow(now: number, completed: boolean): void;
 };
 
 function createGame(): GameHarness {
@@ -65,6 +67,7 @@ describe('first-run activation', () => {
   beforeEach(() => {
     document.body.replaceChildren();
     localStorage.clear();
+    saveSave({ runs: 0, seenFlowTip: false, tutorialVersion: 0 });
     const gradient = { addColorStop: vi.fn() };
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(((kind: string) =>
       kind === '2d'
@@ -128,6 +131,7 @@ describe('first-run activation', () => {
   });
 
   it('ends automatic block protection when the configured practice threats are spent', () => {
+    saveSave({ runs: 1, seenFlowTip: true, tutorialVersion: TUTORIAL.version });
     const game = createGame();
     game.startRun();
     for (let i = 0; i < TUTORIAL.safeThreats; i += 1) game.combat.consumeTutorialThreat();
@@ -137,5 +141,44 @@ describe('first-run activation', () => {
     game.onThreatLands(enemy);
 
     expect(game.hearts).toBe(3);
+  });
+
+  it('keeps the Flow-showcase run unloseable after practice threats are spent', () => {
+    const game = createGame();
+    game.startRun();
+    for (let i = 0; i < TUTORIAL.safeThreats; i += 1) game.combat.consumeTutorialThreat();
+    const enemy = game.combat.liveThreats[0];
+    enemy.spawn({ side: 'L', impactAt: 0, spawnAt: 0, approach: 1, rare: false, rng: new Rng(5) });
+
+    game.onThreatLands(enemy);
+
+    expect(game.hearts).toBe(4);
+    expect(document.body.textContent).toContain('TRAINING SHIELD');
+  });
+
+  it('forces the first Flow showcase at the configured hook time', () => {
+    const game = createGame();
+    game.startRun();
+
+    game.update({
+      dt: 1 / 60,
+      dtReal: 1 / 60,
+      time: TUTORIAL.flowForceSeconds + 0.1,
+    });
+
+    expect(game.state).toBe('flow');
+  });
+
+  it('ends the protected opening run on a completed Flow instead of a death', () => {
+    const game = createGame();
+    game.startRun();
+
+    game.exitFlow(22, true);
+
+    expect(game.state).toBe('gameover');
+    expect(loadSave().seenFlowTip).toBe(true);
+    expect(loadSave().runs).toBe(1);
+    expect(document.body.textContent).toContain('FLOW MASTERED');
+    expect(document.body.textContent).toContain('NEXT RUN');
   });
 });

@@ -17,6 +17,8 @@ export interface GameOverData {
   completedDailies: Daily[];
   /** True when a rewarded continue is available and has not been used. */
   canContinue: boolean;
+  /** The protected opening run ended in its promised Flow finisher, not death. */
+  showcaseComplete: boolean;
 }
 
 /**
@@ -69,6 +71,7 @@ export class GameOverScreen {
         <span class="btn__sub">WATCH AN AD · ONCE PER RUN</span>
       </button>
       <button class="btn" type="button">PLAY AGAIN</button>
+      <div class="over__retry-hint">TAP ANYWHERE OR PRESS ← / →</div>
       <button class="chip chip--menu" type="button" data-menu>MENU</button>
       <div class="unlock">
         <div class="unlock__label"></div>
@@ -99,6 +102,13 @@ export class GameOverScreen {
       this.onContinue?.();
     });
     this.el.querySelector('[data-menu]')!.addEventListener('click', () => this.onMenu?.());
+    // `click` fires for a deliberate tap but not a drag/scroll gesture, so the
+    // whole quiet area is a retry target without hijacking mobile scrolling.
+    this.el.addEventListener('click', (event) => {
+      const target = event.target as Element | null;
+      if (target?.closest('button')) return;
+      this.onPlay?.();
+    });
   }
 
   setHandlers(
@@ -126,7 +136,8 @@ export class GameOverScreen {
     this.flowEl.textContent = `${data.flowChains}`;
 
     const beat = data.score > data.previousBest && data.previousBest > 0;
-    this.newEl.textContent = beat ? 'NEW BEST' : '';
+    this.newEl.textContent = data.showcaseComplete ? 'FLOW MASTERED' : beat ? 'NEW BEST' : '';
+    this.playBtn.textContent = data.showcaseComplete ? 'NEXT RUN' : 'PLAY AGAIN';
 
     // "So close" framing only when it is genuinely close — a manipulative
     // near-miss message on a distant score reads as noise and gets ignored.

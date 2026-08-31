@@ -1,9 +1,10 @@
 import { Scene } from 'three';
-import { ENEMY, FLOW, GUARD, HEALTH, SCORE, TIMING } from '../config';
+import { ENEMY, FLOW, GUARD, HEALTH, SCORE, TIMING, TUTORIAL } from '../config';
 import { CombatDirector } from '../game/CombatDirector';
 import { ComboSystem } from '../game/ComboSystem';
 import { FlowSystem } from '../game/FlowSystem';
 import { evaluate } from '../game/TimingEvaluator';
+import { TimingAssist } from '../game/TimingAssist';
 import { Rng } from '../core/Rng';
 import type { Enemy } from '../game/Enemy';
 
@@ -25,6 +26,8 @@ export interface PlayerProfile {
   errorSeconds: number;
   /** Probability of failing to answer a threat at all. */
   missRate: number;
+  /** Chance an attempted answer chooses the wrong side; 50% models blind mashing. */
+  wrongLaneRate?: number;
   /** Probability of fumbling any single Flow input. */
   flowFumbleRate: number;
   /**
@@ -33,6 +36,11 @@ export interface PlayerProfile {
    * sharpen over the first half minute; Infinity disables learning (masher).
    */
   learnSeconds: number;
+}
+
+export interface RunOptions {
+  /** Models the protected, forced-Flow showcase shown before ordinary runs. */
+  firstFlowShowcase?: boolean;
 }
 
 export interface RunResult {
@@ -57,7 +65,12 @@ export interface RunResult {
 const DT = 1 / 60;
 const ATTACK_LOCK = 0.335;
 
-export function simulateRun(profile: PlayerProfile, seed: number, maxSeconds = 400): RunResult {
+export function simulateRun(
+  profile: PlayerProfile,
+  seed: number,
+  maxSeconds = 400,
+  options: RunOptions = {},
+): RunResult {
   // Two independent streams, deliberately.
   //
   // The director's stream belongs to the GAME: spawn patterns, rare targets,
@@ -73,8 +86,10 @@ export function simulateRun(profile: PlayerProfile, seed: number, maxSeconds = 4
   const director = new CombatDirector(new Scene(), rng);
   const flow = new FlowSystem();
   const combo = new ComboSystem();
+  const timingAssist = new TimingAssist();
 
   director.reset(0);
+  flow.reset(options.firstFlowShowcase ? FLOW.firstRunHead : 0);
 
   let now = 0;
   let hearts = HEALTH.hearts;
@@ -94,7 +109,7 @@ export function simulateRun(profile: PlayerProfile, seed: number, maxSeconds = 4
    * Keyed by impact time, NOT by Enemy instance — the pool recycles instances,
    * and a stale per-instance plan would silently mark new threats as handled.
    */
-  const plan = new Map<string, { at: number | null; done: boolean }>();
+  const plan = new Map<string, { at: number | null; done: boolean; lane: 'left' | 'right' }>();
   const keyOf = (e: Enemy) => e.impactAt.toFixed(4);
 
   while (hearts > 0 && now < maxSeconds) {
@@ -112,7 +127,10 @@ export function simulateRun(profile: PlayerProfile, seed: number, maxSeconds = 4
       if (!enemy.isThreat || plan.has(keyOf(enemy))) continue;
       const miss = playerRng.next() < profile.missRate * learn;
       const jitter = gaussian(playerRng) * profile.errorSeconds * learn;
-      plan.set(keyOf(enemy), { at: miss ? null : enemy.impactAt + jitter, done: false });
+      const intended = enemy.side === 'L' ? 'left' : 'right';
+      const wrong = playerRng.next() < (profile.wrongLaneRate ?? 0);
+      const lane = wrong ? (intended === 'left' ? 'right' : 'left') : intended;
+      plan.set(keyOf(enemy), { at: miss ? null : enemy.impactAt + jitter, done: false, lane });
     }
 
     // Swing.
@@ -124,8 +142,10 @@ export function simulateRun(profile: PlayerProfile, seed: number, maxSeconds = 4
 
       if (lock > 0) continue; // Committed to a previous swing: the press is lost.
 
-      const target = director.findTarget(enemy.side === 'L' ? 'left' : 'right', now);
-      const quality = evaluate(now, target ? target.impactAt : null).quality;
+      const target = director.findTarget(p.lane, now, timingAssist.window);
+      const timing = evaluate(now, target ? target.impactAt : null, timingAssist.window);
+      if (target) timingAssist.observe(timing.errorMs);
+      const quality = timing.quality;
 
       if (quality === 'perfect' || quality === 'good') {
         lock = ATTACK_LOCK;
@@ -161,7 +181,7 @@ export function simulateRun(profile: PlayerProfile, seed: number, maxSeconds = 4
     // Unanswered threats land.
     const overdue = director.findOverdue(now);
     if (overdue) {
-      const safe = director.tutorialThreatsLeft > 0 || recovery > 0;
+      const safe = options.firstFlowShowcase || director.tutorialThreatsLeft > 0 || recovery > 0;
       director.consumeTutorialThreat();
       director.rearmAfterLanding(overdue, now, 0);
       combo.break();
@@ -174,13 +194,19 @@ export function simulateRun(profile: PlayerProfile, seed: number, maxSeconds = 4
       }
     }
 
-    // Flow Mode.
-    if (flow.isFull) {
+    if (options.firstFlowShowcase && now >= TUTORIAL.flowForceSeconds && !flow.isFull) {
+      flow.boost(FLOW.max);
+    }
+
+    // Flow Mode. The showcase is held until the hook beat even if a skilled
+    // player fills early, and force-filled there when the cold player did not.
+    const flowReady = !options.firstFlowShowcase || now >= TUTORIAL.flowEarliestSeconds;
+    if (flow.isFull && flowReady) {
       result.tFirstFlow ??= now;
       const targets = FLOW.minTargets + rng.int(FLOW.maxTargets - FLOW.minTargets + 1);
       let completed = true;
       for (let i = 0; i < targets + 1; i++) {
-        if (playerRng.next() < profile.flowFumbleRate) {
+        if (!options.firstFlowShowcase && playerRng.next() < profile.flowFumbleRate) {
           completed = false;
           break;
         }
@@ -199,6 +225,7 @@ export function simulateRun(profile: PlayerProfile, seed: number, maxSeconds = 4
       const pause = FLOW.activationHold + targets * 0.4 + FLOW.recoverPause;
       now += pause;
       director.delayTo(now + FLOW.recoverPause);
+      if (options.firstFlowShowcase && completed) break;
     }
 
     // Drop plans whose moment has long passed so the map cannot grow forever.
@@ -231,11 +258,19 @@ export function simulateRun(profile: PlayerProfile, seed: number, maxSeconds = 4
 
 /** Player archetypes used across the balance tests. */
 export const PROFILES = {
+  /** Observed portal cold-open player: broad timing error and frequent missed reads. */
+  coldOpen: { errorSeconds: 0.32, missRate: 0.4, flowFumbleRate: 0.22, learnSeconds: 28 },
   firstTimer: { errorSeconds: 0.16, missRate: 0.16, flowFumbleRate: 0.14, learnSeconds: 22 },
   casual: { errorSeconds: 0.1, missRate: 0.07, flowFumbleRate: 0.07, learnSeconds: 30 },
   competent: { errorSeconds: 0.06, missRate: 0.03, flowFumbleRate: 0.03, learnSeconds: 40 },
   expert: { errorSeconds: 0.03, missRate: 0.005, flowFumbleRate: 0.01, learnSeconds: 60 },
-  masher: { errorSeconds: 0.5, missRate: 0.02, flowFumbleRate: 0.3, learnSeconds: Infinity },
+  masher: {
+    errorSeconds: 0.5,
+    missRate: 0.02,
+    wrongLaneRate: 0.5,
+    flowFumbleRate: 0.3,
+    learnSeconds: Infinity,
+  },
 } as const satisfies Record<string, PlayerProfile>;
 
 /** Box-Muller, clipped, so timing error is bell-shaped rather than uniform. */
@@ -251,8 +286,8 @@ export function median(values: number[]): number {
   return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
 }
 
-export function runMany(profile: PlayerProfile, count: number): RunResult[] {
-  return Array.from({ length: count }, (_, i) => simulateRun(profile, 1000 + i * 37));
+export function runMany(profile: PlayerProfile, count: number, options: RunOptions = {}): RunResult[] {
+  return Array.from({ length: count }, (_, i) => simulateRun(profile, 1000 + i * 37, 400, options));
 }
 
 void TIMING;

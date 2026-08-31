@@ -68,6 +68,7 @@ import { commitRun, unlockState, type RunStats } from './Progression';
 import { phaseIndexFor } from './PatternDirector';
 import { MODEL_WEAPONS, setWeaponModelSupplier } from './Weapons';
 import { evaluate } from './TimingEvaluator';
+import { TimingAssist } from './TimingAssist';
 import { flowInstruction, perfectInstruction, type PerfectCuePhase } from './TutorialPrompts';
 
 type GameState =
@@ -113,6 +114,7 @@ export class Game {
   private readonly flowMode: FlowMode;
   private readonly flow = new FlowSystem();
   private readonly combo = new ComboSystem();
+  private readonly timingAssist = new TimingAssist();
   private readonly input: InputManager;
   private readonly audio = new AudioEngine();
   private readonly hud: HUD;
@@ -140,6 +142,9 @@ export class Game {
   private provedLeft = 0;
   private provedRight = 0;
   private flowTutorialActive = false;
+  /** Protected run that ends only after the player completes their first Flow. */
+  private firstFlowShowcase = false;
+  private showcaseComplete = false;
   private deathTimer = 0;
   private flashLight = 0;
   private measured = new Set<MeasureKey>();
@@ -330,12 +335,15 @@ export class Game {
     this.provedLeft = 0;
     this.provedRight = 0;
     this.flowTutorialActive = false;
+    this.firstFlowShowcase = !save.seenFlowTip;
+    this.showcaseComplete = false;
     this.pendingPlayerHit = null;
 
     this.combo.reset();
-    // A brand-new player's meter starts part-way up so they meet Flow inside
-    // their first few seconds. Every later run starts from nothing.
-    this.flow.reset(save.runs === 0 ? FLOW.firstRunHead : 0);
+    // The first Flow showcase starts part-way up so successful lesson hits make
+    // visible progress toward its fixed hook beat. Every later run starts empty.
+    this.flow.reset(this.firstFlowShowcase ? FLOW.firstRunHead : 0);
+    this.timingAssist.reset(save.timingErrorMs, save.timingSamples);
     this.props.clear();
     this.moments.reset();
     this.flowMode.abort();
@@ -357,9 +365,10 @@ export class Game {
 
     this.hud.resetScore();
     this.hud.setHealth(this.hearts);
+    this.hud.setTrainingShield(this.firstFlowShowcase);
     this.hud.setBest(save.best);
     this.hud.setCombo(0, false);
-    this.hud.setFlow(0, false);
+    this.hud.setFlow(this.flow.ratio, false);
     this.hud.setHint(null, '');
     if (waitForInput) {
       const touch = window.matchMedia('(pointer: coarse)').matches;
@@ -531,6 +540,15 @@ export class Game {
   }
 
   private onGlobalKey(e: KeyboardEvent): void {
+    if (
+      this.state === 'gameover' &&
+      !e.repeat &&
+      ['KeyA', 'KeyD', 'ArrowLeft', 'ArrowRight'].includes(e.code)
+    ) {
+      e.preventDefault();
+      void this.replay();
+      return;
+    }
     if (e.code !== 'Escape' && e.code !== 'KeyP') return;
     if (this.state === 'playing' || this.state === 'flow' || this.state === 'paused') {
       e.preventDefault();
@@ -539,6 +557,9 @@ export class Game {
   }
 
   private async replay(): Promise<void> {
+    if (this.state !== 'gameover') return;
+    // Locks out a second reflex tap while the between-run ad is opening.
+    this.state = 'ready';
     this.audio.ui();
     this.platform.measure(MEASURE.replayInteract[0], MEASURE.replayInteract[1]);
     this.gameOver.hide();
@@ -888,15 +909,35 @@ export class Game {
 
     for (const held of this.combat.collectHeldFeints(now)) this.onFeintHeld(held);
 
-    // Flow arms itself the instant the meter fills. No third button, and no
-    // waiting for a clean field — the live threats are swept up by the
-    // activation, which is part of the payoff.
-    if (this.flow.isFull && !this.pendingPlayerHit) this.enterFlow(now);
+    // First Flow is a paced showcase. Skilled play can fill the meter early,
+    // but the scene waits until the lesson has had time to land; cold play is
+    // force-filled at the hook beat so nobody leaves without seeing the game.
+    if (
+      this.firstFlowShowcase &&
+      this.elapsed >= TUTORIAL.flowForceSeconds &&
+      !this.flow.isFull
+    ) {
+      this.flow.boost(FLOW.max);
+      this.hud.setFlow(1, true);
+    }
+    const flowReady = !this.firstFlowShowcase || this.elapsed >= TUTORIAL.flowEarliestSeconds;
+    if (this.flow.isFull && flowReady && !this.pendingPlayerHit) this.enterFlow(now);
   }
 
   private resolveSwing(lane: Lane, pressTime: number): void {
-    const target = this.combat.findTarget(lane, pressTime);
-    const result = evaluate(pressTime, target ? target.impactAt : null);
+    const window = this.timingAssist.window;
+    const target = this.combat.findTarget(lane, pressTime, window);
+    const result = evaluate(pressTime, target ? target.impactAt : null, window);
+    if (target) {
+      const authored = evaluate(pressTime, target.impactAt);
+      this.timingAssist.observe(result.errorMs);
+      if (
+        result.quality === 'good' &&
+        (authored.quality === 'whiff' || authored.quality === 'late')
+      ) {
+        this.measureOnce('timingAssist');
+      }
+    }
 
     if (!target || result.quality === 'whiff' || result.quality === 'late') {
       this.onWhiff(lane);
@@ -1137,10 +1178,11 @@ export class Game {
     if (missedGuard && !loadSave().seenGuardTip) saveSave({ seenGuardTip: true });
     if (missedRare && !loadSave().seenRareTip) saveSave({ seenRareTip: true });
 
-    // Tutorial safety is a finite practice window. Keeping it tied to an
-    // unproven side made an idle player block forever and eventually collect
-    // passive feint rewards, which looked exactly like autoplay.
-    const safe = this.combat.tutorialThreatsLeft > 0 || this.recovery > 0;
+    // The ordinary timing lesson is finite; the one-time Flow showcase extends
+    // safety to its promised finisher. It still consumes threats, so an idle
+    // player never farms passive feint rewards or appears to autoplay.
+    const safe =
+      this.firstFlowShowcase || this.combat.tutorialThreatsLeft > 0 || this.recovery > 0;
     this.combat.consumeTutorialThreat();
 
     if (safe) {
@@ -1181,7 +1223,7 @@ export class Game {
     this.cancelPendingPlayerHit();
     this.state = 'flow';
     this.combat.clearThreats(this.player.worldX);
-    this.flowTutorialActive = !loadSave().seenFlowTip;
+    this.flowTutorialActive = this.firstFlowShowcase || !loadSave().seenFlowTip;
     this.flowMode.start(this.player.worldX, now, this.flowTutorialActive);
     this.loop.setTimeScale(FLOW.timeScale);
     this.rig.setFlow(true);
@@ -1288,7 +1330,8 @@ export class Game {
   }
 
   private exitFlow(now: number, completed: boolean): void {
-    if (this.flowTutorialActive && completed) saveSave({ seenFlowTip: true });
+    const completesShowcase = this.firstFlowShowcase && completed;
+    if ((this.flowTutorialActive || completesShowcase) && completed) saveSave({ seenFlowTip: true });
     this.flow.consume(completed);
     if (completed) {
       this.stats.flows += 1;
@@ -1308,6 +1351,14 @@ export class Game {
     this.player.reset();
     // Guarantee a readable first threat after the cinematic camera settles.
     this.combat.delayTo(now + FLOW.recoverPause);
+    if (completesShowcase) {
+      this.firstFlowShowcase = false;
+      this.showcaseComplete = true;
+      this.input.setEnabled(false);
+      this.platform.gameplayStop();
+      this.commitRunStats();
+      this.presentGameOver();
+    }
   }
 
   // ---------------------------------------------------------------- death
@@ -1419,6 +1470,8 @@ export class Game {
       // The score to beat on the next run. Written even on a bad run: chasing
       // your last attempt is the point, not chasing your best.
       lastScore: this.score,
+      timingErrorMs: this.timingAssist.snapshot.errorMs,
+      timingSamples: this.timingAssist.snapshot.samples,
     });
 
     if (newlyUnlocked.length > 0) {
@@ -1467,7 +1520,8 @@ export class Game {
       unlock: this.pendingState,
       newlyUnlocked: this.pendingUnlocks,
       completedDailies: this.completedDailies,
-      canContinue: !this.continueUsed && this.platform.canReward,
+      canContinue: !this.showcaseComplete && !this.continueUsed && this.platform.canReward,
+      showcaseComplete: this.showcaseComplete,
       selected: this.selected,
       available: (UNLOCKS.order as readonly CharacterId[]).filter((id) => this.assets.isLoaded(id)),
     };
@@ -1485,7 +1539,12 @@ export class Game {
 
     if (this.tutorialDone) {
       const save = loadSave();
-      if (next?.feint && !save.seenFeintTip) {
+      if (this.firstFlowShowcase) {
+        const remaining = Math.max(0, Math.ceil(TUTORIAL.flowForceSeconds - this.elapsed));
+        this.hud.setTutorialText(
+          remaining > 0 ? `TRAINING SHIELD ACTIVE · FLOW IN ${remaining}` : 'FLOW READY',
+        );
+      } else if (next?.feint && !save.seenFeintTip) {
         // Ahead of the others: a feint punishes the reflex the whole rest of
         // the game rewards, so it is the one mechanic that must never be
         // discovered by being caught out.
@@ -1587,6 +1646,7 @@ export class Game {
       this.state = 'playing';
       this.runStart = this.loopTime;
       this.hud.setTutorialText('');
+      if (this.firstFlowShowcase) this.hud.banner('TRAINING RUN · BUILD FLOW');
       this.input.setEnabled(true);
       this.platform.gameplayStart();
       return;

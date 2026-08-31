@@ -42,6 +42,21 @@ describe('First-minute experience', () => {
   });
 });
 
+describe('Cold-open retention', () => {
+  it('makes the first run a protected Flow showcase for the observed audience', () => {
+    const runs = runMany(PROFILES.coldOpen, RUNS, { firstFlowShowcase: true });
+    expect(runs.every((run) => run.tFirstDamage === null)).toBe(true);
+    expect(runs.every((run) => run.tFirstFlow !== null && run.tFirstFlow <= 22)).toBe(true);
+    expect(runs.every((run) => run.tFirstFlowComplete !== null)).toBe(true);
+    expect(median(runs.map((run) => run.survived))).toBeGreaterThanOrEqual(20);
+  }, 15_000);
+
+  it('removes the immediate run-two death cliff for the same cold-open player', () => {
+    const runs = runMany(PROFILES.coldOpen, RUNS);
+    expect(median(runs.map((run) => run.survived))).toBeGreaterThan(20);
+  }, 15_000);
+});
+
 describe('Run shape', () => {
   it('gives competent players runs in the intended 1.5-3.5 minute band', () => {
     const runs = runMany(PROFILES.competent, RUNS);

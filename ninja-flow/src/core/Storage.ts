@@ -1,3 +1,5 @@
+import { TIMING } from '../config';
+
 /**
  * localStorage that can never take the game down.
  *
@@ -30,6 +32,9 @@ export interface SaveData {
   daily: { day: string; progress: Record<string, number>; claimed: string[] };
   /** Score of the previous finished run, chased on the HUD during the next one. */
   lastScore: number;
+  /** Persisted rolling timing estimate used to personalise GOOD, never PERFECT. */
+  timingErrorMs: number;
+  timingSamples: number;
 }
 
 const DEFAULTS: SaveData = {
@@ -50,6 +55,8 @@ const DEFAULTS: SaveData = {
   loadouts: {},
   daily: { day: '', progress: {}, claimed: [] },
   lastScore: 0,
+  timingErrorMs: TIMING.assist.initialErrorMs,
+  timingSamples: 0,
 };
 
 let memory: SaveData | null = null;
@@ -144,6 +151,8 @@ function sanitize(input: Record<string, unknown>): SaveData {
     loadouts: sanitizeLoadouts(input.loadouts),
     daily: sanitizeDaily(input.daily),
     lastScore: Math.max(0, num(input.lastScore, 0)),
+    timingErrorMs: Math.max(0, num(input.timingErrorMs, DEFAULTS.timingErrorMs)),
+    timingSamples: Math.max(0, Math.floor(num(input.timingSamples, 0))),
   };
 }
 

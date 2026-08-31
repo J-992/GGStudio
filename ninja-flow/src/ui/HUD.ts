@@ -11,6 +11,7 @@ import type { Lane } from '../input/InputManager';
  */
 export class HUD {
   private readonly root: HTMLDivElement;
+  private readonly heartsEl: HTMLDivElement;
   private readonly hearts: HTMLDivElement[] = [];
   private readonly scoreEl: HTMLDivElement;
   private readonly bestEl: HTMLDivElement;
@@ -60,13 +61,18 @@ export class HUD {
     `;
     parent.appendChild(this.root);
 
-    const heartsEl = this.root.querySelector('.hearts')!;
+    const heartsEl = this.root.querySelector<HTMLDivElement>('.hearts')!;
+    this.heartsEl = heartsEl;
     for (let i = 0; i < HEALTH.hearts; i++) {
       const h = document.createElement('div');
       h.className = 'heart';
       heartsEl.appendChild(h);
       this.hearts.push(h);
     }
+    const shield = document.createElement('div');
+    shield.className = 'hearts__shield';
+    shield.textContent = 'TRAINING SHIELD';
+    heartsEl.appendChild(shield);
 
     this.scoreEl = this.root.querySelector('.score__value')!;
     this.bestEl = this.root.querySelector('.score__best')!;
@@ -112,6 +118,14 @@ export class HUD {
 
   setHealth(hearts: number): void {
     this.hearts.forEach((h, i) => h.classList.toggle('lost', i >= hearts));
+  }
+
+  setTrainingShield(active: boolean): void {
+    this.heartsEl.classList.toggle('training', active);
+    this.heartsEl.setAttribute(
+      'aria-label',
+      active ? 'Training shield active' : `${HEALTH.hearts} hearts`,
+    );
   }
 
   setScore(score: number): void {

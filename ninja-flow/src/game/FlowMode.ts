@@ -230,11 +230,20 @@ export class FlowMode {
         break;
 
       case 'chain':
-        if (this.timer >= this.window) this.fail();
+        if (this.timer >= this.window) {
+          // The first Flow is the product's hook and a teaching sequence. It
+          // waits on the same glowing target until the player answers; nothing
+          // moves for them and nothing fails invisibly against a new timer.
+          if (this.tutorial) this.timer = 0;
+          else this.fail();
+        }
         break;
 
       case 'finisherWindup':
-        if (this.timer >= FLOW.finisherWindow) this.fail();
+        if (this.timer >= FLOW.finisherWindow) {
+          if (this.tutorial) this.timer = 0;
+          else this.fail();
+        }
         break;
 
       case 'finisher':
