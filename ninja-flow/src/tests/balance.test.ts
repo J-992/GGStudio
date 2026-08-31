@@ -54,13 +54,15 @@ describe('Run shape', () => {
     expect(m).toBeLessThan(310);
   });
 
+  // This compares 72 whole deterministic runs. Keep the test strict, but give
+  // slower shared CI runners enough time to finish the actual simulation.
   it('rewards skill with materially longer runs', () => {
     const first = median(runMany(PROFILES.firstTimer, RUNS).map((r) => r.survived));
     const casual = median(runMany(PROFILES.casual, RUNS).map((r) => r.survived));
     const expert = median(runMany(PROFILES.expert, RUNS).map((r) => r.survived));
     expect(casual).toBeGreaterThan(first);
     expect(expert).toBeGreaterThan(casual * 1.4);
-  });
+  }, 15_000);
 
   it('keeps ending runs — nobody survives forever on the current ramp', () => {
     const runs = runMany(PROFILES.casual, RUNS);
