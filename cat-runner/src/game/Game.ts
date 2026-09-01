@@ -75,6 +75,32 @@ const FAIL_AUTO_RESTART = 2.6;
 const MAX_FRAME_DELTA = 0.1;
 
 /**
+ * Global pace of the simulation, as a fraction of real time. 0.8 runs the whole
+ * game 20% slower than it used to.
+ *
+ * Deliberately a *time* scale rather than a cut to `PHYSICS.runSpeed`, which is
+ * the obvious way to slow a runner down and the wrong one. `runSpeed` and
+ * `jumpImpulse` are a matched pair - 11 u/s against gravity -18 is what makes
+ * the measured flat-to-flat jump 9.53 units, and every gap in the game is
+ * compressed to fit inside that (`GAP_COMPRESSION` in `src/levels/index.ts`).
+ * Taking 20% off the speed alone takes 20% off the jump too, and every gap
+ * authored against the old reach becomes unclearable. Scaling the delta instead
+ * leaves every distance, arc and clearance in the game exactly as tuned and
+ * simply plays them out over more seconds: obstacles arrive 20% slower, the
+ * player has 25% longer to read them, and nothing that was possible stops being
+ * possible.
+ *
+ * Applied to the simulation only. The camera and the fail-screen timers keep
+ * running on the real delta - a smoother that lags real time is just a slower
+ * smoother, not a slower game.
+ *
+ * Composes with the transient scales rather than replacing them: the tutorial's
+ * slow-down and the death beat both write `this.timeScale`, and are still
+ * expressed relative to normal speed.
+ */
+const GAMEPLAY_TIME_SCALE = 0.8;
+
+/**
  * Lives per attempt. Spent on obstacle hits, missed corners and falls.
  *
  * Nine Lives can add to this mid-run, but only up to `MAX_LIVES` - see there
@@ -1366,7 +1392,7 @@ export class Game {
       this.readDriveInput();
       this.updateTutorial(rawDelta);
 
-      const dt = rawDelta * this.timeScale;
+      const dt = rawDelta * this.timeScale * GAMEPLAY_TIME_SCALE;
       simDelta = dt;
       this.elapsed += dt;
 

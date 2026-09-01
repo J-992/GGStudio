@@ -474,3 +474,94 @@ describe('build hygiene', () => {
     expect(sdk.calls.indexOf('gameLoadingStart')).toBeLessThan(sdk.calls.indexOf('init'));
   });
 });
+
+/**
+ * The two ways a session can be reported as having no gameplay at all even
+ * though the game ran and was played. Both are silent by construction: nothing
+ * throws, nothing logs, and the game looks fine right up until the Inspector
+ * says a version has no `gameplayStart` and the fit test cannot be started.
+ */
+describe('an SDK that is late rather than absent', () => {
+  /** Enough of a `<script src=".../poki-sdk.js">` for the wrapper's look-up. */
+  function stubSdkTag(present: boolean): void {
+    globals.document = { querySelector: () => (present ? {} : null) };
+  }
+
+  it('picks up a PokiSDK that only appears after boot has looked for it', async () => {
+    vi.useFakeTimers();
+    stubSdkTag(true);
+    try {
+      const poki = await freshPoki(null);
+      // Boot finds nothing and carries on - it must never wait on the SDK.
+      await expect(poki.init()).resolves.toBe(false);
+
+      // The tag lands a moment later, the way a slow CDN response does.
+      const sdk = new FakeSDK();
+      globals.PokiSDK = sdk;
+      await vi.advanceTimersByTimeAsync(100);
+      expect(sdk.calls).toContain('init');
+
+      // ...and the session reports normally from there, which is the whole
+      // point: this used to be a permanently dead wrapper.
+      await sdk.finishInit();
+      poki.loadingFinished();
+      poki.gameplayStart();
+      expect(sdk.calls).toContain('gameLoadingFinished');
+      expect(sdk.calls).toContain('gameplayStart');
+    } finally {
+      vi.useRealTimers();
+      delete globals.document;
+    }
+  });
+
+  it('does not sit polling when the page has no SDK tag at all', async () => {
+    vi.useFakeTimers();
+    stubSdkTag(false);
+    try {
+      const poki = await freshPoki(null);
+      await expect(poki.init()).resolves.toBe(false);
+      // Off-platform is a supported state, not a wait: nothing is scheduled.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+      delete globals.document;
+    }
+  });
+});
+
+describe('an ad break that never ends', () => {
+  it('gives the game back rather than leaving it frozen for the session', async () => {
+    vi.useFakeTimers();
+    try {
+      const sdk = new FakeSDK();
+      const poki = await freshPoki(sdk);
+      void poki.init();
+      await sdk.finishInit();
+      poki.loadingFinished();
+
+      const onAdEnd = vi.fn();
+      poki.onAdEnd = onAdEnd;
+
+      poki.startRun(() => {}); // first run of the session: never an ad
+      const begin = vi.fn();
+      poki.startRun(begin); // second: an ad is requested and never finished
+      await vi.advanceTimersByTimeAsync(0);
+
+      // The loop is stopped and the audio suspended at this point. The v2 SDK
+      // tag queues every call and replays it only once the real bundle
+      // downloads, so a bundle that never arrives means this promise never
+      // settles - and without the watchdog the game stays here for good.
+      expect(poki.adPlaying).toBe(true);
+      expect(begin).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(onAdEnd).toHaveBeenCalledTimes(1);
+      expect(poki.adPlaying).toBe(false);
+      // And the run the player asked for actually starts.
+      expect(begin).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

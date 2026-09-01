@@ -20,7 +20,8 @@
  * the SDK is still coming up. Calls made in that window are recorded, not
  * thrown away, and replayed in order the moment the SDK answers - a
  * `gameplayStart` lost there is the one event Poki's Inspector will not pass a
- * build without.
+ * build without. The same rule covers an SDK that is not merely slow to answer
+ * but not there yet at all: see `watchForSdk()`.
  *
  * `flush()` is the single place that talks to the SDK about state, comparing
  * what the game is doing against what the SDK has been told. Duplicate
@@ -45,8 +46,35 @@ interface PokiSDKGlobal {
 /** Minimum gap between interstitials, in ms. */
 const AD_MIN_GAP = 60_000;
 
+/**
+ * Longest an ad break may leave the game frozen before it is resumed anyway.
+ *
+ * `adStart()` stops the render loop and suspends audio, and hands control back
+ * only when the SDK's promise settles. The v2 SDK tag is a stub that *queues*
+ * every call and replays it once the real bundle downloads and `init()`
+ * resolves - so if that bundle never arrives, `commercialBreak()` neither
+ * resolves nor rejects, and the game sits frozen and silent for the rest of the
+ * session with no error anywhere. A real interstitial is well under this, so
+ * the only thing the watchdog ever cuts short is a break that was never going
+ * to end.
+ */
+const AD_WATCHDOG = 60_000;
+
 /** Never let a hung SDK hold up the boot. */
 const INIT_TIMEOUT = 5_000;
+
+/**
+ * How long to keep watching for a `window.PokiSDK` that was not there yet, and
+ * how often to look.
+ *
+ * The SDK tag is a blocking `<script>` in the document head, so by the time the
+ * module bundle runs the global is normally already up. Normally is not always:
+ * a slow CDN response, a request that failed and was retried by the browser, or
+ * a host that injects the tag itself all leave a window where it is missing -
+ * and boot happens to be exactly when this file looks. See {@link waitForSdk}.
+ */
+const SDK_WAIT_TIMEOUT = 10_000;
+const SDK_POLL_INTERVAL = 100;
 
 const LOCAL_HOSTS = /^(localhost|127\.0\.0\.1|\[::1\])$/;
 
@@ -67,6 +95,9 @@ class PokiIntegration {
 
   /** True while a commercial or rewarded break is on screen. */
   adPlaying = false;
+
+  /** True while {@link watchForSdk} has a look scheduled. */
+  private watching = false;
 
   // What the game is doing, versus what the SDK has been told about it. The
   // gap between the two pairs is what lets events survive the boot race.
@@ -103,19 +134,38 @@ class PokiIntegration {
   }
 
   /**
-   * Same idea as {@link safely} for the two calls that return a promise.
+   * Same idea as {@link safely} for the two calls that return a promise, and
+   * the reason nothing downstream of an ad has to handle failure.
    *
-   * `adStart()` has already frozen and silenced the game by the time either
-   * is invoked, so the resume is owed unconditionally: an ad call that throws
-   * synchronously rather than rejecting would otherwise skip past the
-   * `.then` that hands control back, and leave the game paused for good.
+   * `adStart()` has already frozen and silenced the game by the time either is
+   * invoked, so the resume is owed unconditionally - and there are three ways
+   * to be denied it, not one. The call can throw synchronously rather than
+   * rejecting, which skips past any `.then`. It can reject. Or it can simply
+   * never settle, which is the one that costs a session: see
+   * {@link AD_WATCHDOG}. All three land here as a resolved `undefined`, so the
+   * returned promise always settles and the caller only ever needs a `.then`.
    */
   private breakOf<T>(call: () => Promise<T>): Promise<T | undefined> {
+    let settle!: (value: T | undefined) => void;
+    const guarded = new Promise<T | undefined>((resolve) => {
+      settle = resolve;
+    });
+
+    // Resolving an already-resolved promise is a no-op, so whichever of the
+    // three paths lands first wins and the rest are free.
+    const watchdog = setTimeout(() => settle(undefined), AD_WATCHDOG);
+    const done = (value: T | undefined): void => {
+      clearTimeout(watchdog);
+      settle(value);
+    };
+
     try {
-      return call();
+      call().then(done, () => done(undefined));
     } catch {
-      return Promise.resolve(undefined);
+      done(undefined);
     }
+
+    return guarded;
   }
 
   /**
@@ -126,7 +176,10 @@ class PokiIntegration {
    */
   init(): Promise<boolean> {
     const sdk = this.sdk;
-    if (!sdk) return Promise.resolve(false);
+    if (!sdk) {
+      this.watchForSdk();
+      return Promise.resolve(false);
+    }
 
     // Local dev only. A build that ships with this on fails review.
     if (LOCAL_HOSTS.test(location.hostname)) this.safely(() => sdk.setDebug?.(true));
@@ -159,6 +212,63 @@ class PokiIntegration {
     });
 
     return Promise.race([ready, timeout]);
+  }
+
+  /**
+   * True when the document is *expecting* a Poki SDK - i.e. the tag for one is
+   * in the markup. The difference between "the SDK is late" and "there is no
+   * SDK here at all", which is what decides whether {@link watchForSdk} has
+   * anything to wait for.
+   */
+  private get sdkExpected(): boolean {
+    return (
+      typeof document !== 'undefined' &&
+      document.querySelector('script[src*="poki-sdk"]') !== null
+    );
+  }
+
+  /**
+   * Keeps looking for a `window.PokiSDK` that was not there when boot looked,
+   * and runs {@link init} the moment it appears.
+   *
+   * Finding no SDK used to be *permanent*: `settled` was never set, so
+   * `flush()` refused for the rest of the session and neither
+   * `gameLoadingFinished` nor `gameplayStart` was ever sent - however soon
+   * after boot the SDK turned up, and however much the player then played.
+   * That is the Inspector failure with a fit test behind it, and it fails
+   * closed in exactly the conditions hardest to reproduce locally, where the
+   * tag is served from the same host as the page and is always instant.
+   *
+   * The tag is a blocking `<script>` in the head, so this should never have
+   * anything to do. Should never is not never: a CDN response slow enough to
+   * be retried, a host that injects the tag itself, or an extension that
+   * defers third-party scripts all open the same window, and boot is exactly
+   * when this file looks.
+   *
+   * Bounded, and only started when the markup says an SDK is coming: a
+   * genuinely absent one (offline, ad blocker, the game served from a plain
+   * folder) has to settle into the supported no-op state rather than leave a
+   * timer running behind the game for the rest of the session.
+   */
+  private watchForSdk(): void {
+    if (this.watching || !this.sdkExpected) return;
+    this.watching = true;
+
+    const deadline = Date.now() + SDK_WAIT_TIMEOUT;
+    const look = (): void => {
+      if (this.sdk) {
+        this.watching = false;
+        void this.init();
+        return;
+      }
+      if (Date.now() >= deadline) {
+        this.watching = false;
+        return;
+      }
+      setTimeout(look, SDK_POLL_INTERVAL);
+    };
+
+    setTimeout(look, SDK_POLL_INTERVAL);
   }
 
   /**
@@ -250,12 +360,10 @@ class PokiIntegration {
     if (this.lastAdAt && Date.now() - this.lastAdAt < AD_MIN_GAP) return Promise.resolve();
 
     const resume = this.adStart();
-    return this.breakOf(() => sdk.commercialBreak())
-      .catch(() => {})
-      .then(() => {
-        this.lastAdAt = Date.now();
-        resume();
-      });
+    return this.breakOf(() => sdk.commercialBreak()).then(() => {
+      this.lastAdAt = Date.now();
+      resume();
+    });
   }
 
   /**
@@ -269,13 +377,11 @@ class PokiIntegration {
     if (!this.settled || !sdk || this.adPlaying) return Promise.resolve(false);
 
     const resume = this.adStart();
-    return this.breakOf(() => sdk.rewardedBreak())
-      .catch(() => false)
-      .then((success) => {
-        this.lastAdAt = Date.now();
-        resume();
-        return success === true;
-      });
+    return this.breakOf(() => sdk.rewardedBreak()).then((success) => {
+      this.lastAdAt = Date.now();
+      resume();
+      return success === true;
+    });
   }
 
   /** The only legal way to leave the page. */
