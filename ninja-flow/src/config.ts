@@ -136,7 +136,9 @@ export const COMBO = {
     [5, 1.2],
     [0, 1],
   ] as ReadonlyArray<readonly [number, number]>,
-  milestones: [10, 20, 40, 60, 100],
+  // The first celebration must happen while a cold player is still deciding
+  // whether the game understands them. Larger milestones keep their weight.
+  milestones: [3, 5, 10, 20, 40, 60, 100],
 } as const;
 
 export const HITSTOP = {
@@ -171,6 +173,16 @@ export const HEALTH = {
    * opening threat beat, so four hearts taper instead of vanishing in a burst.
    */
   recovery: 1.8,
+} as const;
+
+/** A first session teaches through earned recovery, never automatic attacks. */
+export const FIRST_SESSION = {
+  /** Successful answers needed to restore one missing heart on run one. */
+  healEveryHits: 1,
+  /** At full health the same earned reward advances the next spectacle. */
+  flowBonusAtFullHealth: 10,
+  /** The five-minute opening arc then hands control to ordinary balance. */
+  rewardUntilSeconds: 300,
 } as const;
 
 export const ENEMY = {
@@ -361,6 +373,8 @@ export const TUTORIAL = {
   readySeconds: 0.8,
   /** Visual reaction lead: a normal response lands inside the ±100 ms window. */
   perfectCueLeadMs: 230,
+  /** Correct-side opening taps connect broadly; precise timing upgrades them. */
+  goodEarlyMs: 1200,
   /** The first-ever Flow gives players time to read an unfamiliar state. */
   flowFirstWindow: 3.5,
   flowWindowScale: 1.35,
@@ -489,4 +503,7 @@ export const DEV = import.meta.env?.DEV === true;
  */
 export const PLATFORM = {
   ads: true,
+  /** Active play, not page time. Early deaths therefore restart instantly. */
+  firstCommercialSeconds: 180,
+  minCommercialIntervalSeconds: 180,
 } as const;

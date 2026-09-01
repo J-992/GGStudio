@@ -48,5 +48,5 @@ export function isTargetable(
   window: TimingWindow = AUTHORED_WINDOW,
 ): boolean {
   const errorMs = (nowSeconds - impactTimeSeconds) * 1000;
-  return errorMs >= -TIMING.whiffBeyondMs && errorMs <= window.goodLateMs;
+  return errorMs >= -Math.max(TIMING.whiffBeyondMs, window.goodEarlyMs) && errorMs <= window.goodLateMs;
 }

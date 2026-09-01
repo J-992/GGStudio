@@ -43,12 +43,14 @@ describe('First-minute experience', () => {
 });
 
 describe('Cold-open retention', () => {
-  it('makes the first run a protected Flow showcase for the observed audience', () => {
-    const runs = runMany(PROFILES.coldOpen, RUNS, { firstFlowShowcase: true });
-    expect(runs.every((run) => run.tFirstDamage === null)).toBe(true);
+  it('turns the first Flow into a bridge to a substantial first session', () => {
+    const runs = runMany(PROFILES.coldOpen, RUNS, { firstSession: true });
     expect(runs.every((run) => run.tFirstFlow !== null && run.tFirstFlow <= 22)).toBe(true);
     expect(runs.every((run) => run.tFirstFlowComplete !== null)).toBe(true);
-    expect(median(runs.map((run) => run.survived))).toBeGreaterThanOrEqual(20);
+    const survival = median(runs.map((run) => run.survived));
+    expect(survival).toBeGreaterThanOrEqual(280);
+    expect(survival).toBeLessThan(380);
+    expect(median(runs.map((run) => run.flowChains))).toBeGreaterThanOrEqual(2);
   }, 15_000);
 
   it('removes the immediate run-two death cliff for the same cold-open player', () => {

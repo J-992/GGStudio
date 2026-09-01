@@ -27,12 +27,12 @@ describe('current tutorial and help', () => {
     expect(TUTORIAL.slowFactor).toBeGreaterThanOrEqual(2);
   });
 
-  it('states the exact control required for Perfect and Flow', () => {
-    expect(perfectInstruction('left', false, 'tap')).toContain('PRESS ← NOW FOR PERFECT');
-    expect(perfectInstruction('right', true, 'tap')).toContain('TAP RIGHT NOW FOR PERFECT');
-    expect(flowInstruction('left', false)).toContain('PRESS ← NOW');
-    expect(flowInstruction('right', true)).toContain('TAP RIGHT NOW');
-    expect(flowInstruction('right', true)).toContain('GLOWING');
+  it('keeps the opening instruction to one action at a time', () => {
+    expect(perfectInstruction('left', false, 'watch')).toBe('PRESS ←');
+    expect(perfectInstruction('right', true, 'watch')).toBe('TAP RIGHT');
+    expect(perfectInstruction('left', false, 'tap')).toBe('PRESS ← NOW');
+    expect(flowInstruction('left', false)).toBe('PRESS ←');
+    expect(flowInstruction('right', true)).toBe('TAP RIGHT');
   });
 
   it('documents timing, guards, rare targets, Flow, gear, and the highlight reel', () => {

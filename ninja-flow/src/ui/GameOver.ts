@@ -18,7 +18,6 @@ export interface GameOverData {
   /** True when a rewarded continue is available and has not been used. */
   canContinue: boolean;
   /** The protected opening run ended in its promised Flow finisher, not death. */
-  showcaseComplete: boolean;
 }
 
 /**
@@ -136,8 +135,8 @@ export class GameOverScreen {
     this.flowEl.textContent = `${data.flowChains}`;
 
     const beat = data.score > data.previousBest && data.previousBest > 0;
-    this.newEl.textContent = data.showcaseComplete ? 'FLOW MASTERED' : beat ? 'NEW BEST' : '';
-    this.playBtn.textContent = data.showcaseComplete ? 'NEXT RUN' : 'PLAY AGAIN';
+    this.newEl.textContent = beat ? 'NEW BEST' : '';
+    this.playBtn.textContent = 'PLAY AGAIN';
 
     // "So close" framing only when it is genuinely close — a manipulative
     // near-miss message on a distant score reads as noise and gets ignored.

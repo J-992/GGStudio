@@ -221,6 +221,8 @@ export const MEASURE = {
   run60: ['run', '60-sec-reached'],
   run120: ['run', '120-sec-reached'],
   run180: ['run', '180-sec-reached'],
+  session300: ['session', '300-sec-active'],
+  postFlow30: ['session', '30-sec-after-first-flow'],
   replayVisible: ['button', 'replay-visible'],
   replayInteract: ['button', 'replay-interact'],
   secondNinja: ['character', 'second-ninja-unlocked'],

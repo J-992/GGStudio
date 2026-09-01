@@ -71,7 +71,7 @@ export class HUD {
     }
     const shield = document.createElement('div');
     shield.className = 'hearts__shield';
-    shield.textContent = 'TRAINING SHIELD';
+    shield.textContent = 'PRACTICE';
     heartsEl.appendChild(shield);
 
     this.scoreEl = this.root.querySelector('.score__value')!;

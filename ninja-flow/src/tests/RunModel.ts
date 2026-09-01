@@ -1,5 +1,5 @@
 import { Scene } from 'three';
-import { ENEMY, FLOW, GUARD, HEALTH, SCORE, TIMING, TUTORIAL } from '../config';
+import { ENEMY, FIRST_SESSION, FLOW, GUARD, HEALTH, SCORE, TIMING, TUTORIAL } from '../config';
 import { CombatDirector } from '../game/CombatDirector';
 import { ComboSystem } from '../game/ComboSystem';
 import { FlowSystem } from '../game/FlowSystem';
@@ -39,8 +39,8 @@ export interface PlayerProfile {
 }
 
 export interface RunOptions {
-  /** Models the protected, forced-Flow showcase shown before ordinary runs. */
-  firstFlowShowcase?: boolean;
+  /** Models the protected opening plus earned recovery of a first session. */
+  firstSession?: boolean;
 }
 
 export interface RunResult {
@@ -89,7 +89,8 @@ export function simulateRun(
   const timingAssist = new TimingAssist();
 
   director.reset(0);
-  flow.reset(options.firstFlowShowcase ? FLOW.firstRunHead : 0);
+  flow.reset(options.firstSession ? FLOW.firstRunHead : 0);
+  let showcaseActive = options.firstSession === true;
 
   let now = 0;
   let hearts = HEALTH.hearts;
@@ -102,6 +103,7 @@ export function simulateRun(
   let whiffs = 0;
   let damageTaken = 0;
   let guardBreaks = 0;
+  let rookieHits = 0;
   const result: Partial<RunResult> = {};
 
   /**
@@ -142,8 +144,13 @@ export function simulateRun(
 
       if (lock > 0) continue; // Committed to a previous swing: the press is lost.
 
-      const target = director.findTarget(p.lane, now, timingAssist.window);
-      const timing = evaluate(now, target ? target.impactAt : null, timingAssist.window);
+      const assisted = timingAssist.window;
+      const window =
+        director.tutorialThreatsLeft > 0
+          ? { goodEarlyMs: TUTORIAL.goodEarlyMs, goodLateMs: assisted.goodLateMs }
+          : assisted;
+      const target = director.findTarget(p.lane, now, window);
+      const timing = evaluate(now, target ? target.impactAt : null, window);
       if (target) timingAssist.observe(timing.errorMs);
       const quality = timing.quality;
 
@@ -169,6 +176,14 @@ export function simulateRun(
           perfects++;
           result.tFirstPerfect ??= now;
         } else goods++;
+        if (options.firstSession && now <= FIRST_SESSION.rewardUntilSeconds) {
+          rookieHits += 1;
+          if (rookieHits >= FIRST_SESSION.healEveryHits) {
+            rookieHits = 0;
+            if (hearts < HEALTH.hearts) hearts += 1;
+            else flow.boost(FIRST_SESSION.flowBonusAtFullHealth);
+          }
+        }
         if (combo.count >= 10) result.tCombo10 ??= now;
       } else {
         lock = ATTACK_LOCK * 1.35;
@@ -181,7 +196,7 @@ export function simulateRun(
     // Unanswered threats land.
     const overdue = director.findOverdue(now);
     if (overdue) {
-      const safe = options.firstFlowShowcase || director.tutorialThreatsLeft > 0 || recovery > 0;
+      const safe = showcaseActive || director.tutorialThreatsLeft > 0 || recovery > 0;
       director.consumeTutorialThreat();
       director.rearmAfterLanding(overdue, now, 0);
       combo.break();
@@ -194,19 +209,19 @@ export function simulateRun(
       }
     }
 
-    if (options.firstFlowShowcase && now >= TUTORIAL.flowForceSeconds && !flow.isFull) {
+    if (showcaseActive && now >= TUTORIAL.flowForceSeconds && !flow.isFull) {
       flow.boost(FLOW.max);
     }
 
     // Flow Mode. The showcase is held until the hook beat even if a skilled
     // player fills early, and force-filled there when the cold player did not.
-    const flowReady = !options.firstFlowShowcase || now >= TUTORIAL.flowEarliestSeconds;
+    const flowReady = !showcaseActive || now >= TUTORIAL.flowEarliestSeconds;
     if (flow.isFull && flowReady) {
       result.tFirstFlow ??= now;
       const targets = FLOW.minTargets + rng.int(FLOW.maxTargets - FLOW.minTargets + 1);
       let completed = true;
       for (let i = 0; i < targets + 1; i++) {
-        if (!options.firstFlowShowcase && playerRng.next() < profile.flowFumbleRate) {
+        if (!showcaseActive && playerRng.next() < profile.flowFumbleRate) {
           completed = false;
           break;
         }
@@ -225,7 +240,10 @@ export function simulateRun(
       const pause = FLOW.activationHold + targets * 0.4 + FLOW.recoverPause;
       now += pause;
       director.delayTo(now + FLOW.recoverPause);
-      if (options.firstFlowShowcase && completed) break;
+      if (showcaseActive && completed) {
+        showcaseActive = false;
+        hearts = HEALTH.hearts;
+      }
     }
 
     // Drop plans whose moment has long passed so the map cannot grow forever.

@@ -85,7 +85,7 @@ describe('ComboSystem', () => {
       const m = combo.hit();
       if (m) seen.push(m);
     }
-    expect(seen).toEqual([10, 20, 40, 60]);
+    expect(seen).toEqual([3, 5, 10, 20, 40, 60]);
   });
 
   it('remembers the best combo across a break', () => {

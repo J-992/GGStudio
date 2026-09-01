@@ -13,6 +13,7 @@ import {
   CONTACT,
   ENEMY,
   FEINT,
+  FIRST_SESSION,
   FLOW,
   GUARD,
   HEALTH,
@@ -34,6 +35,7 @@ import { loadSave, saveSave } from '../core/Storage';
 import { InputManager, type Lane } from '../input/InputManager';
 import { Assets, idleGate } from '../assets/Assets';
 import { MEASURE, PlatformAdapter, type MeasureKey } from '../platform/PlatformAdapter';
+import { AdCadence } from '../platform/AdCadence';
 import { AudioEngine } from '../fx/Audio';
 import { IMPACT_COLOR, VFX } from '../fx/VFX';
 import { Props } from '../fx/Props';
@@ -129,6 +131,7 @@ export class Game {
   private readonly reel: HighlightReel;
   private readonly platform = new PlatformAdapter();
   private readonly quality = new FrameQuality(window.devicePixelRatio);
+  private readonly adCadence = new AdCadence();
 
   private state: GameState = 'loading';
   private runStart = 0;
@@ -142,9 +145,11 @@ export class Game {
   private provedLeft = 0;
   private provedRight = 0;
   private flowTutorialActive = false;
-  /** Protected run that ends only after the player completes their first Flow. */
+  /** Protected opening phase that hands straight back to combat after first Flow. */
   private firstFlowShowcase = false;
-  private showcaseComplete = false;
+  private rookieRun = false;
+  private rookieHits = 0;
+  private firstFlowCompletedAtSession: number | null = null;
   private deathTimer = 0;
   private flashLight = 0;
   private measured = new Set<MeasureKey>();
@@ -336,7 +341,8 @@ export class Game {
     this.provedRight = 0;
     this.flowTutorialActive = false;
     this.firstFlowShowcase = !save.seenFlowTip;
-    this.showcaseComplete = false;
+    this.rookieRun = save.runs === 0;
+    this.rookieHits = 0;
     this.pendingPlayerHit = null;
 
     this.combo.reset();
@@ -485,7 +491,9 @@ export class Game {
     this.select.hide();
     this.menu.hide();
     // Poki counts an ad break between runs, never in front of the first one.
-    if (loadSave().runs > 0) await this.platform.commercialBreak();
+    if (loadSave().runs > 0 && this.adCadence.consumeBreakDue()) {
+      await this.platform.commercialBreak();
+    }
     this.startRun();
     this.hud.show();
     this.input.setEnabled(true);
@@ -566,7 +574,7 @@ export class Game {
 
     // Ads live strictly between runs, never inside combat, and gameplay is
     // already stopped by the death handler before we get here.
-    await this.platform.commercialBreak();
+    if (this.adCadence.consumeBreakDue()) await this.platform.commercialBreak();
 
     this.startRun();
     this.hud.show();
@@ -737,6 +745,10 @@ export class Game {
   private update(frame: Frame): void {
     this.loopTime = frame.time;
     const { dt, dtReal } = frame;
+    if (this.state === 'playing' || this.state === 'flow') {
+      this.adCadence.addActiveSeconds(dtReal);
+      this.trackSessionDepth();
+    }
     if (dtReal > 0) {
       this.fps += (1 / dtReal - this.fps) * 0.05;
       if (this.quality.sample(dtReal)) this.applyFrameQuality();
@@ -925,7 +937,10 @@ export class Game {
   }
 
   private resolveSwing(lane: Lane, pressTime: number): void {
-    const window = this.timingAssist.window;
+    const assisted = this.timingAssist.window;
+    const window = this.tutorialDone
+      ? assisted
+      : { goodEarlyMs: TUTORIAL.goodEarlyMs, goodLateMs: assisted.goodLateMs };
     const target = this.combat.findTarget(lane, pressTime, window);
     const result = evaluate(pressTime, target ? target.impactAt : null, window);
     if (target) {
@@ -1040,6 +1055,24 @@ export class Game {
     if (lane === 'left') this.provedLeft += 1;
     else this.provedRight += 1;
 
+    // On run one, successful answers replenish the resource mistakes consume.
+    // Recovery is earned through the same one-tap action, never an automatic
+    // block or another meter the player has to understand.
+    if (this.rookieRun && this.elapsed <= FIRST_SESSION.rewardUntilSeconds) {
+      this.rookieHits += 1;
+      if (this.rookieHits >= FIRST_SESSION.healEveryHits) {
+        this.rookieHits = 0;
+        if (this.hearts < HEALTH.hearts) {
+          this.hearts += 1;
+          this.hud.setHealth(this.hearts);
+          this.hud.banner('MOMENTUM · +1 HEART');
+        } else {
+          this.flow.boost(FIRST_SESSION.flowBonusAtFullHealth);
+          this.hud.setFlow(this.flow.ratio, true);
+        }
+      }
+    }
+
     const color = target.rare ? IMPACT_COLOR.rare : perfect ? IMPACT_COLOR.perfect : IMPACT_COLOR.good;
     const intensity = perfect ? VFXCFG.slashScale.perfect : VFXCFG.slashScale.good;
     this.vfx.impact(contactX, contactY, intensity, color);
@@ -1142,7 +1175,11 @@ export class Game {
       this.hud.setCombo(0, false);
       this.hud.setFlow(this.flow.ratio, false);
     }
-    this.hud.callout(learning ? 'TOO EARLY' : 'MISS', 'miss', lane === 'left' ? 0.3 : 0.7);
+    this.hud.callout(
+      learning ? 'READY!' : 'MISS',
+      learning ? 'good' : 'miss',
+      lane === 'left' ? 0.3 : 0.7,
+    );
   }
 
   /**
@@ -1186,11 +1223,13 @@ export class Game {
     this.combat.consumeTutorialThreat();
 
     if (safe) {
-      this.player.hurt(lane);
       this.vfx.impact(x * 0.5, 1.15, 1.1, IMPACT_COLOR.good);
-      this.rig.addTrauma(CAMERA.trauma.good);
       this.audio.whiff();
-      this.hud.callout('BLOCK!', 'good', lane === 'left' ? 0.3 : 0.7);
+      this.hud.callout(
+        `MISS · ${this.touchInput ? 'TAP' : 'PRESS'} ${lane === 'left' ? 'LEFT' : 'RIGHT'}`,
+        'miss',
+        lane === 'left' ? 0.3 : 0.7,
+      );
       this.combo.break();
       this.hud.setCombo(0, false);
       return;
@@ -1337,6 +1376,7 @@ export class Game {
       this.stats.flows += 1;
       this.measureOnce('firstFlowComplete');
       this.hud.banner('FLOW COMPLETE');
+      this.firstFlowCompletedAtSession ??= this.adCadence.activeSeconds;
     }
     this.state = 'playing';
     this.loop.setTimeScale(1);
@@ -1353,11 +1393,10 @@ export class Game {
     this.combat.delayTo(now + FLOW.recoverPause);
     if (completesShowcase) {
       this.firstFlowShowcase = false;
-      this.showcaseComplete = true;
-      this.input.setEnabled(false);
-      this.platform.gameplayStop();
-      this.commitRunStats();
-      this.presentGameOver();
+      this.hearts = HEALTH.hearts;
+      this.hud.setHealth(this.hearts);
+      this.hud.setTrainingShield(false);
+      this.hud.banner('FLOW MASTERED · KEEP GOING');
     }
   }
 
@@ -1520,8 +1559,7 @@ export class Game {
       unlock: this.pendingState,
       newlyUnlocked: this.pendingUnlocks,
       completedDailies: this.completedDailies,
-      canContinue: !this.showcaseComplete && !this.continueUsed && this.platform.canReward,
-      showcaseComplete: this.showcaseComplete,
+      canContinue: !this.continueUsed && this.platform.canReward,
       selected: this.selected,
       available: (UNLOCKS.order as readonly CharacterId[]).filter((id) => this.assets.isLoaded(id)),
     };
@@ -1542,7 +1580,7 @@ export class Game {
       if (this.firstFlowShowcase) {
         const remaining = Math.max(0, Math.ceil(TUTORIAL.flowForceSeconds - this.elapsed));
         this.hud.setTutorialText(
-          remaining > 0 ? `TRAINING SHIELD ACTIVE · FLOW IN ${remaining}` : 'FLOW READY',
+          remaining > 0 ? `PRACTICE · FLOW IN ${remaining}` : 'FLOW READY',
         );
       } else if (next?.feint && !save.seenFeintTip) {
         // Ahead of the others: a feint punishes the reflex the whole rest of
@@ -1572,7 +1610,9 @@ export class Game {
         : 'watch';
 
     let text = '';
-    if (this.provedLeft === 0 || this.provedRight === 0) {
+    if (!next) {
+      text = touch ? 'TAP THE GLOWING SIDE' : 'PRESS ← OR → FOR THE GLOWING SIDE';
+    } else if (this.provedLeft === 0 || this.provedRight === 0) {
       // The direction prompt follows the threat actually on screen, so a missed
       // first enemy can never leave the text pointing at an empty lane.
       const lane: Lane = (next?.side ?? 'L') === 'L' ? 'left' : 'right';
@@ -1595,9 +1635,13 @@ export class Game {
     if (this.provedLeft >= 1) this.measureOnce('tutorialLeft');
     if (this.provedRight >= 1) this.measureOnce('tutorialRight');
 
-    if (next && tapNow && this.combat.tutorialThreatsLeft > 0) {
+    if (next && this.combat.tutorialThreatsLeft > 0) {
       const lane: Lane = next.side === 'L' ? 'left' : 'right';
-      this.hud.setHint(lane, touch ? 'TAP NOW' : lane === 'left' ? '← NOW' : '→ NOW', true);
+      this.hud.setHint(
+        lane,
+        tapNow ? (touch ? 'TAP NOW' : lane === 'left' ? '← NOW' : '→ NOW') : touch ? 'TAP' : lane === 'left' ? '←' : '→',
+        tapNow,
+      );
     } else {
       this.hud.setHint(null, '');
     }
@@ -1617,6 +1661,16 @@ export class Game {
     else if (this.elapsed >= 120) this.measureOnce('run120');
     else if (this.elapsed >= 60) this.measureOnce('run60');
     else if (this.elapsed >= 30) this.measureOnce('run30');
+  }
+
+  private trackSessionDepth(): void {
+    if (this.adCadence.activeSeconds >= 300) this.measureOnce('session300');
+    if (
+      this.firstFlowCompletedAtSession !== null &&
+      this.adCadence.activeSeconds - this.firstFlowCompletedAtSession >= 30
+    ) {
+      this.measureOnce('postFlow30');
+    }
   }
 
   // ------------------------------------------------------------- plumbing
@@ -1646,7 +1700,7 @@ export class Game {
       this.state = 'playing';
       this.runStart = this.loopTime;
       this.hud.setTutorialText('');
-      if (this.firstFlowShowcase) this.hud.banner('TRAINING RUN · BUILD FLOW');
+      if (this.firstFlowShowcase) this.hud.banner('PRACTICE · BUILD FLOW');
       this.input.setEnabled(true);
       this.platform.gameplayStart();
       return;

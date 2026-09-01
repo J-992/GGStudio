@@ -153,7 +153,7 @@ describe('first-run activation', () => {
     game.onThreatLands(enemy);
 
     expect(game.hearts).toBe(4);
-    expect(document.body.textContent).toContain('TRAINING SHIELD');
+    expect(document.body.textContent).toContain('PRACTICE');
   });
 
   it('forces the first Flow showcase at the configured hook time', () => {
@@ -169,16 +169,16 @@ describe('first-run activation', () => {
     expect(game.state).toBe('flow');
   });
 
-  it('ends the protected opening run on a completed Flow instead of a death', () => {
+  it('continues directly into combat after the protected opening Flow', () => {
     const game = createGame();
     game.startRun();
 
     game.exitFlow(22, true);
 
-    expect(game.state).toBe('gameover');
+    expect(game.state).toBe('playing');
     expect(loadSave().seenFlowTip).toBe(true);
-    expect(loadSave().runs).toBe(1);
-    expect(document.body.textContent).toContain('FLOW MASTERED');
-    expect(document.body.textContent).toContain('NEXT RUN');
+    expect(loadSave().runs).toBe(0);
+    expect(document.body.textContent).toContain('KEEP GOING');
+    expect(document.body.textContent).not.toContain('NEXT RUN');
   });
 });

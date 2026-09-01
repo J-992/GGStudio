@@ -18,7 +18,6 @@ describe('game-over retry', () => {
       newlyUnlocked: [],
       completedDailies: [],
       canContinue: false,
-      showcaseComplete: false,
       selected: 'fox',
       available: ['fox'],
     });
