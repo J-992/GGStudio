@@ -83,6 +83,30 @@ to set jump reach), you must re-measure the flat-to-flat jump and update
 `npm test` walks every level's compressed geometry and will tell you which gap
 you just broke.
 
+### So how do you make the game slower?
+
+Not with `runSpeed`. Taking 20% off it takes 20% off jump reach too, and every
+gap authored against the old reach stops being crossable — the coupling above
+is the whole reason.
+
+Use `GAMEPLAY_TIME_SCALE` in `src/game/Game.ts` instead. It is a fraction of
+real time multiplied into the simulation delta (currently `0.8`, i.e. 20%
+slower than real time), so every distance, arc and clearance in the game stays
+exactly as tuned and simply plays out over more seconds: obstacles arrive 20%
+slower and the player gets 25% longer to read them, while nothing that was
+possible stops being possible. It is the one knob that changes the *pace* of
+the game without changing its *geometry*.
+
+It scales the simulation only. The camera and the fail-screen timers keep
+running on the real frame delta — a smoother that lags real time is just a
+slower smoother, not a slower game. It composes with (rather than replaces) the
+transient scales the tutorial and the death beat write into `Game.timeScale`,
+which stay expressed relative to normal speed.
+
+Watch the knock-on effects when you move it: the endless speed ramp
+(`DifficultyCurve.ts`) is measured in *gameplay* seconds, so a slower game
+takes proportionally longer in wall-clock to reach cruise speed and top speed.
+
 ---
 
 ## Every parameter

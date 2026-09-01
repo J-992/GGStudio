@@ -135,6 +135,74 @@ export interface LoadProgress {
   currentItem: string;
 }
 
+/**
+ * The three warnings three.js prints on every FBX this game loads, and why each
+ * is noise rather than a defect worth fixing in the art.
+ *
+ *   - "Vertex has more than 4 skinning weights" - the exporter wrote 6-8
+ *     influences per vertex. three.js skins with exactly 4, so it keeps the
+ *     four heaviest and drops the rest. On these rigs the discarded weights are
+ *     rounding dust; the deformation is the one that has always shipped.
+ *   - "ShininessExponent map is not supported" / "ReflectionFactor map ..." -
+ *     FBX material channels with no three.js equivalent. Every mesh out of
+ *     these files is reassigned a `MeshLambertMaterial` here anyway, so the
+ *     skipped maps could not have survived the load in any case.
+ *
+ * They are printed once per vertex cluster and once per material, which is a
+ * few hundred lines across the three files - noise that buries the console for
+ * anyone reading it, and the Poki Inspector's event log along with it. Matched
+ * on the exact `console.warn` text three.js uses (including the unformatted
+ * `%s` variant, which FBXLoader passes as a literal), so anything else the
+ * loader has to say still gets through untouched.
+ */
+const FBX_KNOWN_WARNINGS = [
+  'THREE.FBXLoader: Vertex has more than 4 skinning weights',
+  'THREE.FBXLoader: %s map is not supported in three.js',
+];
+
+/**
+ * How many FBX loads are in flight. The filter is installed for the first and
+ * removed after the last: `loadCharacterCat()` and the building load overlap,
+ * and a plain install/restore pair would have the inner one hand `console.warn`
+ * back while the outer load was still parsing.
+ */
+let fbxLoadsInFlight = 0;
+let originalWarn: typeof console.warn | null = null;
+
+/**
+ * Runs one FBX load with {@link FBX_KNOWN_WARNINGS} filtered out of the console.
+ */
+async function loadFbxQuietly(
+  loader: FBXLoader,
+  url: string,
+): Promise<THREE.Group> {
+  if (fbxLoadsInFlight === 0) {
+    originalWarn = console.warn;
+    const pass = originalWarn;
+    console.warn = (...args: unknown[]): void => {
+      const first = args[0];
+      if (
+        typeof first === 'string' &&
+        FBX_KNOWN_WARNINGS.some((known) => first.startsWith(known))
+      ) {
+        return;
+      }
+      pass(...args);
+    };
+  }
+  fbxLoadsInFlight++;
+
+  try {
+    return await loader.loadAsync(url);
+  } finally {
+    fbxLoadsInFlight--;
+    if (fbxLoadsInFlight === 0 && originalWarn) {
+      console.warn = originalWarn;
+      originalWarn = null;
+    }
+  }
+}
+
 export class AssetRegistry {
   private manager = new THREE.LoadingManager();
   private gltfLoader = new GLTFLoader(this.manager);
@@ -304,8 +372,7 @@ export class AssetRegistry {
     const pending = this.pending.get(key);
     if (pending) return pending as Promise<THREE.Object3D>;
 
-    const promise = this.fbxLoader
-      .loadAsync(`${ASSET_ROOT}/building/townhouse.fbx`)
+    const promise = loadFbxQuietly(this.fbxLoader, `${ASSET_ROOT}/building/townhouse.fbx`)
       .then(async (root: THREE.Group) => {
         this.toLambert(root);
         root.updateMatrixWorld(true);
@@ -521,7 +588,7 @@ export class AssetRegistry {
       // format declaration, and renaming it churns every reference for no
       // behavioural reason).
       const [rig, ...loaded] = await Promise.all([
-        this.fbxLoader.loadAsync(`${ASSET_ROOT}/cat/kittycat.fbx`),
+        loadFbxQuietly(this.fbxLoader, `${ASSET_ROOT}/cat/kittycat.fbx`),
         ...states.map((state) =>
           this.gltfLoader.loadAsync(`${ASSET_ROOT}/cat/anim/${FBX_CLIP_FILES[state]}.glb`),
         ),
@@ -827,7 +894,7 @@ export class AssetRegistry {
   ): Promise<{ model: THREE.Object3D; clips: THREE.AnimationClip[] }> {
     const key = 'cat';
     const [fbx, skin] = await Promise.all([
-      this.fbxLoader.loadAsync(`${ASSET_ROOT}/cat/cat.fbx`),
+      loadFbxQuietly(this.fbxLoader, `${ASSET_ROOT}/cat/cat.fbx`),
       this.loadTexture(`${ASSET_ROOT}/cat/catskin.webp`),
     ]);
 
