@@ -46,29 +46,51 @@ import type { Rng } from './ChunkGenerators';
  * standing jump, now that the rise is large enough to matter on its own
  * terms (tiers only ever change by one step, see `RoofDirector`).
  *
- * `v = sqrt(2 * |gravity| * apex)`, `apex = TIER_RISE + LANDING_MARGIN`.
- * The previous tuning (a 1-unit rise, back when `ROOF_TIER_HEIGHT` stepped
- * by 1) targeted `STANDING_JUMP_APEX * 2.7` instead - "much higher than a
- * normal jump" stated in terms of the jump it had to visibly beat, since the
- * rise itself was trivial next to any apex worth having. With `TIER_RISE`
- * now 3 (a real storey, not a step), the rise itself is the thing that has
- * to be cleared with margin, so this targets that directly:
- * `apex = 3 + 1.0 = 4.0`, `velocity = sqrt(2*18*4) = 12.0` - still clears
- * the standing jump's own apex (`jumpImpulse^2 / (2*|gravity|)` = 1.73) by a
- * wide, dramatic margin, same as before.
+ * `v = sqrt(2 * |gravity| * apex)`, `apex = TIER_RISE + LANDING_MARGIN`. The
+ * apex framing alone understates what actually has to be guaranteed, though:
+ * the deck the player lands on is 3 units *higher* than the pad, so they
+ * touch back down on the way *down* the arc, at whatever height matches the
+ * new tier - not at the bottom, and not at the apex. What actually has to be
+ * reachable is the *horizontal* distance from the pad to the far edge of the
+ * gap it opens (`TRAMPOLINE_LOCAL_Z` to `GAP_END_Z`, both in
+ * `ChunkBuilder.ts`/`ChunkTypes.ts` - 7.7 units as of this writing) in the
+ * time it takes to descend from launch back to landing height, and it has to
+ * hold at the *slowest* speed the game ever runs at - `PHYSICS.baseRunSpeed *
+ * SPEED_RAMP_START_MULTIPLIER` (7.7 u/s), the speed every run and every
+ * tutorial attempt opens at.
  *
- * Hang time (`2*velocity/|gravity|` = 1.333s) at `PHYSICS.runSpeed` (11)
- * covers ~14.67 horizontal units - just inside `CHUNK_LENGTH` (15), matching
- * the "does not fling the player over the chunk beyond the one it launches
- * from" boundary the old multiplier was chosen against (`tests/roof.test.ts`
- * checks `< CHUNK_LENGTH` directly, so this is re-verified, not assumed).
- * A *stacked* Catnip Rush + late-game speed-ramp launch can still carry
- * further than that - accepted, not engineered around, since overshoot here
- * only skips track during an already-privileged temporary buff and never
- * creates a hazard.
+ * At the old tuning (`LANDING_MARGIN = 1.0`, `v = 12.0`), that descent takes
+ * exactly 1.0s - and `7.7 u/s * 1.0s = 7.7`, precisely the distance needed,
+ * with zero margin. Any friction, timing or discretization noise was enough
+ * to turn a textbook-correct landing into a miss; worse, it's worst exactly
+ * where a first-time player is most likely to meet their first trampoline.
+ *
+ * `LANDING_MARGIN = 3.25` (giving `v = 15.0`) is chosen to clear that with
+ * real margin instead of exactly meeting it: solving `speed_min * t_land =
+ * D_clear + slack` for `slack ≈ 2.5` gives `v ≈ 14.2` as the bare minimum
+ * needed; 15.0 is the clean round number above that, landing at **~3.3 units
+ * of horizontal margin - about 43% more than the bare minimum - at the
+ * slowest speed the game ever runs**, and comfortably more at any faster
+ * one. The apex this produces (6.25 units above launch, more than double the
+ * 3-unit rise) is a deliberately dramatic bounce, not an accident of the
+ * math - launches should read as obviously, comfortably higher than the gap
+ * needs, not as a jump tuned to the metre.
+ *
+ * `TIER_RISE` (below) is the same constant for every transition regardless
+ * of which pair of tiers it's between (`ROOF_TIER_HEIGHT` steps uniformly by
+ * 3), so this one derivation already covers LOW->MEDIUM and MEDIUM->HIGH
+ * identically - there is no separate tuning needed, or possible, per
+ * transition. A direct LOW->HIGH transition (skipping MEDIUM) is not
+ * something to verify reachable, because it cannot be generated at all:
+ * `RoofDirector.next()` only ever steps tier by exactly one per gap chunk.
+ *
+ * `tests/trampoline.test.ts` proves this against real physics (a genuinely
+ * simulated `PlayerController`, not just this arithmetic) at the worst-case
+ * speed, for both transitions - see that file for why algebra alone isn't
+ * treated as sufficient proof here.
  */
 const TIER_RISE = ROOF_TIER_HEIGHT[ROOF_MEDIUM] - ROOF_TIER_HEIGHT[ROOF_LOW];
-const LANDING_MARGIN = 1.0;
+const LANDING_MARGIN = 3.25;
 export const TRAMPOLINE_LAUNCH_VELOCITY = Math.sqrt(2 * Math.abs(PHYSICS.gravity) * (TIER_RISE + LANDING_MARGIN));
 
 /**
@@ -110,6 +132,7 @@ export class RoofDirector {
 
   next(chunkType: ChunkType, rng: Rng): RoofTransition {
     const previousTier = this.tier;
+
     if (chunkType !== 'jump' || rng() >= TIER_CHANGE_CHANCE) {
       return { tier: previousTier, previousTier, trampoline: false };
     }
@@ -138,8 +161,36 @@ const PAD_MAT = getMaterial(PALETTE.fabricRed);
 const PAD_RIM_MAT = getMaterial(PALETTE.metalDark);
 const PAD_LEG_MAT = getMaterial(PALETTE.metal);
 
-/** How close (world units) the player has to be to trigger the launch. */
-export const TRAMPOLINE_TRIGGER_RADIUS = 1.4;
+/**
+ * How close (world units, horizontal XZ only) the player has to be to
+ * trigger the launch - paired with {@link TRAMPOLINE_CATCH_ABOVE}/
+ * {@link TRAMPOLINE_CATCH_BELOW} for the vertical band, rather than one 3D
+ * radius: a single sphere can't be both "generous enough to catch a runner
+ * mid-jump" and "tight enough to still mean centre lane" at once, since a
+ * radius wide enough to cover a jump apex vertically also widens the
+ * horizontal tolerance at every other height. A cylinder keeps the two
+ * independent. Nudged up slightly from the original 1.4 (still comfortably
+ * under half of `PHYSICS.laneSpacing`, 2.4, so an adjacent, uncommitted lane
+ * still doesn't false-trigger at the pad's own Z) - see `ChunkBuilder.step()`'s
+ * trigger check for the fuller story of what this replaces and why.
+ */
+export const TRAMPOLINE_TRIGGER_RADIUS = 1.6;
+/**
+ * How far above the pad's own Y (world units) the trigger still counts - the
+ * "safety activation zone" that catches a runner who jumped shortly before
+ * reaching the pad, rather than only one already `grounded` on it. A
+ * standing jump's apex, in capsule-*centre* terms (what `PlayerController`
+ * actually reports), is `jumpImpulse²/(2·|gravity|) + capsuleFeetOffset()` ≈
+ * `1.73 + 0.5` = 2.23 - this clears that with a little margin, while staying
+ * safely under the ~3.5-unit vertical gap to the *next* tier's own deck
+ * (`ROOF_TIER_HEIGHT`'s 3-unit step + the same 0.5 capsule offset), so a
+ * runner standing on the tier above can never spuriously trigger a pad on
+ * the tier below it.
+ */
+export const TRAMPOLINE_CATCH_ABOVE = 2.4;
+/** Small tolerance below the pad's own Y - numerical/step jitter margin,
+ *  not a real "rescue from below deck" zone. */
+export const TRAMPOLINE_CATCH_BELOW = 0.3;
 
 function buildTrampolinePad(): THREE.Group {
   const group = new THREE.Group();

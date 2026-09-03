@@ -16,7 +16,7 @@ import {
 import { CHUNK_DEBUG } from './debug';
 import { ChunkDirector } from './ChunkDirector';
 import { pickCycleVariant } from './SectionDirector';
-import { generateChunk, mulberry32, type Rng } from './ChunkGenerators';
+import { generateChunk, generateStraight, mulberry32, type Rng } from './ChunkGenerators';
 import { generateFishPattern } from './FishPatterns';
 import { FishPool } from './FishPool';
 import type { Collectible } from '../../entities/Collectible';
@@ -40,6 +40,8 @@ import {
   generateRoofProp,
   TRAMPOLINE_LAUNCH_VELOCITY,
   TRAMPOLINE_TRIGGER_RADIUS,
+  TRAMPOLINE_CATCH_ABOVE,
+  TRAMPOLINE_CATCH_BELOW,
 } from './RoofFeatures';
 import { RoofBorderPool, BORDER_LENGTH } from './RoofBorders';
 import { brickMaterialForChunk } from './RoofBrickMaterials';
@@ -146,20 +148,24 @@ const BEAM_HIT_MARGIN = 0.3;
 /**
  * Bright, well-lit daytime sky for the endless track - no fixed skyline to
  * dress like a campaign level, just sun + sky + fog so obstacles read
- * clearly at a run. Fog colour matches sky colour so the horizon has no seam,
- * and near/far are sized around `AHEAD_DISTANCE` so newly streamed chunks
- * fade in through fog rather than popping into view.
+ * clearly at a run. Fog colour matches the sky gradient's near-horizon tone
+ * so the horizon has no seam, and near/far are sized around `AHEAD_DISTANCE`
+ * so newly streamed chunks fade in through fog rather than popping into view.
  *
- * `skyColor` is the exact #87CEEB the "colorful coastal city" art direction
- * asks for. `sunColor`/`ambientGround` are pulled warmer than the previous
- * pass for the same brief - "warm directional sunlight rather than neutral
- * white lighting" - since the sun is what actually colours every surface in
- * the scene (everything here is flat-shaded, no baked lighting), and a
- * washed-out sun makes the coastal palette's own colour choices pointless.
+ * The actual sky is now a stylized sunset gradient baked in
+ * `EnvironmentLighting.buildSunsetSkyBackground()` (blue-violet at the top,
+ * through warm pink/peach/orange, to golden-yellow at the horizon) -
+ * `skyColor` here is kept as a flat representative tone (the gradient's peach
+ * midpoint) rather than removed, since `BuildingWindows.ts` still reads it as
+ * a brightness reference for window-emissive tuning. `sunColor`/
+ * `ambientGround`/`sunIntensity`/`ambientIntensity` are deliberately left at
+ * their existing warm-daylight values - this is a sky/horizon change, not a
+ * scene-brightness one, and obstacles reading clearly is what those numbers
+ * already protect.
  */
 const ENDLESS_LIGHTING: LightingDef = {
-  skyColor: 0x87ceeb,
-  fogColor: 0x9fd9f2,
+  skyColor: 0xf9c89b,
+  fogColor: 0xffdd8c,
   // Sized so `fogFar` and `AHEAD_DISTANCE` are the same number: a chunk is
   // dealt at exactly the distance the fog has gone opaque, so it arrives
   // invisible rather than at ~70 % fog and visibly fading in, and nothing is
@@ -203,8 +209,10 @@ export interface TrackAhead {
    * Reported separately from `gapArc` (which deliberately omits the gap a pad
    * chunk opens) because a pad is not a hazard to clear, it is a *thing to be
    * standing on*, and the two want opposite answers. `TRAMPOLINE_TRIGGER_RADIUS`
-   * is 1.4 against a `laneSpacing` of 2.4, so the pad only fires for a runner
-   * in the centre lane, and only one that is `grounded` when it crosses.
+   * (1.6, horizontal-only) is still well under half a `laneSpacing` (2.4)
+   * away from the neighbouring lane, so the pad still effectively fires only
+   * for a runner in (or committing to) the centre lane - see `step()`'s
+   * trigger check for why it no longer also requires `grounded`.
    */
   padArc: number;
 }
@@ -287,6 +295,17 @@ export interface ChunkBuilderOptions {
    *  it; the attract screen deliberately does not. */
   forceStartSequence?: boolean;
   /**
+   * A hand-authored, non-procedural chunk sequence - `spawnChunk()` pulls
+   * chunk `index` straight from this array instead of asking `director`/
+   * `roofDirector`/`generateFishPattern` for one, so nothing here is rolled.
+   * Once the array is exhausted, spawning falls back to an empty repeating
+   * `generateStraight()` filler (`Game.startTutorial()`'s level is short
+   * enough, and its own finish-arc trigger fires early enough, that the
+   * filler is never actually reached in play - it exists only so the
+   * streamer always has *something* to build one chunk past the end).
+   */
+  fixedChunks?: readonly ChunkSpec[];
+  /**
    * Called at the world position of every hazard Catnip Rush demolishes -
    * see {@link ChunkBuilder.smashPhased}. `Game` turns it into the burst,
    * the crunch and the jolt; the vector is scratch and must not be retained.
@@ -344,8 +363,15 @@ export class ChunkBuilder {
   private magnetActive = false;
   /** Shared phase for `pulsePowerUpGlow` - see `updatePowerUps()`. */
   private powerUpPulsePhase = 0;
+  /** How many trampoline pads have actually launched the player - a debug
+   *  canary for tests, mirroring the streamer/pool ones below, since
+   *  `LiveChunk.trampolineUsed` itself isn't otherwise observable from
+   *  outside `step()`. */
+  private trampolinesFired = 0;
 
   private readonly onHazardSmashed: ((position: THREE.Vector3) => void) | null;
+  /** See `ChunkBuilderOptions.fixedChunks`. */
+  private readonly fixedChunks: readonly ChunkSpec[] | null;
 
   private readonly spawnPosition = new THREE.Vector3(0, TRACK_Y, 0);
   private readonly spawnHeading = new THREE.Vector3(0, 0, 1);
@@ -369,9 +395,13 @@ export class ChunkBuilder {
     this.roofBorders = new RoofBorderPool(this.root);
     this.route = new RouteGrowth(this.spawnPosition, this.spawnHeading);
     this.onHazardSmashed = options.onHazardSmashed ?? null;
+    this.fixedChunks = options.fixedChunks ?? null;
     this.rng = mulberry32(options.seed ?? 0xc47a11);
     // Drawn from the same per-run stream as everything else, so a run's
-    // seed alone fully determines its section-order variant too.
+    // seed alone fully determines its section-order variant too. Built
+    // unconditionally even when `fixedChunks` is set - `nextSpec()` simply
+    // never calls into it then, and constructing it regardless keeps this
+    // constructor from needing two shapes.
     this.director = new ChunkDirector(
       pickCycleVariant(this.rng),
       options.openingType ?? null,
@@ -451,17 +481,33 @@ export class ChunkBuilder {
         }
       }
 
-      // Only fires once the player is actually grounded (not already mid-arc
-      // from an earlier launch or a jump) and only once per chunk - see
-      // `LiveChunk.trampolineUsed`'s own doc comment.
-      if (
-        chunk.trampoline &&
-        !chunk.trampolineUsed &&
-        this.player.grounded &&
-        playerPos.distanceToSquared(chunk.trampoline) <= TRAMPOLINE_TRIGGER_RADIUS * TRAMPOLINE_TRIGGER_RADIUS
-      ) {
-        chunk.trampolineUsed = true;
-        this.player.launchUpward(TRAMPOLINE_LAUNCH_VELOCITY);
+      // A horizontal (XZ) radius for "which pad", and a generous vertical
+      // safety zone above it for "catch the runner whether they're standing
+      // on it or already mid-jump through it" - deliberately NOT gated on
+      // `this.player.grounded` any more. It used to be: a standing jump's
+      // hang time covers ~9.66 horizontal units, far wider than this ~2.6-
+      // unit-wide window, so any jump taken while passing through it (an
+      // ordinary thing to do, since the pad sits only 1.2 units before the
+      // gap it leads to) made `grounded` false for the whole pass, silently
+      // skipping the check every fixed step and leaving the pad un-triggered
+      // - "passes through instead of bouncing." `launchUpward()` already
+      // clamps any existing downward velocity before applying its impulse,
+      // so it has always been safe to call on an airborne runner; nothing
+      // stopped this except the gate itself. Only once per chunk still -
+      // see `LiveChunk.trampolineUsed`'s own doc comment.
+      if (chunk.trampoline && !chunk.trampolineUsed) {
+        const dx = playerPos.x - chunk.trampoline.x;
+        const dz = playerPos.z - chunk.trampoline.z;
+        const dy = playerPos.y - chunk.trampoline.y;
+        if (
+          dx * dx + dz * dz <= TRAMPOLINE_TRIGGER_RADIUS * TRAMPOLINE_TRIGGER_RADIUS &&
+          dy >= -TRAMPOLINE_CATCH_BELOW &&
+          dy <= TRAMPOLINE_CATCH_ABOVE
+        ) {
+          chunk.trampolineUsed = true;
+          this.trampolinesFired++;
+          this.player.launchUpward(TRAMPOLINE_LAUNCH_VELOCITY);
+        }
       }
     }
   }
@@ -766,6 +812,9 @@ export class ChunkBuilder {
   get builtRigCount(): number {
     return this.pool.builtCount;
   }
+  get trampolinesFiredCount(): number {
+    return this.trampolinesFired;
+  }
 
   // -------------------------------------------------------------------------
 
@@ -865,6 +914,37 @@ export class ChunkBuilder {
     return head >= beam.y - BEAM_RADIUS && feet <= beam.y + BEAM_RADIUS;
   }
 
+  /**
+   * The spec for chunk `placement.index` - either pulled straight from a
+   * hand-authored {@link ChunkBuilderOptions.fixedChunks} sequence, or
+   * decided the normal procedural way (`director.select()` -> `generateChunk()`
+   * -> `roofDirector.next()` -> fish/power-up placement, each layered on top
+   * of the finished hazard geometry rather than deciding it, since they need
+   * to read which lanes are blocked / where the gap is / whether this is even
+   * a `'straight'` chunk - see RoofFeatures.ts/FishPatterns.ts/PowerUps.ts).
+   */
+  private nextSpec(placement: ChunkPlacement): ChunkSpec {
+    if (this.fixedChunks) return this.fixedChunks[placement.index] ?? generateStraight();
+
+    const { type, tier, section, simple } = this.director.select(placement.startZ, this.rng);
+    const hazardSpec = generateChunk(type, this.rng, simple);
+    const roof = this.roofDirector.next(hazardSpec.type, this.rng);
+    // Told after the fact, not before: `ChunkDirector` decided `type` with no
+    // idea whether it would end up carrying a trampoline - only `RoofDirector`,
+    // just above, knows that - so the earliest this director can be informed
+    // is right here, in time for the recovery chunk to land on the *next*
+    // `select()` call. See `ChunkDirector.noteTrampoline()`.
+    if (roof.trampoline) this.director.noteTrampoline();
+    return {
+      ...hazardSpec,
+      fish: generateFishPattern(hazardSpec, section, tier, this.rng),
+      powerUp: generatePowerUp(hazardSpec, section, this.rng),
+      roofTier: roof.tier,
+      previousRoofTier: roof.previousTier,
+      trampoline: roof.trampoline,
+    };
+  }
+
   private spawnChunk(placement: ChunkPlacement, slot: number): void {
     const rig = this.pool.rigFor(slot);
 
@@ -902,22 +982,7 @@ export class ChunkBuilder {
       this.route.extend(generateChunk('straight', this.rng));
     }
 
-    const { type, tier, section, simple } = this.director.select(placement.startZ, this.rng);
-    const hazardSpec = generateChunk(type, this.rng, simple);
-    // Roof tier/fish/power-up placement all read the finished hazard
-    // geometry (which lanes are blocked, where the gap is, whether this is
-    // even a 'straight' chunk) so they're layered on top rather than
-    // decided by the same switch - see RoofFeatures.ts/FishPatterns.ts/
-    // PowerUps.ts.
-    const roof = this.roofDirector.next(hazardSpec.type, this.rng);
-    const spec: ChunkSpec = {
-      ...hazardSpec,
-      fish: generateFishPattern(hazardSpec, section, tier, this.rng),
-      powerUp: generatePowerUp(hazardSpec, section, this.rng),
-      roofTier: roof.tier,
-      previousRoofTier: roof.previousTier,
-      trampoline: roof.trampoline,
-    };
+    const spec = this.nextSpec(placement);
     const { startDist, path } = this.route.extend(spec);
 
     this.player.extendPath(path);
@@ -954,7 +1019,6 @@ export class ChunkBuilder {
         index: placement.index,
         slot,
         type: spec.type,
-        section,
         fish: fishCount,
         powerUp: spec.powerUp?.kind ?? null,
         entry: frame.origin.toArray().map((n) => n.toFixed(1)),

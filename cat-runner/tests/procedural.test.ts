@@ -45,6 +45,8 @@ import {
   ChunkDirector,
   tierAt,
   TURN_COOLDOWN_CHUNKS,
+  MID_TIER_START,
+  LATE_TIER_START,
 } from '../src/levels/procedural/ChunkDirector';
 import {
   CYCLE_LENGTH_CHUNKS,
@@ -420,8 +422,8 @@ describe('ChunkDirector', () => {
   });
 
   it('straight (zero-decision) chunks are the exception, not the routine filler', () => {
-    // SECTION_WEIGHTS keeps `straight` modest in every section (15 in the
-    // three lighter ones, 6 in the two challenge ones) so "every chunk
+    // SECTION_WEIGHTS keeps `straight` modest in every section (8 in the
+    // three lighter ones, 3 in the two challenge ones) so "every chunk
     // should contain at least one obstacle challenge" holds in practice.
     // Some `straight` chunks are additionally unavoidable (forced right
     // after a turn, and required right before one) - this checks the
@@ -435,6 +437,24 @@ describe('ChunkDirector', () => {
       if (director.select(i * CHUNK_LENGTH, rng).type === 'straight') straightCount++;
     }
     expect(straightCount / N).toBeLessThan(0.3);
+  });
+
+  /**
+   * "Landing safety" - a trampoline landing must never be followed
+   * immediately by another hazard, so the player always gets a beat to
+   * recover and reorient. Unlike `pendingEasyGapRecovery` (early/easy tier
+   * only), `noteTrampoline()` is unconditional - sampled at early, mid, and
+   * late tier distances to prove it isn't tier-gated the same way.
+   */
+  it('forces a straight recovery chunk right after any trampoline, regardless of tier', () => {
+    for (const startDist of [0, MID_TIER_START, LATE_TIER_START]) {
+      const director = new ChunkDirector();
+      const rng = mulberry32(11);
+      director.select(startDist, rng); // whatever this deals doesn't matter
+      director.noteTrampoline();
+      const next = director.select(startDist + CHUNK_LENGTH, rng);
+      expect(next.type, `tier at distance ${startDist}`).toBe('straight');
+    }
   });
 
   it('a hazard chunk makes the very next chunk more likely to also be a hazard (combo bias)', () => {

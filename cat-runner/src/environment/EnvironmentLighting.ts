@@ -74,6 +74,41 @@ const STAR_COUNT = 500;
 
 /** Warm horizon tone the sun's colour dips toward near sunrise/sunset. */
 const SUNSET_COLOR = new THREE.Color(0xff8a3d);
+
+/**
+ * Bakes the sunset sky's vertical gradient once, as a 1xN `CanvasTexture` -
+ * the same `ctx.createLinearGradient` idiom already used for the clothesline
+ * fabric and the catnip trail ribbon, applied to `scene.background` instead
+ * of a mesh. Zero per-frame cost (baked once, never redrawn) and no shader/
+ * dome mesh, so it costs nothing extra at any `graphicsQuality` tier.
+ *
+ * Falls back to a flat `THREE.Color` (the gradient's mid tone) when
+ * `document` doesn't exist - the test suite runs in plain Node
+ * (`vitest.config.ts`, `environment: 'node'`), the same constraint
+ * `ClotheslineHazard.buildFabricTexture` already guards against.
+ */
+function buildSunsetSkyBackground(): THREE.Color | THREE.CanvasTexture {
+  if (typeof document === 'undefined') return new THREE.Color(0xf9c89b);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new THREE.Color(0xf9c89b);
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, 256);
+  gradient.addColorStop(0.0, '#8c82c4'); // top: soft blue-violet
+  gradient.addColorStop(0.35, '#f2a9c6'); // warm pink
+  gradient.addColorStop(0.6, '#f9c89b'); // peach
+  gradient.addColorStop(0.8, '#f6a560'); // orange
+  gradient.addColorStop(1.0, '#ffd966'); // near horizon: golden-yellow
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 1, 256);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
 /** Cool white-blue the moon light and disc are lit with. */
 const MOON_COLOR = new THREE.Color(0xaebeff);
 const MOON_MAX_INTENSITY = 0.55;
@@ -152,7 +187,14 @@ export function buildLighting(
   const dayFogColor = new THREE.Color(def.fogColor);
   const daySunColor = new THREE.Color(def.sunColor);
 
-  scene.background = daySkyColor.clone();
+  // The stylized sunset gradient - see `buildSunsetSkyBackground()`'s own
+  // doc comment. `daySkyColor` (above, from `def.skyColor`) is kept as a
+  // flat reference regardless: `BuildingWindows.ts` still reads it for
+  // window-emissive brightness tuning, and `updateTimeOfDay()` below still
+  // uses it as the dusk/dawn lerp target for the same reason a gradient
+  // texture can't be smoothly blended the way a flat colour can.
+  const daySkyBackground = buildSunsetSkyBackground();
+  scene.background = daySkyBackground;
   scene.fog = new THREE.Fog(dayFogColor.getHex(), def.fogNear, def.fogFar);
 
   const sun = new THREE.DirectionalLight(def.sunColor, def.sunIntensity);
@@ -220,6 +262,10 @@ export function buildLighting(
 
   const sunOffset = authoredSun.clone();
   const moonOffset = authoredSun.clone().negate();
+  /** Reused each `updateTimeOfDay()` call for the dusk/dawn half of the
+   *  cycle - see that method's own note on why the gradient background
+   *  can't be smoothly blended the same way. */
+  const nightBlendColor = new THREE.Color();
 
   // Placed once, here, and never touched again. Only the sun -> target
   // direction affects a directional light's shading, so one fixed placement
@@ -285,7 +331,18 @@ export function buildLighting(
       // units/sec is a visibility problem, not atmosphere.
       hemi.intensity = def.ambientIntensity * (0.3 + 0.7 * dayAmount);
 
-      (scene.background as THREE.Color).copy(NIGHT_SKY_COLOR).lerp(daySkyColor, dayAmount);
+      // The gradient background (a baked texture, or its flat-colour
+      // fallback in a DOM-less test environment) can't be smoothly blended
+      // the way the old flat sky colour could, so the night half of the
+      // cycle lerps a plain colour toward `daySkyColor` instead, and only
+      // the "mostly day" half actually shows the crisp gradient - see
+      // `buildSunsetSkyBackground()`'s own doc comment.
+      if (dayAmount > 0.5) {
+        scene.background = daySkyBackground;
+      } else {
+        nightBlendColor.copy(NIGHT_SKY_COLOR).lerp(daySkyColor, dayAmount * 2);
+        scene.background = nightBlendColor;
+      }
       (scene.fog as THREE.Fog).color.copy(NIGHT_FOG_COLOR).lerp(dayFogColor, dayAmount);
 
       moonMesh.visible = nightAmount > 0.02;
@@ -310,6 +367,7 @@ export function buildLighting(
       stars.geometry.dispose();
       (stars.material as THREE.Material).dispose();
 
+      if (daySkyBackground instanceof THREE.CanvasTexture) daySkyBackground.dispose();
       scene.background = null;
       scene.fog = null;
     },

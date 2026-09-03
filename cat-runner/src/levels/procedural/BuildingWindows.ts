@@ -68,12 +68,14 @@ export const WINDOW_PATTERN_COUNT = 4;
  * #000 that the facade reads as a grid of holes punched in the wall.
  *
  * Physically, an unlit window in daylight is not dark - it is a mirror
- * showing the sky. These are that: mid-tone blues pulled from the same sky
- * the scene is lit under (`ENDLESS_LIGHTING.skyColor`, #87CEEB), light enough
- * to survive being multiplied by an unlit face's ambient term and still read
- * as glass. Between this and the emissive mask below (which is the belt to
- * this braces - see `buildEmissiveTexture`), no window cell can go black on
- * any face, at any sun angle.
+ * showing the sky. These are that: mid-tone blues matching the endless
+ * track's original flat sky colour (a fixed palette, not read live from
+ * `ENDLESS_LIGHTING` - now that the sky itself is a sunset gradient, this is
+ * a deliberately kept, separate design choice rather than an oversight),
+ * light enough to survive being multiplied by an unlit face's ambient term
+ * and still read as glass. Between this and the emissive mask below (which
+ * is the belt to this braces - see `buildEmissiveTexture`), no window cell
+ * can go black on any face, at any sun angle.
  */
 const DARK_GLASS = ['#6d9dc4', '#8bb6d6'] as const;
 const LIT_GLASS = ['#ffe6a1', '#ffd27a'] as const;

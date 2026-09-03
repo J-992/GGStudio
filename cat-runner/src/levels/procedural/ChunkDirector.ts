@@ -153,21 +153,30 @@ type WeightTable = Readonly<Record<ChunkType, number>>;
  * **zero in every row** - and that last step overshot. At zero the only
  * chunks that could ever come out `'straight'` were the forced turn lead-in
  * and post-turn rest, which reads as relentless rather than dense: a run
- * with no plain chunk in it anywhere has no rhythm to push against. It is
- * back in the pool here at a modest, deliberately non-dominant weight -
- * roughly the previous pass's own numbers scaled down, since those were
- * reverted for being too high:
+ * with no plain chunk in it anywhere has no rhythm to push against. It went
+ * back in the pool at a modest, deliberately non-dominant weight - 15 in the
+ * three lighter sections, 6 in the two challenge ones - and stayed there
+ * until a pacing pass found even that read as too much downtime: too much of
+ * a run was spent on a chunk with no decision in it. Halved again from
+ * there - **8/8/3/8/3** - on the same reasoning `NO_REPEAT_TYPES` already
+ * relied on to keep the *previous* weight safe: a lower ambient weight isn't
+ * the zero-weight failure mode repeating, because the two *forced* straight
+ * mechanisms (the post-gap recovery chunk and the turn lead-in/post-turn
+ * pair, both below) are untouched by this and keep straight chunks
+ * concentrated in exactly the contexts they're meant for - recovery after a
+ * gap, a turn's approach and exit - rather than turning it into "relentless"
+ * a second time.
  *
- *   `easy`/`fishCollection`/`reward` get 15, the three lighter sections
- *   where a beat of breathing room belongs; the two challenge sections get
- *   6, small enough that a challenge still reads as sustained.
+ *   `easy`/`fishCollection`/`reward` get 8, the three lighter sections where
+ *   a beat of breathing room still belongs, just less of it; the two
+ *   challenge sections get 3, small enough that a challenge reads as fully
+ *   sustained.
  *
- * The weight each row gives back is shaved proportionally off that row's own
- * `obstacle`/`slide`/`jump` (~0.85 in the three 15-weight rows, ~0.94 in the
- * two 6-weight ones) and never off `vent` - it must stay exactly 0 in the
- * three lighter sections (see the per-row comments below), and 0 times any
- * scale is still 0. Rows no longer sum to exactly 100; they never had to,
- * `weightedPick()` normalises against whatever the candidate set totals.
+ * The weight each row gives back is not redistributed onto `obstacle`/
+ * `slide`/`jump` - `weightedPick()` normalises against whatever the
+ * candidate set totals, so lowering `straight` alone already raises every
+ * other type's *share* of the row proportionally, which is the whole point
+ * (more of the run spent on obstacles/gaps/turns/height transitions).
  *
  * Two plain straights can still never land back to back out of this pool -
  * that is {@link NO_REPEAT_TYPES}' job, not the weights' - which is what
@@ -183,7 +192,7 @@ const SECTION_WEIGHTS: Readonly<Record<SectionType, WeightTable>> = {
   // see those two entries for how "gradually" is expressed as a difference
   // in weight between them, not a second tier system.
   easy: {
-    straight: 15, // was 0 - see the table's own doc comment
+    straight: 8, // was 0, then 15 - see the table's own doc comment
     obstacle: 39, // 46 x ~0.85
     slide: 17, // 20 x ~0.85
     jump: 24, // 28 x ~0.85
@@ -192,7 +201,7 @@ const SECTION_WEIGHTS: Readonly<Record<SectionType, WeightTable>> = {
     turnRight: 3,
   },
   fishCollection: {
-    straight: 15, // was 0
+    straight: 8, // was 0, then 15
     obstacle: 21, // 25 x ~0.85
     slide: 36, // 42 x ~0.85 - still favours slide over gaps, shape unchanged
     jump: 23, // 27 x ~0.85
@@ -203,7 +212,7 @@ const SECTION_WEIGHTS: Readonly<Record<SectionType, WeightTable>> = {
   // The first place `vent` can appear at all. One of the two sections the
   // extra gap push (item 4) lands heaviest in.
   obstacleChallenge: {
-    straight: 6, // small - this is a challenge section, not a breather
+    straight: 3, // small (was 6) - this is a challenge section, not a breather
     obstacle: 13, // 14 x ~0.94
     slide: 23, // 25 x ~0.94
     jump: 37, // 39 x ~0.94
@@ -212,8 +221,8 @@ const SECTION_WEIGHTS: Readonly<Record<SectionType, WeightTable>> = {
     turnRight: 6,
   },
   reward: {
-    straight: 15, // was 0 - stays the restful section, and the one that most
-    // wants a plain chunk to actually rest on.
+    straight: 8, // was 0, then 15 - stays the restful section, and the one
+    // that most wants a plain chunk to actually rest on.
     obstacle: 29, // 34 x ~0.85
     slide: 27, // 32 x ~0.85
     jump: 26, // 30 x ~0.85
@@ -225,7 +234,7 @@ const SECTION_WEIGHTS: Readonly<Record<SectionType, WeightTable>> = {
   // carries more of everything" relationship the section already had. The
   // other of the two sections the extra gap push lands heaviest in.
   hardObstacleChallenge: {
-    straight: 6, // small, same reasoning as `obstacleChallenge` above
+    straight: 3, // small (was 6), same reasoning as `obstacleChallenge` above
     obstacle: 5, // 5 x ~0.94, rounded - already the smallest weight in the row
     slide: 23, // 25 x ~0.94
     jump: 39, // 41 x ~0.94
@@ -262,12 +271,12 @@ export interface ChunkSelection {
   readonly section: SectionType;
   /**
    * Asks the generator for the gentlest form of this chunk type it has -
-   * currently only ever set on the forced second chunk of a run's opening
-   * sequence (see `forceStartSequence`), where it means "one blocked lane at
-   * the far, loose Z" rather than the normal 1/2/3-lane roll. Layered on top
-   * of `type` rather than encoded as a separate chunk type so nothing else
-   * in the pipeline (the weight tables, the no-repeat filter, the roof
-   * director) has to learn about a variant that only exists twice per run.
+   * set on the forced second chunk of a run's opening sequence
+   * (`forceStartSequence`), where it means "one blocked lane at the far,
+   * loose Z" rather than the normal 1/2/3-lane roll. Layered on top of
+   * `type` rather than encoded as a separate chunk type so nothing else in
+   * the pipeline (the weight tables, the no-repeat filter, the roof
+   * director) has to learn about a variant that only exists once per run.
    */
   readonly simple: boolean;
 }
@@ -317,6 +326,18 @@ export class ChunkDirector {
    *  section other than `'easy'`), where combinations right after a gap are
    *  the intended, escalating challenge. */
   private pendingEasyGapRecovery = false;
+  /**
+   * Set from outside, by `ChunkBuilder.nextSpec()` calling {@link noteTrampoline}
+   * right after resolving *this* chunk's own roof-tier roll - `ChunkDirector`
+   * has no visibility into that roll itself, since it's decided afterward by
+   * the separate `RoofDirector`. Consulted the same way
+   * `pendingEasyGapRecovery` is (a forced `'straight'` on the very next
+   * `select()` call), but unconditional on tier/section: a trampoline
+   * landing is a height change, a bigger disorientation than a same-height
+   * gap, and deserves a guaranteed recovery chunk everywhere, not just on
+   * early/easy difficulty - see `select()`.
+   */
+  private pendingTrampolineRecovery = false;
 
   /**
    * @param cycleVariant Which `SectionDirector` cycle ordering this run
@@ -373,6 +394,11 @@ export class ChunkDirector {
     } else if (this.turnCycle === 'postTurn') {
       type = 'straight';
       this.turnCycle = 'idle';
+    } else if (this.pendingTrampolineRecovery) {
+      // Trampoline landing -> straight recovery, every tier/section - see
+      // `pendingTrampolineRecovery`'s own doc comment.
+      type = 'straight';
+      this.pendingTrampolineRecovery = false;
     } else if (this.pendingEasyGapRecovery) {
       // Gap -> straight recovery, early/easy difficulty only - see
       // `pendingEasyGapRecovery`'s own doc comment. Bypasses the weighted
@@ -420,6 +446,19 @@ export class ChunkDirector {
     }
 
     return { type, tier, section, simple };
+  }
+
+  /**
+   * Tells the director the chunk it just dealt turned out to carry a
+   * trampoline (a roof-tier rise), so the *next* `select()` call is forced
+   * to a plain `'straight'` recovery chunk regardless of tier/section - see
+   * `pendingTrampolineRecovery`'s own doc comment. Called by
+   * `ChunkBuilder.nextSpec()`, the only place that has both this director's
+   * own type decision and the separate `RoofDirector`'s tier decision for
+   * the same chunk.
+   */
+  noteTrampoline(): void {
+    this.pendingTrampolineRecovery = true;
   }
 
   private weightTableFor(tier: DifficultyTier, section: SectionType): WeightTable {

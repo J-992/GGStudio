@@ -36,7 +36,10 @@ const DEFAULTS: Required<CloudFieldOptions> = {
 };
 
 const puffGeometry = new THREE.IcosahedronGeometry(1, 0);
-const cloudMaterial = new THREE.MeshBasicMaterial({ color: 0xfdfdfd, fog: true });
+// A warm pale tint (was near-white, 0xfdfdfd) so clouds read as sunset-lit
+// against the new gradient sky rather than stark white, while staying light
+// enough to keep clear contrast against obstacles/deck geometry.
+const cloudMaterial = new THREE.MeshBasicMaterial({ color: 0xfff1e0, fog: true });
 
 export class CloudField {
   readonly root = new THREE.Group();

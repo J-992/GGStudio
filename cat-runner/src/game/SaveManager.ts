@@ -8,7 +8,6 @@
  */
 
 import { CAT_SKINS } from '../entities/CatSkins';
-import { TUTORIAL_LESSONS, isTutorialLesson, type TutorialLesson } from './Tutorial';
 
 // ============================================================================
 // Storage abstraction
@@ -148,14 +147,21 @@ export interface SaveData {
   /** Furthest single run, in metres. Drives the main menu's best-distance row. */
   bestDistance: number;
   /**
-   * Lessons the player has already been shown - see `Tutorial.ts`.
+   * Whether the standalone tutorial level (`src/levels/procedural/
+   * TutorialLevel.ts`, `Game.startTutorial()`) has ever been completed.
    *
-   * A list rather than a "hasSeenTutorial" flag because the two lessons are
-   * taught independently, whenever the track first happens to deal each
-   * hazard: a player can easily run four hundred metres over a clothesline
-   * and never meet a trampoline, and the one they haven't met is still owed.
+   * Gates only *auto-launching* it on boot, never its availability - the
+   * main menu's Tutorial button always works, regardless of this flag, and
+   * replaying it doesn't touch this field until it's finished again.
+   *
+   * `true` for every save that already existed before this field did: a
+   * save existing at all is proof the game has already been launched once,
+   * and forcing a returning player through the tutorial unasked would be far
+   * more jarring than a one-off reactive prompt ever was. Only a genuinely
+   * fresh install (no save file at all) starts `false` - see `sanitize`'s
+   * note.
    */
-  tutorialsLearned: TutorialLesson[];
+  tutorialCompleted: boolean;
 }
 
 const STORAGE_KEY = 'rooftop-rascal:save:v1';
@@ -177,12 +183,20 @@ const STORAGE_KEY = 'rooftop-rascal:save:v1';
  * something that now has a price. `sanitize` grants exactly that coat rather
  * than resetting them to the default - see its note.
  *
- * v5 adds `tutorialsLearned`. Additive again, and deliberately arriving empty
- * for an existing save: a returning player being shown the duck prompt once
- * is a beat, being *never* shown it because their file predates the tutorial
- * is a player who never finds out the input exists.
+ * v5 added `tutorialsLearned` (per-lesson reactive-teaching progress for an
+ * endless-mode system that no longer exists) and v6 added
+ * `tutorialCourseCompleted` (whether a since-scrapped scripted opening
+ * sequence had run). v7 replaces both with one `tutorialCompleted` flag, now
+ * that the only tutorial is the standalone level in `TutorialLevel.ts`: it
+ * teaches everything fresh on every attempt (nothing persists per-lesson,
+ * see `Tutorial.ts`), so the save file only ever needs to remember "has this
+ * ever been finished." Arrives `true` for every save that already existed
+ * (reaching `sanitize()` at all proves the game has launched before) and
+ * `false` only for a save that doesn't exist yet - the same shape v6 used,
+ * for the same reason: forcing the tutorial on someone who has already been
+ * playing would be far more jarring than a stale reactive prompt ever was.
  */
-const CURRENT_VERSION = 5;
+const CURRENT_VERSION = 7;
 const OLDEST_MIGRATABLE_VERSION = 1;
 const SAVE_DEBOUNCE_MS = 250;
 
@@ -239,7 +253,7 @@ function createDefaultSaveData(): SaveData {
     unlockedSkins: [],
     fish: 0,
     bestDistance: 0,
-    tutorialsLearned: [],
+    tutorialCompleted: false,
   };
 }
 
@@ -372,6 +386,20 @@ export class SaveManager {
     return { bestDistance: this._data.bestDistance, isNewBest };
   }
 
+  /**
+   * Banks a flat amount of fish with no run attached - unlike `recordRun()`,
+   * never touches `bestDistance`. Used by the standalone tutorial level's
+   * completion (`Game.completeTutorial()`): fish picked up along the way plus
+   * the flat completion bonus, granted together since the tutorial isn't a
+   * "run" in the scoring sense.
+   */
+  addFish(amount: number): void {
+    const earned = isFiniteNumber(amount) ? Math.max(0, Math.floor(amount)) : 0;
+    if (earned === 0) return;
+    this._data.fish = clampFish(this._data.fish + earned);
+    this.save();
+  }
+
   // -------------------------------------------------------------------------
   // Coats
   // -------------------------------------------------------------------------
@@ -425,16 +453,13 @@ export class SaveManager {
   }
 
   /**
-   * Banks the tutorial lessons the player has now been shown.
-   *
-   * Written through the same debounce as everything else - a lesson is
-   * learned at most twice per install, so there is nothing to batch, but a
-   * mid-run `localStorage` write on a phone is a frame either way.
+   * Marks the standalone tutorial level finished, so it never auto-launches
+   * again - see `SaveData.tutorialCompleted`. One-way: nothing in normal play
+   * ever needs to clear it back to `false`.
    */
-  setTutorialsLearned(lessons: readonly TutorialLesson[]): void {
-    const next = TUTORIAL_LESSONS.filter((lesson) => lessons.includes(lesson));
-    if (next.join() === this._data.tutorialsLearned.join()) return;
-    this._data.tutorialsLearned = next;
+  setTutorialCompleted(): void {
+    if (this._data.tutorialCompleted) return;
+    this._data.tutorialCompleted = true;
     this.save();
   }
 
@@ -498,14 +523,11 @@ export class SaveManager {
       fish: isFiniteNumber(obj.fish) ? clampFish(Math.floor(obj.fish)) : 0,
       bestDistance:
         isFiniteNumber(obj.bestDistance) && obj.bestDistance > 0 ? obj.bestDistance : 0,
-      // Filtered against the shipped lesson ids and re-ordered to match them,
-      // so a hand-edited file can neither invent a lesson nor suppress one by
-      // listing it twice.
-      tutorialsLearned: TUTORIAL_LESSONS.filter((lesson) =>
-        (Array.isArray(obj.tutorialsLearned) ? obj.tutorialsLearned : [])
-          .filter(isTutorialLesson)
-          .includes(lesson),
-      ),
+      // Reaching sanitize() at all proves a save already existed - see the v7
+      // note above `CURRENT_VERSION`. Unconditional, not read from `obj`: a
+      // save from before this field existed does not get to opt back into
+      // the tutorial's auto-launch by omitting it.
+      tutorialCompleted: true,
     };
   }
 }
