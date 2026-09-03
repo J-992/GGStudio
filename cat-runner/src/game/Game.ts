@@ -7,7 +7,6 @@ import { SettingsManager, type GameSettings } from './SettingsManager';
 import {
   notifyGameFailed,
   notifyGameStarted,
-  notifyLevelCompleted,
   notifySoundChanged,
 } from './IntegrationHooks';
 import { Poki } from './PokiSDK';
@@ -388,21 +387,22 @@ export class Game {
 
   // --- Tutorial ---
   /**
-   * `'endless'` unless `startTutorial()` is currently active - see that
-   * method. Gates the handful of places endless-only behaviour would
-   * otherwise be wrong for the standalone tutorial level: `loseLife()`/
-   * `fallToDeath()` (always a free checkpoint respawn there, never a spent
-   * life or a failed run), the restart hotkey (restarts the level, not an
-   * endless run), and `recordRun()`/`bestDistance` (never touched - the
-   * tutorial has its own completion path, `completeTutorial()`). Speed
-   * ramping and time scale are deliberately *not* gated on this any more -
-   * the tutorial runs at exactly the same pace and physics as an endless run.
+   * True only while the runner is still inside the first-run tutorial
+   * prefix at the start of an endless run - see `startEndless()`. Gates the
+   * handful of places ordinary endless behaviour would otherwise be wrong
+   * for it: `loseLife()`/`fallToDeath()` (always a free checkpoint respawn
+   * while this is true, never a spent life or a failed run) and the cue
+   * scanning in `updateTutorialLevel()`. Nothing else about the run differs -
+   * it is the same `ChunkBuilder`, the same lives/score bookkeeping, the
+   * same speed ramp - which is the whole point: the tutorial is a temporary
+   * mode within one run, not a separate one.
    */
-  private mode: 'endless' | 'tutorial' = 'endless';
+  private tutorialActive = false;
   /**
-   * Non-null only while `mode === 'tutorial'` - a fresh instance every
-   * attempt (see `startTutorial()`), never persisted, so a replay from the
-   * main menu teaches everything again. See `Tutorial.ts`.
+   * Non-null only while `tutorialActive` - a fresh instance every run that
+   * includes the prefix (see `startEndless()`), never persisted, so a replay
+   * from the main menu's Tutorial button teaches everything again. See
+   * `Tutorial.ts`.
    */
   private tutorialLevel: TutorialDirector | null = null;
   private readonly tutorialAhead: TrackAhead = {
@@ -430,10 +430,6 @@ export class Game {
     turned: false,
     suspended: false,
   };
-  /** Banked at `completeTutorial()`, read back by the `TutorialComplete`
-   *  state's `onEnter` to draw the overlay - see `UIManager.showTutorialComplete`. */
-  private lastTutorialFishEarned = 0;
-
   // --- Frame bookkeeping ---
   private lastFrameTime = 0;
   private rafHandle = 0;
@@ -492,9 +488,9 @@ export class Game {
     this.ui = new UIManager(this.states, this.save, this.settings, this.audio, this.input, {
       onPlay: () => this.enterRun(),
       onResume: () => this.resume(),
-      onRestart: () => this.restartCurrentRun(),
+      onRestart: () => this.enterRun(),
       onReturnToMenu: () => this.returnToMenu(),
-      onTutorial: () => this.startTutorial(),
+      onTutorial: () => this.startEndless({ forceTutorial: true }),
       onOpenShop: () => this.states.transition(GameState.Shop),
       onOpenSettings: () => this.openSettings(),
       onCloseSettings: () => this.closeSettings(),
@@ -569,11 +565,12 @@ export class Game {
     this.start();
 
     // First launch ever, and only then - see `SaveData.tutorialCompleted`.
-    // `startTutorial()` transitions straight on to `Intro`/`Playing`, and
-    // since state transitions are synchronous while rendering always waits
-    // for the next animation frame, the main menu is never actually painted
-    // on a fresh install.
-    if (!this.save.data.tutorialCompleted) this.startTutorial();
+    // `startEndless()` transitions straight on to `Intro`/`Playing` and,
+    // since `tutorialCompleted` is still false, folds the tutorial prefix
+    // into that same call - see its own doc comment. State transitions are
+    // synchronous while rendering always waits for the next animation frame,
+    // so the main menu is never actually painted on a fresh install.
+    if (!this.save.data.tutorialCompleted) this.startEndless();
   }
 
   private setupRenderer(canvas: HTMLCanvasElement): void {
@@ -919,15 +916,6 @@ export class Game {
       },
     });
 
-    this.states.register(GameState.TutorialComplete, {
-      onEnter: () => {
-        this.audio.setSlideIntensity(0);
-        this.audio.setWindIntensity(0);
-        this.audio.play('levelComplete');
-        this.ui.showTutorialComplete(this.lastTutorialFishEarned);
-      },
-    });
-
     this.states.register(GameState.MainMenu, {
       onEnter: (from) => {
         this.audio.stopMusic();
@@ -947,13 +935,13 @@ export class Game {
     this.unsubscribes.push(
       this.input.on('restart', () => {
         if (this.states.state === GameState.Playing || this.states.state === GameState.Failed) {
-          this.restartCurrentRun();
+          this.enterRun();
         }
       }),
       this.input.on('pause', () => this.togglePause()),
       this.input.on('mute', () => this.toggleSound()),
       this.input.on('confirm', () => {
-        if (this.states.state === GameState.Failed) this.restartCurrentRun();
+        if (this.states.state === GameState.Failed) this.enterRun();
       }),
     );
 
@@ -1044,85 +1032,62 @@ export class Game {
    * the HUD's turn-warning indicator are all reused as-is; `ChunkBuilder` owns
    * everything about the track itself, streaming chunks and wiring the
    * player's path internally.
+   *
+   * On a fresh install (`!save.data.tutorialCompleted`), or whenever
+   * `forceTutorial` is asked for (the main menu's Tutorial button), the run
+   * opens with the hand-authored first-run prefix from
+   * `src/levels/procedural/TutorialLevel.ts` - `ChunkBuilder`'s own
+   * `fixedChunks` option, not a chunk of it decided by `ChunkDirector` - and
+   * then falls straight through into the same procedural generation an
+   * ordinary run uses, in the same `ChunkBuilder` instance, with no reset,
+   * teleport or scene change at the seam. `tutorialActive`/`tutorialLevel`
+   * (see their own doc comments) are what makes the prefix teach via cues
+   * and respawn-on-failure instead of behaving like ordinary hazards; once
+   * `updateTutorialLevel()` reaches the end of it, `completeTutorial()`
+   * quietly turns both off and the run just continues.
    */
-  startEndless(): void {
+  startEndless(options: { forceTutorial?: boolean } = {}): void {
     this.teardownRun();
-    this.mode = 'endless';
+
+    const includeTutorial = options.forceTutorial || !this.save.data.tutorialCompleted;
+    this.tutorialActive = includeTutorial;
+    this.tutorialLevel = includeTutorial ? new TutorialDirector() : null;
 
     this.followCamera.setFarPlane(400);
 
     // A fresh seed every run, so the chunk sequence (turns, obstacles, fish,
     // power-ups, and section order) varies instead of replaying the same
-    // fixed default. Logged so a specific run can be manually re-seeded
-    // (hardcode `seed:` below) if a bug needs reproducing.
+    // fixed default - including whatever procedural generation picks up
+    // with once a tutorial prefix, if any, runs out. Logged so a specific
+    // run can be manually re-seeded (hardcode `seed:` below) if a bug needs
+    // reproducing.
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
     console.info(`[endless] run seed: 0x${seed.toString(16)}`);
 
     this.endless = new ChunkBuilder(this.scene, this.physics, this.player, {
       seed,
       shadowMapSize: this.shadowMapSizeForQuality(),
+      fixedChunks: includeTutorial ? TUTORIAL_LEVEL_CHUNKS : undefined,
       // Every real run opens straight-then-single-obstacle regardless of
       // seed, so it never starts with a clothesline or a pipe in the
-      // runner's face - see `ChunkDirector`'s `forceStartSequence`. The
-      // attract screen deliberately doesn't ask for this: it is a
+      // runner's face - see `ChunkDirector`'s `forceStartSequence`. Only
+      // needed when there's no tutorial prefix: the prefix's own opening
+      // buffer chunks already do this job, more thoroughly. The attract
+      // screen deliberately doesn't ask for this either way: it is a
       // background decoration, not a run.
-      forceStartSequence: true,
+      forceStartSequence: !includeTutorial,
       onHazardSmashed: (position) => this.onHazardSmashed(position),
     });
     this.endless.start();
     this.player.spawn(new THREE.Vector3(0, TRACK_Y + capsuleFeetOffset(), 0), 0);
 
     this.resetRunState();
-
-    this.followCamera.reset();
-    this.player.getPosition(_catPos);
-    this.followCamera.snapTo(this.cameraTarget(), 0);
-
-    this.states.transition(GameState.Intro);
-    this.states.transition(GameState.Playing);
-
-    notifyGameStarted();
-  }
-
-  /**
-   * Starts (or restarts) the standalone, completely hand-authored tutorial
-   * level - `src/levels/procedural/TutorialLevel.ts`, not a chunk of it
-   * decided by `ChunkDirector`. Reuses `ChunkBuilder`'s rendering/physics via
-   * its `fixedChunks` option rather than the weighted pool, and reuses the
-   * same run-lifecycle scaffolding `startEndless()` does (fresh
-   * `ChunkBuilder`, `resetRunState()`, camera reset, `Intro` -> `Playing`) -
-   * see `this.mode`'s own doc comment for exactly what tutorial mode changes
-   * along the way.
-   */
-  startTutorial(): void {
-    this.teardownRun();
-    this.mode = 'tutorial';
-    this.tutorialLevel = new TutorialDirector(); // fresh, in-memory, every attempt
-
-    this.followCamera.setFarPlane(400);
-
-    // Handcrafted, not random - a fixed seed only so the level's purely
-    // cosmetic decoration (roof props, clouds) is reproducible between
-    // attempts too, not because anything gameplay-relevant reads it.
-    this.endless = new ChunkBuilder(this.scene, this.physics, this.player, {
-      seed: 0xdeadbeef,
-      shadowMapSize: this.shadowMapSizeForQuality(),
-      fixedChunks: TUTORIAL_LEVEL_CHUNKS,
-      onHazardSmashed: (position) => this.onHazardSmashed(position),
-    });
-    this.endless.start();
-    this.player.spawn(new THREE.Vector3(0, TRACK_Y + capsuleFeetOffset(), 0), 0);
-
-    this.resetRunState();
-    // Speed ramps exactly like an endless run from here - `resetRunState()`
-    // already set `runSpeed`/`currentSpeedBase` back to base, and
-    // `runFrame()` now calls `updateDifficultySpeed()` regardless of mode.
-    // Deliberately not held at a fixed pace: the tutorial is meant to teach
-    // the game at the speed it's actually played at, not a gentler one -
-    // and the ramp's own opening floor (`SPEED_RAMP_START_MULTIPLIER`) is
-    // exactly the speed every endless run already opens at too, so this
-    // introduces no new low-speed case beyond what endless mode already
-    // accepts everywhere.
+    // Speed ramps exactly like the rest of an endless run through the
+    // tutorial prefix too - `runFrame()` calls `updateDifficultySpeed()`
+    // unconditionally. Deliberately not held at a gentler pace: the prefix
+    // is meant to teach the game at the speed it's actually played at, and
+    // the ramp's own opening floor (`SPEED_RAMP_START_MULTIPLIER`) is
+    // exactly the speed every run already opens at regardless.
 
     this.followCamera.reset();
     this.player.getPosition(_catPos);
@@ -1150,7 +1115,7 @@ export class Game {
     if (this.powerUpGlow) this.powerUpGlow.visible = false;
     // A later `startEndless()` must never inherit a stale tutorial director.
     this.tutorialLevel = null;
-    this.mode = 'endless';
+    this.tutorialActive = false;
   }
 
   private resetRunState(): void {
@@ -1507,9 +1472,9 @@ export class Game {
       if (this.endless) this.endless.update(_catPos);
       if (state === GameState.Playing) {
         this.updateDistance();
-        // Ramps in tutorial mode exactly like an endless run now - see
-        // `startTutorial()`'s own note on why holding a fixed speed isn't
-        // needed.
+        // Ramps through the tutorial prefix exactly like the rest of an
+        // endless run - see `startEndless()`'s own note on why holding a
+        // fixed speed isn't needed.
         this.updateDifficultySpeed();
       }
       this.updateVisuals(dt);
@@ -1667,13 +1632,14 @@ export class Game {
   }
 
   /**
-   * Drives the standalone tutorial level's cues - a no-op outside
-   * `mode === 'tutorial'`, so ordinary endless play never shows any of this.
+   * Drives the first-run tutorial prefix's cues - a no-op once
+   * `tutorialActive` is false, so ordinary endless play (and the rest of a
+   * run, once the prefix ends) never shows any of this.
    *
    * Deliberately does not touch `this.timeScale` or game speed at all - the
-   * tutorial runs at exactly the same pace, with exactly the same physics,
-   * as an ordinary endless run (see `startTutorial()`'s speed handling).
-   * Teaching happens entirely through the cue/arrow (`TutorialDirector`,
+   * prefix runs at exactly the same pace, with exactly the same physics, as
+   * the rest of the run (see `startEndless()`'s speed handling). Teaching
+   * happens entirely through the cue/arrow (`TutorialDirector`,
    * `UIManager.updateTutorialCue`) and the checkpoint respawn on failure -
    * never by slowing the world down.
    *
@@ -1685,7 +1651,7 @@ export class Game {
    * method, the next hazard is just whatever the scan finds ahead next.
    */
   private updateTutorialLevel(): void {
-    if (this.mode !== 'tutorial' || !this.endless || !this.tutorialLevel) return;
+    if (!this.tutorialActive || !this.endless || !this.tutorialLevel) return;
     const tutorial = this.tutorialLevel;
 
     if (this.states.state !== GameState.Playing) {
@@ -1831,9 +1797,9 @@ export class Game {
     }
 
     // The one deliberate exception to "a missed jump is a missed jump" above:
-    // in the standalone tutorial level, a fall is exactly a missed *lesson*,
-    // not a missed run - see `respawnAtTutorialCheckpoint`.
-    if (this.mode === 'tutorial') {
+    // inside the tutorial prefix, a fall is exactly a missed *lesson*, not a
+    // missed run - see `respawnAtTutorialCheckpoint`.
+    if (this.tutorialActive) {
       this.respawnAtTutorialCheckpoint();
       return;
     }
@@ -1884,9 +1850,9 @@ export class Game {
       return;
     }
 
-    // Same exception as `fallToDeath`'s: in the tutorial level, this hit is
-    // a lesson to redo, not a life to spend.
-    if (this.mode === 'tutorial') {
+    // Same exception as `fallToDeath`'s: inside the tutorial prefix, this
+    // hit is a lesson to redo, not a life to spend.
+    if (this.tutorialActive) {
       this.respawnAtTutorialCheckpoint();
       return;
     }
@@ -1957,13 +1923,13 @@ export class Game {
   /**
    * Puts the runner back just before the tutorial hazard it failed, without
    * spending a life, ending the run, or reseeding the track - the whole
-   * reason `mode === 'tutorial'` redirects here instead of the ordinary
-   * `fail()`/life-spending paths, see `this.mode`'s own doc comment.
+   * reason `tutorialActive` redirects here instead of the ordinary
+   * `fail()`/life-spending paths, see that field's own doc comment.
    *
    * Structurally the same placement `recoverEndlessFall()` does - same
    * `getPositionAt`/`safeLaneNear`/`roofTierNear` - but targets a *remembered*
    * checkpoint arc (`TUTORIAL_LEVEL_CHECKPOINTS`, precomputed from the
-   * level's own hand-authored chunk sequence) rather than a fixed setback
+   * prefix's own hand-authored chunk sequence) rather than a fixed setback
    * from wherever the runner happens to be now, since a fall in particular
    * has usually already carried it past the hazard by the time this runs.
    *
@@ -1973,14 +1939,15 @@ export class Game {
    * one lesson: worst case it's the nearest hazard behind the runner, which
    * is still forward progress with no penalty.
    *
-   * Fish already picked up this attempt are left untouched - nothing is
-   * "spent" until `completeTutorial()` banks them, and this path never
-   * shortcuts that. `tutorialLevel.reset()` at the end drops the in-flight
-   * prompt/slowdown but keeps `learned`, so the same cue naturally re-arms
-   * once the runner is back within its lesson's own `LESSON_LEAD` of the
-   * hazard again - except on the Combined Challenge's restaged hazards,
-   * where the lesson is already learned from earlier in the same attempt and
-   * so stays silent, by the same "never re-arm a learned lesson" rule.
+   * Fish already picked up this attempt are left untouched - they're already
+   * ordinary in-run fish (`fishCollected`), nothing special banks them, and
+   * this path never touches that counter. `tutorialLevel.reset()` at the end
+   * drops the in-flight prompt but keeps `learned`, so the same cue
+   * naturally re-arms once the runner is back within its lesson's own
+   * `LESSON_LEAD` of the hazard again - except on the Combined Challenge's
+   * restaged hazards, where the lesson is already learned from earlier in
+   * the same run and so stays silent, by the same "never re-arm a learned
+   * lesson" rule.
    */
   private respawnAtTutorialCheckpoint(): void {
     const endless = this.endless;
@@ -2014,26 +1981,25 @@ export class Game {
   }
 
   /**
-   * The tutorial level's own finish line - reached once, from
+   * The tutorial prefix's own finish line - reached once, from
    * `updateTutorialLevel()`, when `view.arc` passes `TUTORIAL_LEVEL_FINISH_ARC`.
-   * Never redirected through `fail()`/`GameState.Failed`: this is a success,
-   * not a run ending, so it gets its own state and its own overlay.
    *
-   * Banks whatever fish were picked up along the way plus a flat completion
-   * bonus in one `addFish()` call, since the tutorial isn't a "run" in the
-   * `recordRun()`/`bestDistance` sense - see `SaveManager.addFish`'s own doc
-   * comment for why the two are kept separate.
+   * Deliberately invisible: no state transition, no sound, no overlay, no
+   * separate save-bank call - the whole point is that the run just keeps
+   * going, exactly as it would have anyway, and the player has no reason to
+   * notice the seam. Fish collected during the prefix were never held
+   * separately (see `respawnAtTutorialCheckpoint()`'s own note) - they're
+   * already `fishCollected`, counting toward this run's eventual
+   * `recordRun()` like any other endless fish. All this does is stop
+   * scanning for tutorial cues and remember, for every future run, that it
+   * doesn't need to happen again.
    */
   private completeTutorial(): void {
-    if (this.states.state !== GameState.Playing || this.mode !== 'tutorial') return;
+    if (!this.tutorialActive) return;
 
-    const earned = this.fishCollected + 100;
-    this.save.addFish(earned);
+    this.tutorialActive = false;
     this.save.setTutorialCompleted();
-    this.lastTutorialFishEarned = earned;
-
-    this.states.transition(GameState.TutorialComplete);
-    notifyLevelCompleted('tutorial', this.elapsed * 1000, this.fishCollected);
+    this.tutorialLevel = null;
   }
 
   /**
@@ -2088,11 +2054,11 @@ export class Game {
 
   private fail(reason: FailReason): void {
     if (this.states.state !== GameState.Playing) return;
-    // Belt-and-suspenders: the `mode === 'tutorial'` guards in `loseLife()`/
+    // Belt-and-suspenders: the `tutorialActive` guards in `loseLife()`/
     // `fallToDeath()` already redirect every failure away from this method
-    // before it's ever reached, so the tutorial level never fails by
+    // before it's ever reached, so the tutorial prefix never fails by
     // construction, not merely by omission here too.
-    if (this.mode === 'tutorial') return;
+    if (this.tutorialActive) return;
     this.failReason = reason;
     this.lives = 0;
     this.player.kill();
@@ -2126,18 +2092,10 @@ export class Game {
     // Any input restarts immediately; otherwise it restarts itself, so the
     // "one more go" loop never stalls waiting for a decision.
     if (this.failTimer > 0.35 && this.input.consumeAnyInput()) {
-      this.restartCurrentRun();
+      this.enterRun();
       return;
     }
-    if (this.failTimer >= FAIL_AUTO_RESTART) this.restartCurrentRun();
-  }
-
-  private restartCurrentRun(): void {
-    if (this.mode === 'tutorial') {
-      this.startTutorial();
-      return;
-    }
-    this.enterRun();
+    if (this.failTimer >= FAIL_AUTO_RESTART) this.enterRun();
   }
 
   /**

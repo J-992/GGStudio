@@ -106,6 +106,26 @@ describe('RoofDirector', () => {
     };
     expect(seq()).toEqual(seq());
   });
+
+  /**
+   * Regression for the tutorial-prefix seam: `ChunkBuilder` primes this
+   * director with the last `fixedChunks` chunk's own tier before procedural
+   * generation resumes (see `ChunkBuilder.nextSpec()`), since this director
+   * never rolled any of those chunks itself and would otherwise still be
+   * sitting at its own default (0). A non-`'jump'` chunk never changes tier
+   * regardless of the rng draw, so `next('straight', ...)` reading the
+   * primed value straight back - not 0 - is the whole regression.
+   */
+  it('prime() syncs the tier without rolling, so the next chunk reads it straight back', () => {
+    const director = new RoofDirector();
+    const rng = mulberry32(1);
+
+    director.prime(ROOF_MEDIUM);
+    const { tier, previousTier } = director.next('straight', rng);
+
+    expect(previousTier).toBe(ROOF_MEDIUM);
+    expect(tier).toBe(ROOF_MEDIUM);
+  });
 });
 
 describe('TRAMPOLINE_LAUNCH_VELOCITY', () => {

@@ -147,7 +147,6 @@ const SCREEN_ID_BY_STATE: Record<GameState, string | null> = {
   [GameState.Playing]: null,
   [GameState.Paused]: 'screen-pause',
   [GameState.Failed]: 'screen-failed',
-  [GameState.TutorialComplete]: 'screen-tutorial-complete',
 };
 
 /** Every `.screen` id that exists in the document, used to build the lookup cache. */
@@ -158,14 +157,9 @@ const ALL_SCREEN_IDS = [
   'screen-settings',
   'screen-pause',
   'screen-failed',
-  'screen-tutorial-complete',
 ] as const;
 
-/** States in which the HUD (not a `.screen`) should be visible.
- *
- * `TutorialComplete` is deliberately absent: it's a clean success screen,
- * not a HUD-behind-overlay like `Failed` (whose HUD stays visible so the
- * lives/fish counters read as "this is what that run ended with"). */
+/** States in which the HUD (not a `.screen`) should be visible. */
 const HUD_VISIBLE_STATES = new Set<GameState>([
   GameState.Intro,
   GameState.Playing,
@@ -288,9 +282,6 @@ interface Refs {
   failFish: HTMLElement | null;
   failBest: HTMLElement | null;
   failNewBest: HTMLElement | null;
-
-  tutorialCompleteFish: HTMLElement | null;
-
 
   setMasterVolume: HTMLInputElement | null;
   setMusicVolume: HTMLInputElement | null;
@@ -474,9 +465,6 @@ export class UIManager {
       failBest: this.qs('fail-best'),
       failNewBest: this.qs('fail-new-best'),
 
-      tutorialCompleteFish: this.qs('tutorial-complete-fish'),
-
-
       setMasterVolume: this.qs<HTMLInputElement>('set-master-volume'),
       setMusicVolume: this.qs<HTMLInputElement>('set-music-volume'),
       setEffectsVolume: this.qs<HTMLInputElement>('set-effects-volume'),
@@ -558,8 +546,6 @@ export class UIManager {
       ['btn-pause-menu', () => this.callbacks.onReturnToMenu()],
       ['btn-fail-retry', () => this.callbacks.onRestart()],
       ['btn-fail-menu', () => this.callbacks.onReturnToMenu()],
-      ['btn-tutorial-complete-endless', () => this.callbacks.onPlay()],
-      ['btn-tutorial-complete-menu', () => this.callbacks.onReturnToMenu()],
       ['btn-reset-progress', () => this.callbacks.onResetProgress()],
     ]);
   }
@@ -1261,23 +1247,6 @@ export class UIManager {
     // definition, which is the right time to say so - it is also the moment
     // the player learns there is a record at all.
     if (this.refs.failNewBest) this.refs.failNewBest.hidden = !summary.isNewBest;
-  }
-
-  // ==========================================================================
-  // Tutorial complete overlay
-  // ==========================================================================
-
-  /**
-   * Draws the standalone tutorial level's success screen -
-   * `Game.completeTutorial()`'s only caller. `fishEarned` is the total
-   * banked (pickups along the way plus the flat completion bonus), not just
-   * the bonus alone, so the number here matches what `SaveManager.addFish`
-   * actually wrote.
-   */
-  showTutorialComplete(fishEarned: number): void {
-    if (this.refs.tutorialCompleteFish) {
-      this.refs.tutorialCompleteFish.textContent = formatFish(fishEarned);
-    }
   }
 
   // ==========================================================================

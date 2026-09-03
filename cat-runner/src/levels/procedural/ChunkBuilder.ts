@@ -16,7 +16,7 @@ import {
 import { CHUNK_DEBUG } from './debug';
 import { ChunkDirector } from './ChunkDirector';
 import { pickCycleVariant } from './SectionDirector';
-import { generateChunk, generateStraight, mulberry32, type Rng } from './ChunkGenerators';
+import { generateChunk, mulberry32, type Rng } from './ChunkGenerators';
 import { generateFishPattern } from './FishPatterns';
 import { FishPool } from './FishPool';
 import type { Collectible } from '../../entities/Collectible';
@@ -152,20 +152,19 @@ const BEAM_HIT_MARGIN = 0.3;
  * so the horizon has no seam, and near/far are sized around `AHEAD_DISTANCE`
  * so newly streamed chunks fade in through fog rather than popping into view.
  *
- * The actual sky is now a stylized sunset gradient baked in
- * `EnvironmentLighting.buildSunsetSkyBackground()` (blue-violet at the top,
- * through warm pink/peach/orange, to golden-yellow at the horizon) -
- * `skyColor` here is kept as a flat representative tone (the gradient's peach
- * midpoint) rather than removed, since `BuildingWindows.ts` still reads it as
- * a brightness reference for window-emissive tuning. `sunColor`/
- * `ambientGround`/`sunIntensity`/`ambientIntensity` are deliberately left at
- * their existing warm-daylight values - this is a sky/horizon change, not a
- * scene-brightness one, and obstacles reading clearly is what those numbers
- * already protect.
+ * The actual sky is now a stylized Candy City gradient baked in
+ * `EnvironmentLighting.buildSunsetSkyBackground()` (soft blue at the top,
+ * through lavender, to peach-pink at the horizon) - `skyColor` here is kept
+ * as a flat representative tone (the gradient's lavender midpoint) rather
+ * than removed, since it's still `updateTimeOfDay()`'s dusk/dawn lerp target
+ * (see `EnvironmentLighting.ts`). `sunColor`/`ambientGround`/`sunIntensity`/
+ * `ambientIntensity` are deliberately left at their existing warm-daylight
+ * values - this is a sky/horizon change, not a scene-brightness one, and
+ * obstacles reading clearly is what those numbers already protect.
  */
 const ENDLESS_LIGHTING: LightingDef = {
-  skyColor: 0xf9c89b,
-  fogColor: 0xffdd8c,
+  skyColor: 0xdcb9e6,
+  fogColor: 0xffd9c9,
   // Sized so `fogFar` and `AHEAD_DISTANCE` are the same number: a chunk is
   // dealt at exactly the distance the fog has gone opaque, so it arrives
   // invisible rather than at ~70 % fog and visibly fading in, and nothing is
@@ -295,14 +294,15 @@ export interface ChunkBuilderOptions {
    *  it; the attract screen deliberately does not. */
   forceStartSequence?: boolean;
   /**
-   * A hand-authored, non-procedural chunk sequence - `spawnChunk()` pulls
-   * chunk `index` straight from this array instead of asking `director`/
-   * `roofDirector`/`generateFishPattern` for one, so nothing here is rolled.
-   * Once the array is exhausted, spawning falls back to an empty repeating
-   * `generateStraight()` filler (`Game.startTutorial()`'s level is short
-   * enough, and its own finish-arc trigger fires early enough, that the
-   * filler is never actually reached in play - it exists only so the
-   * streamer always has *something* to build one chunk past the end).
+   * A hand-authored, non-procedural *prefix* - `nextSpec()` pulls chunk
+   * `index` straight from this array instead of asking `director`/
+   * `roofDirector`/`generateFishPattern` for one, for as long as `index` is
+   * within it. Once the array runs out, spawning falls through to ordinary
+   * procedural generation from whatever distance/roof-tier the prefix ended
+   * at (see `RoofDirector.prime()`) - so a run can open on a fixed sequence
+   * (`Game.startEndless()`'s first-launch tutorial prefix) and continue
+   * seamlessly into the normal weighted pool, in the same `ChunkBuilder`
+   * instance, with no reset or hand-off the player would ever notice.
    */
   fixedChunks?: readonly ChunkSpec[];
   /**
@@ -815,6 +815,18 @@ export class ChunkBuilder {
   get trampolinesFiredCount(): number {
     return this.trampolinesFired;
   }
+  /** World positions of every currently-visible fish in `slot`'s chunk - a
+   *  test accessor, mirroring the debug canaries above, for verifying real
+   *  placement (e.g. the deck-A/deck-B tier split on a gap chunk) without
+   *  reaching into `FishPool` internals directly. Read before any further
+   *  `step()`, since the idle bob (`Collectible.update`) perturbs Y slightly
+   *  every frame after placement. */
+  fishPositionsFor(slot: number): THREE.Vector3[] {
+    return this.fish
+      .rigFor(slot)
+      .filter((f) => f.root.visible)
+      .map((f) => f.root.position.clone());
+  }
 
   // -------------------------------------------------------------------------
 
@@ -916,7 +928,7 @@ export class ChunkBuilder {
 
   /**
    * The spec for chunk `placement.index` - either pulled straight from a
-   * hand-authored {@link ChunkBuilderOptions.fixedChunks} sequence, or
+   * hand-authored {@link ChunkBuilderOptions.fixedChunks} *prefix*, or
    * decided the normal procedural way (`director.select()` -> `generateChunk()`
    * -> `roofDirector.next()` -> fish/power-up placement, each layered on top
    * of the finished hazard geometry rather than deciding it, since they need
@@ -924,9 +936,18 @@ export class ChunkBuilder {
    * a `'straight'` chunk - see RoofFeatures.ts/FishPatterns.ts/PowerUps.ts).
    */
   private nextSpec(placement: ChunkPlacement): ChunkSpec {
-    if (this.fixedChunks) return this.fixedChunks[placement.index] ?? generateStraight();
+    if (this.fixedChunks && placement.index < this.fixedChunks.length) {
+      const spec = this.fixedChunks[placement.index];
+      // Keeps RoofDirector in sync even though it never rolled this chunk
+      // itself - see `RoofDirector.prime()`'s own doc comment.
+      this.roofDirector.prime(spec.roofTier);
+      return spec;
+    }
 
-    const { type, tier, section, simple } = this.director.select(placement.startZ, this.rng);
+    const { type, tier, section, simple, forcedRecovery } = this.director.select(
+      placement.startZ,
+      this.rng,
+    );
     const hazardSpec = generateChunk(type, this.rng, simple);
     const roof = this.roofDirector.next(hazardSpec.type, this.rng);
     // Told after the fact, not before: `ChunkDirector` decided `type` with no
@@ -937,7 +958,7 @@ export class ChunkBuilder {
     if (roof.trampoline) this.director.noteTrampoline();
     return {
       ...hazardSpec,
-      fish: generateFishPattern(hazardSpec, section, tier, this.rng),
+      fish: generateFishPattern(hazardSpec, section, tier, this.rng, forcedRecovery),
       powerUp: generatePowerUp(hazardSpec, section, this.rng),
       roofTier: roof.tier,
       previousRoofTier: roof.previousTier,
@@ -1526,7 +1547,15 @@ export class ChunkBuilder {
         fishRig[i].root.visible = false;
         continue;
       }
-      fishRig[i].moveTo(at(placement.x, placement.y, placement.z));
+      // A gap chunk can change roof tier mid-chunk (deck A at `previousRoofTier`,
+      // deck B at `roofTier` - see the `at`/`atPrev` note above `placeChunk`'s
+      // deck placement). Fish over deck A (before the gap opens) have to use
+      // `atPrev` for the same reason deck A itself does, or a tier-changing
+      // gap embeds/floats them relative to the surface they actually sit
+      // above. Fish at/after the gap's far edge, and every fish on a
+      // non-gap chunk (where `at`/`atPrev` already agree), use `at`.
+      const placeFish = spec.hasGap && placement.z < GAP_START_Z ? atPrev : at;
+      fishRig[i].moveTo(placeFish(placement.x, placement.y, placement.z));
     }
 
     if (spec.powerUp) {

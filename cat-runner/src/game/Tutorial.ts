@@ -3,11 +3,15 @@ import type { Lane } from '../levels/chunkTemplate';
 /**
  * The six things a first-time player has not yet worked out.
  *
- * Taught exactly once each, in order, by a single completely hand-authored,
- * non-procedural level (`src/levels/procedural/TutorialLevel.ts`) reachable
- * from the main menu's Tutorial button and auto-launched on the very first
- * ever install - never woven into ordinary endless play, which stays purely
- * procedural and shows none of this:
+ * Taught exactly once each, in order, by a hand-authored, non-procedural
+ * prefix (`src/levels/procedural/TutorialLevel.ts`) at the *start* of an
+ * ordinary endless run - not a separate scene, level, or mode. It plays on
+ * the very first ever install and is replayable at will from the main
+ * menu's Tutorial button (`Game.startEndless({ forceTutorial: true })`);
+ * every other run skips it and is purely procedural from its first chunk.
+ * Once the prefix ends, `Game.completeTutorial()` quietly stops scanning for
+ * these cues and the same run carries straight on into normal generation -
+ * see that method's own doc comment:
  *
  *  - **Lane changing.** A single blocked lane, placed at the loosest spacing
  *    the `obstacle` generator has, with a fish trail leading into the open
@@ -39,10 +43,10 @@ import type { Lane } from '../levels/chunkTemplate';
  * nothing new - see `TutorialLevel.ts`'s own doc comment for why its cues
  * stay silent even on a failure there.
  *
- * Each lesson is learned once per attempt, the first time its hazard is
- * passed correctly, and never taught again within that attempt - `learned`
- * lives only in memory, one fresh `TutorialDirector` per playthrough (see
- * `Game.startTutorial()`), so a replay from the menu teaches everything
+ * Each lesson is learned once per run, the first time its hazard is passed
+ * correctly, and never taught again within that run - `learned` lives only
+ * in memory, one fresh `TutorialDirector` per run that includes the prefix
+ * (see `Game.startEndless()`), so a replay from the menu teaches everything
  * again. Failing a lesson's hazard does not spend it: `Game`'s
  * checkpoint respawn puts the runner back before it and this director's own
  * {@link reset} re-arms the cue, so the prompt is simply shown again.

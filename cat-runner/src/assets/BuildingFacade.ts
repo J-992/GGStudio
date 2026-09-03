@@ -98,6 +98,13 @@ const FAMILIES: readonly PanelFamily[] = [
     cornice: 'Cornice_Brick_Center',
     base: PALETTE.coastalYellow,
   },
+  {
+    wall: 'Trim_Plain_3',
+    window: 'Trim_Window',
+    ground: 'Trim_FirstFloor_Wall',
+    cornice: 'Cornice_Trim_Center',
+    base: PALETTE.coastalLavender,
+  },
 ];
 
 /**

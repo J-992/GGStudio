@@ -386,20 +386,6 @@ export class SaveManager {
     return { bestDistance: this._data.bestDistance, isNewBest };
   }
 
-  /**
-   * Banks a flat amount of fish with no run attached - unlike `recordRun()`,
-   * never touches `bestDistance`. Used by the standalone tutorial level's
-   * completion (`Game.completeTutorial()`): fish picked up along the way plus
-   * the flat completion bonus, granted together since the tutorial isn't a
-   * "run" in the scoring sense.
-   */
-  addFish(amount: number): void {
-    const earned = isFiniteNumber(amount) ? Math.max(0, Math.floor(amount)) : 0;
-    if (earned === 0) return;
-    this._data.fish = clampFish(this._data.fish + earned);
-    this.save();
-  }
-
   // -------------------------------------------------------------------------
   // Coats
   // -------------------------------------------------------------------------

@@ -86,22 +86,25 @@ const SUNSET_COLOR = new THREE.Color(0xff8a3d);
  * `document` doesn't exist - the test suite runs in plain Node
  * (`vitest.config.ts`, `environment: 'node'`), the same constraint
  * `ClotheslineHazard.buildFabricTexture` already guards against.
+ *
+ * Candy City palette: soft blue at the top, through lavender at the middle,
+ * to peach-pink near the horizon.
  */
 function buildSunsetSkyBackground(): THREE.Color | THREE.CanvasTexture {
-  if (typeof document === 'undefined') return new THREE.Color(0xf9c89b);
+  if (typeof document === 'undefined') return new THREE.Color(0xdcb9e6);
 
   const canvas = document.createElement('canvas');
   canvas.width = 1;
   canvas.height = 256;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.Color(0xf9c89b);
+  if (!ctx) return new THREE.Color(0xdcb9e6);
 
   const gradient = ctx.createLinearGradient(0, 0, 0, 256);
-  gradient.addColorStop(0.0, '#8c82c4'); // top: soft blue-violet
-  gradient.addColorStop(0.35, '#f2a9c6'); // warm pink
-  gradient.addColorStop(0.6, '#f9c89b'); // peach
-  gradient.addColorStop(0.8, '#f6a560'); // orange
-  gradient.addColorStop(1.0, '#ffd966'); // near horizon: golden-yellow
+  gradient.addColorStop(0.0, '#a8d4f5'); // top: soft blue
+  gradient.addColorStop(0.3, '#c3c3ef'); // blue fading into lavender
+  gradient.addColorStop(0.55, '#dcb9e6'); // lavender
+  gradient.addColorStop(0.8, '#f5bdd6'); // lavender warming into pink
+  gradient.addColorStop(1.0, '#ffc9b0'); // near horizon: peach-pink
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, 1, 256);
 

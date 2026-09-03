@@ -11,11 +11,14 @@ import { FISH_HEIGHT, OBSTACLE_Z_LOOSE, ROOF_LOW, ROOF_MEDIUM, type ChunkSpec, t
 import type { TutorialLesson } from '../../game/Tutorial';
 
 /**
- * The standalone, first-launch tutorial level - completely hand-authored,
- * not a chunk of it decided by `ChunkDirector`/`generateChunk()`'s RNG.
- * Every hazard's type, position, and (where relevant) roof tier is a literal
- * value below, not a roll - see `ChunkBuilder`'s `fixedChunks` option, which
- * this feeds.
+ * The first-run tutorial prefix - completely hand-authored, not a chunk of
+ * it decided by `ChunkDirector`/`generateChunk()`'s RNG. Every hazard's
+ * type, position, and (where relevant) roof tier is a literal value below,
+ * not a roll - see `ChunkBuilder`'s `fixedChunks` option, which this feeds
+ * as the *first* `TUTORIAL_LEVEL_CHUNKS.length` chunks of an ordinary
+ * endless run; once the array runs out, that same `ChunkBuilder` instance
+ * falls straight through into normal procedural generation, with no reset
+ * or scene change - see `Game.startEndless()`.
  *
  * Seven sections, each teaching exactly one mechanic before the next starts,
  * two plain `'straight'` buffer chunks between them (the only spacing lever
@@ -25,7 +28,7 @@ import type { TutorialLesson } from '../../game/Tutorial';
  * Challenge that restages three of the earlier hazards back-to-back with
  * tighter spacing and no instructional cue - see `lesson` below.
  *
- * The trampoline chunk (index 15) is the *only* chunk in the whole level
+ * The trampoline chunk (index 15) is the *only* chunk in the whole prefix
  * that changes roof tier - every chunk before it is tier 0, every chunk
  * after it is tier 1 - so the higher rooftop is provably unreachable any
  * other way, by construction rather than by suppressing a random roll.
@@ -138,10 +141,11 @@ export const TUTORIAL_LEVEL_CHECKPOINTS: readonly TutorialCheckpoint[] = STEPS.r
 }, []);
 
 /**
- * Arc at which the level is considered finished - the start of the final
+ * Arc at which the prefix is considered finished - the start of the final
  * chunk, a full chunk short of `STEPS.length * CHUNK_LENGTH`. That margin is
- * deliberate: it means `ChunkBuilder`'s own past-the-end filler chunk (see
- * `fixedChunks`'s doc comment) is provably unreachable in normal play, since
- * `Game.completeTutorial()` fires before the player could ever reach it.
+ * deliberate: it guarantees `Game.completeTutorial()` (and so `tutorialActive`
+ * turning off) fires with a full chunk of lead time before the runner could
+ * ever reach the first genuinely procedural chunk `ChunkBuilder` deals right
+ * after this array runs out.
  */
 export const TUTORIAL_LEVEL_FINISH_ARC = (STEPS.length - 1) * CHUNK_LENGTH;

@@ -279,6 +279,17 @@ export interface ChunkSelection {
    * director) has to learn about a variant that only exists once per run.
    */
   readonly simple: boolean;
+  /**
+   * True only when this pick was a forced `'straight'` recovery chunk right
+   * after a gap or a trampoline (`pendingTrampolineRecovery`/
+   * `pendingEasyGapRecovery` below) - never on a normal weighted pick, and
+   * never on the turn cycle's own forced chunks (a lead-in/post-turn
+   * straight isn't a "recovery" in this sense). `ChunkBuilder.nextSpec()`
+   * reads this to hand `generateFishPattern()` a signal that's otherwise
+   * lost the instant `type` collapses to plain `'straight'` - see
+   * `FishPatterns.ts`'s own use of it.
+   */
+  readonly forcedRecovery: boolean;
 }
 
 /**
@@ -378,6 +389,7 @@ export class ChunkDirector {
 
     let type: ChunkType;
     let simple = false;
+    let forcedRecovery = false;
     if (this.dealt === 0 && this.openingType !== null) {
       type = this.openingType;
     } else if (this.dealt === 0 && this.forceStartSequence) {
@@ -398,6 +410,7 @@ export class ChunkDirector {
       // Trampoline landing -> straight recovery, every tier/section - see
       // `pendingTrampolineRecovery`'s own doc comment.
       type = 'straight';
+      forcedRecovery = true;
       this.pendingTrampolineRecovery = false;
     } else if (this.pendingEasyGapRecovery) {
       // Gap -> straight recovery, early/easy difficulty only - see
@@ -405,6 +418,7 @@ export class ChunkDirector {
       // pool (and so `boostHazards()`'s post-hazard combo bias) entirely for
       // this one pick, the same way the turn cycle's own forced chunks do.
       type = 'straight';
+      forcedRecovery = true;
     } else {
       const allowed = CHUNK_TYPES.filter((candidate) => {
         if (TURN_TYPES.has(candidate)) return false;
@@ -445,7 +459,7 @@ export class ChunkDirector {
       });
     }
 
-    return { type, tier, section, simple };
+    return { type, tier, section, simple, forcedRecovery };
   }
 
   /**

@@ -130,6 +130,19 @@ export interface RoofTransition {
 export class RoofDirector {
   private tier: RoofTier = 0;
 
+  /**
+   * Syncs the director's own notion of "current tier" to `tier`, without
+   * rolling anything - for a caller (`ChunkBuilder.nextSpec()`) that just
+   * placed a chunk whose roof tier this director never decided, such as a
+   * hand-authored `fixedChunks` prefix. Idempotent and cheap enough to call
+   * on every such chunk, so the first real roll once procedural generation
+   * resumes always starts from wherever that prefix actually left the roof,
+   * instead of this director's own default (0).
+   */
+  prime(tier: RoofTier): void {
+    this.tier = tier;
+  }
+
   next(chunkType: ChunkType, rng: Rng): RoofTransition {
     const previousTier = this.tier;
 

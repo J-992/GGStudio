@@ -14,7 +14,7 @@ import {
 } from '../src/levels/procedural/TutorialLevel';
 
 /**
- * The standalone, hand-authored tutorial level - see `TutorialLevel.ts`'s own
+ * The hand-authored first-run tutorial prefix - see `TutorialLevel.ts`'s own
  * doc comment. Every hazard's type, position, and roof tier is a literal
  * value, not a roll, so these are checked directly against the exported
  * arrays rather than sampled across seeds the way procedural chunks are.

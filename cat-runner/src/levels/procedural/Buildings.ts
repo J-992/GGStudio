@@ -92,15 +92,16 @@ export const HEIGHT_PATTERN: readonly number[] = [2, 6, 10, 6, 2, 10];
 export const HEIGHT_JITTER = 1.5;
 
 /** Reused across every building - a handful of materials, not one per
- *  instance. The five "colorful coastal city" building colours, randomly
- *  (well, index-cyclically - see `generateBuildingRow`) assigned per
- *  building per the request. */
+ *  instance. The six Candy City building colours, randomly (well,
+ *  index-cyclically - see `generateBuildingRow`) assigned per building per
+ *  the request. */
 export const BUILDING_COLORS: readonly number[] = [
   PALETTE.coastalTeal,
   PALETTE.coastalPeach,
   PALETTE.coastalYellow,
   PALETTE.coastalBlue,
   PALETTE.coastalCream,
+  PALETTE.coastalLavender,
 ];
 
 /**

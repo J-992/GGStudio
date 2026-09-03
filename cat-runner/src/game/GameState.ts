@@ -17,8 +17,6 @@ export enum GameState {
   Playing = 'playing',
   Paused = 'paused',
   Failed = 'failed',
-  /** The standalone tutorial level's success screen - see `Game.completeTutorial()`. */
-  TutorialComplete = 'tutorialComplete',
 }
 
 /** Why the last attempt ended. Drives the failure message. */
@@ -68,7 +66,6 @@ const TRANSITIONS: Record<GameState, GameState[]> = {
   [GameState.Playing]: [
     GameState.Paused,
     GameState.Failed,
-    GameState.TutorialComplete,
     GameState.Intro,
     GameState.MainMenu,
   ],
@@ -82,7 +79,6 @@ const TRANSITIONS: Record<GameState, GameState[]> = {
     GameState.MainMenu,
   ],
   [GameState.Failed]: [GameState.Intro, GameState.MainMenu],
-  [GameState.TutorialComplete]: [GameState.MainMenu, GameState.Intro],
 };
 
 export interface StateHandlers {

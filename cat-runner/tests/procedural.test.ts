@@ -6,7 +6,7 @@ import { PhysicsWorld, initRapier, GROUP, collisionGroups } from '../src/physics
 import { PlayerController, consumeEdges, type RunInput } from '../src/physics/PlayerController';
 import { resetPhysicsConfig, capsuleFeetOffset } from '../src/physics/PhysicsConfig';
 import { RunPath } from '../src/levels/RunPath';
-import { CHUNK_LENGTH } from '../src/levels/TrackConfig';
+import { CHUNK_LENGTH, TRACK_Y } from '../src/levels/TrackConfig';
 import { laneX } from '../src/levels/chunkTemplate';
 
 import {
@@ -35,6 +35,9 @@ import {
   OBSTACLE_Z_TRIPLE,
   OBSTACLE_SIZE,
   POWERUP_HEIGHT,
+  ROOF_LOW,
+  ROOF_MEDIUM,
+  ROOF_TIER_HEIGHT,
   VENT_PIPE_DEPTH,
   VENT_PIPE_HEIGHT,
   VENT_PIPE_LENGTH,
@@ -1477,4 +1480,172 @@ describe('ChunkBuilder', () => {
 
     expect(overlaps, overlaps.join('\n')).toEqual([]);
   }, 30000);
+});
+
+// ---------------------------------------------------------------------------
+// Fish placement on a tier-changing gap - regression for the clipping bug
+// ---------------------------------------------------------------------------
+
+describe('ChunkBuilder fish placement across a tier-changing gap', () => {
+  let world: PhysicsWorld;
+  let player: PlayerController;
+  let scene: THREE.Scene;
+  let builder: ChunkBuilder;
+
+  beforeAll(async () => {
+    await initRapier();
+  });
+
+  afterEach(() => {
+    builder.dispose();
+    player.dispose();
+    world.dispose();
+  });
+
+  /**
+   * `fixedChunks` specs are consumed as-is by `ChunkBuilder.nextSpec()` -
+   * `generateFishPattern()` never runs for them - so `fish` has to be
+   * hand-authored here, the same way `TutorialLevel.ts` does it. One fish
+   * sits just before the gap (over deck A, built at `previousRoofTier`), one
+   * just after it (over deck B, built at `roofTier`) - `arcPattern()`'s own
+   * flat-end positions, reused so this test exercises the exact placements
+   * a real gap chunk produces.
+   */
+  it('places the deck-A fish at the previous tier and the deck-B fish at the new tier when the roof steps DOWN', () => {
+    resetPhysicsConfig();
+    world = new PhysicsWorld();
+    scene = new THREE.Scene();
+    player = new PlayerController(world);
+
+    const deckAFishZ = GAP_START_Z - 3;
+    const deckBFishZ = GAP_END_Z + 3;
+    const gapChunk: ChunkSpec = {
+      ...generateJump(),
+      previousRoofTier: ROOF_MEDIUM,
+      roofTier: ROOF_LOW,
+      fish: [
+        { x: 0, y: FISH_HEIGHT, z: deckAFishZ },
+        { x: 0, y: FISH_HEIGHT, z: deckBFishZ },
+      ],
+    };
+    const atTier = (tier: typeof ROOF_LOW | typeof ROOF_MEDIUM): ChunkSpec => ({
+      ...generateStraight(),
+      previousRoofTier: tier,
+      roofTier: tier,
+    });
+    const chunks: ChunkSpec[] = [atTier(ROOF_MEDIUM), atTier(ROOF_MEDIUM), gapChunk, atTier(ROOF_LOW), atTier(ROOF_LOW)];
+
+    builder = new ChunkBuilder(scene, world, player, { fixedChunks: chunks });
+    builder.start();
+    player.spawn(new THREE.Vector3(0, TRACK_Y + ROOF_TIER_HEIGHT[ROOF_MEDIUM] + capsuleFeetOffset(), 0), 0);
+
+    // A `fixedChunks` prefix now falls through to real procedural
+    // generation once it runs out (chunk index 5 onward here) - see
+    // `ChunkBuilder.nextSpec()` - which deals its own fish at ROOF_LOW too.
+    // Isolating the gap chunk's own world-Z span (index 2, straight route so
+    // world Z tracks arc) keeps this test about only the two hand-placed
+    // fish, regardless of what procedural generation adds past the prefix.
+    const gapChunkStartZ = 2 * CHUNK_LENGTH;
+    const gapChunkEndZ = 3 * CHUNK_LENGTH;
+    const allFish: THREE.Vector3[] = [];
+    for (let slot = 0; slot < 20; slot++) allFish.push(...builder.fishPositionsFor(slot));
+    const gapChunkFish = allFish.filter((p) => p.z >= gapChunkStartZ && p.z < gapChunkEndZ);
+
+    const expectedMediumY = TRACK_Y + ROOF_TIER_HEIGHT[ROOF_MEDIUM] + FISH_HEIGHT;
+    const expectedLowY = TRACK_Y + ROOF_TIER_HEIGHT[ROOF_LOW] + FISH_HEIGHT;
+
+    const atMedium = gapChunkFish.filter((p) => Math.abs(p.y - expectedMediumY) < 0.5);
+    const atLow = gapChunkFish.filter((p) => Math.abs(p.y - expectedLowY) < 0.5);
+
+    // Before the fix, both fish used `roofTier` (LOW) regardless of which
+    // deck they sat over, so the deck-A fish would land ~3 units below the
+    // deck it's actually placed above (embedded in the rooftop) instead of
+    // here, at the deck's real (previous-tier) height.
+    expect(atMedium.length).toBe(1);
+    expect(atLow.length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixedChunks prefix falling through to real procedural generation -
+// the mechanism the first-run tutorial prefix relies on to become an
+// ordinary endless run once it ends, with no reset or scene change.
+// ---------------------------------------------------------------------------
+
+describe('ChunkBuilder fixedChunks prefix -> procedural fallthrough', () => {
+  let world: PhysicsWorld;
+  let player: PlayerController;
+  let scene: THREE.Scene;
+  let builder: ChunkBuilder;
+
+  beforeAll(async () => {
+    await initRapier();
+  });
+
+  afterEach(() => {
+    builder.dispose();
+    player.dispose();
+    world.dispose();
+  });
+
+  /**
+   * Before this change, `nextSpec()` used `fixedChunks` for the whole run,
+   * falling back to an infinite repeat of `generateStraight()` once the
+   * array ran out - every chunk past it identical: `type: 'straight'`,
+   * `hasGap: false`, no obstacles, tier stuck at 0. This proves that no
+   * longer happens: real procedural variety (a hazard shape, or a tier the
+   * fixed prefix's last chunk didn't leave the roof at) shows up well past
+   * the short fixed prefix used here.
+   */
+  it('deals the fixed prefix, then real procedural chunks - not an infinite straight-chunk repeat', () => {
+    resetPhysicsConfig();
+    world = new PhysicsWorld();
+    scene = new THREE.Scene();
+    player = new PlayerController(world);
+
+    const fixed: ChunkSpec[] = [
+      { ...generateStraight(), previousRoofTier: ROOF_LOW, roofTier: ROOF_LOW },
+      { ...generateStraight(), previousRoofTier: ROOF_LOW, roofTier: ROOF_LOW },
+      { ...generateJump(), previousRoofTier: ROOF_LOW, roofTier: ROOF_MEDIUM, trampoline: true },
+    ];
+
+    builder = new ChunkBuilder(scene, world, player, { fixedChunks: fixed, seed: 777 });
+    builder.start();
+
+    const pos = new THREE.Vector3(0, TRACK_Y, 0);
+    const heading = new THREE.Vector3(0, 0, 1);
+    for (let i = 0; i < 3000; i++) {
+      const path = builder.path;
+      if (path) {
+        const arc = path.projectDistance(pos);
+        path.getDirectionAt(arc + 1, heading);
+        pos.addScaledVector(heading, 11 * (1 / 60));
+      }
+      builder.update(pos);
+      builder.step(1 / 60);
+    }
+
+    const liveChunks = (
+      builder as unknown as {
+        liveChunks: readonly (
+          | {
+              placement: { index: number };
+              type: string;
+              hasGap: boolean;
+              obstacles: readonly unknown[];
+              roofTier: number;
+            }
+          | null
+        )[];
+      }
+    ).liveChunks;
+
+    const pastPrefix = liveChunks.filter((c) => c && c.placement.index >= fixed.length);
+    expect(pastPrefix.length).toBeGreaterThan(0);
+
+    const sawVariety = pastPrefix.some(
+      (c) => c!.type !== 'straight' || c!.hasGap || c!.obstacles.length > 0 || c!.roofTier !== ROOF_LOW,
+    );
+    expect(sawVariety).toBe(true);
+  });
 });

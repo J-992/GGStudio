@@ -318,11 +318,11 @@ describe('first-run tutorial', () => {
 });
 
 /**
- * The standalone tutorial level is only ever auto-launched once - on a
- * genuinely fresh install - and otherwise reachable at will from the main
- * menu's Tutorial button. `SaveData.tutorialCompleted` is the only thing
- * that remembers whether that first launch has already happened; nothing
- * about individual lessons persists across attempts (see `Tutorial.ts`'s own
+ * The tutorial prefix is only ever included once automatically - on a
+ * genuinely fresh install - and otherwise forced onto a run at will from the
+ * main menu's Tutorial button. `SaveData.tutorialCompleted` is the only
+ * thing that remembers whether that first run has already happened; nothing
+ * about individual lessons persists across runs (see `Tutorial.ts`'s own
  * module doc comment for why `TutorialDirector.learned` is in-memory only).
  */
 describe('remembering whether the tutorial has run', () => {
@@ -388,54 +388,5 @@ describe('remembering whether the tutorial has run', () => {
     save.flush();
 
     expect(new SaveManager(adapter).data.tutorialCompleted).toBe(true);
-  });
-});
-
-describe('SaveManager.addFish', () => {
-  class MemoryAdapter implements StorageAdapter {
-    store = new Map<string, string>();
-    get(key: string): string | null {
-      return this.store.get(key) ?? null;
-    }
-    set(key: string, value: string): void {
-      this.store.set(key, value);
-    }
-    remove(key: string): void {
-      this.store.delete(key);
-    }
-  }
-
-  it('adds to the wallet without touching bestDistance', () => {
-    const save = new SaveManager(new MemoryAdapter());
-    expect(save.data.fish).toBe(0);
-    expect(save.data.bestDistance).toBe(0);
-
-    save.addFish(100);
-
-    expect(save.data.fish).toBe(100);
-    expect(save.data.bestDistance).toBe(0);
-  });
-
-  it('adds on top of whatever the wallet already held', () => {
-    const save = new SaveManager(new MemoryAdapter());
-    save.addFish(20);
-    save.addFish(100);
-    expect(save.data.fish).toBe(120);
-  });
-
-  it('ignores non-finite or negative amounts rather than corrupting the wallet', () => {
-    const save = new SaveManager(new MemoryAdapter());
-    save.addFish(Number.NaN);
-    save.addFish(-50);
-    expect(save.data.fish).toBe(0);
-  });
-
-  it('persists across a reload, same as recordRun', () => {
-    const adapter = new MemoryAdapter();
-    const first = new SaveManager(adapter);
-    first.addFish(100);
-    first.flush();
-
-    expect(new SaveManager(adapter).data.fish).toBe(100);
   });
 });

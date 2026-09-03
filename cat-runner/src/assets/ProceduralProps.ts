@@ -24,29 +24,35 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
  */
 
 export const PALETTE = {
-  cream: 0xf0e2c8,
-  creamDark: 0xd9c5a3,
-  // Weathered clay, not fresh terracotta. The saturated 0xb4552a this replaced
-  // was chosen to separate the roof from an orange cat; with the default cat now
-  // black that constraint is gone, and the saturation was the main reason every
-  // rooftop in the game read as one flat sheet of orange under the sunset key
-  // light. Kept warm, but pulled well down in chroma so the light does the
-  // colouring rather than the albedo.
-  terracotta: 0xc59180,
-  terracottaDark: 0x9a6b5c,
+  // Candy City: brightened from a muted tan/beige toward true white/cream,
+  // since these back the rooftop parapet cap/rim, chimney caps and signage -
+  // exactly the "white or cream-coloured rooftop borders" the art direction
+  // calls for.
+  cream: 0xfdf8ef,
+  creamDark: 0xe9dcc4,
+  // Candy City: brightened well past the old weathered-clay tan into a warm
+  // coral - still reads as terracotta, just cheerful rather than muted. Props
+  // pulling this colour (chimneys, roof huts) now match the bright rooftop
+  // palette below instead of sitting in a separate, dimmer "Mediterranean"
+  // family.
+  terracotta: 0xffab8a,
+  terracottaDark: 0xe8846a,
   // A second tiled-roof colourway. Levels alternate the two so the player is not
   // looking at one unbroken sheet of clay for an entire run - a slate roof
   // between two terracotta ones is also the clearest signal that a new building
-  // has started.
-  slate: 0x7d8794,
-  slateDark: 0x5a636e,
-  wood: 0x9a6b43,
-  woodDark: 0x6e4a2e,
-  metal: 0x9aa3a8,
-  metalDark: 0x6e767b,
-  white: 0xf7f2e8,
-  leaf: 0x6e8f4e,
-  leafDark: 0x4f6b38,
+  // has started. Candy City: lightened to a pale sky-slate to match.
+  slate: 0xb8c9d9,
+  slateDark: 0x8fa5b8,
+  wood: 0xd9a066,
+  woodDark: 0xa8703f,
+  // Candy City: a pale, slightly cool silver rather than a flat industrial
+  // grey - AC units/vents/scaffolding read as "candy chrome" instead of the
+  // one dark, realistic material left in an otherwise bright scene.
+  metal: 0xc9d6e0,
+  metalDark: 0x8fa3b0,
+  white: 0xfdfaf5,
+  leaf: 0x8fd99f,
+  leafDark: 0x5fb374,
 
   // Rope, canvas and laundry colours.
   rope: 0xc7b18c,
@@ -54,11 +60,14 @@ export const PALETTE = {
   fabricCream: 0xf2e6ce,
   fabricTeal: 0x2e7d74,
   fabricGold: 0xd9a441,
-  fabricNavy: 0x2b3a55,
+  // Candy City: was a near-black navy (0x2b3a55) - one of the only actually
+  // dark tones left anywhere in the prop set. Lightened to a periwinkle so no
+  // laundry line reads as a "dark, realistic" garment against the bright sky.
+  fabricNavy: 0x6f8fd9,
 
   // Glass for distant-building windows.
-  glass: 0x87a7b0,
-  glassDark: 0x3e4a52,
+  glass: 0xa8d4e8,
+  glassDark: 0x5a7a8a,
 
   // Chef costume.
   chefSkin: 0xe8b48a,
@@ -76,29 +85,32 @@ export const PALETTE = {
   duskPurple: 0x4a3b6b,
   nightBlue: 0x1b2340,
 
-  // Coastal-city re-skin: the five building colours and three rooftop colours
-  // from the "colorful coastal city" art direction. Deliberately its own
-  // small group rather than folded into the muted Mediterranean tones above -
-  // those are still used by unrelated props (chimneys, laundry, signage) this
-  // request never touched, so recolouring them in place would have re-skinned
-  // things nobody asked to change. Only `Buildings.ts` (the skyline),
-  // `BuildingFacade.ts`/`MegaKitPalette.ts` (the building under the player's
-  // own rooftop) and the deck material (`PlaceholderAssets.ts`) draw from
-  // these.
-  coastalTeal: 0x5dd9c1,
-  coastalPeach: 0xffbe98,
-  coastalYellow: 0xffd54f,
-  coastalBlue: 0xa7d8ff,
-  coastalCream: 0xfff3d1,
-  roofCream: 0xfff3d1,
-  roofSand: 0xf5d7a1,
-  roofTerracotta: 0xe8b07a,
+  // Candy City re-skin (previously "colorful coastal city"): the six building
+  // colours and rooftop colours the art direction asks for - mint green,
+  // pastel pink, lavender, baby blue, soft peach and pale yellow for
+  // buildings; coral pink, warm orange-red, soft purple and light teal for
+  // rooftops, plus two lighter connective tones so a brick roof still reads
+  // as a set rather than one flat colour. Deliberately its own small group
+  // rather than folded into the (now also brightened) Mediterranean prop
+  // tones above - `Buildings.ts` (the skyline), `BuildingFacade.ts`/
+  // `MegaKitPalette.ts` (the building under the player's own rooftop),
+  // `RoofBrickMaterials.ts` (the deck surface/borders) and the deck material
+  // (`PlaceholderAssets.ts`) draw from these.
+  coastalTeal: 0x9df2c9, // mint green
+  coastalPeach: 0xffd4b3, // soft peach
+  coastalYellow: 0xfff2b8, // pale yellow
+  coastalBlue: 0xb3e0ff, // baby blue
+  coastalCream: 0xffc9dd, // pastel pink
+  coastalLavender: 0xd6c3f0, // lavender
+  roofCream: 0xfff5db,
+  roofSand: 0x9fe6d9, // light teal
+  roofTerracotta: 0xff7a5c, // warm orange-red
   // Two more additions to the same rooftop set, for RoofBrickMaterials.ts's
   // six-colour brick palette - sitting between the existing rooftop tones
   // rather than introducing a new hue family, so a brick roof still reads
-  // as part of the same coastal skyline.
-  roofCoral: 0xf2937d,
-  roofWarmGray: 0xc9beb2,
+  // as part of the same candy skyline.
+  roofCoral: 0xff9eb0, // coral pink
+  roofWarmGray: 0xc9a8e8, // soft purple
 } as const;
 
 // ---------------------------------------------------------------------------
