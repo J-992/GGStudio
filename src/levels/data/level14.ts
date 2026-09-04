@@ -1,24 +1,30 @@
 import type { LevelDef } from "../types";
 import { pat, rep, seq, solidRun } from "../helpers";
-
-const E = ".....";
+import { voidRun } from "../sections";
 
 export const level14: LevelDef = {
-  name: "SPIRE",
-  hints: [{ atSlice: 8, text: "LAND ON THE WALL — GAPS AHEAD" }],
+  name: "FERRY",
+  hints: [
+    { atSlice: 8, text: "PAD OUT, LAND, THEN TAKE THE FERRY" },
+    { atSlice: 56, text: "TWO FERRIES, OPPOSITE SWINGS" },
+  ],
   slices: seq(
-    solidRun(8),
-    rep(4, { f: pat(E) }),
-    rep(2, { f: pat(E), r: pat(E) }),
-    rep(2, { f: pat(E) }),
-    rep(2, { f: pat(E), r: pat(E) }),
-    rep(2, { f: pat(E) }),
     solidRun(10),
-    rep(4, { f: pat(E) }),
-    rep(2, { f: pat(E), l: pat(E) }),
-    rep(2, { f: pat(E) }),
-    rep(2, { f: pat(E), l: pat(E) }),
-    rep(2, { f: pat(E) }),
-    solidRun(14),
+    rep(2, { f: pat("^^^^^") }),
+    voidRun(3),
+    solidRun(6),
+    rep(5, { f: pat(".===.") }),
+    solidRun(8),
+    rep(4, { f: pat(".===.") }),
+    rep(3, { f: pat(".###.") }),
+    rep(4, { f: pat(".===.") }),
+    solidRun(8),
+    rep(2, { f: pat("^^^^^") }),
+    voidRun(3),
+    solidRun(6),
+    rep(4, { f: pat("..=..") }),
+    solidRun(6),
+    rep(5, { f: pat(".===.") }),
+    solidRun(16),
   ),
 };

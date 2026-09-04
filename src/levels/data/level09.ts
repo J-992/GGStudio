@@ -1,24 +1,32 @@
 import type { LevelDef } from "../types";
-import { pat, rep, seq, slice, solidRun } from "../helpers";
+import { pat, rep, seq, solidRun } from "../helpers";
+import { voidRun } from "../sections";
 
-const E = ".....";
-
+// ACT III — launch pads and the rope between you.
 export const level09: LevelDef = {
-  name: "TENSION",
+  name: "SLINGSHOT",
   hints: [
-    { atSlice: 1, text: "DISTANCE CREATES TENSION" },
-    { atSlice: 28, text: "THE TETHER PULLS YOU BACK TOGETHER" },
+    { atSlice: 10, text: "GREEN PADS THROW YOU — YOU DO NOT NEED TO JUMP" },
+    { atSlice: 34, text: "NOTHING TO ROLL ONTO. THE PAD IS THE ONLY WAY OVER" },
+    { atSlice: 66, text: "MIND WHERE YOU COME DOWN" },
   ],
   slices: seq(
-    solidRun(9),
-    rep(12, { f: E }),
-    rep(6, { f: E, r: pat("#...#") }),
-    rep(2, { f: E, r: E }),
-    rep(6, { f: E, r: pat("#...#") }),
-    rep(10, { r: E }),
-    slice({ f: E }), solidRun(2),
-    slice({ f: E }), solidRun(2),
-    slice({ f: E }),
-    solidRun(14),
+    solidRun(12),
+    rep(2, { f: pat("^^^^^") }),
+    solidRun(10),
+    rep(2, { f: pat("^^^^^") }),
+    voidRun(3),
+    solidRun(10),
+    rep(2, { f: pat("^^^^^") }),
+    voidRun(3),
+    rep(4, { f: pat(".###.") }),
+    solidRun(8),
+    rep(2, { f: pat("^^^^^") }),
+    voidRun(3),
+    rep(5, { f: pat("..#..") }),
+    solidRun(8),
+    rep(2, { f: pat("^^^^^") }),
+    voidRun(3),
+    solidRun(16),
   ),
 };

@@ -1,30 +1,32 @@
 import type { LevelDef } from "../types";
 import { pat, rep, seq, solidRun } from "../helpers";
-import { faceCrumble } from "../sections";
 
 const E = ".....";
 
 export const level07: LevelDef = {
   name: "SKYLINE",
   hints: [
-    { atSlice: 4, text: "UP THE WALLS — THE CEILING CAN HOLD YOU" },
-    { atSlice: 48, text: "CEILING GONE — RIDE A WALL DOWN" },
+    { atSlice: 24, text: "THE WALL HAS HOLES TOO" },
+    { atSlice: 52, text: "THE CEILING IS THE ONLY WAY ON" },
   ],
   slices: seq(
     solidRun(10),
-    rep(8, { f: pat(E) }),
-    rep(8, { f: pat(E), l: pat(E) }),
-    rep(6, { f: pat(E), l: pat(E), r: pat(E) }),
-    solidRun(6),
-    rep(2, { c: pat(E) }),
-    solidRun(3),
-    faceCrumble("c", 3),
-    solidRun(2),
-    rep(12, { c: pat(E) }),
-    solidRun(4),
-    rep(2, { l: pat(E), r: pat(E) }),
-    solidRun(4),
-    rep(10, { l: pat(E), r: pat(E) }),
+    rep(4, { f: pat("...##"), c: E, l: E }),
+    rep(10, { f: E, c: E, l: E }),
+    rep(6, { f: E, c: E, l: E, r: pat("####.") }),
+    rep(6, { f: E, c: E, l: E, r: pat(".####") }),
+    rep(6, { f: E, c: E, l: E, r: pat("..###") }),
+    rep(6, { f: E, c: E, l: E, r: pat(".####") }),
+    rep(6, { f: E, c: E, l: E, r: pat("####.") }),
+    rep(10, { f: E, c: E, l: E }),
+    rep(4, { f: E, l: E, r: pat("..###") }),
+    rep(8, { f: E, r: E, l: E }),
+    rep(4, { f: E, r: E, l: E, c: pat("##.##") }),
+    rep(6, { f: E, r: E, l: E }),
+    rep(6, { f: E, l: E, c: pat("..###") }),
+    rep(8, { f: E, l: E, c: E }),
+    rep(8, { f: pat("...##"), l: E, c: E }),
+    rep(8, { f: pat("...##"), r: E, l: E, c: E }),
     solidRun(14),
   ),
 };

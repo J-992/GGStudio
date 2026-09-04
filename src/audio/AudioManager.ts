@@ -126,6 +126,11 @@ class AudioManager {
   }
   snap() { this.noise(0.12, 2000, 0.2, "bandpass"); }
   crumble() { this.noise(0.16, 900, 0.2); this.tone("square", 220, 80, 0.14, 0.1); }
+  launch() {
+    this.tone("square", 260, 1050, 0.26, 0.18);
+    this.noise(0.18, 1800, 0.09, "highpass");
+  }
+  shutter() { this.tone("sawtooth", 180, 90, 0.12, 0.14); this.noise(0.1, 700, 0.12); }
 }
 
 export const audio = new AudioManager();

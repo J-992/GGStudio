@@ -15,12 +15,13 @@ export interface BotSource {
 }
 
 export class InputManager {
-  private botSrc: BotSource | null = null;
+  private botSrc: (BotSource | null)[] = [null, null];
   private remoteSrc: BotSource | null = null;
-  private prevBotJump = false;
+  private prevBotJump = [false, false];
 
-  setBotSource(src: BotSource | null) {
-    this.botSrc = src;
+  /** The verification bot drives each robot separately, so it binds two sources. */
+  setBotSources(p0: BotSource | null, p1: BotSource | null) {
+    this.botSrc = [p0, p1];
   }
 
   setRemoteSource(src: BotSource | null) {
@@ -93,11 +94,12 @@ export class InputManager {
       this.padJumpPrev[player][0] = j;
       break;
     }
-    if (this.botSrc?.active) {
-      lat = Math.max(-1, Math.min(1, this.botSrc.lat));
-      jumpHeld = this.botSrc.jump;
-      jumpPressed = this.botSrc.jump && !this.prevBotJump;
-      this.prevBotJump = this.botSrc.jump;
+    const bot = this.botSrc[player];
+    if (bot?.active) {
+      lat = Math.max(-1, Math.min(1, bot.lat));
+      jumpHeld = bot.jump;
+      jumpPressed = bot.jump && !this.prevBotJump[player];
+      this.prevBotJump[player] = bot.jump;
     }
     if (player === 1 && this.remoteSrc?.active) {
       lat = Math.max(-1, Math.min(1, this.remoteSrc.lat));
@@ -113,7 +115,7 @@ export class InputManager {
     this.keys.clear();
     this.keyPrevW = false;
     this.keyPrevUp = false;
-    this.prevBotJump = false;
+    this.prevBotJump = [false, false];
     this.prevRemoteJump = false;
     touchState.p1l = touchState.p1r = touchState.p1j = false;
     touchState.p2l = touchState.p2r = touchState.p2j = false;

@@ -23,6 +23,7 @@ export interface PlayerEvents {
   jumped: boolean;
   landed: boolean;
   landImpact: number;
+  launched?: boolean;
 }
 
 export const STATIC_GROUP = 0x0001;
@@ -73,6 +74,12 @@ export class Player {
   rotHoldLeft = 0;
   rotHoldRight = 0;
   time = 0;
+
+  /** Lateral carry from a conveyor or a slider, in units per second. */
+  platformLat = 0;
+  /** Set by a launch pad; spent on the next integrate. */
+  boostUp = 0;
+  private launchArc = false;
 
   tensionPull = new THREE.Vector3();
   tensionAmount = 0;
@@ -217,6 +224,9 @@ export class Player {
     this.wasFar = false;
     this.rotHoldLeft = 0;
     this.rotHoldRight = 0;
+    this.platformLat = 0;
+    this.boostUp = 0;
+    this.launchArc = false;
     this.tensionPull.set(0, 0, 0);
     this.tensionAmount = 0;
   }
@@ -247,11 +257,22 @@ export class Player {
 
     let vUp = this.velocityAlong(frame.up);
 
+    // A released jump is cut short on purpose. A launch pad is not a jump, so it
+    // keeps its full arc whether or not anyone is holding the button.
     let gMult: number;
-    if (vUp > 0.001) gMult = input.jumpHeld ? JUMP_HOLD_GRAVITY_MULT : JUMP_RELEASE_GRAVITY_MULT;
-    else gMult = FALL_GRAVITY_MULT;
+    if (vUp > 0.001) {
+      if (this.launchArc) gMult = input.jumpHeld ? JUMP_HOLD_GRAVITY_MULT : 1;
+      else gMult = input.jumpHeld ? JUMP_HOLD_GRAVITY_MULT : JUMP_RELEASE_GRAVITY_MULT;
+    } else {
+      gMult = FALL_GRAVITY_MULT;
+      this.launchArc = false;
+    }
     if (!this.grounded || vUp > 0 || this.tensionPull.dot(frame.up) < 0) vUp -= GRAVITY * gMult * dt;
 
+    // A pad fires whether or not you also pressed jump. Without the saved flag the
+    // jump clears `grounded` first and quietly swallows the launch, which is
+    // exactly what you do not want on the lip of a chasm.
+    const groundedBeforeJump = this.grounded;
     if (this.jumpBufferTimer > 0 && (this.grounded || this.coyoteTimer > 0)) {
       vUp = JUMP_V;
       this.jumpBufferTimer = 0;
@@ -260,6 +281,16 @@ export class Player {
       this.squashVel = 2.6;
       ev.jumped = true;
     }
+
+    if (this.boostUp > 0 && groundedBeforeJump) {
+      vUp = this.boostUp;
+      this.coyoteTimer = 0;
+      this.grounded = false;
+      this.launchArc = true;
+      this.squashVel = 3.4;
+      ev.launched = true;
+    }
+    this.boostUp = 0;
 
     vUp += this.tensionPull.dot(frame.up) * dt;
     this.latVel += this.tensionPull.dot(frame.right) * dt;
@@ -276,12 +307,10 @@ export class Player {
 
     if (this.grounded && vUp <= 0.01 && !ev.jumped) vUp = 0;
 
-    const vx =
-      frame.right.x * this.latVel + FORWARD.x * this.fwdVel + frame.up.x * vUp;
-    const vy =
-      frame.right.y * this.latVel + FORWARD.y * this.fwdVel + frame.up.y * vUp;
-    const vz =
-      frame.right.z * this.latVel + FORWARD.z * this.fwdVel + frame.up.z * vUp;
+    const lat = this.latVel + this.platformLat;
+    const vx = frame.right.x * lat + FORWARD.x * this.fwdVel + frame.up.x * vUp;
+    const vy = frame.right.y * lat + FORWARD.y * this.fwdVel + frame.up.y * vUp;
+    const vz = frame.right.z * lat + FORWARD.z * this.fwdVel + frame.up.z * vUp;
     this.body.setLinvel({ x: vx, y: vy, z: vz }, true);
   }
 

@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "qa": "node scripts/qa.mjs",
     "qa:online": "node scripts/online-qa.mjs",
-    "qa:dist": "node scripts/dist-check.mjs"
+    "qa:dist": "node scripts/dist-check.mjs",
+    "qa:levels": "node scripts/levels-qa.mjs all"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0",

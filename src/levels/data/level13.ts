@@ -1,42 +1,24 @@
 import type { LevelDef } from "../types";
-import { pat, rep, seq, slice, solidRun } from "../helpers";
-import { crumble } from "../sections";
+import { pat, rep, seq, solidRun } from "../helpers";
 
-const E = ".....";
-
+// ACT IV — moving ground, and doors that close.
 export const level13: LevelDef = {
-  name: "FULL SEND",
-  spinners: [{ atSlice: 51, speed: 2.4 }],
+  name: "TRACKING",
   hints: [
-    { atSlice: 13, text: "HOLD INTO THE WALL" },
-    { atSlice: 56, text: "FLOOR GONE - WEAVE THE RIGHT WALL" },
+    { atSlice: 10, text: "VIOLET PLATFORMS TRACK ACROSS — RIDE THEM" },
+    { atSlice: 46, text: "THIS ONE IS NARROWER" },
   ],
   slices: seq(
+    solidRun(12),
+    rep(4, { f: pat(".===.") }),
+    solidRun(10),
+    rep(5, { f: pat(".===.") }),
     solidRun(8),
-    slice({ f: pat("#..##") }), solidRun(1),
-    slice({ f: pat("##..#") }), solidRun(1),
-    slice({ f: pat("#..##") }), solidRun(1),
-    slice({ f: pat("##..#") }), solidRun(1),
-    rep(8, { f: E }),
-    rep(2, { f: E, r: E }),
-    rep(6, { f: E }),
+    rep(4, { f: pat(".===.") }),
     solidRun(8),
-    crumble(4),
-    solidRun(2),
-    rep(2, { f: E }),
-    solidRun(8),
-    rep(4, { f: E }),
-    rep(2, { f: E, r: pat("#..##") }),
-    rep(2, { f: E, r: pat("##..#") }),
-    rep(2, { f: E, r: E }),
-    rep(2, { f: E, r: pat("#..##") }),
-    rep(2, { f: E, r: pat("##..#") }),
-    rep(2, { f: E }),
-    solidRun(6),
-    slice({ f: E }), solidRun(2),
-    slice({ f: E }), solidRun(2),
-    slice({ f: E }), solidRun(2),
-    rep(2, { f: E }),
-    solidRun(14),
+    rep(4, { f: pat(".===.") }),
+    solidRun(10),
+    rep(5, { f: pat(".===.") }),
+    solidRun(16),
   ),
 };

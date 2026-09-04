@@ -1,25 +1,23 @@
 import type { LevelDef } from "../types";
-import { crumble } from "../sections";
-import { seq, solidRun, slice, pat, rep } from "../helpers";
+import { pat, rep, seq, solidRun } from "../helpers";
+
+const E = ".....";
 
 export const level04: LevelDef = {
   name: "BEAM TEAM",
-  spinners: [{ atSlice: 41, speed: 2.2 }],
+  spinners: [{ atSlice: 36, speed: 2.0 }],
+  hints: [{ atSlice: 30, text: "THE ARM SWEEPS LOW — TAKE AN OUTSIDE LANE" }],
   slices: seq(
     solidRun(10),
-    rep(6, { f: pat("..#..") }),
+    rep(5, { f: pat("..#..") }),
     solidRun(6),
-    slice({ f: pat("#.#..") }),
-    solidRun(3),
-    slice({ f: pat("..#.#") }),
-    solidRun(3),
-    solidRun(2),
-    crumble(5),
-    solidRun(1),
+    rep(5, { f: pat(".#.#.") }),
+    solidRun(11),
+    rep(3, { f: pat("##.##") }),
+    rep(2, { f: E }),
+    rep(6, { f: pat(".###.") }),
     solidRun(8),
-    rep(2, { f: pat(".....") }),
-    solidRun(6),
-    rep(2, { f: pat(".....") }),
+    rep(2, { f: E }),
     solidRun(10),
   ),
 };

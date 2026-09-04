@@ -2,7 +2,7 @@ import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
 import {
   FIXED_DT, MAX_FRAME_DT, KILL_DIST, MAX_AIR_TIME,
-  HALF, ROT_COOLDOWN, PLAYER_HALF_H, SLICE_LEN,
+  HALF, ROT_COOLDOWN, PLAYER_HALF_H, PLAYER_HALF_W, SLICE_LEN,
   P1_COLOR, P2_COLOR, TETHER_REST, SCREEN_KILL_GRACE, FORWARD_SPEED,
 } from "./Constants";
 import { InputManager } from "../input/InputManager";
@@ -12,7 +12,7 @@ import { Effects } from "../effects/Effects";
 import { audio } from "../audio/AudioManager";
 import { Tunnel } from "../tunnel/Tunnel";
 import { Orientation, getFrame, stepOrientation } from "../tunnel/SurfaceOrientation";
-import { Player, STATIC_GROUP } from "../player/Player";
+import { Player, PLAYER_GROUP, STATIC_GROUP } from "../player/Player";
 import { TetherState } from "../tether/TetherPhysics";
 import { TetherRenderer } from "../tether/TetherRenderer";
 import { CoopCamera } from "../camera/CoopCamera";
@@ -44,7 +44,10 @@ export interface NetworkGameState {
   rescues: number;
 }
 
-const RAY_GROUPS = (0xffff << 16) | STATIC_GROUP;
+// The ground ray sees the other robot as well as the tunnel. Standing on your
+// partner has to count as standing on something: without this a robot resting on
+// the other one is "airborne" forever and dies to the air-time limit.
+const RAY_GROUPS = (0xffff << 16) | STATIC_GROUP | PLAYER_GROUP;
 
 export class Game {
   private renderer!: THREE.WebGLRenderer;
@@ -63,6 +66,7 @@ export class Game {
   levelIdx = 0;
   timeScale = 1;
   botInput = { lat: 0, jump: false, active: false };
+  botInput2 = { lat: 0, jump: false, active: false };
   bot: { tick(dt: number): void } | null = null;
   onGameplayStart?: (level: number) => void;
   onGameplayStop?: (level: number, result?: "complete" | "fail") => void;
@@ -123,7 +127,7 @@ export class Game {
     this.input.onPauseToggle = () => this.pauseGame();
     this.input.onRestart = () => this.restartGame();
     this.input.onMuteToggle = () => this.handleMute();
-    this.input.setBotSource(this.botInput);
+    this.input.setBotSources(this.botInput, this.botInput2);
     this.input.setRemoteSource(this.remoteInput);
 
     window.addEventListener("resize", () => {
@@ -360,7 +364,10 @@ export class Game {
       this.players[0].updateShadow(RAPIER, this.world, frameUp, RAY_GROUPS);
       this.players[1].updateShadow(RAPIER, this.world, frameUp, RAY_GROUPS);
       this.tunnel.update(visDt);
-      if (this.networkGuest && this.state === GameState.Playing) this.tunnel.updateSpinners(visDt);
+      if (this.networkGuest && this.state === GameState.Playing) {
+        this.tunnel.updateSpinners(visDt);
+        this.tunnel.updateFeatures(visDt);
+      }
       _gravDir.copy(frameUp.up).negate();
       this.effects.update(visDt, _gravDir, this.coopCam.camera.position.z);
       this.coopCam.update(visDt, this.players[0], this.players[1], this.orientation);
@@ -422,12 +429,14 @@ export class Game {
     this.players[1].winchActive = this.tetherPhysics.winchActive;
     if (snap && this.state === GameState.Playing) audio.snap();
 
-    const ev0 = { jumped: false, landed: false, landImpact: 0 };
-    const ev1 = { jumped: false, landed: false, landImpact: 0 };
+    const ev0 = { jumped: false, landed: false, landImpact: 0, launched: false };
+    const ev1 = { jumped: false, landed: false, landImpact: 0, launched: false };
+    this.tunnel.applyFeatures(this.players, frame);
     this.players[0].integrate(frame, dt, ev0);
     this.players[1].integrate(frame, dt, ev1);
 
     this.tunnel.updateSpinners(dt);
+    this.tunnel.updateFeatures(dt);
     this.world.step();
 
     const cev = this.tunnel.updateCrumble(dt, this.players, this.world, frame.up);
@@ -443,10 +452,20 @@ export class Game {
     if (this.state !== GameState.Playing) return;
 
     if (ev0.jumped || ev1.jumped) audio.jump();
+    if (ev0.launched || ev1.launched) {
+      audio.launch();
+      for (let i = 0; i < 2; i++) {
+        if (!(i === 0 ? ev0 : ev1).launched) continue;
+        this.players[i].position(this.tmpA);
+        this.effects.burst(this.tmpA, 0x2effa8, 22, 9, 0.55, 0);
+      }
+    }
     if (ev0.landed && ev0.landImpact > 0.08) audio.land();
     if (ev1.landed && ev1.landImpact > 0.08) audio.land();
 
     this.checkRotation();
+    this.checkShutters();
+    if (this.state !== GameState.Playing) return;
     this.checkKills(ev0, ev1);
     this.checkFinish();
     this.checkHints();
@@ -485,6 +504,7 @@ export class Game {
       if (off) {
         p.offScreenTime += dt;
         if (p.offScreenTime > SCREEN_KILL_GRACE) {
+          this.noteDeath("off-screen", p.index);
           this.die();
           return;
         }
@@ -515,6 +535,29 @@ export class Game {
     }
   }
 
+  private checkShutters() {
+    for (const p of this.players) {
+      p.position(this.tmpA);
+      if (!this.tunnel.shutterHazard(this.tmpA, PLAYER_HALF_W, PLAYER_HALF_H)) continue;
+      this.effects.burst(this.tmpA, 0xff3a2f, 34, 11, 0.7, 0);
+      this.noteDeath("shutter", p.index);
+      this.die();
+      return;
+    }
+  }
+
+  /** Diagnostics for the verification bot: what ended the run, and where. */
+  deathInfo: { cause: string; player: number; slice: number; orientation: string } | null = null;
+
+  private noteDeath(cause: string, player: number) {
+    this.players[player].position(this.tmpA);
+    this.deathInfo = {
+      cause, player,
+      slice: Math.round(-this.tmpA.z / SLICE_LEN),
+      orientation: Orientation[this.orientation],
+    };
+  }
+
   private checkKills(ev0: { landed: boolean }, ev1: { landed: boolean }) {
     const evs = [ev0, ev1];
     let anyDead = false;
@@ -533,7 +576,10 @@ export class Game {
         audio.save();
         this.effects.burst(this.tmpA, 0x7dffc8, 30, 8, 0.8, 0);
       }
-      if (p.beyond > KILL_DIST || p.airTime > MAX_AIR_TIME) anyDead = true;
+      if (p.beyond > KILL_DIST || p.airTime > MAX_AIR_TIME) {
+        anyDead = true;
+        this.noteDeath(p.airTime > MAX_AIR_TIME ? "air-time" : "fell-out", i);
+      }
     }
     if (anyDead) this.die();
   }
@@ -603,6 +649,10 @@ export class Game {
       setTimeScale: (ts: number) => { this.timeScale = ts; },
       setPlayerCollision: (on: boolean) => this.setPlayerCollision(on),
       crumbleBroken: () => this.tunnel.crumbleBrokenCount(),
+      features: () => ({
+        ...this.tunnel.featurePositions(),
+        sliders: this.tunnel.sliderStates(),
+      }),
       bot: null as unknown,
       touch: () => ({ ...touchState }),
       levels: () =>
@@ -638,19 +688,17 @@ export class Game {
       def: LEVELS[this.levelIdx],
       level: this.levelIdx + 1,
       p1: this.players[0],
+      p2: this.players[1],
       p2body: this.players[1].body,
       spinners: this.tunnel.spinnerStates(),
+      sliders: this.tunnel.sliderStates(),
+      sliderColAt: (ahead: number, baseCol: number, phase: number) =>
+        this.tunnel.sliderColAt(ahead, baseCol, phase),
+      deathInfo: this.deathInfo,
+      shutterAt: (ahead: number, phase: number) => this.tunnel.shutterExtensionAt(ahead, phase),
       timeScale: this.timeScale,
       time: this.time,
     };
-  }
-
-  botFollow() {
-    const p2 = this.players[1];
-    p2.autoRun = false;
-    const t = this.players[0].body.translation();
-    p2.warp(t.x, t.y, t.z + 1.5);
-    p2.body.setLinvel({ x: 0, y: 0, z: -FORWARD_SPEED }, true);
   }
 
   setNetworkRole(role: "local" | "host" | "guest") {

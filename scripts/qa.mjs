@@ -330,20 +330,21 @@ async function main() {
   check("left wall orientation set", s.orientation === "LeftWall", s.orientation);
   await shot("07-ceiling-roll.png");
 
+  // Campaign shape. The acts alternate deliberately — walls in II and V, the new
+  // ground mechanics on the floor in III and IV — so this asserts the spread
+  // across the campaign rather than demanding wall work from every single level.
   const lvlStats = await page.evaluate(() => window.__TR__.levels());
-  for (let i = 4; i < 20; i++) {
-    check(
-      `level ${i + 1} forces off-floor travel`,
-      lvlStats[i].maxFloorRun >= 6,
-      `maxFloorRun=${lvlStats[i].maxFloorRun}`,
-    );
-    const minHaz = i >= 6 ? 2 : 1;
-    check(
-      `level ${i + 1} carries hazards on walls/ceiling`,
-      lvlStats[i].wallHaz >= minHaz,
-      `wallHaz=${lvlStats[i].wallHaz}`,
-    );
-  }
+  const offFloor = lvlStats.filter((l) => l.maxFloorRun >= 6).length;
+  check("half the campaign leaves the floor behind", offFloor >= 10, `${offFloor}/20`);
+  const wallHeavy = lvlStats.slice(4).filter((l) => l.wallHaz >= 2).length;
+  check("wall work runs through the back three quarters", wallHeavy >= 6, `${wallHeavy}/16`);
+  const lengths = lvlStats.map((l) => l.len);
+  check(
+    "levels get longer across the campaign",
+    Math.min(...lengths.slice(15)) > Math.max(...lengths.slice(0, 4)),
+    `first four <= ${Math.max(...lengths.slice(0, 4))}, last five >= ${Math.min(...lengths.slice(15))}`,
+  );
+  check("the finale is the longest level", lengths[19] === Math.max(...lengths), `${lengths[19]}`);
 
   for (let i = 0; i < 20; i++) {
     await page.evaluate((idx) => {
@@ -387,8 +388,9 @@ async function main() {
     const t = window.__TR__;
     t.setAutoRun(0, false);
     t.setAutoRun(1, false);
-    t.warp(0, 0, -4.52, -69);
-    t.warp(1, 0, -4.52, -67.5);
+    const z = t.game.tunnel.crumbleZ();
+    t.warp(0, 0, -4.52, z);
+    t.warp(1, 0, -4.52, z + 1.5);
   });
   await page.waitForTimeout(1400);
   check("crumble tiles break underfoot", await page.evaluate(() => window.__TR__.crumbleBroken()) > 0, "");
@@ -403,6 +405,86 @@ async function main() {
   await page.waitForTimeout(500);
   const spB = (await snap()).spinners;
   check("spinner exists and rotates", spA.length > 0 && Math.abs(spB[0].angle - spA[0].angle) > 0.5, "");
+
+  // --- level mechanics -----------------------------------------------------
+  // Each of these parks the pair on one feature and watches what it does to them.
+  const featureRun = async (levelIdx) => {
+    await page.evaluate((i) => window.__TR__.startRun(i), levelIdx);
+    await page.waitForTimeout(450);
+    await page.evaluate(() => {
+      window.__TR__.setAutoRun(0, false);
+      window.__TR__.setAutoRun(1, false);
+    });
+    return page.evaluate(() => window.__TR__.features());
+  };
+  const parkAt = (x, y, z) => page.evaluate(([x, y, z]) => {
+    const t = window.__TR__;
+    t.warp(0, x, y, z);
+    t.warp(1, x, y, z - 1.4);
+  }, [x, y, z]);
+  const sampleP1 = () => page.evaluate(() => {
+    const p = window.__TR__.game.players[0];
+    const tr = p.body.translation();
+    return { x: tr.x, y: tr.y, state: window.__TR__.game.state };
+  });
+
+  let feats = await featureRun(8);
+  const pad = feats.pads[0];
+  await parkAt(pad[0], pad[1] + 0.4, pad[2]);
+  let peak = -99;
+  for (let i = 0; i < 30; i++) {
+    await page.waitForTimeout(45);
+    peak = Math.max(peak, (await sampleP1()).y);
+  }
+  check("launch pad throws well past a jump", peak - pad[1] > 4, `rise ${(peak - pad[1]).toFixed(2)}`);
+
+  feats = await featureRun(10);
+  const belt = feats.belts.find((b) => b.dir > 0) ?? feats.belts[0];
+  await parkAt(belt.pos[0], belt.pos[1] + 0.4, belt.pos[2]);
+  const beltStart = (await sampleP1()).x;
+  await page.waitForTimeout(700);
+  const beltEnd = (await sampleP1()).x;
+  check(
+    "conveyor carries you along the face",
+    Math.sign(beltEnd - beltStart) === Math.sign(belt.dir) && Math.abs(beltEnd - beltStart) > 1,
+    `${beltStart.toFixed(2)} -> ${beltEnd.toFixed(2)} dir ${belt.dir}`,
+  );
+
+  feats = await featureRun(12);
+  const ferry = feats.sliders[0];
+  const ferryX = await page.evaluate((s) => {
+    const t = window.__TR__;
+    const sl = t.game.tunnel.sliderStates()[0];
+    void s;
+    return -5 + (sl.col + 0.5) * 2;
+  }, 0);
+  await parkAt(ferryX, -4.4, ferry.z);
+  const rides = [];
+  for (let i = 0; i < 10; i++) {
+    await page.waitForTimeout(90);
+    const s = await sampleP1();
+    const col = await page.evaluate(() => window.__TR__.game.tunnel.sliderStates()[0].col);
+    rides.push(Math.abs(s.x - (-5 + (col + 0.5) * 2)));
+  }
+  check(
+    "ferry carries whoever is standing on it",
+    Math.max(...rides) < 1.1,
+    `max drift ${Math.max(...rides).toFixed(2)}`,
+  );
+
+  feats = await featureRun(14);
+  const shut = feats.shutters[0];
+  await parkAt(shut[0], shut[1] + 0.5, shut[2]);
+  let died = false;
+  for (let i = 0; i < 30; i++) {
+    await page.waitForTimeout(90);
+    if ((await sampleP1()).state !== 1) { died = true; break; }
+  }
+  check("shutter kills whoever stands in its lane", died, "");
+  await page.evaluate(() => {
+    window.__TR__.setAutoRun(0, true);
+    window.__TR__.setAutoRun(1, true);
+  });
 
   await page.evaluate(() => {
     window.__TR__.setTimeScale(1);
