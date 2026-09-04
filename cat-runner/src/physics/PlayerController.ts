@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { PHYSICS } from './PhysicsConfig';
+import { PHYSICS, capsuleFeetOffset } from './PhysicsConfig';
 import { PhysicsWorld, GROUP, collisionGroups } from './PhysicsWorld';
 import type { RunPath } from '../levels/RunPath';
 import { wrapAngle } from '../levels/RunPath';
@@ -1020,20 +1020,51 @@ export class PlayerController {
    * The probe starts just above the tallest lip tryStepUp can handle, so a
    * climbable seam never reads as a wall, and anything shallow enough to stand
    * on is treated as a ramp rather than an obstruction.
+   *
+   * This runs airborne too, and that half is the fix for a reported bug: a jump
+   * that lands *short* of the next roof puts the capsule against the side of
+   * that roof's deck slab, which is a wall like any other - but with the probe
+   * grounded-only, nothing cut the forward drive, and the runner spent every
+   * step writing a full runSpeed into a vertical face. That is the exact
+   * extrusion described above, and it did not read as a wall at all: the cat
+   * ground its way up the slab's one-unit face at about a unit a second, broke
+   * free the moment its feet cleared the lip, and arrived on the roof at full
+   * speed - a missed jump silently converted into a launch onto the deck, and
+   * from there into whatever hazard happened to be standing on it. Measured
+   * across the approach band, the capsule climbed up to 1.29 units of a
+   * one-unit face and was ejected at up to +13.0, against a `jumpImpulse` of
+   * 7.9. Catnip Rush made it both stronger (half again the speed pushing into
+   * the face) and more likely to end in a "save" rather than a fall.
+   *
+   * The probe line is what keeps this from stealing jumps the runner had made.
+   * It sits at `footY + maxStepUp`, which airborne is exactly the capsule's own
+   * centre (`capsuleFeetOffset()` and `maxStepUp` are both 0.5), so the test is
+   * "is more than half of me below this ledge?" - a runner arriving with its
+   * feet at or above the lip casts over the deck and is untouched, and one
+   * arriving a whole body below it was never getting up there. That is also why
+   * a same-height gap's far side coming into probe range mid-flight is not the
+   * false positive it would have been for a probe aimed lower.
    */
   private probeWall(): void {
     const wasBlocked = this.wallAhead;
     this.wallAhead = false;
-    // Airborne, the same cut would kill a jump the moment the far side of a gap
-    // came into probe range, and the extrusion only ever happens on the ground.
-    // wasBlocked is captured above, before this return, so going airborne reads
-    // as a falling edge next grounded step rather than a spurious collision now.
-    if (!this.grounded) return;
 
     const t = this.body.translation();
-    const footY = t.y - this.groundDistance;
+    const airborne = !this.grounded;
+    // Grounded, the foot line comes off the ground ray, so a ramp is measured
+    // from the ramp rather than from the capsule. Airborne there is no ground
+    // under the capsule to measure from - `groundDistance` is Infinity - so it
+    // is the capsule's own geometry instead.
+    const footY = airborne ? t.y - capsuleFeetOffset() : t.y - this.groundDistance;
 
-    _v1.set(t.x, footY + PHYSICS.maxStepUp + 0.06, t.z);
+    // The +0.06 clears the tallest lip `tryStepUp` can handle, so a climbable
+    // seam underfoot never reads as a wall. Airborne it is deliberately left
+    // off, so that this probe's threshold and the airborne step-up's are the
+    // same line rather than 0.06 apart: `maxStepUp` and `capsuleFeetOffset()`
+    // are both 0.5, so "the probe sees a face" and "the step-up can reach the
+    // top of it" become exact complements, with no sliver of height in between
+    // where neither fires and the capsule is left to bury itself.
+    _v1.set(t.x, footY + PHYSICS.maxStepUp + (airborne ? 0 : 0.06), t.z);
     _v2.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
 
     const hit = this.physics.raycast(
@@ -1041,12 +1072,17 @@ export class PlayerController {
       _v2,
       PHYSICS.colliderRadius + 0.3,
       this.body,
+      // Airborne this is deliberately GROUND-only. What it exists for is the
+      // side of a roof slab; letting a crate cut the forward drive mid-jump
+      // would change how every obstacle in the game is cleared, and an obstacle
+      // hit already has its own path through handleContact().
+      //
       // Phasing: obstacles are not in the capsule's collision filter either,
       // so leaving them in this probe's would stop the runner dead in front
       // of something it is supposed to be running straight through.
       collisionGroups(
         GROUP.PLAYER,
-        this.phasing ? GROUP.GROUND : GROUP.GROUND | GROUP.OBSTACLE,
+        airborne || this.phasing ? GROUP.GROUND : GROUP.GROUND | GROUP.OBSTACLE,
       ),
     );
     if (!hit) return;
@@ -1084,7 +1120,13 @@ export class PlayerController {
         ? (_horiz.x * _v2.x + _horiz.z * _v2.z) / this.horizontalSpeed
         : 1;
 
+    // Grounded-only, and not merely because the airborne probe's GROUND-only
+    // filter already makes `isObstacle` false: a runner in mid-air is not
+    // wedged against anything, it is falling past it, and billing that as a
+    // crash would charge a life for the very miss the fall is about to settle
+    // on its own.
     if (
+      !airborne &&
       this.wallAhead &&
       !wasBlocked &&
       isObstacle(hit.collider) &&
@@ -1102,13 +1144,53 @@ export class PlayerController {
    * face and nothing ever supplies the vertical speed to climb it, so a 0.4-unit
    * seam is a permanent stop rather than a bump. A forward probe finds standable
    * ground just above the current footing and writes the capsule up onto it.
+   *
+   * This runs airborne-and-descending as well, and that is the other half of
+   * the short-jump fix `probeWall` documents. `probeWall` handles a runner that
+   * arrives clearly below the next roof: it stops the forward drive, and the
+   * miss becomes the fall it always was. But one that arrives *just* below the
+   * lip - inside the last half-capsule, which is a jump the player made - still
+   * buried its rounded bottom in the slab's top corner, because at Catnip Rush
+   * speed a fixed step is 0.275 units against a 0.34 capsule radius. The
+   * solver's answer to an overlap that deep is to throw the body out of it,
+   * hard enough to put the cat a couple of units above a ledge it had only
+   * grazed - while it kept the full forward speed being prescribed underneath,
+   * so it came down somewhere it was never flying.
+   *
+   * What is left afterwards is the ordinary contact bounce of a landing that
+   * clips the very corner of a deck: up to +4.4 under Catnip Rush and +5.7 at
+   * the top of the speed ramp, against +10.6 and +13.0 before. That remainder
+   * is contact resolution doing its job on a landing the player made, and is
+   * deliberately not chased any further.
+   *
+   * Reaching the lip a step early and *writing* the capsule on top of it is the
+   * same assist this method already performs on the ground, and it settles the
+   * graze before there is any penetration for the solver to react to. Position
+   * only: no velocity is added, so the runner lands and runs rather than
+   * taking off.
+   *
+   * Descending only. Rising, the runner is mid-jump and on its way over
+   * whatever is ahead; snapping it onto the first ledge within half a metre
+   * would cut jumps short.
    */
   private tryStepUp(): void {
-    if (!this.grounded) return;
-    if (this.groundDistance === Infinity) return;
+    const airborne = !this.grounded;
+    if (airborne) {
+      // Only on the way down, and only once the jump is actually over the top.
+      if (this.body.linvel().y > 0) return;
+    } else if (this.groundDistance === Infinity) {
+      return;
+    }
 
     const t = this.body.translation();
-    const probeAhead = PHYSICS.colliderRadius + 0.25;
+    // Airborne, the probe has to see one step further than the capsule can
+    // travel, or at the top of the speed ramp under Catnip Rush (0.34 units a
+    // step against a 0.34 radius) the lip arrives already penetrated and there
+    // is nothing left to get ahead of.
+    const probeAhead =
+      PHYSICS.colliderRadius +
+      0.25 +
+      (airborne ? PHYSICS.runSpeed * PHYSICS.fixedTimeStep : 0);
 
     _v2.set(
       t.x + _forward.x * probeAhead,
@@ -1127,7 +1209,10 @@ export class PlayerController {
     if (!hit) return;
 
     const aheadY = _v2.y - hit.distance;
-    const footY = t.y - this.groundDistance;
+    // Same split as probeWall's: off the ground ray when there is ground under
+    // the capsule to measure from, off the capsule's own geometry when there
+    // is not.
+    const footY = airborne ? t.y - capsuleFeetOffset() : t.y - this.groundDistance;
     const rise = aheadY - footY;
 
     if (rise <= 0.06 || rise > PHYSICS.maxStepUp) return;

@@ -78,8 +78,6 @@ import { runGuarded } from './frameGuard';
 /** Slow-motion factor applied briefly on failure. */
 const FAIL_SLOWMO_SCALE = 0.25;
 const FAIL_SLOWMO_DURATION = 0.4;
-/** Auto-restart delay after a failure if the player does nothing. */
-const FAIL_AUTO_RESTART = 2.6;
 /** Largest real delta the loop will accept, to survive tab stalls. */
 const MAX_FRAME_DELTA = 0.1;
 
@@ -369,7 +367,6 @@ export class Game {
   private failReason: FailReason = 'fell';
   /** A run has been asked for and is waiting on an interstitial. See `enterRun()`. */
   private runPending = false;
-  private failTimer = 0;
   private slowMoTimer = 0;
   private timeScale = 1;
   private elapsed = 0;
@@ -896,14 +893,7 @@ export class Game {
 
     this.states.register(GameState.Failed, {
       onEnter: () => {
-        this.failTimer = 0;
         this.slowMoTimer = FAIL_SLOWMO_DURATION;
-        // `anyInputSeen` is a latch, and the player was necessarily pressing
-        // something a moment ago - they were driving. Discard that history so
-        // the "any input skips the beat" rule in updateFailure() only reacts to
-        // a press made *after* the death, instead of firing on the first frame
-        // past the 0.35 s grace and stealing the failure message.
-        this.input.consumeAnyInput();
         this.audio.setSlideIntensity(0);
         this.audio.setWindIntensity(0);
         this.audio.play('fail');
@@ -1130,7 +1120,6 @@ export class Game {
     this.elapsed = 0;
     this.timeScale = 1;
     this.slowMoTimer = 0;
-    this.failTimer = 0;
 
     this.lives = LIVES_PER_RUN;
     this.livesTotal = LIVES_PER_RUN;
@@ -2085,28 +2074,32 @@ export class Game {
     this.states.transition(GameState.Failed);
   }
 
+  /**
+   * The failure beat: a short stretch of slow motion, and then nothing.
+   *
+   * The fail screen holds. It does not restart itself, and it does not restart
+   * on a stray press. Both of those used to happen - a 2.6 s timer, plus "any
+   * input past a 0.35 s grace" - on the theory that the "one more go" loop
+   * should never stall waiting for a decision. But a run ends with the player's
+   * hands still on the controls, so in practice the press that ended one run
+   * started the next: a fresh run was already underway before the player had
+   * read what killed them, or seen the distance and the fish it was worth. On
+   * touch it is worse still, because the swipe that missed the jump is itself
+   * an input.
+   *
+   * Restarting is now only ever something the player asks for - the Retry
+   * button, R, or Enter; see `bindInput` and `UIManager`'s `btn-fail-retry`.
+   */
   private updateFailure(dt: number): void {
-    // A short slow-motion beat sells the mistake, then time snaps back.
-    if (this.slowMoTimer > 0) {
-      this.slowMoTimer -= dt;
-      this.timeScale = FAIL_SLOWMO_SCALE;
-      if (this.slowMoTimer <= 0) this.timeScale = 1;
-    }
+    if (this.slowMoTimer <= 0) return;
 
-    this.failTimer += dt;
-
-    // Any input restarts immediately; otherwise it restarts itself, so the
-    // "one more go" loop never stalls waiting for a decision.
-    if (this.failTimer > 0.35 && this.input.consumeAnyInput()) {
-      this.enterRun();
-      return;
-    }
-    if (this.failTimer >= FAIL_AUTO_RESTART) this.enterRun();
+    this.slowMoTimer -= dt;
+    this.timeScale = this.slowMoTimer > 0 ? FAIL_SLOWMO_SCALE : 1;
   }
 
   /**
-   * The single door into a run - Play, Restart, the retry on the fail screen,
-   * and the auto-restart all come through here.
+   * The single door into a run - Play, the pause menu's Restart and the fail
+   * screen's Retry all come through here.
    *
    * `Poki.startRun` is what makes that worth having: it ends the previous
    * gameplay session, shows an interstitial if one is due (never before the
@@ -2114,10 +2107,10 @@ export class Game {
    * every entry shares the door, an ad can never land mid-run, and no path
    * into gameplay can skip one.
    *
-   * `runPending` covers the gap between asking and starting. Without it the
-   * fail screen's auto-restart timer, which is still ticking when an
-   * interstitial is *not* due and the callback lands a microtask later, can
-   * ask a second time and start two runs.
+   * `runPending` covers the gap between asking and starting. Without it a
+   * second ask - a double-tapped Retry, or R held down - landing before the
+   * callback does (which it will, a microtask later, whenever an interstitial
+   * is *not* due) starts two runs.
    */
   private enterRun(): void {
     if (this.runPending) return;
