@@ -36,7 +36,11 @@ export const MEGAKIT_COLORS: Readonly<Record<string, number>> = {
 
   // Glazing. `FakeInterior` is the flat card behind each window that stands in
   // for a room, so it wants to read as depth rather than as a surface.
-  MI_Glass: PALETTE.coastalTeal,
+  // Points at `coastalBlue` (light blue), not `coastalTeal` - `coastalTeal`
+  // is now a building wall colour (mint green) in the Candy City palette, and
+  // glazing should stay a consistent light blue regardless of which wall
+  // colour it's set against.
+  MI_Glass: PALETTE.coastalBlue,
   MI_FakeInterior: GLASS_INTERIOR,
   MI_FakeInterior_1: GLASS_INTERIOR,
   MI_FakeInterior_2: GLASS_INTERIOR,

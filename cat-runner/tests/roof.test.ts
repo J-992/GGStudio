@@ -7,7 +7,15 @@ import {
 import { mulberry32 } from '../src/levels/procedural/ChunkGenerators';
 import { CHUNK_LENGTH, DECK_WIDTH } from '../src/levels/TrackConfig';
 import { PHYSICS } from '../src/physics/PhysicsConfig';
-import type { ChunkType } from '../src/levels/procedural/ChunkTypes';
+import { SPEED_RAMP_START_MULTIPLIER } from '../src/levels/procedural/DifficultyCurve';
+import {
+  DECK_A_LENGTH,
+  GAP_END_Z,
+  ROOF_LOW,
+  ROOF_MEDIUM,
+  ROOF_TIER_HEIGHT,
+  type ChunkType,
+} from '../src/levels/procedural/ChunkTypes';
 
 /**
  * Rooftop tier progression and prop dressing.
@@ -98,6 +106,26 @@ describe('RoofDirector', () => {
     };
     expect(seq()).toEqual(seq());
   });
+
+  /**
+   * Regression for the tutorial-prefix seam: `ChunkBuilder` primes this
+   * director with the last `fixedChunks` chunk's own tier before procedural
+   * generation resumes (see `ChunkBuilder.nextSpec()`), since this director
+   * never rolled any of those chunks itself and would otherwise still be
+   * sitting at its own default (0). A non-`'jump'` chunk never changes tier
+   * regardless of the rng draw, so `next('straight', ...)` reading the
+   * primed value straight back - not 0 - is the whole regression.
+   */
+  it('prime() syncs the tier without rolling, so the next chunk reads it straight back', () => {
+    const director = new RoofDirector();
+    const rng = mulberry32(1);
+
+    director.prime(ROOF_MEDIUM);
+    const { tier, previousTier } = director.next('straight', rng);
+
+    expect(previousTier).toBe(ROOF_MEDIUM);
+    expect(tier).toBe(ROOF_MEDIUM);
+  });
 });
 
 describe('TRAMPOLINE_LAUNCH_VELOCITY', () => {
@@ -117,10 +145,52 @@ describe('TRAMPOLINE_LAUNCH_VELOCITY', () => {
     expect(apex).toBeGreaterThan(standingJumpApex * 2);
   });
 
-  it('does not fling the player over the chunk beyond the one it launches from', () => {
-    const hangTime = (2 * TRAMPOLINE_LAUNCH_VELOCITY) / Math.abs(PHYSICS.gravity);
-    const horizontalDistance = PHYSICS.runSpeed * hangTime;
-    expect(horizontalDistance).toBeLessThan(CHUNK_LENGTH);
+  /**
+   * The pad sits 1.2 units short of deck A's far edge (`TRAMPOLINE_LOCAL_Z`
+   * in `ChunkBuilder.ts`), so it's already offset into its own chunk before
+   * the launch even starts - a raw "return-to-*launch*-height" hang distance
+   * (the old version of this test) is a looser, less accurate proxy than
+   * checking where the player actually lands: back down at the *landing*
+   * deck's height (3 units higher, so partway down the arc, not the bottom
+   * of it). `2 * CHUNK_LENGTH` bounds that to landing within the chunk right
+   * after the one that launched it - the chunk `ChunkDirector`'s trampoline
+   * recovery mechanism (see `ChunkDirector.noteTrampoline`) now guarantees
+   * is always a plain, hazard-free `'straight'`.
+   */
+  it('lands within the guaranteed-safe chunk right after the one it launches from', () => {
+    const g = Math.abs(PHYSICS.gravity);
+    const rise = ROOF_TIER_HEIGHT[ROOF_MEDIUM] - ROOF_TIER_HEIGHT[ROOF_LOW];
+    const v = TRAMPOLINE_LAUNCH_VELOCITY;
+    // Second (descending) root of `rise = v*t - 0.5*g*t^2`.
+    const landingTime = (v + Math.sqrt(v * v - 2 * g * rise)) / g;
+    const horizontalDistance = PHYSICS.runSpeed * landingTime;
+    expect(horizontalDistance).toBeLessThan(2 * CHUNK_LENGTH);
+  });
+
+  /**
+   * The actual bug this tuning fixes, pinned directly: at the game's
+   * slowest possible speed (the ramp's own opening floor - every run and
+   * every tutorial attempt starts here), the player must cover the full
+   * pad-to-landing-edge distance before descending back to landing height,
+   * with real margin to spare - not exactly meet it, which is what the old
+   * tuning did (zero margin, a coin-flip miss on any noise). See
+   * `RoofFeatures.ts`'s own derivation comment for the full working; this
+   * pins the conclusion.
+   */
+  it('clears the gap with real margin at the slowest speed the game ever runs', () => {
+    const g = Math.abs(PHYSICS.gravity);
+    const rise = ROOF_TIER_HEIGHT[ROOF_MEDIUM] - ROOF_TIER_HEIGHT[ROOF_LOW];
+    const v = TRAMPOLINE_LAUNCH_VELOCITY;
+    const landingTime = (v + Math.sqrt(v * v - 2 * g * rise)) / g;
+
+    const worstCaseSpeed = PHYSICS.baseRunSpeed * SPEED_RAMP_START_MULTIPLIER;
+    // Pad to landing-deck edge - see `RoofFeatures.ts`'s derivation comment;
+    // 1.2 is `ChunkBuilder.ts`'s `TRAMPOLINE_LOCAL_Z` offset from deck A's
+    // far edge, not itself exported (a placement-only implementation detail).
+    const clearanceNeeded = GAP_END_Z - (DECK_A_LENGTH - 1.2);
+
+    const margin = worstCaseSpeed * landingTime - clearanceNeeded;
+    expect(margin).toBeGreaterThan(2); // comfortable, not exact
   });
 });
 

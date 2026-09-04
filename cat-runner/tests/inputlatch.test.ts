@@ -70,12 +70,28 @@ describe('drive input latching', () => {
     expect(pending.laneStep).toBe(-1);
   });
 
-  it('keeps jump and slide pulses latched across an empty frame', () => {
+  it('keeps a jump pulse latched across an empty frame', () => {
     const pending = empty();
-    latchEdges(pending, press({ jump: true, slide: true }));
+    latchEdges(pending, press({ jump: true }));
     latchEdges(pending, empty());
 
     expect(pending.jump).toBe(true);
+  });
+
+  it('overwrites slide with the latest read instead of latching it, since it is a level, not a pulse', () => {
+    const pending = empty();
+    latchEdges(pending, press({ slide: true }));
+    // Unlike jump, an empty (not-held) read correctly turns slide back off -
+    // it means "is it held right now", not "was it pressed since last
+    // consumed". See `RunInput.slide`.
+    latchEdges(pending, empty());
+    expect(pending.slide).toBe(false);
+
+    // A still-held signal isn't lost the way a pulse could be, either - the
+    // very bug this file exists to cover (a signal destroyed by a frame that
+    // drives no fixed step) doesn't apply to a level: if it's still true on
+    // the next read, it's simply read true again.
+    latchEdges(pending, press({ slide: true }));
     expect(pending.slide).toBe(true);
   });
 

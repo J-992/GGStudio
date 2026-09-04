@@ -344,8 +344,14 @@ export const TURN_MARKER_HEIGHT = 1.4;
  * (1.0). Lowered to sit at the standing capsule's own centre height, so fish
  * read as placed directly on the running path rather than floating in the
  * air.
+ *
+ * Nudged back up from 0.5: `Collectible`'s idle bob (`IDLE_BOB_AMPLITUDE`,
+ * 0.18) swings below this base height every cycle, and 0.5 only left ~0.32
+ * units of clearance above the deck at the bottom of that swing - visible as
+ * clipping on some rooftop surfaces. 0.65 keeps fish at essentially the same
+ * near-path height while giving the bob real margin either side.
  */
-export const FISH_HEIGHT = 0.5;
+export const FISH_HEIGHT = 0.65;
 /**
  * Height fish sit above the gap floor when arcing over a jump - well above
  * head height (1.0) so a grounded (non-jumping) cat can never sweep them up.

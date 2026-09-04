@@ -78,8 +78,8 @@ describe('generateBuildingRow', () => {
     }
   });
 
-  it('only ever draws a building colour from the five coastal building colours', () => {
-    expect(BUILDING_COLORS).toHaveLength(5);
+  it('only ever draws a building colour from the six Candy City building colours', () => {
+    expect(BUILDING_COLORS).toHaveLength(6);
     for (const chunkIndex of CHUNK_INDICES) {
       for (const side of SIDES) {
         for (const b of generateBuildingRow(chunkIndex, side)) {

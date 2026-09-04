@@ -161,29 +161,6 @@ export interface PhysicsConfig {
   /** How long a stumble makes the runner mushy, seconds. */
   stumbleDuration: number;
   /**
-   * How long one press keeps the cat tucked, seconds.
-   *
-   * Sized against the thing it exists to clear. At `runSpeed` 11 the cat covers
-   * 11 units a second and a clothesline's overlap band is about 2.2 units deep,
-   * so the tuck has to outlast roughly 0.2 s of travel. 0.55 gives a window
-   * either side of that - late enough to answer a line the player has only just
-   * read, generous enough that a slightly early press still lands - without
-   * making the duck free. Holding the key does not extend it; see
-   * `PlayerController.tickTimers`.
-   */
-  slideDuration: number;
-  /**
-   * Window before landing where a pressed slide is remembered, seconds.
-   *
-   * Same idea as `jumpBufferTime`: a press on the fixed step just before the
-   * cat touches down would otherwise be discarded outright, because a
-   * grounded press is required to start a duck. Kept short - a slide is
-   * usually pressed in reaction to something already on screen, not
-   * anticipated the way a jump over a known gap can be, so a wide window
-   * would let stray presses buffer in from further away than makes sense.
-   */
-  slideBufferTime: number;
-  /**
    * How far the runner may drop below the last ground it stood on before the
    * fall is unrecoverable. Well under any authored step, well over any lip.
    */
@@ -297,8 +274,6 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   // Stability & recovery
   hardLandingSpeed: 13,
   stumbleDuration: 0.45,
-  slideDuration: 0.55,
-  slideBufferTime: 0.12,
   fallThreshold: 3.5,
 
   // Collisions

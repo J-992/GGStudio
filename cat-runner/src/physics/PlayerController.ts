@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { PHYSICS } from './PhysicsConfig';
+import { PHYSICS, capsuleFeetOffset } from './PhysicsConfig';
 import { PhysicsWorld, GROUP, collisionGroups } from './PhysicsWorld';
 import type { RunPath } from '../levels/RunPath';
 import { wrapAngle } from '../levels/RunPath';
@@ -53,7 +53,13 @@ export interface RunInput {
   turn: -1 | 0 | 1;
   /** True on the frame jump was newly pressed. */
   jump: boolean;
-  /** True on the frame slide was newly pressed. */
+  /**
+   * True for as long as slide is held down - a level, not a pulse, unlike
+   * every other field here. Drives `isDucking` directly and continuously
+   * (see `tickTimers()`/`updateDucking()`): there is nothing to buffer or
+   * consume once per step, since it already reflects "held right now" as of
+   * the last read.
+   */
   slide: boolean;
 }
 
@@ -91,12 +97,16 @@ export const LANES = [-1, 0, 1] as const;
  *
  * Call this after the first `step()` of a frame, not after the last - the point
  * is that sub-steps two onward see no input at all.
+ *
+ * `slide` is deliberately not touched here - it is a level, not a pulse (see
+ * `RunInput.slide`), so there is nothing to consume: every sub-step should
+ * see the same "is it held right now" answer, not have it zeroed after the
+ * first.
  */
 export function consumeEdges(input: RunInput): void {
   input.laneStep = 0;
   input.turn = 0;
   input.jump = false;
-  input.slide = false;
 }
 
 /**
@@ -117,6 +127,11 @@ export function consumeEdges(input: RunInput): void {
  * Latching instead lets a press wait out however many zero-step frames it
  * takes for the accumulator to fill, while `consumeEdges` still guarantees it
  * is applied exactly once.
+ *
+ * `slide` is the one field here that isn't an edge (see `RunInput.slide`), so
+ * it isn't OR-latched with the others - it's simply overwritten with
+ * whatever `source` currently reads, since a level has no pulse to preserve
+ * across a zero-step frame; it will just be read again, correctly, next time.
  */
 export function latchEdges(target: RunInput, source: RunInput): void {
   // Clamped to the same +-2 a single frame's read is clamped to: banking
@@ -125,7 +140,7 @@ export function latchEdges(target: RunInput, source: RunInput): void {
   target.laneStep = THREE.MathUtils.clamp(target.laneStep + source.laneStep, -2, 2);
   if (source.turn !== 0) target.turn = source.turn;
   target.jump = target.jump || source.jump;
-  target.slide = target.slide || source.slide;
+  target.slide = source.slide;
 }
 
 // Scratch vectors - reused every step to keep the update loop allocation-free.
@@ -223,12 +238,12 @@ export class PlayerController {
   /**
    * True while the cat is tucked under something.
    *
-   * A timed pose rather than a held one: the input is a single press and the
-   * duck runs for {@link PHYSICS.slideDuration} and ends, so there is no way to
-   * hold the key down and be permanently short. The capsule is deliberately not
-   * resized - obstacles that can be ducked test this flag instead, which keeps
-   * the collider a constant the rest of the controller can rely on. See
-   * `Clothesline`.
+   * A held pose, not a timed one: true for exactly as long as `input.slide`
+   * is held (and the cat is grounded and alive), false the instant it's
+   * released - see `tickTimers()`/`updateDucking()`. The capsule is
+   * deliberately not resized - obstacles that can be ducked test this flag
+   * instead, which keeps the collider a constant the rest of the controller
+   * can rely on. See `Clothesline`.
    */
   isDucking = false;
 
@@ -285,11 +300,10 @@ export class PlayerController {
   private coyoteTimer = 0;
   private jumpBufferTimer = 0;
   private jumpCooldownTimer = 0;
-  /** A slide press remembered until the next `tryDuck()`, same idea as
-   *  `jumpBufferTimer`. See `PhysicsConfig.slideBufferTime`. */
-  private slideBufferTimer = 0;
-  /** Seconds left in the duck, and how long a fresh one lasts. */
-  private duckTimer = 0;
+  /** `isDucking` as of last step - not read for physics, only to fire
+   *  `onDuck` on the rising edge, the same "derive the edge from the state"
+   *  pattern `Cat.ts`'s own `wasDucking` uses for its animation rewind. */
+  private wasDucking = false;
   private stumbleTimer = 0;
   private airTime = 0;
   /** `airTime` as it stood the instant before a landing zeroed it - see
@@ -434,8 +448,7 @@ export class PlayerController {
     this.slipSpeed = 0;
     this.isSliding = false;
     this.isDucking = false;
-    this.duckTimer = 0;
-    this.slideBufferTimer = 0;
+    this.wasDucking = false;
 
     this.lane = 0;
     this.lateral = 0;
@@ -562,7 +575,7 @@ export class PlayerController {
     this.applyRunVelocity(dt);
     this.tryStepUp();
     this.tryJump();
-    this.tryDuck();
+    this.updateDucking(input);
     this.detectBlocked(dt);
   }
 
@@ -572,24 +585,13 @@ export class PlayerController {
 
     this.jumpCooldownTimer = Math.max(0, this.jumpCooldownTimer - dt);
 
-    // A duck restarts on a fresh press rather than extending, so mashing the
-    // key through a row of clotheslines works and holding it does nothing.
-    // An airborne press is not dropped outright any more - see
-    // `slideBufferTimer`/`tryDuck()` - but it still cannot start the duck
-    // itself here: there is nothing to tuck against until grounded, and
-    // letting it fire mid-air would make jump the safer answer to a low
-    // obstacle.
-    if (input.slide) this.slideBufferTimer = PHYSICS.slideBufferTime;
-    else this.slideBufferTimer = Math.max(0, this.slideBufferTimer - dt);
-
-    if (input.slide && this.grounded && this.state !== PlayerState.Dead) {
-      this.duckTimer = PHYSICS.slideDuration;
-      this.slideBufferTimer = 0;
-      this.events.onDuck?.();
-    } else {
-      this.duckTimer = Math.max(0, this.duckTimer - dt);
-    }
-    this.isDucking = this.duckTimer > 0;
+    // A first-pass value, off *last* step's `grounded` - `updateDucking()`
+    // (after `probeGround()`/`detectLanding()` below have this step's real
+    // answer) corrects it, the same two-pass shape `tryJump()`'s coyote/buffer
+    // handling uses for the same reason. There is nothing to tuck against
+    // mid-air, so airborne is never ducking regardless of how long `slide`
+    // has been held.
+    this.isDucking = input.slide && this.grounded && this.state !== PlayerState.Dead;
 
     if (this.stumbleTimer > 0) {
       this.stumbleTimer -= dt;
@@ -1018,20 +1020,51 @@ export class PlayerController {
    * The probe starts just above the tallest lip tryStepUp can handle, so a
    * climbable seam never reads as a wall, and anything shallow enough to stand
    * on is treated as a ramp rather than an obstruction.
+   *
+   * This runs airborne too, and that half is the fix for a reported bug: a jump
+   * that lands *short* of the next roof puts the capsule against the side of
+   * that roof's deck slab, which is a wall like any other - but with the probe
+   * grounded-only, nothing cut the forward drive, and the runner spent every
+   * step writing a full runSpeed into a vertical face. That is the exact
+   * extrusion described above, and it did not read as a wall at all: the cat
+   * ground its way up the slab's one-unit face at about a unit a second, broke
+   * free the moment its feet cleared the lip, and arrived on the roof at full
+   * speed - a missed jump silently converted into a launch onto the deck, and
+   * from there into whatever hazard happened to be standing on it. Measured
+   * across the approach band, the capsule climbed up to 1.29 units of a
+   * one-unit face and was ejected at up to +13.0, against a `jumpImpulse` of
+   * 7.9. Catnip Rush made it both stronger (half again the speed pushing into
+   * the face) and more likely to end in a "save" rather than a fall.
+   *
+   * The probe line is what keeps this from stealing jumps the runner had made.
+   * It sits at `footY + maxStepUp`, which airborne is exactly the capsule's own
+   * centre (`capsuleFeetOffset()` and `maxStepUp` are both 0.5), so the test is
+   * "is more than half of me below this ledge?" - a runner arriving with its
+   * feet at or above the lip casts over the deck and is untouched, and one
+   * arriving a whole body below it was never getting up there. That is also why
+   * a same-height gap's far side coming into probe range mid-flight is not the
+   * false positive it would have been for a probe aimed lower.
    */
   private probeWall(): void {
     const wasBlocked = this.wallAhead;
     this.wallAhead = false;
-    // Airborne, the same cut would kill a jump the moment the far side of a gap
-    // came into probe range, and the extrusion only ever happens on the ground.
-    // wasBlocked is captured above, before this return, so going airborne reads
-    // as a falling edge next grounded step rather than a spurious collision now.
-    if (!this.grounded) return;
 
     const t = this.body.translation();
-    const footY = t.y - this.groundDistance;
+    const airborne = !this.grounded;
+    // Grounded, the foot line comes off the ground ray, so a ramp is measured
+    // from the ramp rather than from the capsule. Airborne there is no ground
+    // under the capsule to measure from - `groundDistance` is Infinity - so it
+    // is the capsule's own geometry instead.
+    const footY = airborne ? t.y - capsuleFeetOffset() : t.y - this.groundDistance;
 
-    _v1.set(t.x, footY + PHYSICS.maxStepUp + 0.06, t.z);
+    // The +0.06 clears the tallest lip `tryStepUp` can handle, so a climbable
+    // seam underfoot never reads as a wall. Airborne it is deliberately left
+    // off, so that this probe's threshold and the airborne step-up's are the
+    // same line rather than 0.06 apart: `maxStepUp` and `capsuleFeetOffset()`
+    // are both 0.5, so "the probe sees a face" and "the step-up can reach the
+    // top of it" become exact complements, with no sliver of height in between
+    // where neither fires and the capsule is left to bury itself.
+    _v1.set(t.x, footY + PHYSICS.maxStepUp + (airborne ? 0 : 0.06), t.z);
     _v2.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
 
     const hit = this.physics.raycast(
@@ -1039,12 +1072,17 @@ export class PlayerController {
       _v2,
       PHYSICS.colliderRadius + 0.3,
       this.body,
+      // Airborne this is deliberately GROUND-only. What it exists for is the
+      // side of a roof slab; letting a crate cut the forward drive mid-jump
+      // would change how every obstacle in the game is cleared, and an obstacle
+      // hit already has its own path through handleContact().
+      //
       // Phasing: obstacles are not in the capsule's collision filter either,
       // so leaving them in this probe's would stop the runner dead in front
       // of something it is supposed to be running straight through.
       collisionGroups(
         GROUP.PLAYER,
-        this.phasing ? GROUP.GROUND : GROUP.GROUND | GROUP.OBSTACLE,
+        airborne || this.phasing ? GROUP.GROUND : GROUP.GROUND | GROUP.OBSTACLE,
       ),
     );
     if (!hit) return;
@@ -1082,7 +1120,13 @@ export class PlayerController {
         ? (_horiz.x * _v2.x + _horiz.z * _v2.z) / this.horizontalSpeed
         : 1;
 
+    // Grounded-only, and not merely because the airborne probe's GROUND-only
+    // filter already makes `isObstacle` false: a runner in mid-air is not
+    // wedged against anything, it is falling past it, and billing that as a
+    // crash would charge a life for the very miss the fall is about to settle
+    // on its own.
     if (
+      !airborne &&
       this.wallAhead &&
       !wasBlocked &&
       isObstacle(hit.collider) &&
@@ -1100,13 +1144,53 @@ export class PlayerController {
    * face and nothing ever supplies the vertical speed to climb it, so a 0.4-unit
    * seam is a permanent stop rather than a bump. A forward probe finds standable
    * ground just above the current footing and writes the capsule up onto it.
+   *
+   * This runs airborne-and-descending as well, and that is the other half of
+   * the short-jump fix `probeWall` documents. `probeWall` handles a runner that
+   * arrives clearly below the next roof: it stops the forward drive, and the
+   * miss becomes the fall it always was. But one that arrives *just* below the
+   * lip - inside the last half-capsule, which is a jump the player made - still
+   * buried its rounded bottom in the slab's top corner, because at Catnip Rush
+   * speed a fixed step is 0.275 units against a 0.34 capsule radius. The
+   * solver's answer to an overlap that deep is to throw the body out of it,
+   * hard enough to put the cat a couple of units above a ledge it had only
+   * grazed - while it kept the full forward speed being prescribed underneath,
+   * so it came down somewhere it was never flying.
+   *
+   * What is left afterwards is the ordinary contact bounce of a landing that
+   * clips the very corner of a deck: up to +4.4 under Catnip Rush and +5.7 at
+   * the top of the speed ramp, against +10.6 and +13.0 before. That remainder
+   * is contact resolution doing its job on a landing the player made, and is
+   * deliberately not chased any further.
+   *
+   * Reaching the lip a step early and *writing* the capsule on top of it is the
+   * same assist this method already performs on the ground, and it settles the
+   * graze before there is any penetration for the solver to react to. Position
+   * only: no velocity is added, so the runner lands and runs rather than
+   * taking off.
+   *
+   * Descending only. Rising, the runner is mid-jump and on its way over
+   * whatever is ahead; snapping it onto the first ledge within half a metre
+   * would cut jumps short.
    */
   private tryStepUp(): void {
-    if (!this.grounded) return;
-    if (this.groundDistance === Infinity) return;
+    const airborne = !this.grounded;
+    if (airborne) {
+      // Only on the way down, and only once the jump is actually over the top.
+      if (this.body.linvel().y > 0) return;
+    } else if (this.groundDistance === Infinity) {
+      return;
+    }
 
     const t = this.body.translation();
-    const probeAhead = PHYSICS.colliderRadius + 0.25;
+    // Airborne, the probe has to see one step further than the capsule can
+    // travel, or at the top of the speed ramp under Catnip Rush (0.34 units a
+    // step against a 0.34 radius) the lip arrives already penetrated and there
+    // is nothing left to get ahead of.
+    const probeAhead =
+      PHYSICS.colliderRadius +
+      0.25 +
+      (airborne ? PHYSICS.runSpeed * PHYSICS.fixedTimeStep : 0);
 
     _v2.set(
       t.x + _forward.x * probeAhead,
@@ -1125,7 +1209,10 @@ export class PlayerController {
     if (!hit) return;
 
     const aheadY = _v2.y - hit.distance;
-    const footY = t.y - this.groundDistance;
+    // Same split as probeWall's: off the ground ray when there is ground under
+    // the capsule to measure from, off the capsule's own geometry when there
+    // is not.
+    const footY = airborne ? t.y - capsuleFeetOffset() : t.y - this.groundDistance;
     const rise = aheadY - footY;
 
     if (rise <= 0.06 || rise > PHYSICS.maxStepUp) return;
@@ -1199,32 +1286,31 @@ export class PlayerController {
   }
 
   /**
-   * Consumes a buffered slide the instant the runner is actually grounded.
+   * The authoritative `isDucking` for this step, and where `onDuck` actually
+   * fires.
    *
-   * `tickTimers()` already starts the duck immediately for the common case -
-   * pressed while already on the ground. This only rescues the case that
-   * check misses: `tickTimers` runs *before* `probeGround()`, so it sees last
-   * step's grounded state, and a press on the fixed step just before landing
-   * would otherwise be silently dropped (slide has no coyote-style leniency
-   * of its own the way jump's `jumpBufferTime`/`coyoteTime` pair does). Runs
-   * after `probeGround()`/`detectLanding()`, so `this.grounded` here is this
-   * step's real answer.
+   * `tickTimers()` already set a provisional value off *last* step's
+   * `grounded`. This corrects it: runs after `probeGround()`/`detectLanding()`,
+   * so `this.grounded` here is this step's real answer - the case that
+   * matters is a slide held (or pressed) on the exact step the runner lands,
+   * which `tickTimers()`'s stale read would otherwise miss for one step.
+   *
+   * `onDuck` fires here, not in `tickTimers()`, for the same reason: it must
+   * fire off the *real* grounded answer, and only on the rising edge of
+   * `isDucking` (tracked via `wasDucking`) - once per hold, not once per
+   * step, since a hold spans many steps but the sound/pose-start event it
+   * drives (`Game.ts`'s `onDuck` callback) should not.
+   *
+   * No `state !== PlayerState.Dead` check needed here - `step()` only calls
+   * this after its own Dead early-return, so `isDucking` simply freezes at
+   * whatever `tickTimers()` last set it to (false, by its own Dead check)
+   * once the runner dies.
    */
-  private tryDuck(): void {
-    if (this.slideBufferTimer <= 0) return;
-    if (!this.grounded) return;
-    if (this.state === PlayerState.Dead) return;
-    // Already started this step via the immediate path in tickTimers().
-    if (this.duckTimer >= PHYSICS.slideDuration) return;
+  private updateDucking(input: RunInput): void {
+    this.isDucking = input.slide && this.grounded;
 
-    this.duckTimer = PHYSICS.slideDuration;
-    // tickTimers() already ran this step and derived `isDucking` from
-    // duckTimer as it stood then (0) - without this, a rescued press would
-    // read as not-ducking for one whole step after the one it actually
-    // landed on.
-    this.isDucking = true;
-    this.slideBufferTimer = 0;
-    this.events.onDuck?.();
+    if (this.isDucking && !this.wasDucking) this.events.onDuck?.();
+    this.wasDucking = this.isDucking;
   }
 
   /**

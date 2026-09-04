@@ -8,12 +8,21 @@
  * gesture they replace. The reference is Subway Surfers, which is also why
  * `handleSwipePointerMove` fires on the drag rather than on release.
  *
- * Everything the runner needs is edge-triggered - there are no held axes any
- * more, because the cat runs at a fixed speed and moves between three discrete
- * lanes. Each source latches its presses as they arrive and `update()` resolves
- * them into a single one-frame snapshot, which guarantees exactly one pulse per
- * physical press no matter how many events land between two frames or how long
- * a frame takes.
+ * Almost everything the runner needs is edge-triggered - the cat runs at a
+ * fixed speed and moves between three discrete lanes, so a lane change, a
+ * turn, and a jump are each one pulse per physical press, however long the
+ * key/button/swipe that caused it lasts. Each source latches its presses as
+ * they arrive and `update()` resolves them into a single one-frame snapshot,
+ * which guarantees exactly one pulse per press no matter how many events land
+ * between two frames or how long a frame takes.
+ *
+ * Slide is the one deliberate exception: it is a level (`RunInput.slide`),
+ * true for as long as the input is held, because whether the cat is ducking
+ * has to track how long the player is actually under an obstacle, not a
+ * fixed timer started at press-time. Keyboard/gamepad read a genuinely held
+ * key/button; touch has no natural "hold" out of a discrete swipe, so a
+ * recognised downward swipe keeps `touchSlideHeld` true until the finger
+ * lifts (or drags into a different direction) - see `classifySwipe()`.
  *
  * The one piece of real interpretation happens here: a left or right press is
  * both a lane change *and* half of a corner turn. A single tap always shifts a
@@ -31,7 +40,8 @@ export interface RunInput {
   turn: -1 | 0 | 1;
   /** True ONLY on the frame jump was newly pressed. */
   jump: boolean;
-  /** True ONLY on the frame slide was newly pressed. */
+  /** True for as long as slide is held down - a level, not a pulse. See this
+   *  module's own doc comment for why slide is the one exception. */
   slide: boolean;
 }
 
@@ -164,13 +174,15 @@ export class InputManager {
   private readonly keysDown = new Set<string>();
   /** Latched by keydown, consumed (cleared) by the next update(). */
   private keyboardJumpPending = false;
-  private keyboardSlidePending = false;
 
   // --- Touch state ---------------------------------------------------------
   // Raised by a swipe (see `classifySwipe`) and consumed by the next
-  // `update()`, exactly like their keyboard counterparts above.
+  // `update()`.
   private touchJumpPending = false;
-  private touchSlidePending = false;
+  /** True from a recognised downward swipe until the finger lifts or drags
+   *  into a different direction - see `classifySwipe()`. A level, not a
+   *  pulse, unlike `touchJumpPending` above - see `RunInput.slide`. */
+  private touchSlideHeld = false;
 
   // --- Swipe state -----------------------------------------------------------
   /** Only one gesture tracked at a time - a second finger landing while one
@@ -190,8 +202,8 @@ export class InputManager {
   // --- Gamepad state ---------------------------------------------------------
   private gamepadJumpWasDown = false;
   private gamepadJumpPending = false;
-  private gamepadSlideWasDown = false;
-  private gamepadSlidePending = false;
+  /** Live level, not an edge - see `RunInput.slide`. */
+  private gamepadSlideDown = false;
   private gamepadPauseWasDown = false;
   private gamepadLaneWasLeft = false;
   private gamepadLaneWasRight = false;
@@ -309,12 +321,9 @@ export class InputManager {
         this.anyInputSeen = true;
       }
 
-      // S / Down slide. Edge-triggered like every other verb here: the duck is
-      // a timed pose, so holding the key must not hold the cat down.
-      if (e.code === 'KeyS' || e.code === 'ArrowDown') {
-        this.keyboardSlidePending = true;
-        this.anyInputSeen = true;
-      }
+      // S / Down slide is read straight off `keysDown` in `update()` - it's
+      // a level (see `RunInput.slide`), not a pulse, so there is no pending
+      // flag to raise here.
 
       if (e.code === 'KeyA' || e.code === 'ArrowLeft') this.registerTap(-1);
       if (e.code === 'KeyD' || e.code === 'ArrowRight') this.registerTap(1);
@@ -353,6 +362,7 @@ export class InputManager {
     this.anchorSwipe(e.clientX, e.clientY);
     this.swipeFired = false;
     this.swipeLastDirection = null;
+    this.touchSlideHeld = false;
     this._isTouchActive = true;
     // Keeps the browser's own gesture recognizer (scroll/pinch) from fighting
     // this manual gesture tracking, same intent as `onContextMenu` above.
@@ -414,6 +424,9 @@ export class InputManager {
   private handleSwipePointerUp(e: PointerEvent): void {
     if (e.pointerId !== this.swipeActivePointerId) return;
     this.swipeActivePointerId = null;
+    // Lifting the finger always ends a hold-to-slide, however this gesture
+    // otherwise resolves below.
+    this.touchSlideHeld = false;
 
     const fired = this.swipeFired;
     this.swipeFired = false;
@@ -470,8 +483,16 @@ export class InputManager {
       return 'fired';
     }
 
-    if (direction === 'up') this.touchJumpPending = true;
-    else this.touchSlidePending = true;
+    if (direction === 'up') {
+      this.touchJumpPending = true;
+      // A later flick up mid-drag (finger still down after an earlier
+      // swipe-down) cancels any hold in progress - a change of direction
+      // reads as "not sliding any more", the same way it already reads as a
+      // fresh lane input above rather than a continuation of the old one.
+      this.touchSlideHeld = false;
+    } else {
+      this.touchSlideHeld = true;
+    }
     this.anyInputSeen = true;
     return 'fired';
   }
@@ -516,6 +537,7 @@ export class InputManager {
     if (!pad) {
       this._isGamepadActive = false;
       this.gamepadJumpWasDown = false;
+      this.gamepadSlideDown = false;
       this.gamepadPauseWasDown = false;
       this.gamepadLaneWasLeft = false;
       this.gamepadLaneWasRight = false;
@@ -555,15 +577,11 @@ export class InputManager {
     this.gamepadJumpWasDown = jumpDown;
 
     // East face button or d-pad down, so the duck is reachable whichever hand
-    // the player steers with.
-    const slideDown =
+    // the player steers with. Held, not edge-triggered - see `RunInput.slide` -
+    // so this is just a live level read, no was/pending pair needed.
+    this.gamepadSlideDown =
       (pad.buttons[GAMEPAD_BUTTON_SLIDE]?.pressed ?? false) ||
       (pad.buttons[GAMEPAD_BUTTON_DPAD_DOWN]?.pressed ?? false);
-    if (slideDown && !this.gamepadSlideWasDown) {
-      this.gamepadSlidePending = true;
-      this.anyInputSeen = true;
-    }
-    this.gamepadSlideWasDown = slideDown;
 
     const pauseDown = pad.buttons[GAMEPAD_BUTTON_PAUSE]?.pressed ?? false;
     if (pauseDown && !this.gamepadPauseWasDown) {
@@ -591,8 +609,11 @@ export class InputManager {
     this.drive.jump = jump;
     if (jump) this.anyInputSeen = true;
 
+    // A level, not a pulse - see `RunInput.slide` - so this is a plain
+    // "is any source currently asking for it" read, not an accumulated
+    // pending flag, and there is nothing to consume for it below.
     const slide =
-      this.keyboardSlidePending || this.touchSlidePending || this.gamepadSlidePending;
+      this.keysDown.has('KeyS') || this.keysDown.has('ArrowDown') || this.touchSlideHeld || this.gamepadSlideDown;
     this.drive.slide = slide;
     if (slide) this.anyInputSeen = true;
 
@@ -603,9 +624,6 @@ export class InputManager {
     this.keyboardJumpPending = false;
     this.touchJumpPending = false;
     this.gamepadJumpPending = false;
-    this.keyboardSlidePending = false;
-    this.touchSlidePending = false;
-    this.gamepadSlidePending = false;
   }
 
   // ===========================================================================
@@ -645,16 +663,14 @@ export class InputManager {
   clear(): void {
     this.keysDown.clear();
     this.keyboardJumpPending = false;
-    this.keyboardSlidePending = false;
     this.touchJumpPending = false;
-    this.touchSlidePending = false;
+    this.touchSlideHeld = false;
     this.swipeActivePointerId = null;
     this.swipeFired = false;
     this.swipeLastDirection = null;
     this.gamepadJumpPending = false;
     this.gamepadJumpWasDown = false;
-    this.gamepadSlidePending = false;
-    this.gamepadSlideWasDown = false;
+    this.gamepadSlideDown = false;
     this.gamepadPauseWasDown = false;
     this.gamepadLaneWasLeft = false;
     this.gamepadLaneWasRight = false;

@@ -63,7 +63,12 @@ const TRANSITIONS: Record<GameState, GameState[]> = {
   [GameState.Shop]: [GameState.MainMenu],
   [GameState.Settings]: [GameState.MainMenu, GameState.Paused],
   [GameState.Intro]: [GameState.Playing, GameState.MainMenu],
-  [GameState.Playing]: [GameState.Paused, GameState.Failed, GameState.Intro, GameState.MainMenu],
+  [GameState.Playing]: [
+    GameState.Paused,
+    GameState.Failed,
+    GameState.Intro,
+    GameState.MainMenu,
+  ],
   // Shop is deliberately absent here: it's reachable only from the main
   // menu, never mid-run - see `screen-pause` in index.html, which no longer
   // has a Shop button at all.

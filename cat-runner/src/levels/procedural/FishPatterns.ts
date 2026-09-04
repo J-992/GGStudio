@@ -72,7 +72,7 @@ function zigzagPattern(rng: Rng, count: number): FishPlacement[] {
  * of the trail - the risk/reward the spec asks for.
  */
 function arcPattern(): FishPlacement[] {
-  const count = 6;
+  const count = 7;
   const startZ = GAP_START_Z - 3;
   const endZ = GAP_END_Z + 3;
   const fish: FishPlacement[] = [];
@@ -132,12 +132,32 @@ export function generateFishPattern(
   section: SectionType,
   tier: DifficultyTier,
   rng: Rng,
+  /**
+   * True on a `ChunkDirector`-forced recovery chunk (the guaranteed
+   * `'straight'` right after a gap or a trampoline landing) - see
+   * `ChunkSelection.forcedRecovery`. These chunks carry no hazard of their
+   * own, so without this flag they'd fall into the plain `section` switch
+   * below and could land on the sparse end of it just as easily as the
+   * dense end. Defaults to `false` so every existing call site (direct unit
+   * tests included) is unaffected.
+   */
+  forcedRecovery = false,
 ): readonly FishPlacement[] {
   // Gaps and obstacles get their own hazard-shaped pattern regardless of
   // section - the "risky route" fish always exist where the risk does.
   if (spec.hasGap) return arcPattern();
   if (spec.ventZ !== null) return ventArcPattern(spec.ventZ);
   if (spec.obstacles.length > 0) return weavePattern(spec, rng);
+
+  // A safe landing deserves a rewarding, guaranteed line - not a coin-flip
+  // against whatever `section` happens to be active. Checked ahead of the
+  // turn/section branches below since a recovery chunk is never also a turn.
+  if (forcedRecovery) return rng() < 0.5 ? zigzagPattern(rng, 5) : straightLinePattern(rng, 5);
+
+  // Turns get their own guaranteed line too, for the same reason - the
+  // section switch below is otherwise just as likely to hand a turn zero
+  // fish as a straight filler chunk would.
+  if (spec.type === 'turnLeft' || spec.type === 'turnRight') return zigzagPattern(rng, 3);
 
   // "Increasing fish-path complexity" expressed the same way every other
   // difficulty knob in this game already is: a probability that shifts
@@ -148,15 +168,16 @@ export function generateFishPattern(
 
   switch (section) {
     case 'fishCollection':
-      return rng() < zigzagChance ? zigzagPattern(rng, 5) : straightLinePattern(rng, 5);
+      return rng() < zigzagChance ? zigzagPattern(rng, 6) : straightLinePattern(rng, 6);
     case 'reward':
-      return straightLinePattern(rng, 4);
+      return straightLinePattern(rng, 5);
     case 'easy':
-      return rng() < 0.75 ? zigzagPattern(rng, 3) : straightLinePattern(rng, 2);
+      return rng() < 0.75 ? zigzagPattern(rng, 4) : straightLinePattern(rng, 3);
     default:
       // obstacleChallenge/hardObstacleChallenge straight filler, or a plain
-      // 'slide' chunk elsewhere - denser than before, but still sparse
-      // enough that fish don't blanket every chunk.
-      return rng() < 0.4 ? straightLinePattern(rng, 3) : [];
+      // 'slide' chunk elsewhere (turns and forced-recovery straights are
+      // carved out above) - denser than before, but still sparse enough
+      // that fish don't blanket every chunk.
+      return rng() < 0.6 ? straightLinePattern(rng, 3) : [];
   }
 }

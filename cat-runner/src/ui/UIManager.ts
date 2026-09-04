@@ -30,11 +30,14 @@ import type { TutorialCue } from '../game/Tutorial';
 // ============================================================================
 
 export interface UICallbacks {
-  /** Main menu Play - starts (or restarts) the endless run. */
+  /** Main menu Play - starts (or restarts) the endless run. Also reused by
+   *  the Tutorial Complete screen's "Start Endless Mode" button. */
   onPlay(): void;
   onResume(): void;
   onRestart(): void;
   onReturnToMenu(): void;
+  /** Main menu Tutorial button - launches the standalone tutorial level. */
+  onTutorial(): void;
   onOpenShop(): void;
   onOpenSettings(): void;
   onCloseSettings(): void;
@@ -280,7 +283,6 @@ interface Refs {
   failBest: HTMLElement | null;
   failNewBest: HTMLElement | null;
 
-
   setMasterVolume: HTMLInputElement | null;
   setMusicVolume: HTMLInputElement | null;
   setEffectsVolume: HTMLInputElement | null;
@@ -463,7 +465,6 @@ export class UIManager {
       failBest: this.qs('fail-best'),
       failNewBest: this.qs('fail-new-best'),
 
-
       setMasterVolume: this.qs<HTMLInputElement>('set-master-volume'),
       setMusicVolume: this.qs<HTMLInputElement>('set-music-volume'),
       setEffectsVolume: this.qs<HTMLInputElement>('set-effects-volume'),
@@ -525,6 +526,7 @@ export class UIManager {
   private buildButtonActions(): Map<string, () => void> {
     return new Map<string, () => void>([
       ['btn-play', () => this.callbacks.onPlay()],
+      ['btn-tutorial', () => this.callbacks.onTutorial()],
       ['btn-shop', () => this.callbacks.onOpenShop()],
       ['btn-settings', () => this.callbacks.onOpenSettings()],
       ['btn-sound-toggle', () => this.callbacks.onToggleSound()],
@@ -1077,20 +1079,21 @@ export class UIManager {
    * The first-time lesson prompt, drawn over a world `Game.updateTutorial`
    * has slowed underneath it.
    *
-   * The clothesline's is a bare arrow, no plate and no words - the same
-   * treatment `updateTurnWarning` gives a corner, and for the same reason.
-   * "Swipe down to slide!" was a sentence to read at the one moment the
-   * player has least attention to spare, and the arrow had already said it:
-   * down is the whole instruction, and pointing is a faster way to say down
-   * than spelling it. The trampoline keeps its line, because "run onto it,
-   * don't jump" is a thing an arrow genuinely cannot say.
+   * Every lesson now carries a short label alongside its arrow - "Move
+   * Left/Right", "Jump", "Slide", "Use Trampoline", "Turn". `duck` used to be
+   * arrow-only (the reasoning: pointing down says everything "swipe down to
+   * slide" would, at the one moment the player has least attention to spare)
+   * and `trampoline` used to carry a full sentence instead of a short label;
+   * both are deliberately superseded here by the concise-text-for-every-lesson
+   * requirement the five-lesson course was built against.
    *
-   * `announce` is what the label would have been, kept for the container's
-   * `aria-label` whether or not it is drawn - a screen reader gets no arrow.
-   * It is the one string still decided here rather than handed over in the
-   * state, because it depends on something only this class knows: whether the
-   * player is on a touch screen. "Swipe down" is meaningless on a keyboard
-   * and "Press down" is meaningless on a phone.
+   * `announce` is the fuller sentence kept for the container's `aria-label`
+   * regardless of what's drawn - a screen reader gets no arrow, so it still
+   * earns the longer, more specific phrasing the visible plate no longer
+   * carries. It is decided here rather than handed over in the state, because
+   * it depends on something only this class knows: whether the player is on a
+   * touch screen. "Swipe down" is meaningless on a keyboard and "Press down"
+   * is meaningless on a phone.
    *
    * Rewritten only when the prompt actually changes - the cue is up for a
    * couple of seconds at a time, which at 60 fps is a hundred-odd identical
@@ -1109,22 +1112,48 @@ export class UIManager {
     if (!cue) return;
 
     const touch = this.input.isTouchActive;
+    // Left/right arrow from `steer`, with a neutral fallback for the one
+    // frame a steering lesson's cue can be up with nothing left to steer
+    // toward (already lined up, success about to clear the prompt).
+    const steerArrow = cue.steer === -1 ? '⬅️' : cue.steer === 1 ? '➡️' : '↔️';
+
     let arrow: string;
     let label: string;
     let announce: string;
 
-    if (cue.lesson === 'duck') {
-      arrow = '⬇️';
-      label = '';
-      announce = touch ? 'Swipe down to slide' : 'Press down to slide';
-    } else if (cue.steer !== 0) {
-      arrow = cue.steer === -1 ? '⬅️' : '➡️';
-      label = 'Line up with the trampoline!';
-      announce = label;
-    } else {
-      arrow = '⬆️';
-      label = "Run onto the trampoline - don't jump!";
-      announce = label;
+    switch (cue.lesson) {
+      case 'laneChange':
+        arrow = steerArrow;
+        label = 'Move Left/Right';
+        announce = touch ? 'Swipe left or right to change lanes' : 'Press left or right to change lanes';
+        break;
+      case 'jump':
+        arrow = '⬆️';
+        label = 'Jump';
+        announce = touch ? 'Swipe up to jump' : 'Press up to jump';
+        break;
+      case 'gap':
+        arrow = '⬆️';
+        label = 'Jump the Gap';
+        announce = touch ? 'Swipe up to jump the gap' : 'Press up to jump the gap';
+        break;
+      case 'duck':
+        arrow = '⬇️';
+        label = 'Slide';
+        announce = touch ? 'Swipe down to slide' : 'Press down to slide';
+        break;
+      case 'trampoline':
+        arrow = cue.steer !== 0 ? steerArrow : '⬆️';
+        label = 'Use Trampoline';
+        announce =
+          cue.steer !== 0 ? 'Line up with the trampoline!' : "Run onto the trampoline - don't jump!";
+        break;
+      case 'turn':
+      default:
+        arrow = steerArrow;
+        label = 'Turn';
+        announce = touch ? 'Swipe toward the turn' : 'Press toward the turn';
+        break;
     }
 
     if (this.refs.hudTutorialArrow) this.refs.hudTutorialArrow.textContent = arrow;
@@ -1132,6 +1161,8 @@ export class UIManager {
       this.refs.hudTutorialLabel.textContent = label;
       // Hidden rather than merely empty, so the flex gap above it goes too -
       // an empty plate under the arrow is still a plate's worth of layout.
+      // Dead code now that every lesson sets a non-empty label, kept as a
+      // guard rather than removed outright - harmless either way.
       this.refs.hudTutorialLabel.hidden = label === '';
     }
     el.setAttribute('aria-label', announce);

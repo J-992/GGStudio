@@ -36,7 +36,11 @@ const DEFAULTS: Required<CloudFieldOptions> = {
 };
 
 const puffGeometry = new THREE.IcosahedronGeometry(1, 0);
-const cloudMaterial = new THREE.MeshBasicMaterial({ color: 0xfdfdfd, fog: true });
+// Candy City: a near-white with the faintest lavender whisper, so clouds
+// read clearly against the blue/lavender/peach-pink gradient sky rather than
+// clashing with it, while staying light enough to keep clear contrast
+// against obstacles/deck geometry.
+const cloudMaterial = new THREE.MeshBasicMaterial({ color: 0xfaf3ff, fog: true });
 
 export class CloudField {
   readonly root = new THREE.Group();

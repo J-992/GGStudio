@@ -6,7 +6,7 @@ import { PhysicsWorld, initRapier, GROUP, collisionGroups } from '../src/physics
 import { PlayerController, consumeEdges, type RunInput } from '../src/physics/PlayerController';
 import { resetPhysicsConfig, capsuleFeetOffset } from '../src/physics/PhysicsConfig';
 import { RunPath } from '../src/levels/RunPath';
-import { CHUNK_LENGTH } from '../src/levels/TrackConfig';
+import { CHUNK_LENGTH, TRACK_Y } from '../src/levels/TrackConfig';
 import { laneX } from '../src/levels/chunkTemplate';
 
 import {
@@ -35,6 +35,9 @@ import {
   OBSTACLE_Z_TRIPLE,
   OBSTACLE_SIZE,
   POWERUP_HEIGHT,
+  ROOF_LOW,
+  ROOF_MEDIUM,
+  ROOF_TIER_HEIGHT,
   VENT_PIPE_DEPTH,
   VENT_PIPE_HEIGHT,
   VENT_PIPE_LENGTH,
@@ -45,6 +48,8 @@ import {
   ChunkDirector,
   tierAt,
   TURN_COOLDOWN_CHUNKS,
+  MID_TIER_START,
+  LATE_TIER_START,
 } from '../src/levels/procedural/ChunkDirector';
 import {
   CYCLE_LENGTH_CHUNKS,
@@ -420,8 +425,8 @@ describe('ChunkDirector', () => {
   });
 
   it('straight (zero-decision) chunks are the exception, not the routine filler', () => {
-    // SECTION_WEIGHTS keeps `straight` modest in every section (15 in the
-    // three lighter ones, 6 in the two challenge ones) so "every chunk
+    // SECTION_WEIGHTS keeps `straight` modest in every section (8 in the
+    // three lighter ones, 3 in the two challenge ones) so "every chunk
     // should contain at least one obstacle challenge" holds in practice.
     // Some `straight` chunks are additionally unavoidable (forced right
     // after a turn, and required right before one) - this checks the
@@ -435,6 +440,24 @@ describe('ChunkDirector', () => {
       if (director.select(i * CHUNK_LENGTH, rng).type === 'straight') straightCount++;
     }
     expect(straightCount / N).toBeLessThan(0.3);
+  });
+
+  /**
+   * "Landing safety" - a trampoline landing must never be followed
+   * immediately by another hazard, so the player always gets a beat to
+   * recover and reorient. Unlike `pendingEasyGapRecovery` (early/easy tier
+   * only), `noteTrampoline()` is unconditional - sampled at early, mid, and
+   * late tier distances to prove it isn't tier-gated the same way.
+   */
+  it('forces a straight recovery chunk right after any trampoline, regardless of tier', () => {
+    for (const startDist of [0, MID_TIER_START, LATE_TIER_START]) {
+      const director = new ChunkDirector();
+      const rng = mulberry32(11);
+      director.select(startDist, rng); // whatever this deals doesn't matter
+      director.noteTrampoline();
+      const next = director.select(startDist + CHUNK_LENGTH, rng);
+      expect(next.type, `tier at distance ${startDist}`).toBe('straight');
+    }
   });
 
   it('a hazard chunk makes the very next chunk more likely to also be a hazard (combo bias)', () => {
@@ -1095,7 +1118,7 @@ describe('PlayerController.extendPath', () => {
 // PlayerController's slide buffer
 // ---------------------------------------------------------------------------
 
-describe('PlayerController slide buffer', () => {
+describe('PlayerController slide', () => {
   let world: PhysicsWorld;
   let player: PlayerController;
 
@@ -1143,10 +1166,10 @@ describe('PlayerController slide buffer', () => {
     return steps;
   }
 
-  it('a slide pressed on the exact fixed step the runner lands still ducks', () => {
+  it('a slide held through the exact fixed step the runner lands still ducks', () => {
     // Physics is deterministic given the same input sequence, so a dry run
     // finds exactly which step landing happens on before repeating the jump
-    // and substituting a slide press on that one step.
+    // and holding slide through that one step.
     const landingStep = stepsUntilLanded();
     expect(landingStep).toBeGreaterThan(1);
     expect(landingStep).toBeLessThan(300);
@@ -1160,20 +1183,20 @@ describe('PlayerController slide buffer', () => {
     consumeEdges({ ...NO_INPUT, jump: true });
     for (let i = 1; i < landingStep - 1; i++) fixedStep(NO_INPUT);
 
-    // Under the pre-buffer behaviour this would be silently dropped:
-    // tickTimers() runs before probeGround() and would still see last step's
-    // airborne `grounded` flag.
+    // `updateDucking()` re-reads `slide` after `probeGround()`/`detectLanding()`
+    // specifically so this doesn't get missed: `tickTimers()` runs first and
+    // would otherwise still see last step's airborne `grounded` flag.
     fixedStep({ ...NO_INPUT, slide: true });
-    consumeEdges({ ...NO_INPUT, slide: true });
 
     expect(player.grounded).toBe(true);
     expect(player.isDucking).toBe(true);
   });
 
-  it('a slide pressed well before landing does not linger and fire twice', () => {
-    // Pressed far outside slideBufferTime (0.12s) - should have decayed away
-    // and not duck at all once grounded, since the press is well outside the
-    // buffer's window.
+  it('a slide held only while airborne is not still ducking once grounded', () => {
+    // Held for exactly one step, long before landing, then released (every
+    // later step is NO_INPUT) - `slide` is a level now (see `RunInput.slide`),
+    // so by the time landing actually happens it simply isn't held any more,
+    // with nothing to buffer or decay.
     fixedStep({ ...NO_INPUT, jump: true, slide: true });
     consumeEdges({ ...NO_INPUT, jump: true, slide: true });
     let steps = 1;
@@ -1182,6 +1205,29 @@ describe('PlayerController slide buffer', () => {
       steps++;
     }
     expect(steps).toBeLessThan(300);
+    expect(player.isDucking).toBe(false);
+  });
+
+  it('keeps ducking for as long as slide is held, and stands the instant it is released', () => {
+    // Settle onto the floor from the spawn drop first - grounded is what
+    // gates ducking, and the point of this test is the hold, not the fall.
+    let settleSteps = 0;
+    while (!player.grounded && settleSteps < 300) {
+      fixedStep(NO_INPUT);
+      settleSteps++;
+    }
+    expect(player.grounded).toBe(true);
+
+    // The direct regression test for hold-to-slide: under the old
+    // fixed-duration timer this would have stood back up after ~33 steps
+    // (`PHYSICS.slideDuration`'s old 0.55s) regardless of the key still being
+    // held.
+    for (let i = 0; i < 90; i++) {
+      fixedStep({ ...NO_INPUT, slide: true });
+      expect(player.isDucking).toBe(true);
+    }
+
+    fixedStep(NO_INPUT);
     expect(player.isDucking).toBe(false);
   });
 });
@@ -1457,4 +1503,172 @@ describe('ChunkBuilder', () => {
 
     expect(overlaps, overlaps.join('\n')).toEqual([]);
   }, 30000);
+});
+
+// ---------------------------------------------------------------------------
+// Fish placement on a tier-changing gap - regression for the clipping bug
+// ---------------------------------------------------------------------------
+
+describe('ChunkBuilder fish placement across a tier-changing gap', () => {
+  let world: PhysicsWorld;
+  let player: PlayerController;
+  let scene: THREE.Scene;
+  let builder: ChunkBuilder;
+
+  beforeAll(async () => {
+    await initRapier();
+  });
+
+  afterEach(() => {
+    builder.dispose();
+    player.dispose();
+    world.dispose();
+  });
+
+  /**
+   * `fixedChunks` specs are consumed as-is by `ChunkBuilder.nextSpec()` -
+   * `generateFishPattern()` never runs for them - so `fish` has to be
+   * hand-authored here, the same way `TutorialLevel.ts` does it. One fish
+   * sits just before the gap (over deck A, built at `previousRoofTier`), one
+   * just after it (over deck B, built at `roofTier`) - `arcPattern()`'s own
+   * flat-end positions, reused so this test exercises the exact placements
+   * a real gap chunk produces.
+   */
+  it('places the deck-A fish at the previous tier and the deck-B fish at the new tier when the roof steps DOWN', () => {
+    resetPhysicsConfig();
+    world = new PhysicsWorld();
+    scene = new THREE.Scene();
+    player = new PlayerController(world);
+
+    const deckAFishZ = GAP_START_Z - 3;
+    const deckBFishZ = GAP_END_Z + 3;
+    const gapChunk: ChunkSpec = {
+      ...generateJump(),
+      previousRoofTier: ROOF_MEDIUM,
+      roofTier: ROOF_LOW,
+      fish: [
+        { x: 0, y: FISH_HEIGHT, z: deckAFishZ },
+        { x: 0, y: FISH_HEIGHT, z: deckBFishZ },
+      ],
+    };
+    const atTier = (tier: typeof ROOF_LOW | typeof ROOF_MEDIUM): ChunkSpec => ({
+      ...generateStraight(),
+      previousRoofTier: tier,
+      roofTier: tier,
+    });
+    const chunks: ChunkSpec[] = [atTier(ROOF_MEDIUM), atTier(ROOF_MEDIUM), gapChunk, atTier(ROOF_LOW), atTier(ROOF_LOW)];
+
+    builder = new ChunkBuilder(scene, world, player, { fixedChunks: chunks });
+    builder.start();
+    player.spawn(new THREE.Vector3(0, TRACK_Y + ROOF_TIER_HEIGHT[ROOF_MEDIUM] + capsuleFeetOffset(), 0), 0);
+
+    // A `fixedChunks` prefix now falls through to real procedural
+    // generation once it runs out (chunk index 5 onward here) - see
+    // `ChunkBuilder.nextSpec()` - which deals its own fish at ROOF_LOW too.
+    // Isolating the gap chunk's own world-Z span (index 2, straight route so
+    // world Z tracks arc) keeps this test about only the two hand-placed
+    // fish, regardless of what procedural generation adds past the prefix.
+    const gapChunkStartZ = 2 * CHUNK_LENGTH;
+    const gapChunkEndZ = 3 * CHUNK_LENGTH;
+    const allFish: THREE.Vector3[] = [];
+    for (let slot = 0; slot < 20; slot++) allFish.push(...builder.fishPositionsFor(slot));
+    const gapChunkFish = allFish.filter((p) => p.z >= gapChunkStartZ && p.z < gapChunkEndZ);
+
+    const expectedMediumY = TRACK_Y + ROOF_TIER_HEIGHT[ROOF_MEDIUM] + FISH_HEIGHT;
+    const expectedLowY = TRACK_Y + ROOF_TIER_HEIGHT[ROOF_LOW] + FISH_HEIGHT;
+
+    const atMedium = gapChunkFish.filter((p) => Math.abs(p.y - expectedMediumY) < 0.5);
+    const atLow = gapChunkFish.filter((p) => Math.abs(p.y - expectedLowY) < 0.5);
+
+    // Before the fix, both fish used `roofTier` (LOW) regardless of which
+    // deck they sat over, so the deck-A fish would land ~3 units below the
+    // deck it's actually placed above (embedded in the rooftop) instead of
+    // here, at the deck's real (previous-tier) height.
+    expect(atMedium.length).toBe(1);
+    expect(atLow.length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixedChunks prefix falling through to real procedural generation -
+// the mechanism the first-run tutorial prefix relies on to become an
+// ordinary endless run once it ends, with no reset or scene change.
+// ---------------------------------------------------------------------------
+
+describe('ChunkBuilder fixedChunks prefix -> procedural fallthrough', () => {
+  let world: PhysicsWorld;
+  let player: PlayerController;
+  let scene: THREE.Scene;
+  let builder: ChunkBuilder;
+
+  beforeAll(async () => {
+    await initRapier();
+  });
+
+  afterEach(() => {
+    builder.dispose();
+    player.dispose();
+    world.dispose();
+  });
+
+  /**
+   * Before this change, `nextSpec()` used `fixedChunks` for the whole run,
+   * falling back to an infinite repeat of `generateStraight()` once the
+   * array ran out - every chunk past it identical: `type: 'straight'`,
+   * `hasGap: false`, no obstacles, tier stuck at 0. This proves that no
+   * longer happens: real procedural variety (a hazard shape, or a tier the
+   * fixed prefix's last chunk didn't leave the roof at) shows up well past
+   * the short fixed prefix used here.
+   */
+  it('deals the fixed prefix, then real procedural chunks - not an infinite straight-chunk repeat', () => {
+    resetPhysicsConfig();
+    world = new PhysicsWorld();
+    scene = new THREE.Scene();
+    player = new PlayerController(world);
+
+    const fixed: ChunkSpec[] = [
+      { ...generateStraight(), previousRoofTier: ROOF_LOW, roofTier: ROOF_LOW },
+      { ...generateStraight(), previousRoofTier: ROOF_LOW, roofTier: ROOF_LOW },
+      { ...generateJump(), previousRoofTier: ROOF_LOW, roofTier: ROOF_MEDIUM, trampoline: true },
+    ];
+
+    builder = new ChunkBuilder(scene, world, player, { fixedChunks: fixed, seed: 777 });
+    builder.start();
+
+    const pos = new THREE.Vector3(0, TRACK_Y, 0);
+    const heading = new THREE.Vector3(0, 0, 1);
+    for (let i = 0; i < 3000; i++) {
+      const path = builder.path;
+      if (path) {
+        const arc = path.projectDistance(pos);
+        path.getDirectionAt(arc + 1, heading);
+        pos.addScaledVector(heading, 11 * (1 / 60));
+      }
+      builder.update(pos);
+      builder.step(1 / 60);
+    }
+
+    const liveChunks = (
+      builder as unknown as {
+        liveChunks: readonly (
+          | {
+              placement: { index: number };
+              type: string;
+              hasGap: boolean;
+              obstacles: readonly unknown[];
+              roofTier: number;
+            }
+          | null
+        )[];
+      }
+    ).liveChunks;
+
+    const pastPrefix = liveChunks.filter((c) => c && c.placement.index >= fixed.length);
+    expect(pastPrefix.length).toBeGreaterThan(0);
+
+    const sawVariety = pastPrefix.some(
+      (c) => c!.type !== 'straight' || c!.hasGap || c!.obstacles.length > 0 || c!.roofTier !== ROOF_LOW,
+    );
+    expect(sawVariety).toBe(true);
+  });
 });

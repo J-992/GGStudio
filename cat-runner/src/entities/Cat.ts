@@ -899,7 +899,7 @@ export class Cat {
     //
     // Derived from the state rather than driven by an event on purpose. The
     // slide action is `LoopOnce` + `clampWhenFinished` - it has to be, or a
-    // take shorter than `slideDuration` visibly rewinds mid-duck - which means
+    // take shorter than a held slide visibly rewinds mid-duck - which means
     // that by the time the player first presses slide, the action started at
     // load has long since run to its end and parked there. Raising its weight
     // then shows the clip's final frame and nothing else: the cat does not

@@ -68,15 +68,18 @@ export const WINDOW_PATTERN_COUNT = 4;
  * #000 that the facade reads as a grid of holes punched in the wall.
  *
  * Physically, an unlit window in daylight is not dark - it is a mirror
- * showing the sky. These are that: mid-tone blues pulled from the same sky
- * the scene is lit under (`ENDLESS_LIGHTING.skyColor`, #87CEEB), light enough
- * to survive being multiplied by an unlit face's ambient term and still read
- * as glass. Between this and the emissive mask below (which is the belt to
- * this braces - see `buildEmissiveTexture`), no window cell can go black on
- * any face, at any sun angle.
+ * showing the sky. These are that: a white/light-blue pair (a fixed palette,
+ * not read live from `ENDLESS_LIGHTING` - this is a deliberately kept,
+ * separate design choice rather than an oversight), light enough to survive
+ * being multiplied by an unlit face's ambient term and still read as glass.
+ * Between this and the emissive mask below (which is the belt to this
+ * braces - see `buildEmissiveTexture`), no window cell can go black on any
+ * face, at any sun angle. `LIT_GLASS` is the warm-yellow counterpart - the
+ * three window colours the Candy City art direction asks for (white, light
+ * blue, warm yellow) split across the two states.
  */
-const DARK_GLASS = ['#6d9dc4', '#8bb6d6'] as const;
-const LIT_GLASS = ['#ffe6a1', '#ffd27a'] as const;
+const DARK_GLASS = ['#eef7ff', '#bde3f7'] as const;
+const LIT_GLASS = ['#fff0b3', '#ffdb82'] as const;
 const FRAME = 'rgba(20, 22, 28, 0.55)';
 /** Chance a given cell is left as blank wall rather than a window - a solid
  *  grid of windows on every single cell reads as a glass tower, not a mixed
