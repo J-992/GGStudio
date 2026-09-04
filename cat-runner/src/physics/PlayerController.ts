@@ -53,7 +53,13 @@ export interface RunInput {
   turn: -1 | 0 | 1;
   /** True on the frame jump was newly pressed. */
   jump: boolean;
-  /** True on the frame slide was newly pressed. */
+  /**
+   * True for as long as slide is held down - a level, not a pulse, unlike
+   * every other field here. Drives `isDucking` directly and continuously
+   * (see `tickTimers()`/`updateDucking()`): there is nothing to buffer or
+   * consume once per step, since it already reflects "held right now" as of
+   * the last read.
+   */
   slide: boolean;
 }
 
@@ -91,12 +97,16 @@ export const LANES = [-1, 0, 1] as const;
  *
  * Call this after the first `step()` of a frame, not after the last - the point
  * is that sub-steps two onward see no input at all.
+ *
+ * `slide` is deliberately not touched here - it is a level, not a pulse (see
+ * `RunInput.slide`), so there is nothing to consume: every sub-step should
+ * see the same "is it held right now" answer, not have it zeroed after the
+ * first.
  */
 export function consumeEdges(input: RunInput): void {
   input.laneStep = 0;
   input.turn = 0;
   input.jump = false;
-  input.slide = false;
 }
 
 /**
@@ -117,6 +127,11 @@ export function consumeEdges(input: RunInput): void {
  * Latching instead lets a press wait out however many zero-step frames it
  * takes for the accumulator to fill, while `consumeEdges` still guarantees it
  * is applied exactly once.
+ *
+ * `slide` is the one field here that isn't an edge (see `RunInput.slide`), so
+ * it isn't OR-latched with the others - it's simply overwritten with
+ * whatever `source` currently reads, since a level has no pulse to preserve
+ * across a zero-step frame; it will just be read again, correctly, next time.
  */
 export function latchEdges(target: RunInput, source: RunInput): void {
   // Clamped to the same +-2 a single frame's read is clamped to: banking
@@ -125,7 +140,7 @@ export function latchEdges(target: RunInput, source: RunInput): void {
   target.laneStep = THREE.MathUtils.clamp(target.laneStep + source.laneStep, -2, 2);
   if (source.turn !== 0) target.turn = source.turn;
   target.jump = target.jump || source.jump;
-  target.slide = target.slide || source.slide;
+  target.slide = source.slide;
 }
 
 // Scratch vectors - reused every step to keep the update loop allocation-free.
@@ -223,12 +238,12 @@ export class PlayerController {
   /**
    * True while the cat is tucked under something.
    *
-   * A timed pose rather than a held one: the input is a single press and the
-   * duck runs for {@link PHYSICS.slideDuration} and ends, so there is no way to
-   * hold the key down and be permanently short. The capsule is deliberately not
-   * resized - obstacles that can be ducked test this flag instead, which keeps
-   * the collider a constant the rest of the controller can rely on. See
-   * `Clothesline`.
+   * A held pose, not a timed one: true for exactly as long as `input.slide`
+   * is held (and the cat is grounded and alive), false the instant it's
+   * released - see `tickTimers()`/`updateDucking()`. The capsule is
+   * deliberately not resized - obstacles that can be ducked test this flag
+   * instead, which keeps the collider a constant the rest of the controller
+   * can rely on. See `Clothesline`.
    */
   isDucking = false;
 
@@ -285,11 +300,10 @@ export class PlayerController {
   private coyoteTimer = 0;
   private jumpBufferTimer = 0;
   private jumpCooldownTimer = 0;
-  /** A slide press remembered until the next `tryDuck()`, same idea as
-   *  `jumpBufferTimer`. See `PhysicsConfig.slideBufferTime`. */
-  private slideBufferTimer = 0;
-  /** Seconds left in the duck, and how long a fresh one lasts. */
-  private duckTimer = 0;
+  /** `isDucking` as of last step - not read for physics, only to fire
+   *  `onDuck` on the rising edge, the same "derive the edge from the state"
+   *  pattern `Cat.ts`'s own `wasDucking` uses for its animation rewind. */
+  private wasDucking = false;
   private stumbleTimer = 0;
   private airTime = 0;
   /** `airTime` as it stood the instant before a landing zeroed it - see
@@ -434,8 +448,7 @@ export class PlayerController {
     this.slipSpeed = 0;
     this.isSliding = false;
     this.isDucking = false;
-    this.duckTimer = 0;
-    this.slideBufferTimer = 0;
+    this.wasDucking = false;
 
     this.lane = 0;
     this.lateral = 0;
@@ -562,7 +575,7 @@ export class PlayerController {
     this.applyRunVelocity(dt);
     this.tryStepUp();
     this.tryJump();
-    this.tryDuck();
+    this.updateDucking(input);
     this.detectBlocked(dt);
   }
 
@@ -572,24 +585,13 @@ export class PlayerController {
 
     this.jumpCooldownTimer = Math.max(0, this.jumpCooldownTimer - dt);
 
-    // A duck restarts on a fresh press rather than extending, so mashing the
-    // key through a row of clotheslines works and holding it does nothing.
-    // An airborne press is not dropped outright any more - see
-    // `slideBufferTimer`/`tryDuck()` - but it still cannot start the duck
-    // itself here: there is nothing to tuck against until grounded, and
-    // letting it fire mid-air would make jump the safer answer to a low
-    // obstacle.
-    if (input.slide) this.slideBufferTimer = PHYSICS.slideBufferTime;
-    else this.slideBufferTimer = Math.max(0, this.slideBufferTimer - dt);
-
-    if (input.slide && this.grounded && this.state !== PlayerState.Dead) {
-      this.duckTimer = PHYSICS.slideDuration;
-      this.slideBufferTimer = 0;
-      this.events.onDuck?.();
-    } else {
-      this.duckTimer = Math.max(0, this.duckTimer - dt);
-    }
-    this.isDucking = this.duckTimer > 0;
+    // A first-pass value, off *last* step's `grounded` - `updateDucking()`
+    // (after `probeGround()`/`detectLanding()` below have this step's real
+    // answer) corrects it, the same two-pass shape `tryJump()`'s coyote/buffer
+    // handling uses for the same reason. There is nothing to tuck against
+    // mid-air, so airborne is never ducking regardless of how long `slide`
+    // has been held.
+    this.isDucking = input.slide && this.grounded && this.state !== PlayerState.Dead;
 
     if (this.stumbleTimer > 0) {
       this.stumbleTimer -= dt;
@@ -1199,32 +1201,31 @@ export class PlayerController {
   }
 
   /**
-   * Consumes a buffered slide the instant the runner is actually grounded.
+   * The authoritative `isDucking` for this step, and where `onDuck` actually
+   * fires.
    *
-   * `tickTimers()` already starts the duck immediately for the common case -
-   * pressed while already on the ground. This only rescues the case that
-   * check misses: `tickTimers` runs *before* `probeGround()`, so it sees last
-   * step's grounded state, and a press on the fixed step just before landing
-   * would otherwise be silently dropped (slide has no coyote-style leniency
-   * of its own the way jump's `jumpBufferTime`/`coyoteTime` pair does). Runs
-   * after `probeGround()`/`detectLanding()`, so `this.grounded` here is this
-   * step's real answer.
+   * `tickTimers()` already set a provisional value off *last* step's
+   * `grounded`. This corrects it: runs after `probeGround()`/`detectLanding()`,
+   * so `this.grounded` here is this step's real answer - the case that
+   * matters is a slide held (or pressed) on the exact step the runner lands,
+   * which `tickTimers()`'s stale read would otherwise miss for one step.
+   *
+   * `onDuck` fires here, not in `tickTimers()`, for the same reason: it must
+   * fire off the *real* grounded answer, and only on the rising edge of
+   * `isDucking` (tracked via `wasDucking`) - once per hold, not once per
+   * step, since a hold spans many steps but the sound/pose-start event it
+   * drives (`Game.ts`'s `onDuck` callback) should not.
+   *
+   * No `state !== PlayerState.Dead` check needed here - `step()` only calls
+   * this after its own Dead early-return, so `isDucking` simply freezes at
+   * whatever `tickTimers()` last set it to (false, by its own Dead check)
+   * once the runner dies.
    */
-  private tryDuck(): void {
-    if (this.slideBufferTimer <= 0) return;
-    if (!this.grounded) return;
-    if (this.state === PlayerState.Dead) return;
-    // Already started this step via the immediate path in tickTimers().
-    if (this.duckTimer >= PHYSICS.slideDuration) return;
+  private updateDucking(input: RunInput): void {
+    this.isDucking = input.slide && this.grounded;
 
-    this.duckTimer = PHYSICS.slideDuration;
-    // tickTimers() already ran this step and derived `isDucking` from
-    // duckTimer as it stood then (0) - without this, a rescued press would
-    // read as not-ducking for one whole step after the one it actually
-    // landed on.
-    this.isDucking = true;
-    this.slideBufferTimer = 0;
-    this.events.onDuck?.();
+    if (this.isDucking && !this.wasDucking) this.events.onDuck?.();
+    this.wasDucking = this.isDucking;
   }
 
   /**

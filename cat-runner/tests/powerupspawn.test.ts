@@ -180,12 +180,17 @@ describe('slide barrier shape', () => {
   it('does not deepen the duck window when the barrier gets taller', () => {
     // The overlap test measures distance from the beam's centre *line*, so if
     // it keyed off the band's height the taller barrier would silently demand
-    // a duck held over 4.75 units of travel instead of 1.85 - against a
-    // slideDuration worth only ~6 units, that is most of the timing slack
-    // gone. These are separate axes and must stay separate.
+    // a duck held over 4.75 units of travel instead of 2.5 units. These are
+    // separate axes and must stay separate.
     expect(BEAM_HALF_DEPTH).toBeLessThan(BEAM_RADIUS);
 
-    const duckTravel = PHYSICS.slideDuration * PHYSICS.runSpeed;
+    // Slide is hold-driven now (see `RunInput.slide`), not a fixed timer, so
+    // there is no `PHYSICS.slideDuration` to measure "duck window" against
+    // any more - the real question is just whether the beam is comfortably
+    // narrower than even the shortest deliberate press-and-hold a player
+    // would make. 0.3s is a fast but genuine hold, not a reflexive tap.
+    const MIN_REASONABLE_SLIDE_SECONDS = 0.3;
+    const duckTravel = MIN_REASONABLE_SLIDE_SECONDS * PHYSICS.runSpeed;
     expect(BEAM_HALF_DEPTH * 2).toBeLessThan(duckTravel / 2);
   });
 

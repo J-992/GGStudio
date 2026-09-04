@@ -1588,8 +1588,11 @@ export class Game {
    *
    * Accumulating instead means a press survives however many zero-step frames
    * it takes for the accumulator to fill. `consumeEdges` remains the only
-   * thing that clears these, so each press is still applied exactly once.
-   * `latchEdges` carries the full reasoning and the arithmetic.
+   * thing that clears `laneStep`/`turn`/`jump`, so each press is still
+   * applied exactly once. `slide` is the one exception - a level, not a
+   * pulse (see `RunInput.slide`) - which is why `latchEdges` overwrites it
+   * instead of OR-ing it in below. `latchEdges` carries the full reasoning
+   * and the arithmetic.
    */
   /**
    * Drops every source's held/latched input *and* the cross-frame drive latch
@@ -1671,10 +1674,13 @@ export class Game {
     }
 
     view.lane = this.player.lane as Lane;
-    // The press, not the pose: `driveInput.slide`/`laneStep`/`jump` are
-    // latched edges that `fixedStep` consumes a few lines later, and reading
-    // them here (after `readDriveInput`, before `physics.update`) is the one
-    // window where they mean "asked to do this thing this frame".
+    // `laneStep`/`jump` are latched edges `fixedStep` consumes a few lines
+    // later, so reading them here (after `readDriveInput`, before
+    // `physics.update`) is the one window where they mean "asked to do this
+    // thing this frame". `slide` is different - it's already a live level
+    // (see `RunInput.slide`), true for as long as the lesson's own arc window
+    // sees it held, not just its first frame - which still correctly
+    // satisfies `TutorialDirector.advance()`'s "did they duck" check.
     view.ducked = this.driveInput.slide;
     view.laneChanged = this.driveInput.laneStep !== 0;
     view.jumped = this.driveInput.jump;

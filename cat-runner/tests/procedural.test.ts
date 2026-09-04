@@ -1118,7 +1118,7 @@ describe('PlayerController.extendPath', () => {
 // PlayerController's slide buffer
 // ---------------------------------------------------------------------------
 
-describe('PlayerController slide buffer', () => {
+describe('PlayerController slide', () => {
   let world: PhysicsWorld;
   let player: PlayerController;
 
@@ -1166,10 +1166,10 @@ describe('PlayerController slide buffer', () => {
     return steps;
   }
 
-  it('a slide pressed on the exact fixed step the runner lands still ducks', () => {
+  it('a slide held through the exact fixed step the runner lands still ducks', () => {
     // Physics is deterministic given the same input sequence, so a dry run
     // finds exactly which step landing happens on before repeating the jump
-    // and substituting a slide press on that one step.
+    // and holding slide through that one step.
     const landingStep = stepsUntilLanded();
     expect(landingStep).toBeGreaterThan(1);
     expect(landingStep).toBeLessThan(300);
@@ -1183,20 +1183,20 @@ describe('PlayerController slide buffer', () => {
     consumeEdges({ ...NO_INPUT, jump: true });
     for (let i = 1; i < landingStep - 1; i++) fixedStep(NO_INPUT);
 
-    // Under the pre-buffer behaviour this would be silently dropped:
-    // tickTimers() runs before probeGround() and would still see last step's
-    // airborne `grounded` flag.
+    // `updateDucking()` re-reads `slide` after `probeGround()`/`detectLanding()`
+    // specifically so this doesn't get missed: `tickTimers()` runs first and
+    // would otherwise still see last step's airborne `grounded` flag.
     fixedStep({ ...NO_INPUT, slide: true });
-    consumeEdges({ ...NO_INPUT, slide: true });
 
     expect(player.grounded).toBe(true);
     expect(player.isDucking).toBe(true);
   });
 
-  it('a slide pressed well before landing does not linger and fire twice', () => {
-    // Pressed far outside slideBufferTime (0.12s) - should have decayed away
-    // and not duck at all once grounded, since the press is well outside the
-    // buffer's window.
+  it('a slide held only while airborne is not still ducking once grounded', () => {
+    // Held for exactly one step, long before landing, then released (every
+    // later step is NO_INPUT) - `slide` is a level now (see `RunInput.slide`),
+    // so by the time landing actually happens it simply isn't held any more,
+    // with nothing to buffer or decay.
     fixedStep({ ...NO_INPUT, jump: true, slide: true });
     consumeEdges({ ...NO_INPUT, jump: true, slide: true });
     let steps = 1;
@@ -1205,6 +1205,29 @@ describe('PlayerController slide buffer', () => {
       steps++;
     }
     expect(steps).toBeLessThan(300);
+    expect(player.isDucking).toBe(false);
+  });
+
+  it('keeps ducking for as long as slide is held, and stands the instant it is released', () => {
+    // Settle onto the floor from the spawn drop first - grounded is what
+    // gates ducking, and the point of this test is the hold, not the fall.
+    let settleSteps = 0;
+    while (!player.grounded && settleSteps < 300) {
+      fixedStep(NO_INPUT);
+      settleSteps++;
+    }
+    expect(player.grounded).toBe(true);
+
+    // The direct regression test for hold-to-slide: under the old
+    // fixed-duration timer this would have stood back up after ~33 steps
+    // (`PHYSICS.slideDuration`'s old 0.55s) regardless of the key still being
+    // held.
+    for (let i = 0; i < 90; i++) {
+      fixedStep({ ...NO_INPUT, slide: true });
+      expect(player.isDucking).toBe(true);
+    }
+
+    fixedStep(NO_INPUT);
     expect(player.isDucking).toBe(false);
   });
 });
