@@ -16,10 +16,15 @@ export interface BotSource {
 
 export class InputManager {
   private botSrc: BotSource | null = null;
+  private remoteSrc: BotSource | null = null;
   private prevBotJump = false;
 
   setBotSource(src: BotSource | null) {
     this.botSrc = src;
+  }
+
+  setRemoteSource(src: BotSource | null) {
+    this.remoteSrc = src;
   }
 
   private keys = new Set<string>();
@@ -43,7 +48,7 @@ export class InputManager {
       this.onAnyKey?.();
     });
     window.addEventListener("keyup", (e) => this.keys.delete(e.code));
-    window.addEventListener("blur", () => this.keys.clear());
+    window.addEventListener("blur", () => this.clearMovementKeys());
   }
 
   sample(player: PlayerIndex): PlayerInput {
@@ -94,6 +99,12 @@ export class InputManager {
       jumpPressed = this.botSrc.jump && !this.prevBotJump;
       this.prevBotJump = this.botSrc.jump;
     }
+    if (player === 1 && this.remoteSrc?.active) {
+      lat = Math.max(-1, Math.min(1, this.remoteSrc.lat));
+      jumpHeld = this.remoteSrc.jump;
+      jumpPressed = this.remoteSrc.jump && !this.prevRemoteJump;
+      this.prevRemoteJump = this.remoteSrc.jump;
+    }
     lat = Math.max(-1, Math.min(1, lat));
     return { lateral: lat, jumpHeld, jumpPressed };
   }
@@ -102,10 +113,16 @@ export class InputManager {
     this.keys.clear();
     this.keyPrevW = false;
     this.keyPrevUp = false;
+    this.prevBotJump = false;
+    this.prevRemoteJump = false;
+    touchState.p1l = touchState.p1r = touchState.p1j = false;
+    touchState.p2l = touchState.p2r = touchState.p2j = false;
+    touchState.p1jLatch = touchState.p2jLatch = false;
   }
 
   private keyPrevW = false;
   private keyPrevUp = false;
+  private prevRemoteJump = false;
 }
 
 function isGameKey(code: string): boolean {

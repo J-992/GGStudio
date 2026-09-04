@@ -79,6 +79,25 @@ body {
   font-size: 13px; letter-spacing: 0.3em; color: #9fd8ff;
   animation: blink 1.6s ease-in-out infinite;
 }
+.save-note { margin-top: 12px; color: var(--dim); font-size: 9px; letter-spacing: 0.18em; }
+#mode-actions { display: flex; gap: 14px; margin-bottom: 20px; }
+button, input {
+  font: inherit; color: var(--ink); background: rgba(10, 16, 26, 0.88);
+  border: 1px solid #35506e; border-radius: 7px; padding: 12px 18px;
+  letter-spacing: 0.14em;
+}
+button { cursor: pointer; }
+button:hover, button:focus-visible { border-color: #7fdcff; color: #bceeff; outline: none; }
+#online-panel { display: none; flex-direction: column; align-items: center; gap: 18px; }
+#online-panel > p { color: var(--dim); font-size: 12px; letter-spacing: 0.18em; }
+.online-actions { display: flex; align-items: center; gap: 10px; }
+.online-actions span { color: var(--dim); font-size: 11px; }
+#room-code { width: 150px; text-align: center; text-transform: uppercase; }
+#online-status { min-height: 16px; color: #9fd8ff !important; }
+#online-code { min-height: 42px; font-size: 34px; letter-spacing: 0.35em; color: var(--p2); }
+button.quiet { padding: 8px 14px; color: var(--dim); }
+body.online .tc-right { display: none; }
+body.online .tc-left { left: 50%; transform: translateX(-50%); }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 #finish-stats { margin: 16px 0 34px; color: var(--dim); letter-spacing: 0.2em; line-height: 2; }
 
@@ -117,3 +136,13 @@ body.touch #hint { top: 14%; bottom: auto; }
   color: #9fd8ff; letter-spacing: 0.3em; font-size: 17px;
 }
 #rotate-overlay span { margin-top: 12px; font-size: 11px; color: var(--dim); }
+
+@media (max-width: 700px) {
+  #title-screen h1 { font-size: 34px; }
+  #title-screen .tag { margin: 8px 18px 16px; }
+  .controls-grid { gap: 8px; margin-bottom: 14px; }
+  .ctl { padding: 9px 12px; }
+  #mode-actions { margin-bottom: 10px; }
+  #mode-actions button { padding: 9px 11px; font-size: 10px; }
+  .online-actions { flex-wrap: wrap; justify-content: center; max-width: 420px; }
+}

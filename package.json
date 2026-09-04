@@ -7,10 +7,13 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "qa": "node scripts/qa.mjs"
+    "qa": "node scripts/qa.mjs",
+    "qa:online": "node scripts/online-qa.mjs",
+    "qa:dist": "node scripts/dist-check.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0",
+    "@poki/netlib": "^0.0.20",
     "three": "^0.185.1"
   },
   "devDependencies": {

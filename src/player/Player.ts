@@ -179,7 +179,13 @@ export class Player {
       .lockRotations()
       .setCanSleep(false);
     this.body = world.createRigidBody(bodyDesc);
-    const colDesc = R.ColliderDesc.cuboid(PLAYER_HALF_W, PLAYER_HALF_H, PLAYER_HALF_W)
+    const radius = 0.08;
+    const colDesc = R.ColliderDesc.roundCuboid(
+      PLAYER_HALF_W - radius,
+      PLAYER_HALF_H - radius,
+      PLAYER_HALF_W - radius,
+      radius,
+    )
       .setFriction(0)
       .setRestitution(0)
       .setCollisionGroups((PLAYER_GROUP << 16) | (STATIC_GROUP | PLAYER_GROUP));

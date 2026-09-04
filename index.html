@@ -25,11 +25,28 @@
     <div id="title-screen">
       <h1>TETHER<span>RUN</span></h1>
       <p class="tag">two robots · one elastic tether · every wall is a floor</p>
-      <div class="controls-grid">
+      <div class="controls-grid local-intro">
         <div class="ctl p1"><h3>P1 · IGNIS</h3><p>A / D — move<br/>W — jump</p></div>
         <div class="ctl p2"><h3>P2 · VOLTA</h3><p>&larr; / &rarr; — move<br/>&uarr; — jump</p></div>
       </div>
-      <p class="press">GAMEPADS SUPPORTED · PRESS ANY KEY TO START</p>
+      <div id="mode-actions">
+        <button id="btn-local" type="button">PLAY LOCAL CO-OP</button>
+        <button id="btn-online" type="button">PLAY ONLINE</button>
+      </div>
+      <p class="press local-intro">2 PLAYERS · GAMEPADS SUPPORTED · PRESS ANY MOVE KEY</p>
+      <p class="save-note local-intro">ARCADE RUN · NO SAVED CHECKPOINTS</p>
+      <div id="online-panel" aria-live="polite">
+        <p>PLAY WITH ONE FRIEND ON ANOTHER DEVICE</p>
+        <div class="online-actions">
+          <button id="btn-host" type="button">CREATE ROOM</button>
+          <span>OR</span>
+          <input id="room-code" aria-label="Room code" maxlength="8" autocomplete="off" placeholder="ROOM CODE" />
+          <button id="btn-join" type="button">JOIN</button>
+        </div>
+        <p id="online-status"></p>
+        <strong id="online-code"></strong>
+        <button id="btn-online-cancel" class="quiet" type="button">BACK</button>
+      </div>
     </div>
     <div id="finish-screen">
       <h1>ALL CONDUITS CLEAR</h1>

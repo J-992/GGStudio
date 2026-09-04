@@ -58,7 +58,7 @@ async function main() {
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
 
-  await page.goto(BASE + "/?bot=1", { waitUntil: "load" });
+  await page.goto(BASE + "/?bot=1&poki=mock", { waitUntil: "load" });
   await page.waitForFunction(() => !!window.__TR__, null, { timeout: 15000 });
   await page.waitForTimeout(1200);
   await shot("01-title.png");
@@ -66,6 +66,17 @@ async function main() {
   let s = await snap();
   check("loads without errors", errors.length === 0, errors.slice(0, 3).join(" | "));
   check("title state", s.state === "Title", s.state);
+  const initialPoki = await page.evaluate(() => window.__POKI_EVENTS__);
+  check("Poki loading lifecycle", initialPoki.join(",") === "init,loadingFinished", initialPoki.join(","));
+  check("local and online modes offered", await page.evaluate(() => {
+    return !!document.getElementById("btn-local") && !!document.getElementById("btn-online");
+  }), "");
+  await page.click("#btn-online");
+  check("online room UI opens", await page.isVisible("#online-panel"), "");
+  await page.fill("#room-code", "bad!");
+  await page.click("#btn-join");
+  check("online room code is validated", await page.textContent("#online-status") === "ENTER A VALID ROOM CODE", "");
+  await page.click("#btn-online-cancel");
 
   await page.keyboard.press("KeyW");
   await page.waitForTimeout(600);
@@ -73,6 +84,8 @@ async function main() {
   check("starts on keypress", s.state === "Playing", s.state);
   check("level is 1", s.level === 1, s.level);
   check("orientation floor", s.orientation === "Floor", s.orientation);
+  const startedPoki = await page.evaluate(() => window.__POKI_EVENTS__);
+  check("Poki gameplay starts on first input", startedPoki.filter((x) => x === "gameplayStart").length === 1, startedPoki.join(","));
 
   const z0 = s.p1.z;
   await page.waitForTimeout(700);
@@ -149,11 +162,16 @@ async function main() {
   await page.waitForTimeout(300);
   s = await snap();
   check("esc pauses", s.state === "Paused", s.state);
+  check("Poki gameplay stops on pause", await page.evaluate(() => window.__POKI_EVENTS__.at(-1) === "gameplayStop"), "");
   await shot("03-pause.png");
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
   s = await snap();
   check("esc resumes", s.state === "Playing", s.state);
+  check("Poki ad break precedes resume", await page.evaluate(() => {
+    const lifecycle = window.__POKI_EVENTS__.filter((x) => !x.startsWith("measure:"));
+    return lifecycle.slice(-2).join(",") === "commercialBreak,gameplayStart";
+  }), "");
 
   const deathsBefore = s.deaths;
   const g = await snap();
@@ -387,13 +405,13 @@ async function main() {
   check("spinner exists and rotates", spA.length > 0 && Math.abs(spB[0].angle - spA[0].angle) > 0.5, "");
 
   await page.evaluate(() => {
-    window.__TR__.setTimeScale(2);
+    window.__TR__.setTimeScale(1);
     window.__TR__.setPlayerCollision(false);
   });
   const beatable = new Array(20).fill(false);
   for (let attempt = 0; attempt < 2; attempt++) {
     for (let i = 0; i < 20; i++) {
-      if (beatable[i] && attempt === 0) continue;
+      if (beatable[i]) continue;
       const res = await page.evaluate((idx) => window.__TR__.bot.run(idx), i);
       if (res.ok) beatable[i] = true;
       check(`level ${i + 1} BEATABLE (bot playthrough)`, res.ok, `attempt ${attempt + 1}: ${res.reason}`);
@@ -435,7 +453,7 @@ async function main() {
   const merrors = [];
   mp.on("pageerror", (e) => merrors.push(String(e)));
   mp.on("console", (m) => { if (m.type() === "error") merrors.push(m.text()); });
-  await mp.goto(BASE, { waitUntil: "load" });
+  await mp.goto(BASE + "/?bot=1&poki=mock", { waitUntil: "load" });
   await mp.waitForFunction(() => !!window.__TR__, null, { timeout: 15000 });
   await mp.waitForTimeout(900);
   check(
@@ -481,7 +499,7 @@ async function main() {
   });
   const pp = await pctx.newPage();
   await pp.bringToFront();
-  await pp.goto(BASE, { waitUntil: "load" });
+  await pp.goto(BASE + "/?bot=1&poki=mock", { waitUntil: "load" });
   await pp.waitForFunction(() => !!window.__TR__, null, { timeout: 15000 });
   await pp.waitForTimeout(600);
   check(

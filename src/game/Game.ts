@@ -27,6 +27,23 @@ export enum GameState {
   Finished,
 }
 
+export interface NetworkPlayerState {
+  p: [number, number, number];
+  v: [number, number, number];
+  grounded: boolean;
+}
+
+export interface NetworkGameState {
+  level: number;
+  state: GameState;
+  orientation: Orientation;
+  players: [NetworkPlayerState, NetworkPlayerState];
+  tetherDistance: number;
+  tetherTension: number;
+  deaths: number;
+  rescues: number;
+}
+
 const RAY_GROUPS = (0xffff << 16) | STATIC_GROUP;
 
 export class Game {
@@ -47,6 +64,12 @@ export class Game {
   timeScale = 1;
   botInput = { lat: 0, jump: false, active: false };
   bot: { tick(dt: number): void } | null = null;
+  onGameplayStart?: (level: number) => void;
+  onGameplayStop?: (level: number, result?: "complete" | "fail") => void;
+  onCommercialBreak?: () => Promise<void>;
+  pauseInterceptor?: () => boolean;
+  restartInterceptor?: () => boolean;
+  titleInputEnabled = true;
   orientation: Orientation = Orientation.Floor;
   deaths = 0;
   rescues = 0;
@@ -60,8 +83,12 @@ export class Game {
   private hintFlags: boolean[] = [];
   private tmpA = new THREE.Vector3();
   private tmpB = new THREE.Vector3();
+  private remoteInput = { lat: 0, jump: false, active: false };
+  private networkGuest = false;
+  private resuming = false;
+  private playerCollisionEnabled = true;
 
-  async init(canvas: HTMLCanvasElement) {
+  async init(canvas: HTMLCanvasElement, debug = false) {
     await RAPIER.init();
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -93,16 +120,21 @@ export class Game {
     this.players = [p1, p2];
 
     this.input.onAnyKey = () => this.handleAnyKey();
-    this.input.onPauseToggle = () => this.handlePause();
-    this.input.onRestart = () => this.handleRestart();
+    this.input.onPauseToggle = () => this.pauseGame();
+    this.input.onRestart = () => this.restartGame();
     this.input.onMuteToggle = () => this.handleMute();
     this.input.setBotSource(this.botInput);
-    document.addEventListener("pointerdown", () => this.handleAnyKey());
+    this.input.setRemoteSource(this.remoteInput);
 
     window.addEventListener("resize", () => {
       this.renderer.setSize(window.innerWidth, window.innerHeight);
       this.coopCam.camera.aspect = window.innerWidth / window.innerHeight;
       this.coopCam.camera.updateProjectionMatrix();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden && this.state === GameState.Playing && !this.networkGuest) {
+        void this.handlePause();
+      }
     });
 
     this.loadLevel(0);
@@ -110,24 +142,37 @@ export class Game {
     this.ui.showTitle(true);
     this.ui.hideLoading();
 
-    this.exposeDebug();
+    if (debug) this.exposeDebug();
   }
 
   private handleAnyKey() {
     audio.resume();
-    if (this.state === GameState.Title) {
+    if (this.state === GameState.Title && this.titleInputEnabled) {
       this.ui.showTitle(false);
       this.startRun(0);
     }
   }
 
-  private handlePause() {
+  startLocal() {
+    this.titleInputEnabled = true;
+    this.handleAnyKey();
+  }
+
+  private async handlePause() {
     if (this.state === GameState.Playing) {
       this.state = GameState.Paused;
       this.ui.pause(true);
+      audio.suspend();
+      this.onGameplayStop?.(this.levelIdx + 1);
     } else if (this.state === GameState.Paused) {
+      if (this.resuming) return;
+      this.resuming = true;
+      await this.onCommercialBreak?.();
       this.state = GameState.Playing;
       this.ui.pause(false);
+      audio.resume();
+      this.onGameplayStart?.(this.levelIdx + 1);
+      this.resuming = false;
     }
   }
 
@@ -137,11 +182,21 @@ export class Game {
   }
 
   pauseGame() {
-    this.handlePause();
+    if (this.pauseInterceptor?.()) return;
+    void this.handlePause();
+  }
+
+  pauseFromNetwork() {
+    if (this.state === GameState.Playing) void this.handlePause();
   }
 
   muteGame() {
     this.handleMute();
+  }
+
+  restartGame() {
+    if (this.restartInterceptor?.()) return;
+    this.handleRestart();
   }
 
   private handleRestart() {
@@ -151,10 +206,13 @@ export class Game {
       this.startRun(0);
       return;
     }
-    if (this.state === GameState.Playing || this.state === GameState.Dying || this.state === GameState.Paused) {
+    if (this.state === GameState.Playing || this.state === GameState.Dying || this.state === GameState.Paused || this.state === GameState.Complete) {
+      if (this.state === GameState.Playing) this.onGameplayStop?.(this.levelIdx + 1, "fail");
       this.ui.pause(false);
       this.resetLevel();
       this.state = GameState.Playing;
+      audio.resume();
+      this.onGameplayStart?.(this.levelIdx + 1);
     }
   }
 
@@ -163,6 +221,7 @@ export class Game {
     this.rescues = 0;
     this.loadLevel(level);
     this.state = GameState.Playing;
+    this.onGameplayStart?.(level + 1);
   }
 
   private loadLevel(idx: number) {
@@ -190,6 +249,7 @@ export class Game {
     ];
     this.players.forEach((p, i) => {
       p.attachBody(RAPIER, this.world, spawns[i]);
+      p.setCollide(this.playerCollisionEnabled);
       p.stopMotion();
       p.resetToSpawn();
     });
@@ -223,6 +283,7 @@ export class Game {
     this.state = GameState.Dying;
     this.dyingTimer = 0.42;
     this.deaths++;
+    this.onGameplayStop?.(this.levelIdx + 1, "fail");
     this.ui.flash("#ff3828", 0.42);
     audio.death();
     for (const p of this.players) {
@@ -235,6 +296,7 @@ export class Game {
     if (this.state !== GameState.Playing) return;
     this.state = GameState.Complete;
     this.completeTimer = 1.15;
+    this.onGameplayStop?.(this.levelIdx + 1, "complete");
     audio.portal();
     this.ui.bannerShow("LEVEL COMPLETE", "", "#9ff5ff");
     this.bannerTimer = 1.1;
@@ -255,6 +317,7 @@ export class Game {
     } else {
       this.loadLevel(this.levelIdx + 1);
       this.state = GameState.Playing;
+      this.onGameplayStart?.(this.levelIdx + 1);
     }
   }
 
@@ -271,11 +334,11 @@ export class Game {
       this.state === GameState.Dying ? 0.25 :
       this.state === GameState.Complete ? 0.55 : 1;
 
-    if (
+    if (!this.networkGuest && (
       this.state === GameState.Playing ||
       this.state === GameState.Dying ||
       this.state === GameState.Complete
-    ) {
+    )) {
       this.accumulator += dtReal * scale * this.timeScale;
       let steps = 0;
       while (this.accumulator >= FIXED_DT && steps < 40) {
@@ -297,6 +360,7 @@ export class Game {
       this.players[0].updateShadow(RAPIER, this.world, frameUp, RAY_GROUPS);
       this.players[1].updateShadow(RAPIER, this.world, frameUp, RAY_GROUPS);
       this.tunnel.update(visDt);
+      if (this.networkGuest && this.state === GameState.Playing) this.tunnel.updateSpinners(visDt);
       _gravDir.copy(frameUp.up).negate();
       this.effects.update(visDt, _gravDir, this.coopCam.camera.position.z);
       this.coopCam.update(visDt, this.players[0], this.players[1], this.orientation);
@@ -317,6 +381,7 @@ export class Game {
       if (this.dyingTimer <= 0) {
         this.loadLevel(0);
         this.state = GameState.Playing;
+        this.onGameplayStart?.(1);
       }
     }
     if (this.state === GameState.Complete) {
@@ -536,7 +601,7 @@ export class Game {
       },
       musicPlaying: () => audio.musicPlaying,
       setTimeScale: (ts: number) => { this.timeScale = ts; },
-      setPlayerCollision: (on: boolean) => { for (const p of this.players) p.setCollide(on); },
+      setPlayerCollision: (on: boolean) => this.setPlayerCollision(on),
       crumbleBroken: () => this.tunnel.crumbleBrokenCount(),
       bot: null as unknown,
       touch: () => ({ ...touchState }),
@@ -586,6 +651,114 @@ export class Game {
     const t = this.players[0].body.translation();
     p2.warp(t.x, t.y, t.z + 1.5);
     p2.body.setLinvel({ x: 0, y: 0, z: -FORWARD_SPEED }, true);
+  }
+
+  setNetworkRole(role: "local" | "host" | "guest") {
+    this.networkGuest = role === "guest";
+    this.remoteInput.active = role === "host";
+    if (role !== "host") {
+      this.remoteInput.lat = 0;
+      this.remoteInput.jump = false;
+    }
+  }
+
+  setRemoteInput(lateral: number, jumpHeld: boolean) {
+    this.remoteInput.lat = Math.max(-1, Math.min(1, lateral));
+    this.remoteInput.jump = jumpHeld;
+    this.remoteInput.active = true;
+  }
+
+  private setPlayerCollision(on: boolean) {
+    this.playerCollisionEnabled = on;
+    for (const p of this.players) p.setCollide(on);
+  }
+
+  readOnlineInput(): { lateral: number; jumpHeld: boolean } {
+    const sample = this.input.sample(0);
+    return { lateral: sample.lateral, jumpHeld: sample.jumpHeld };
+  }
+
+  startOnlineRun() {
+    this.ui.showTitle(false);
+    this.ui.hideFinish();
+    this.startRun(0);
+  }
+
+  networkSnapshot(): NetworkGameState {
+    return {
+      level: this.levelIdx,
+      state: this.state,
+      orientation: this.orientation,
+      players: [this.networkPlayerState(this.players[0]), this.networkPlayerState(this.players[1])],
+      tetherDistance: this.tetherPhysics.distance,
+      tetherTension: this.tetherPhysics.tension01,
+      deaths: this.deaths,
+      rescues: this.rescues,
+    };
+  }
+
+  applyNetworkSnapshot(s: NetworkGameState) {
+    if (!this.networkGuest) return;
+    const previousState = this.state;
+    if (s.level !== this.levelIdx) this.loadLevel(s.level);
+    if (s.orientation !== this.orientation) {
+      this.orientation = s.orientation;
+      this.coopCam.snapTo(this.orientation);
+    }
+    this.applyNetworkPlayerState(this.players[0], s.players[0]);
+    this.applyNetworkPlayerState(this.players[1], s.players[1]);
+    this.tetherPhysics.distance = s.tetherDistance;
+    this.tetherPhysics.tension01 = s.tetherTension;
+    this.deaths = s.deaths;
+    this.rescues = s.rescues;
+    this.state = s.state;
+    this.ui.showTitle(false);
+    this.ui.pause(s.state === GameState.Paused);
+    if (s.state === GameState.Finished) this.ui.showFinish(s.deaths, s.rescues);
+    else this.ui.hideFinish();
+
+    if (previousState === GameState.Paused && s.state === GameState.Playing) {
+      this.state = GameState.Paused;
+      this.ui.pause(true);
+      if (!this.resuming) {
+        this.resuming = true;
+        void (async () => {
+          await this.onCommercialBreak?.();
+          this.state = GameState.Playing;
+          this.ui.pause(false);
+          audio.resume();
+          this.onGameplayStart?.(s.level + 1);
+          this.resuming = false;
+        })();
+      }
+      return;
+    }
+
+    if (previousState === GameState.Playing && s.state !== GameState.Playing) {
+      const result = s.state === GameState.Complete ? "complete" : s.state === GameState.Dying ? "fail" : undefined;
+      this.onGameplayStop?.(s.level + 1, result);
+      if (s.state === GameState.Paused) audio.suspend();
+    } else if (previousState !== GameState.Playing && s.state === GameState.Playing) {
+      audio.resume();
+      this.onGameplayStart?.(s.level + 1);
+    }
+  }
+
+  private networkPlayerState(p: Player): NetworkPlayerState {
+    const pos = p.body.translation();
+    const vel = p.body.linvel();
+    return {
+      p: [pos.x, pos.y, pos.z],
+      v: [vel.x, vel.y, vel.z],
+      grounded: p.grounded,
+    };
+  }
+
+  private applyNetworkPlayerState(p: Player, s: NetworkPlayerState) {
+    p.body.setTranslation({ x: s.p[0], y: s.p[1], z: s.p[2] }, true);
+    p.body.setLinvel({ x: s.v[0], y: s.v[1], z: s.v[2] }, true);
+    p.container.position.set(s.p[0], s.p[1], s.p[2]);
+    p.grounded = s.grounded;
   }
 
   private playerSnap(p: Player) {

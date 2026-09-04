@@ -37,6 +37,11 @@ class AudioManager {
     this.music?.start();
   }
 
+  suspend() {
+    this.music?.stop();
+    void this.ctx?.suspend();
+  }
+
   get musicPlaying(): boolean {
     return this.music?.playing ?? false;
   }

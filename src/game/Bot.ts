@@ -37,6 +37,8 @@ export class Bot {
     this.rotDir = 0;
     this.rotOrient = -1;
     this.jumpUntil = 0;
+    this.releaseUntil = 0;
+    this.prevAir = false;
     return new Promise<{ ok: boolean; reason: string }>((res) => {
       this.resolve_ = res;
     });
@@ -108,16 +110,20 @@ export class Bot {
 
     if (this.rotDir !== 0 && o !== this.rotOrient) this.rotDir = 0;
     let faceGone = 0;
-    for (let d = 1; d <= 10; d++) {
+    let firstFaceGone = 99;
+    for (let d = 1; d <= 14; d++) {
       const s = slices[clamp(i + d, 0, n - 1)];
-      if ((s as any)[face] === ".....") faceGone++;
+      if ((s as any)[face] === ".....") {
+        faceGone++;
+        if (firstFaceGone === 99) firstFaceGone = d;
+      }
     }
-    if (!dodging && (this.rotDir !== 0 || (faceGone >= 4 && emptyCount(i + 1, i + 10) >= 4))) {
+    if (!dodging && (this.rotDir !== 0 || (faceGone >= 2 && emptyCount(i + 1, i + 14) >= 2))) {
       if (this.rotDir === 0) {
         const score = (dir: number) => {
           const nf = ["f", "r", "c", "l"][(o + dir + 4) % 4];
           let k = 0;
-          for (let d = 1; d <= 14; d++) {
+          for (let d = 1; d <= 18; d++) {
             const s = slices[clamp(i + d, 0, n - 1)];
             const v = (s as any)[nf];
             k += v ? (v[col] !== "." ? 1 : 0) : 1;
@@ -126,10 +132,28 @@ export class Bot {
         };
         const s1 = score(1);
         const s2 = score(-1);
+        const safe = (dir: number) => {
+          const nf = ["f", "r", "c", "l"][(o + dir + 4) % 4];
+          if ((slices[clamp(i, 0, n - 1)] as any)[nf] === ".....") return false;
+          let gapRun = 0;
+          for (let d = 0; d <= firstFaceGone + 4; d++) {
+            if ((slices[clamp(i + d, 0, n - 1)] as any)[nf] === ".....") gapRun++;
+            else gapRun = 0;
+            if (gapRun >= 4) return false;
+          }
+          return true;
+        };
+        const safe1 = safe(1), safe2 = safe(-1);
+        if (!safe1 && !safe2) {
+          this.game.botInput.lat = 0;
+          this.game.botInput.jump = false;
+          this.game.botFollow();
+          return;
+        }
         this.rotDir = Math.abs(s1 - s2) < 3 ? (along >= 0 ? 1 : -1) : s1 >= s2 ? 1 : -1;
+        if (this.rotDir > 0 && !safe1) this.rotDir = -1;
+        if (this.rotDir < 0 && !safe2) this.rotDir = 1;
         this.rotOrient = o;
-        const ll = (this as any).latchLog ?? ((this as any).latchLog = []);
-        ll.push({ t: performance.now().toFixed(0), o, fg: faceGone, ec: emptyCount(i + 1, i + 10), dir: this.rotDir, z: +(r.p1.body.translation().z).toFixed(0) });
       }
       lat = this.rotDir;
       const fe = (() => { for (let d = 0; d <= 5; d++) if (!solid(i + d, col)) return d; return 99; })();
@@ -140,8 +164,8 @@ export class Bot {
     } else if (!dodging) {
       this.rotDir = 0;
       let firstEmpty = 99;
-      for (let d = 0; d <= 6; d++) if (!solid(i + d, col)) { firstEmpty = d; break; }
-      if (firstEmpty <= 7) {
+      for (let d = 0; d <= 9; d++) if (!solid(i + d, col)) { firstEmpty = d; break; }
+      if (firstEmpty <= 9) {
         const start = Math.max(1, firstEmpty);
         let best = col;
         let bestScore = -1;
@@ -154,7 +178,13 @@ export class Bot {
             bestScore = score; best = c; bestDist = dist;
           }
         }
-        if (best !== col) lat = Math.sign(best - col);
+        if (best !== col) {
+          const destinationIsGap = !solid(i, best);
+          if (!destinationIsGap || firstEmpty <= 5) {
+            lat = Math.sign(best - col);
+            if (destinationIsGap && r.p1.grounded) wantJump = true;
+          }
+        }
         let gapW = 0;
         while (gapW < 6 && !solid(i + firstEmpty + gapW, col)) gapW++;
         if (gapW >= 2) hold = 0.42; else hold = 0.17;
