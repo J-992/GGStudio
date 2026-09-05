@@ -1,7 +1,7 @@
 import { LEVELS } from "../levels";
 
 export const ACT_SIZE = 4;
-export const ACT_NAMES = ["FOOTING", "THE TURN", "THROWN", "MOVING GROUND", "TERMINUS"];
+export const ACT_NAMES = ["FIRST CONNECTION", "STORED MOMENTUM", "REVOLUTIONS", "MOVING GROUND", "CAROUSEL"];
 
 export const actOf = (levelIdx: number) => Math.floor(levelIdx / ACT_SIZE);
 export const actStart = (act: number) => act * ACT_SIZE;

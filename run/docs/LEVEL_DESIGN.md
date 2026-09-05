@@ -4,7 +4,8 @@ Two robots, one elastic tether, a square tunnel that can turn under you. This is
 the reference for how a level is written and how the twenty of them are paced.
 
 See [CAMPAIGN_RESEARCH.md](CAMPAIGN_RESEARCH.md) for the revised curriculum,
-visual language, evidence, playtest criteria and rotating-drum mechanic proposal.
+visual language and research. [ELASTIC_VERSION.md](ELASTIC_VERSION.md) describes
+the implemented elastic campaign and the remaining prototype scope.
 
 ## Reading a level
 
@@ -18,6 +19,7 @@ walls, so a `>` belt on the left wall pushes you up it.
 
 ```
 #   solid panel
+M   powered magnetic rail — hold grip to anchor sideways while moving forward
 .   nothing — a hole in that face
 ~   crumble tile, drops a beat after weight lands on it
 ^   launch pad, throws you about five units off the face
@@ -29,8 +31,11 @@ walls, so a `>` belt on the left wall pushes you up it.
 ?   shutter half a cycle behind "!", so a "!?" pair always leaves one lane open
 ```
 
-Gravity turns, geometry does not. Rolling the tunnel changes which face you
-stand on; the panels themselves never move.
+Gravity rolls change the chosen face. Courses with `drum: { speed }` also rotate
+their actual terrain and kinematic collision bodies continuously around Z.
+Speed is signed radians per simulation second; scenery stays fixed. Drum
+courses currently use rigid panels and magnetic rails only, not crumbles,
+spinners, ferries, belts, launch pads or shutters.
 
 ## Rules that come from the physics
 
@@ -82,28 +87,28 @@ learned.
 |---|------|---------|------|
 | 1 | Warmup Conduit | move, jump | — |
 | 2 | Step Up | crumble | landing on tiles that fall |
-| 3 | Lanes | sustained lane choice | rhythm |
-| 4 | Beam Team | the spinner | narrow beams |
+| 3 | Catch Me | grip, partner catch | explicit recovery |
+| 4 | Pendulum Run | swing | moving forward while anchored |
 | 5 | Wall Roll | rolling onto a wall | the tunnel turns |
 | 6 | Two Turn | roll and roll back | the ceiling holds you |
-| 7 | Skyline | holes in a wall | gaps off the floor |
-| 8 | Carousel | a full lap of four faces | — |
-| 9 | Slingshot | launch pads | true voids |
-| 10 | High Wire | pads on a wall | wall crumble; finish on the wall |
-| 11 | Beltway | conveyors | forced drift and counterflow |
-| 12 | Crosscurrent | belts that aim you at a wall | belts that climb |
-| 13 | Tracking | ferries | ground that moves |
-| 14 | Ferry | pad into ferry | opposite-phase decks and transfers |
-| 15 | Shutter Line | shutters | reading a rhythm |
-| 16 | Split Second | paired shutters | two lanes, one open |
-| 17 | Overdrive | belts feeding barriers | barriers on a wall |
-| 18 | Helix | a lap with moving ground | — |
-| 19 | Longfall | pad, ferry, barrier in sequence | living on the wall |
-| 20 | Terminus | all of it | mandatory four-face finale |
+| 7 | Slingshot Alley | stretch, jump inward, release | retained spring momentum |
+| 8 | Leapfrog | alternate anchors | shorter regroup windows |
+| 9 | Slow Revolution | real rotating terrain | floor → wall → ceiling |
+| 10 | Follow the Opening | four-face drum route | opposite rotation direction |
+| 11 | Orbit Partners | rotating magnetic anchors | all four faces |
+| 12 | Carousel Rescue | combine grip and rotation | faster reverse rotation |
+| 13 | Split Current | conveyors plus rails | counterflow |
+| 14 | Springboard Relay | launch pads plus rails | true voids |
+| 15 | Ferry Handoff | moving decks plus rails | opposite-phase transfers |
+| 16 | Shutter Partners | shutters plus rails | timing |
+| 17 | Elastic Overdrive | conveyors and barriers | optional anchors |
+| 18 | Helix Handoff | four faces and moving decks | anchor handoffs |
+| 19 | Longfall Catch | pads, ferries and shutters | recovery opportunities |
+| 20 | Carousel Finale | faster rotating anchors | mandatory four-face route |
 
 Introductions give players space to read the next demand, then narrow or combine
 it after practice. The back four keep the hardest combinations, with recovery
-space at face transfers and landings. Levels 8, 18 and 20 require all four faces;
+space at face transfers and landings. Levels 10–12, 18 and 20 require all four faces;
 unused faces disappear so the intended circuit cannot be skipped on the opposite
 wall. Automated completion is a traversal check, not evidence of human fairness.
 

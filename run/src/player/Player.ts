@@ -18,6 +18,7 @@ export interface PlayerInputSample {
   lateral: number;
   jumpHeld: boolean;
   jumpPressed: boolean;
+  gripHeld?: boolean;
 }
 
 export interface PlayerEvents {
@@ -78,6 +79,15 @@ export class Player {
 
   /** Lateral carry from a conveyor or a slider, in units per second. */
   platformLat = 0;
+  /** Magnetic grip constrains the cross-section, not the forward-moving rail. */
+  gripping = false;
+  gripAvailable = false;
+  gripHeld = false;
+  elasticFlight = 0;
+  private reelRequested = false;
+  get reeling() { return this.reelRequested; }
+  supportVelocity = new THREE.Vector3();
+  private gripPoint = new THREE.Vector3();
   /** Set by a launch pad; spent on the next integrate. */
   boostUp = 0;
   private launchArc = false;
@@ -108,6 +118,7 @@ export class Player {
   private legR!: THREE.Group;
   private visorMat!: THREE.MeshBasicMaterial;
   private accentMat!: THREE.MeshStandardMaterial;
+  private skinGlow = 0.45;
   private bodyMat!: THREE.MeshStandardMaterial;
   shadow: THREE.Mesh;
 
@@ -137,6 +148,7 @@ export class Player {
     this.accentMat.color.setHex(accent);
     this.accentMat.emissive.setHex(accent);
     this.accentMat.emissiveIntensity = skin.glow;
+    this.skinGlow = skin.glow;
     this.accentMat.metalness = skin.metalness;
     this.accentMat.roughness = skin.roughness;
     this.visorMat.color.setHex(accent);
@@ -261,6 +273,12 @@ export class Player {
     this.platformLat = 0;
     this.boostUp = 0;
     this.launchArc = false;
+    this.gripping = this.gripAvailable = this.gripHeld = false;
+    this.offScreenTime = 0;
+    this.winchActive = false;
+    this.elasticFlight = 0;
+    this.reelRequested = false;
+    this.supportVelocity.set(0, 0, 0);
     this.tensionPull.set(0, 0, 0);
     this.tensionAmount = 0;
   }
@@ -278,24 +296,53 @@ export class Player {
   preStep(input: PlayerInputSample) {
     if (input.jumpPressed) this.jumpBufferTimer = JUMP_BUFFER;
     this.input = input;
+    this.gripHeld = !!input.gripHeld;
+    if (!input.jumpHeld || this.grounded) this.reelRequested = false;
+    else if (input.jumpPressed && this.airTime > 0.35 && this.elasticFlight > 0) this.reelRequested = true;
+  }
+
+  updateGrip(available: boolean) {
+    this.gripAvailable = available;
+    const on = this.gripHeld && available && (this.grounded || this.gripping) && !this.input.jumpPressed;
+    if (on && !this.gripping) this.position(this.gripPoint);
+    if (!on && this.gripping) this.elasticFlight = Math.max(this.elasticFlight, 1.1);
+    this.gripping = on;
   }
 
   integrate(frame: SurfaceFrame, dt: number, ev: PlayerEvents) {
     const input = this.input;
 
+    this.elasticFlight = Math.max(0, this.elasticFlight - dt);
+    if (this.gripping) {
+      this.gripPoint.addScaledVector(this.supportVelocity, dt);
+      const pos = this.body.translation();
+      this.latVel = 0;
+      this.fwdVel = this.autoRun ? FORWARD_SPEED : 0;
+      this.body.setLinvel({
+        x: (this.gripPoint.x - pos.x) / dt,
+        y: (this.gripPoint.y - pos.y) / dt,
+        z: -this.fwdVel,
+      }, true);
+      this.jumpBufferTimer = 0;
+      return;
+    }
+    const flight = this.elasticFlight > 0 && !this.grounded;
+
     const authority = 1 - 0.72 * this.tensionAmount;
     const accel = (this.grounded ? LAT_ACC_GROUND : LAT_ACC_AIR) * authority;
-    this.latVel = moveToward(this.latVel, input.lateral * LAT_MAX, accel * dt);
+    if (flight) this.latVel = this.velocityAlong(frame.right) + input.lateral * 12 * dt;
+    else this.latVel = moveToward(this.latVel, input.lateral * LAT_MAX, accel * dt);
     const fwdTarget = this.autoRun ? FORWARD_SPEED : 0;
-    this.fwdVel = Math.max(-18, Math.min(18, moveToward(this.fwdVel, fwdTarget, FWD_ACC * dt)));
+    this.fwdVel = Math.max(-18, Math.min(18, moveToward(this.fwdVel, fwdTarget, (flight ? 5 : FWD_ACC) * dt)));
 
-    let vUp = this.velocityAlong(frame.up);
+    let vUp = this.velocityAlong(frame.up) - this.supportVelocity.dot(frame.up);
 
     // A released jump is cut short on purpose. A launch pad is not a jump, so it
     // keeps its full arc whether or not anyone is holding the button.
     let gMult: number;
     if (vUp > 0.001) {
-      if (this.launchArc) gMult = input.jumpHeld ? JUMP_HOLD_GRAVITY_MULT : 1;
+      if (flight) gMult = 1;
+      else if (this.launchArc) gMult = input.jumpHeld ? JUMP_HOLD_GRAVITY_MULT : 1;
       else gMult = input.jumpHeld ? JUMP_HOLD_GRAVITY_MULT : JUMP_RELEASE_GRAVITY_MULT;
     } else {
       gMult = FALL_GRAVITY_MULT;
@@ -330,7 +377,7 @@ export class Player {
     this.latVel += this.tensionPull.dot(frame.right) * dt;
     this.fwdVel += this.tensionPull.dot(FORWARD) * dt;
 
-    if (!this.grounded && input.jumpHeld && (this.tensionAmount > 0.08 || this.winchActive)) {
+    if ((!flight || this.reelRequested) && !this.grounded && input.jumpHeld && (this.tensionAmount > 0.08 || this.winchActive)) {
       const climb = ROPE_CLIMB_ACCEL * (this.winchActive ? 3 : 1);
       vUp += climb * dt;
       if (vUp > ROPE_CLIMB_MAX_V) vUp = ROPE_CLIMB_MAX_V;
@@ -345,7 +392,7 @@ export class Player {
     const vx = frame.right.x * lat + FORWARD.x * this.fwdVel + frame.up.x * vUp;
     const vy = frame.right.y * lat + FORWARD.y * this.fwdVel + frame.up.y * vUp;
     const vz = frame.right.z * lat + FORWARD.z * this.fwdVel + frame.up.z * vUp;
-    this.body.setLinvel({ x: vx, y: vy, z: vz }, true);
+    this.body.setLinvel({ x: vx + this.supportVelocity.x, y: vy + this.supportVelocity.y, z: vz }, true);
   }
 
   postStep(
@@ -413,12 +460,15 @@ export class Player {
     const alongRight = _pos.dot(frame.right);
     const pressingRight = this.input.lateral > 0.5;
     const pressingLeft = this.input.lateral < -0.5;
+    // A moving corner can briefly lose the downward ray before the adjacent
+    // panel takes support. Preserve the same short coyote window as jumping.
+    const cornerFooting = this.grounded || this.coyoteTimer > 0;
     this.rotHoldRight =
-      this.grounded && pressingRight && alongRight > HALF - WALL_TRIGGER_DIST
+      cornerFooting && pressingRight && alongRight > HALF - WALL_TRIGGER_DIST
         ? this.rotHoldRight + dt
         : 0;
     this.rotHoldLeft =
-      this.grounded && pressingLeft && alongRight < -(HALF - WALL_TRIGGER_DIST)
+      cornerFooting && pressingLeft && alongRight < -(HALF - WALL_TRIGGER_DIST)
         ? this.rotHoldLeft + dt
         : 0;
   }
@@ -469,6 +519,7 @@ export class Player {
     this.modelRoot.scale.set(sxz, sy, sxz);
 
     this.visorMat.color.setHex(this.color).multiplyScalar(Math.min(2.2, 0.7 + this.tensionAmount * 1.6));
+    this.accentMat.emissiveIntensity = this.skinGlow + (this.gripping ? 1.95 : this.gripAvailable ? 0.65 : 0);
   }
 
   updateShadow(

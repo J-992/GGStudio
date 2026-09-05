@@ -44,7 +44,7 @@ try {
         try { return { ...await debug.bot.run(index), trail, faces: [...faces] }; }
         finally { clearInterval(timer); }
       }, index);
-      if (result.ok && [7, 17, 19].includes(index) && result.faces.length !== 4) {
+      if (result.ok && [9, 10, 11, 17, 19].includes(index) && result.faces.length !== 4) {
         result.ok = false; result.reason = `four-face route bypassed: ${result.faces.join(", ")}`;
       }
       console.log(`L${index + 1} attempt ${attempt + 1}: ${result.ok ? "PASS" : "FAIL"} ${result.reason} (${result.faces.join(" → ")})`);
@@ -53,6 +53,7 @@ try {
     if (!result.ok) {
       failures++;
       console.log(JSON.stringify(result.trail));
+      console.log(result.trace?.join("\n") ?? "");
     }
   }
   console.log(`${indices.length - failures}/${indices.length} passed; collisions on, speed ${speed}, attempts <= ${retries}`);

@@ -1,4 +1,5 @@
 import { getFrame } from "../tunnel/SurfaceOrientation";
+import { Vector3 } from "three";
 import { COLS, HALF, SLICE_LEN, TILE } from "./Constants";
 
 const FACES = ["f", "r", "c", "l"] as const;
@@ -12,10 +13,11 @@ interface Drive {
   releaseUntil: number;
   prevAir: boolean;
   dodgeCol: number;
+  reelRelease: boolean;
 }
 
 const newDrive = (): Drive => ({
-  rotDir: 0, rotOrient: -1, jumpUntil: 0, releaseUntil: 0, prevAir: false, dodgeCol: -1,
+  rotDir: 0, rotOrient: -1, jumpUntil: 0, releaseUntil: 0, prevAir: false, dodgeCol: -1, reelRelease: false,
 });
 
 /**
@@ -42,7 +44,7 @@ export class Autopilot {
   /** `forcedRot` makes the second robot lean the same way, so a roll fires. */
   plan(
     r: any, idx: number, forcedRot: number | null,
-  ): { lat: number; jump: boolean; rotDir: number } {
+  ): { lat: number; jump: boolean; rotDir: number; grip: boolean } {
     const d = this.drives[idx];
     const me = idx === 0 ? r.p1 : r.p2;
     const mate = idx === 0 ? r.p2 : r.p1;
@@ -50,10 +52,14 @@ export class Autopilot {
     const face = FACES[o];
     const slices = r.def.slices;
     const n = slices.length;
-    const t = me.body.translation();
+    const raw = me.body.translation();
+    const t = new Vector3(raw.x, raw.y, raw.z);
+    r.drum?.toLocal(t);
     const frame = getFrame(r.orientation);
     const along = t.x * frame.right.x + t.y * frame.right.y + t.z * frame.right.z;
-    const mt = mate.body.translation();
+    const rawMate = mate.body.translation();
+    const mt = new Vector3(rawMate.x, rawMate.y, rawMate.z);
+    r.drum?.toLocal(mt);
     const mateAlong = mt.x * frame.right.x + mt.y * frame.right.y + mt.z * frame.right.z;
     const i = clamp(Math.floor(-t.z / SLICE_LEN), 0, n - 1);
 
@@ -297,6 +303,13 @@ export class Autopilot {
     if (!me.grounded && me.tensionAmount > 0.08 && (me.beyond > 0.4 || me.airTime > 1.6)) {
       jump = true;
     }
+    if (me.grounded || me.elasticFlight <= 0) d.reelRelease = false;
+    if (!me.grounded && me.elasticFlight > 0 && me.airTime > 0.7) {
+      // A fresh press explicitly asks for recovery; do not flatten every jump
+      // into a winch just because the partner happens to be gripping.
+      jump = d.reelRelease;
+      d.reelRelease = true;
+    }
     if (this.onTrace) {
       this.onTrace(
         `P${idx + 1} s${i} c${col} ${face} lat${lat >= 0 ? "+" : ""}${lat}` +
@@ -307,7 +320,12 @@ export class Autopilot {
         `${me.grounded ? "" : " air"}`,
       );
     }
-    return { lat, jump, rotDir: d.rotDir };
+    // Do not replace an already-running rescue winch with a fresh four-unit
+    // swing. That would pay out rope just as the partner reaches the landing.
+    const grip = me.gripAvailable && !mate.grounded && mate.airTime < 6.5 && !rolling
+      && (me.gripping || (!mate.winchActive && mate.airTime < 1.2));
+    if (grip) { lat = 0; jump = false; }
+    return { lat, jump, rotDir: d.rotDir, grip };
   }
 
   /** Frame-space centre of whichever ferry at this slice is nearest right now. */

@@ -21,9 +21,11 @@ export class Audio {
     const melody=melodies[this.world%3],degree=melody[beat%melody.length];
     const section=Math.floor(beat/32)%4;
     if(degree>=0){const f=midi(root+12+scale[degree]);this.note(f,t,.21,.035,'sine',bus);this.note(f*2,t,.09,.009,'sine',bus);if(section===3&&beat%4===0)this.note(f*.5,t,.32,.018,'triangle',bus);}
-    const chord=[0,5,9,7][Math.floor(beat/8)%4];
+    const chordIndex=Math.floor(beat/8)%4;
+    const chord=(this.boss?[0,5,8,7]:[0,5,9,7])[chordIndex];
+    const third=this.boss?(chordIndex===2?4:3):(chordIndex===2?3:4);
     if(beat%4===0){this.note(midi(root-24+chord),t,.32,.065,'triangle',bus);this.note(105,t,.12,.028,'sine',bus,.32);}
-    if(beat%8===0)for(const n of [0,this.boss?3:4,7])this.note(midi(root+chord+n),t,.7,.012,'sine',bus);
+    if(beat%8===0)for(const n of [0,third,7])this.note(midi(root+chord+n),t,.7,.012,'sine',bus);
     if(beat%2===1&&this.noise){const n=ctx.createBufferSource(),g=ctx.createGain(),filter=ctx.createBiquadFilter();n.buffer=this.noise;filter.type='highpass';filter.frequency.value=4800;g.gain.value=.025;n.connect(filter).connect(g).connect(bus);n.start(t);}
   }
   play(name:string,count=0){

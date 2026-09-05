@@ -6,7 +6,7 @@
   "scripts": {
     "dev:squish": "vite --config squish/vite.config.ts",
     "build:squish": "tsc --project squish/tsconfig.json && vite build --config squish/vite.config.ts",
-    "qa:squish": "node squish/solve.mjs && node squish/mechanics.mjs && node squish/qa.mjs",
+    "qa:squish": "node squish/layout-qa.mjs && node squish/solve.mjs && node squish/mechanics.mjs && node squish/text-layout-qa.mjs && node squish/qa.mjs",
     "dev": "vite --config squish/vite.config.ts",
     "dev:tether": "vite",
     "build": "tsc --noEmit && vite build",

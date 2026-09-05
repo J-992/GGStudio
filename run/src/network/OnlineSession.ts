@@ -3,7 +3,7 @@ import { Game, GameState, type NetworkGameState } from "../game/Game";
 
 type Role = "none" | "host" | "guest";
 type WireMessage =
-  | { t: "input"; lateral: number; jumpHeld: boolean }
+  | { t: "input"; lateral: number; jumpHeld: boolean; gripHeld?: boolean }
   | { t: "start"; state: NetworkGameState }
   | { t: "state"; state: NetworkGameState }
   | { t: "pause" }
@@ -106,7 +106,7 @@ export class OnlineSession {
     try { msg = JSON.parse(data) as WireMessage; } catch { return; }
 
     if (this.role === "host") {
-      if (msg.t === "input") this.game.setRemoteInput(msg.lateral, msg.jumpHeld);
+      if (msg.t === "input") this.game.setRemoteInput(msg.lateral, msg.jumpHeld, msg.gripHeld);
       else if (msg.t === "pause") this.game.pauseGame();
       else if (msg.t === "restart") this.game.restartGame();
       return;

@@ -24,14 +24,14 @@ if(requestedDate&&/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)&&!Number.isNaN(Date.
 const dailySeed=Number(dailyDate.replaceAll('-',''));
 function gameplayStart(){if(platformReady)poki.gameplayStart();}
 function clearInput(){inputs.clear();sim.held=false;sim.charge=0;sim.diving=false;}
-function toast(text:string){$('toast').textContent=text;$('toast').style.opacity='1';toastTime=1.3;}
+function toast(text:string){$('toast').textContent=text;toastTime=1.3;}
 function closeModal(){$('modal').classList.add('hidden');previousFocus?.focus({preventScroll:true});}
 function modal(kicker:string,title:string,copy:string,primary:string,action:()=>void,secondary='BACK TO THE GAME',second:()=>void=resume){
   clearInput();previousFocus=document.activeElement as HTMLElement;$('modal-kicker').textContent=kicker;$('modal-title').textContent=title;$('modal-copy').textContent=copy;$('modal-extra').replaceChildren();$('modal-primary').textContent=primary;$('modal-secondary').textContent=secondary;modalAction=action;secondaryAction=second;$('modal').classList.remove('hidden');$('modal-primary').focus({preventScroll:true});
 }
 function loadLevel(level:number,isDaily=false,cp?:Checkpoint,auto=false){
   poki.gameplayStop();clearInput();closeModal();index=level;daily=isDaily;
-  sim=new Simulation(makeLevel(isDaily?12:level,isDaily?dailySeed:undefined),cp);sim.state=auto?'playing':'ready';age=0;transitionTime=0;rewarded=false;renderer.particles=[];renderer.snapCamera=true;
+  sim=new Simulation(makeLevel(isDaily?12:level,isDaily?dailySeed:undefined),cp);sim.state=auto?'playing':'ready';age=0;transitionTime=0;toastTime=0;$('toast').classList.add('hidden');rewarded=false;renderer.particles=[];renderer.snapCamera=true;
   if(!cp)attempt=1;
   if(!isDaily){save.current=level;persist();}
   $('level-name').textContent=isDaily?'DAILY EXPEDITION':String(level+1).padStart(2,'0')+' / '+NAMES[level].toUpperCase();
@@ -43,8 +43,8 @@ function begin(){audio.unlock();if(sim.state!=='ready')return;sim.state='playing
 function retry(full=false){attempt++;const cp=full?undefined:sim.checkpoint;loadLevel(index,daily,cp,true);}
 function freeze(){if(sim.state==='playing'||sim.state==='ready'){sim.state='paused';poki.gameplayStop();}audio.playing=false;}
 function resume(){closeModal();if(sim.state==='won'){loadLevel(daily?save.current:index===23?0:index+1);return;}if(sim.state==='paused'){sim.state='playing';gameplayStart();}audio.unlock();$('canvas').focus({preventScroll:true});}
-function extraButton(text:string,action:()=>void){const b=document.createElement('button');b.className='text-button';b.textContent=text;b.onclick=action;$('modal-extra').append(b);}
-function pause(){if(sim.state==='paused'&&!$('modal').classList.contains('hidden')){resume();return;}if(sim.state!=='playing'&&sim.state!=='ready')return;freeze();modal('TAKE A BREATHER','Stay soft.','Your next little adventure is right here.','KEEP BOUNCING ↗',resume,'CHOOSE A LEVEL',showMap);extraButton('✿ Jelly closet',closet);extraButton('☀ Daily expedition',()=>loadLevel(12,true));extraButton('↺ Restart this level',()=>retry(true));extraButton(audio.musicMuted?'♫ Music: off':'♫ Music: on',()=>{audio.musicMuted=!audio.musicMuted;save.musicMuted=audio.musicMuted;persist();$('modal-extra').replaceChildren();extraButton(audio.musicMuted?'♫ Music: off':'♫ Music: on',()=>{audio.musicMuted=!audio.musicMuted;save.musicMuted=audio.musicMuted;persist();resume();});});}
+function extraButton(text:string,action:()=>void){const b=document.createElement('button');b.className='text-button';b.textContent=text;b.onclick=action;$('modal-extra').append(b);return b;}
+function pause(){if(sim.state==='paused'&&!$('modal').classList.contains('hidden')){resume();return;}if(sim.state!=='playing'&&sim.state!=='ready')return;freeze();modal('TAKE A BREATHER','Stay soft.','Your next little adventure is right here.','KEEP BOUNCING ↗',resume,'CHOOSE A LEVEL',showMap);extraButton('✿ Jelly closet',closet);extraButton('☀ Daily expedition',()=>loadLevel(12,true));extraButton('↺ Restart this level',()=>retry(true));const musicButton=extraButton(audio.musicMuted?'♫ Music: off':'♫ Music: on',()=>{audio.musicMuted=!audio.musicMuted;save.musicMuted=audio.musicMuted;persist();musicButton.textContent=audio.musicMuted?'♫ Music: off':'♫ Music: on';});}
 function showMap(){freeze();modal('A LITTLE JELLY. A BIG WORLD.','Your adventure.',save.rescues.reduce((a,b)=>a+b,0)+' friends rescued · '+save.stars.reduce((a,b)=>a+b,0)+' stars earned','KEEP BOUNCING',resume);
   const grid=document.createElement('div');grid.className='level-grid';NAMES.forEach((name,i)=>{const b=document.createElement('button');b.disabled=i>save.unlocked;b.className=i===index?'selected':'';b.setAttribute('aria-label','Level '+(i+1)+': '+name);b.innerHTML=(b.disabled?'·':i%8===7?'♛':i+1)+'<small>'+('★'.repeat(save.stars[i]||0)||'—')+'</small>';b.onclick=()=>loadLevel(i);grid.append(b);});$('modal-extra').append(grid);extraButton('✿ Jelly closet',closet);extraButton('☀ Daily expedition',()=>loadLevel(12,true));
 }
@@ -87,7 +87,7 @@ function events(){for(const e of sim.events){audio.play(e.type,sim.sweets);
   if(e.type==='jump')renderer.burst(e.x,e.y,'#fff8e3',6);
   if(e.type==='land'){renderer.impact=1;renderer.burst(e.x,e.y,'#fff8e3',4);}
   if(e.type==='sweet')renderer.burst(e.x,e.y,'#efc56b',4);
-  if(['stomp','break','spring','friend','power','portal','bossHit'].includes(e.type)){renderer.burst(e.x,e.y,e.type==='friend'?'#a9d59a':'#f3c779',e.type==='bossHit'?38:14);if(e.value)toast(e.value);if(e.type==='spring'||e.type==='stomp')renderer.impact=.5;}
+  if(['stomp','break','spring','friend','power','portal','bossHit'].includes(e.type)){renderer.burst(e.x,e.y,e.type==='friend'?'#a9d59a':'#f3c779',e.type==='bossHit'?38:14);if(e.value&&['friend','power','portal','bossHit'].includes(e.type))toast(e.value);if(e.type==='spring'||e.type==='stomp')renderer.impact=.5;}
   if(e.type==='clear'&&sim.combo>5)toast(sim.combo+'× SWEET STREAK');
   if(e.type==='checkpoint')toast('CHECKPOINT ✦');
   if(e.type==='hit'){renderer.shake=renderer.reduced?0:4;renderer.burst(e.x,e.y,SKINS[save.skin].color,10);}
@@ -117,7 +117,12 @@ function frame(now:number){const dt=Math.max(0,Math.min((now-last)/1000,.05));la
   }
   if(sim.state==='won'&&age>.4&&!rewarded)finish();
   if(transitionTime>0&&$('modal').classList.contains('hidden')){transitionTime-=dt;if(transitionTime<=0)loadLevel(index+1,false,undefined,true);}
-  if(toastTime>0){toastTime-=dt;if(toastTime<=0)$('toast').style.opacity='0';}
+  document.body.dataset.state=sim.state;
+  $('messages').classList.toggle('hidden',!$('modal').classList.contains('hidden')||!['playing','dead'].includes(sim.state));
+  $('boss-hud').classList.toggle('hidden',!sim.bossActive||sim.state!=='playing');
+  if(sim.state!=='playing')$('power').textContent='';
+  toastTime=Math.max(0,toastTime-dt);
+  $('toast').classList.toggle('hidden',toastTime<=0||sim.state!=='playing'||!!$('hint').textContent);
   requestAnimationFrame(frame);
 }
 if(import.meta.env.DEV)(window as unknown as {__SQUISH__:unknown}).__SQUISH__={snapshot:()=>({state:sim.state,time:sim.time,x:sim.x,y:sim.y,vy:sim.vy,direction:sim.direction,charge:sim.charge,held:sim.held,diving:sim.diving,grounded:sim.grounded,index,daily,attempt,totalDeaths,sweets:sim.sweets,friends:sim.friends,health:sim.health,power:sim.power,bossHP:sim.bossHP,bossX:sim.bossX,bossY:sim.bossY,checkpoint:sim.checkpoint,level:sim.level,save,music:{playing:audio.playing,muted:audio.musicMuted,initialized:!!audio.ctx}})};

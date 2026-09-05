@@ -116,7 +116,6 @@ export class Renderer {
       const x=sim.level.length-this.camera;
       if(x<w+100){this.rr(x-12,g-135,82,135,39,'#a1c5ab');this.rr(x,g-124,58,124,29,'#fcf5df');this.text('↗',x+29,g-47,36);this.star(x+29,g-164,15,'#f3c169',this.clock*.3);}
     }
-    if(sim.level.index<2)for(const s of sim.level.signs){const x=s.x-this.camera;if(x>-100&&x<w+100)this.text(s.text,x,g+s.y,15,'#678874');}
     const px=sim.x-this.camera,py=g+sim.y;
     if(sim.fever>0||sim.power==='chili')for(let i=1;i<=6;i++){c.globalAlpha=(1-i/7)*.2;this.ellipse(px-i*14*sim.direction,py-16,21-i,17-i,sim.power==='chili'?'#f0a65d':'#f4d16c');}c.globalAlpha=1;
     if(sim.grounded)this.ellipse(px,py+5,27+sim.charge*8,6,'#293d351c');

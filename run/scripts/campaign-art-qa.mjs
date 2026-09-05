@@ -26,20 +26,21 @@ try {
   assert.equal(new Set(campaign.map(level => level.environment)).size, 5);
   for (const level of campaign) {
     for (const slice of level.slices) for (const pattern of Object.values(slice)) {
-      assert.match(pattern, /^[#.~^<>=+!?]{5}$/, `${level.name}: invalid pattern`);
+      assert.match(pattern, /^[#.~^<>=+!?M]{5}$/, `${level.name}: invalid pattern`);
     }
     for (const hint of level.hints ?? []) assert(hint.atSlice >= 0 && hint.atSlice < level.slices.length, `${level.name}: hint outside level`);
     if (level.beats) {
       assert.equal(level.beats.length, 4, `${level.name}: four challenge phrases`);
       for (const beat of level.beats) {
-        assert(level.slices.slice(beat.atSlice, beat.atSlice + 6).every(s => !s.f || s.f === "#####"), `${level.name}: missing approach runway`);
+        const approach = level.slices.slice(beat.atSlice, beat.atSlice + 6);
+        assert(["f", "r", "c", "l"].some(face => approach.every(s => /^[#M]{5}$/.test(s[face] ?? "#####"))), `${level.name}: missing approach runway on a consistent face`);
       }
     }
   }
-  assert(campaign[10].slices.some(s => s.f === "<<#>>"), "counterflow lesson present");
-  assert(campaign[13].slices.some(s => s.f === ".=+++"), "opposite-phase ferry challenge present");
-  assert(campaign[12].slices.some(s => s.f === ".==.."), "moving support narrows after introduction");
-  for (const index of [7, 17, 19]) for (const face of ["r", "c", "l"]) {
+  assert(campaign[12].slices.some(s => s.f === "<<#>>"), "counterflow lesson present");
+  assert(campaign[14].slices.some(s => s.f === ".=+++"), "opposite-phase ferry challenge present");
+  assert(campaign[14].slices.some(s => s.f?.includes("=")), "moving support lesson present");
+  for (const index of [9, 10, 11, 17, 19]) for (const face of ["r", "c", "l"]) {
     const faces = ["f", "r", "c", "l"];
     const exclusive = slice => faces.every(key => key === face
       ? (slice[key] ?? "#####") !== "....." : slice[key] === ".....");
@@ -61,7 +62,7 @@ try {
     console.log(`${campaign[index].environment}: ${JSON.stringify(stats)}`);
   }
   // Repeated loads should settle at the same resource count, not leak textures.
-  for (const [index, slice] of [[7, 22], [19, 108]]) {
+  for (const [index, slice] of [[9, 40], [19, 40]]) {
     await page.evaluate(([index, slice]) => {
       const debug = window.__TR__;
       debug.startRun(index);

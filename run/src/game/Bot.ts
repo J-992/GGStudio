@@ -81,8 +81,10 @@ export class Bot {
     const follow = this.pilot.plan(r, 1, lead.rotDir);
     inputs[0].lat = lead.lat;
     inputs[0].jump = lead.jump;
+    inputs[0].grip = lead.grip;
     inputs[1].lat = follow.lat;
     inputs[1].jump = follow.jump;
+    inputs[1].grip = follow.grip;
   }
 
 }

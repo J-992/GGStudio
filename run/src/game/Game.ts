@@ -50,6 +50,8 @@ export interface NetworkPlayerState {
   p: [number, number, number];
   v: [number, number, number];
   grounded: boolean;
+  gripping: boolean;
+  elasticFlight: number;
 }
 
 export interface NetworkGameState {
@@ -61,6 +63,9 @@ export interface NetworkGameState {
   tetherTension: number;
   deaths: number;
   rescues: number;
+  drumAngle: number;
+  featureTime: number;
+  releaseReady: boolean;
 }
 
 // The ground ray sees the other robot as well as the tunnel. Standing on your
@@ -84,8 +89,8 @@ export class Game {
   state: GameState = GameState.Title;
   levelIdx = 0;
   timeScale = 1;
-  botInput = { lat: 0, jump: false, active: false };
-  botInput2 = { lat: 0, jump: false, active: false };
+  botInput = { lat: 0, jump: false, grip: false, active: false };
+  botInput2 = { lat: 0, jump: false, grip: false, active: false };
   bot: { tick(dt: number): void } | null = null;
   onGameplayStart?: (level: number) => void;
   onGameplayStop?: (level: number, result?: "complete" | "fail") => void;
@@ -106,7 +111,7 @@ export class Game {
   private hintFlags: boolean[] = [];
   private tmpA = new THREE.Vector3();
   private tmpB = new THREE.Vector3();
-  private remoteInput = { lat: 0, jump: false, active: false };
+  private remoteInput = { lat: 0, jump: false, grip: false, active: false };
   private networkGuest = false;
   private resuming = false;
   private playerCollisionEnabled = true;
@@ -329,9 +334,10 @@ export class Game {
   private autoOffered = [false, false];
   /** Decisions are held briefly so the autopilot reads as a hand, not a script. */
   private autoHold = [0, 0];
-  private autoLast: { lat: number; jump: boolean }[] = [
-    { lat: 0, jump: false }, { lat: 0, jump: false },
+  private autoLast: { lat: number; jump: boolean; grip: boolean }[] = [
+    { lat: 0, jump: false, grip: false }, { lat: 0, jump: false, grip: false },
   ];
+  private autoJumpPrev = [false, false];
   private locker!: LockerPanel;
   private coins!: Coins;
   private trails: RobotTrail[] = [];
@@ -352,13 +358,14 @@ export class Game {
     this.onGameplayStart?.(level + 1);
   }
 
-  private loadLevel(idx: number) {
+  private loadLevel(idx: number, preserveCoins = false) {
     this.coach.stop();
     if (idx === 0 && !progress.learned) this.coach.start();
     this.levelIdx = idx;
     const def = LEVELS[idx];
 
     if (this.tunnel) this.tunnel.dispose(this.scene);
+    this.world?.free();
     this.world = new RAPIER.World({ x: 0, y: 0, z: 0 });
     this.world.timestep = FIXED_DT;
     const spawnY = -HALF + PLAYER_HALF_H + 0.02;
@@ -373,8 +380,10 @@ export class Game {
       this.world.createCollider(col, body);
     });
 
-    if (this.coins) this.coins.dispose(this.scene);
-    this.coins = new Coins(this.scene, def);
+    if (!preserveCoins || !this.coins) {
+      if (this.coins) this.coins.dispose(this.scene);
+      this.coins = new Coins(this.scene, def);
+    }
 
     const spawns = [
       new THREE.Vector3(-1.2, spawnY, -4),
@@ -393,7 +402,7 @@ export class Game {
     this.hintFlags = (def.hints ?? []).map(() => false);
     this.recoveries = 0;
     this.recoverCooldown = [0, 0];
-    this.tetherPhysics.wasHigh = false;
+    this.tetherPhysics.reset();
     this.ui.clearHint();
     this.ui.setLevel(idx + 1, LEVELS.length, def.name);
     this.ui.bannerShow(`LEVEL ${idx + 1}`, def.name, "#dfe9f5");
@@ -408,7 +417,8 @@ export class Game {
     this.orientation = Orientation.Floor;
     this.coopCam.snapTo(this.orientation);
     this.rotCooldown = 0;
-    this.tetherPhysics.wasHigh = false;
+    this.tetherPhysics.reset();
+    this.tunnel.drum.setAngle(0, true);
     this.tunnel.resetCrumbles(this.world);
     this.ui.flash("#000000", 0);
   }
@@ -504,7 +514,7 @@ export class Game {
       }
     }
 
-    const frameUp = getFrame(this.orientation);
+    const frameUp = this.tunnel.drum.surface(this.orientation);
 
     if (this.state !== GameState.Paused && this.state !== GameState.Title) {
       const visDt = dtReal * scale * this.timeScale;
@@ -516,7 +526,7 @@ export class Game {
       this.players[0].updateShadow(RAPIER, this.world, frameUp, RAY_GROUPS);
       this.players[1].updateShadow(RAPIER, this.world, frameUp, RAY_GROUPS);
       this.tunnel.update(visDt);
-      this.coins.update(visDt);
+      this.coins.update(visDt, this.tunnel.drum.angle);
       for (let i = 0; i < 2; i++) {
         this.players[i].position(this.tmpA);
         this.trails[i].update(visDt, this.tmpA, frameUp.up, this.state === GameState.Playing);
@@ -527,7 +537,7 @@ export class Game {
       }
       _gravDir.copy(frameUp.up).negate();
       this.effects.update(visDt, _gravDir, this.coopCam.camera.position.z);
-      this.coopCam.update(visDt, this.players[0], this.players[1], this.orientation);
+      this.coopCam.update(visDt, this.players[0], this.players[1], this.orientation, this.tunnel.drum.angle);
       if (this.state === GameState.Playing) {
         this.players[0].position(this.tmpA);
         this.players[1].position(this.tmpB);
@@ -547,22 +557,32 @@ export class Game {
     }
     this.ui.update(dtReal);
 
-    if (this.state === GameState.Dying) {
+    if (!this.networkGuest && this.state === GameState.Dying) {
       this.dyingTimer -= dtReal;
-      if (this.dyingTimer <= 0) this.endRun();
+      if (this.dyingTimer <= 0) {
+        if (LEVELS[this.levelIdx].localRetry) {
+          this.loadLevel(this.levelIdx, true);
+          this.state = GameState.Playing;
+          this.onGameplayStart?.(this.levelIdx + 1);
+        } else this.endRun();
+      }
     }
-    if (this.state === GameState.RunOver) {
+    if (!this.networkGuest && this.state === GameState.RunOver) {
       this.runOverTimer -= dtReal;
       if (this.runOverTimer <= 0) {
         this.startRun(this.practising ? actStart(actOf(this.levelIdx)) : 0);
       }
     }
-    if (this.state === GameState.Complete) {
+    if (!this.networkGuest && this.state === GameState.Complete) {
       this.completeTimer -= dtReal;
       if (this.completeTimer <= 0) this.advanceAfterComplete();
     }
 
     audio.setTension(this.state === GameState.Playing ? this.tetherPhysics.tension01 : 0);
+    const anchors = this.players.filter(p => p.gripping);
+    this.ui.elasticStatus(this.state !== GameState.Playing ? "" : anchors.length === 2 ? "BOTH LOCKED · RELEASE ONE TO SWING"
+      : anchors.length ? this.tetherPhysics.releaseReady ? "SPRING RETURNING · RELEASE TO CARRY MOMENTUM" : `P${anchors[0].index + 1} ANCHORED · STRETCH → SWING → RELEASE`
+      : this.players.some(p => p.gripAvailable) ? "GOLD RAIL · HOLD GRIP TO ANCHOR" : "");
     this.renderer.render(this.scene, this.coopCam.camera);
   }
 
@@ -576,7 +596,7 @@ export class Game {
   }
 
   private fixedUpdate(dt: number) {
-    const frame = getFrame(this.orientation);
+    const frame = this.tunnel.drum.surface(this.orientation);
 
     if (this.state === GameState.Complete) {
       this.retractStep(dt);
@@ -589,6 +609,14 @@ export class Game {
     this.driveIdleRobot(1, in1, dt);
     this.players[0].preStep(in0);
     this.players[1].preStep(in1);
+    const previouslyGripped = this.players.map(p => p.gripping);
+    this.tunnel.preparePlayers(this.players);
+    if (this.players.some((p, i) => p.gripping && !previouslyGripped[i])) audio.grip();
+    // Preserve the existing axis-aligned collision shape in tunnel-local space.
+    // Rotating it again on a gravity roll expands its side into a wall/partner.
+    if (this.tunnel.drum.speed) {
+      for (const p of this.players) p.body.setRotation(this.tunnel.drum.rotation, true);
+    }
 
     const { snap } = this.tetherPhysics.compute(this.players[0], this.players[1], frame, frame, dt);
     this.players[0].tensionAmount = this.tetherPhysics.tension01;
@@ -608,7 +636,7 @@ export class Game {
     this.world.step();
 
     const picked: THREE.Vector3[] = [];
-    if (this.coins.collect(this.players, picked)) {
+    if (this.coins.collect(this.players, picked, this.tunnel.drum)) {
       for (const at of picked) this.effects.burst(at, 0xffd75e, 14, 6, 0.5, 0);
       this.runCoins += picked.length;
       progress.addCoins(picked.length);
@@ -685,6 +713,11 @@ export class Game {
 
   private checkScreenDeath(dt: number) {
     for (const p of this.players) {
+      const mate = this.players[1 - p.index];
+      if (p.elasticFlight > 0 && (mate.gripping || mate.grounded) && this.tetherPhysics.distance < 9) {
+        p.offScreenTime = 0;
+        continue;
+      }
       p.position(_proj);
       _proj.project(this.coopCam.camera);
       const off =
@@ -736,7 +769,7 @@ export class Game {
     if (!mate.grounded || mate.beyond > 0.5) return false;
 
     mate.position(this.tmpB);
-    const frame = getFrame(this.orientation);
+    const frame = this.tunnel.drum.surface(this.orientation);
     this.tmpA.copy(this.tmpB).addScaledVector(frame.right, p.index === 0 ? -1.1 : 1.1);
     this.tmpA.addScaledVector(frame.up, 0.6);
     p.warp(this.tmpA.x, this.tmpA.y, this.tmpA.z);
@@ -757,7 +790,7 @@ export class Game {
    * robot they have picked up.
    */
   private driveIdleRobot(i: number, sample: PlayerInputSample, dt: number) {
-    const touched = Math.abs(sample.lateral) > 0.15 || sample.jumpHeld || sample.jumpPressed;
+    const touched = Math.abs(sample.lateral) > 0.15 || sample.jumpHeld || sample.jumpPressed || sample.gripHeld;
     if (touched) {
       this.humanIdle[i] = 0;
       if (this.autoOn[i]) this.setAutopilot(i, false);
@@ -784,20 +817,23 @@ export class Game {
       // A touch of slop: a partner who tracks the exact centre of every lane
       // reads as a machine, and the point is that it feels like somebody is there.
       const slop = Math.random() < 0.12 ? 0 : plan.lat;
-      this.autoLast[i] = { lat: slop, jump: plan.jump };
+      this.autoLast[i] = { lat: slop, jump: plan.jump, grip: plan.grip };
       this.autoHold[i] = AUTOPILOT_REACTION * (0.7 + Math.random() * 0.6);
     }
     sample.lateral = this.autoLast[i].lat;
-    const wasHeld = sample.jumpHeld;
+    const wasHeld = this.autoJumpPrev[i];
     sample.jumpHeld = this.autoLast[i].jump;
     sample.jumpPressed = this.autoLast[i].jump && !wasHeld;
+    this.autoJumpPrev[i] = sample.jumpHeld;
+    sample.gripHeld = this.autoLast[i].grip;
   }
 
   setAutopilot(i: number, on: boolean) {
     if (this.autoOn[i] === on) return;
     this.autoOn[i] = on;
     this.autoHold[i] = 0;
-    this.autoLast[i] = { lat: 0, jump: false };
+    this.autoLast[i] = { lat: 0, jump: false, grip: false };
+    this.autoJumpPrev[i] = false;
     if (on) this.pilot.reset();
     this.ui.setAutopilot(i, on);
   }
@@ -833,6 +869,7 @@ export class Game {
     for (let i = 0; i < 2; i++) {
       const p = this.players[i];
       p.position(this.tmpA);
+      this.tunnel.drum.toLocal(this.tmpA);
       const dx = Math.max(0, Math.abs(this.tmpA.x) - HALF - 0.4);
       const dy = Math.max(0, Math.abs(this.tmpA.y) - HALF - 0.4);
       p.beyond = Math.max(dx, dy);
@@ -845,7 +882,8 @@ export class Game {
         audio.save();
         this.effects.burst(this.tmpA, 0x7dffc8, 30, 8, 0.8, 0);
       }
-      if (p.beyond > KILL_DIST || p.airTime > MAX_AIR_TIME) {
+      const supportedSwing = p.elasticFlight > 0 && this.players[1 - i].gripping && this.tetherPhysics.distance < 9;
+      if (p.beyond > KILL_DIST || p.airTime > (supportedSwing ? 7 : MAX_AIR_TIME)) {
         // Act one teaches. A robot that falls there is put back beside its
         // partner instead of ending the run: playtests showed the median session
         // dying out inside the first minute, which is the tutorial failing, not
@@ -903,6 +941,7 @@ export class Game {
         rescues: this.rescues,
         finishZ: this.tunnel.finishZ,
         spinners: this.tunnel.spinnerStates(),
+        drumAngle: this.tunnel.drum.angle,
       }),
       warp: (i: number, x: number, y: number, z: number) => this.players[i].warp(x, y, z),
       setAutoRun: (i: number, on: boolean) => {
@@ -960,6 +999,7 @@ export class Game {
       state: this.state as number,
       orientation: this.orientation,
       def: LEVELS[this.levelIdx],
+      drum: this.tunnel.drum,
       level: this.levelIdx + 1,
       p1: this.players[0],
       p2: this.players[1],
@@ -981,12 +1021,14 @@ export class Game {
     if (role !== "host") {
       this.remoteInput.lat = 0;
       this.remoteInput.jump = false;
+      this.remoteInput.grip = false;
     }
   }
 
-  setRemoteInput(lateral: number, jumpHeld: boolean) {
-    this.remoteInput.lat = Math.max(-1, Math.min(1, lateral));
+  setRemoteInput(lateral: number, jumpHeld: boolean, gripHeld = false) {
+    this.remoteInput.lat = Number.isFinite(lateral) ? Math.max(-1, Math.min(1, lateral)) : 0;
     this.remoteInput.jump = jumpHeld;
+    this.remoteInput.grip = gripHeld;
     this.remoteInput.active = true;
   }
 
@@ -995,9 +1037,9 @@ export class Game {
     for (const p of this.players) p.setCollide(on);
   }
 
-  readOnlineInput(): { lateral: number; jumpHeld: boolean } {
+  readOnlineInput(): { lateral: number; jumpHeld: boolean; gripHeld: boolean } {
     const sample = this.input.sample(0);
-    return { lateral: sample.lateral, jumpHeld: sample.jumpHeld };
+    return { lateral: sample.lateral, jumpHeld: sample.jumpHeld, gripHeld: sample.gripHeld };
   }
 
   startOnlineRun() {
@@ -1016,6 +1058,9 @@ export class Game {
       tetherTension: this.tetherPhysics.tension01,
       deaths: this.deaths,
       rescues: this.rescues,
+      drumAngle: this.tunnel.drum.angle,
+      featureTime: this.tunnel.featureClock,
+      releaseReady: this.tetherPhysics.releaseReady,
     };
   }
 
@@ -1023,14 +1068,17 @@ export class Game {
     if (!this.networkGuest) return;
     const previousState = this.state;
     if (s.level !== this.levelIdx) this.loadLevel(s.level);
+    this.tunnel.syncClock(s.featureTime ?? 0, s.drumAngle ?? 0);
     if (s.orientation !== this.orientation) {
       this.orientation = s.orientation;
       this.coopCam.snapTo(this.orientation);
     }
     this.applyNetworkPlayerState(this.players[0], s.players[0]);
     this.applyNetworkPlayerState(this.players[1], s.players[1]);
+    this.world.propagateModifiedBodyPositionsToColliders();
     this.tetherPhysics.distance = s.tetherDistance;
     this.tetherPhysics.tension01 = s.tetherTension;
+    this.tetherPhysics.releaseReady = !!s.releaseReady;
     this.deaths = s.deaths;
     this.rescues = s.rescues;
     this.state = s.state;
@@ -1083,6 +1131,8 @@ export class Game {
       p: [pos.x, pos.y, pos.z],
       v: [vel.x, vel.y, vel.z],
       grounded: p.grounded,
+      gripping: p.gripping,
+      elasticFlight: p.elasticFlight,
     };
   }
 
@@ -1091,11 +1141,13 @@ export class Game {
     p.body.setLinvel({ x: s.v[0], y: s.v[1], z: s.v[2] }, true);
     p.container.position.set(s.p[0], s.p[1], s.p[2]);
     p.grounded = s.grounded;
+    p.gripping = !!s.gripping;
+    p.elasticFlight = s.elasticFlight ?? 0;
   }
 
   private playerSnap(p: Player) {
     p.position(this.tmpA);
-    return { x: +this.tmpA.x.toFixed(2), y: +this.tmpA.y.toFixed(2), z: +this.tmpA.z.toFixed(2), grounded: p.grounded };
+    return { x: +this.tmpA.x.toFixed(2), y: +this.tmpA.y.toFixed(2), z: +this.tmpA.z.toFixed(2), grounded: p.grounded, gripping: p.gripping, gripAvailable: p.gripAvailable, elasticFlight: p.elasticFlight };
   }
 }
 
