@@ -1,0 +1,28 @@
+{
+  "name": "arena-defense",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Arena Defense - first-person wave tower defense in a circular arena, built for Poki. three.js + vanilla JS.",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:poki": "vite build --mode poki",
+    "preview": "vite preview",
+    "test": "node --test test/",
+    "assets:fetch": "node scripts/fetch-sources.mjs",
+    "assets:build": "node scripts/build-assets.mjs",
+    "budget": "node scripts/budget.mjs",
+    "dist:check": "node scripts/dist-check.mjs",
+    "check": "npm run test && npm run build:poki && npm run budget && npm run dist:check"
+  },
+  "dependencies": {
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "vite": "^8.2.2"
+  }
+}
