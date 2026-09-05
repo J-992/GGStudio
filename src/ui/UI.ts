@@ -24,6 +24,11 @@ export class UI {
   private autoOfferTimer = 0;
   private offerFor = -1;
   private hintTimer = 0;
+  private elasticEl = document.getElementById("elastic-readout")!;
+
+  elasticStatus(text: string) {
+    if (this.elasticEl.textContent !== text) this.elasticEl.textContent = text;
+  }
 
   /**
    * Keeps `body.overlay-open` in sync with the menus. The touch pads are hidden

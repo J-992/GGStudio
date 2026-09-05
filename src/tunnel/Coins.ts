@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { FaceKey, LevelDef, SliceDef } from "../levels/types";
 import { COLS, HALF, SLICE_LEN, TILE } from "../game/Constants";
+import type { Drum } from "./Drum";
 
 const FACES: FaceKey[] = ["f", "r", "c", "l"];
 
@@ -13,7 +14,7 @@ const AXES: Record<FaceKey, { n: THREE.Vector3; c: THREE.Vector3 }> = {
 };
 
 /** Anything you can stand on. Ferries move, so they are not coin ground. */
-const STANDABLE = "#^<>!?~";
+const STANDABLE = "#^<>!?~M";
 
 interface Coin {
   mesh: THREE.Mesh;
@@ -43,6 +44,9 @@ export class Coins {
       roughness: 0.3, metalness: 0.6,
     });
     for (const spot of this.plan(def)) this.add(spot);
+    for (const reward of def.elasticRewards ?? []) {
+      this.add({ face: reward.face, col: reward.col, slice: reward.atSlice, high: false, height: reward.height });
+    }
     scene.add(this.group);
   }
 
@@ -104,7 +108,7 @@ export class Coins {
     return out;
   }
 
-  private add(spot: { face: FaceKey; col: number; slice: number; high: boolean }) {
+  private add(spot: { face: FaceKey; col: number; slice: number; high: boolean; height?: number }) {
     const ax = AXES[spot.face];
     const along = -HALF + (spot.col + 0.5) * TILE;
     // The face's own offset: walls sit on x, floor and ceiling on y.
@@ -115,7 +119,7 @@ export class Coins {
     else base.set(HALF, along, 0);
     base.z = -(spot.slice + 0.5) * SLICE_LEN;
 
-    const pos = base.clone().addScaledVector(ax.n, spot.high ? 1.75 : 0.7);
+    const pos = base.clone().addScaledVector(ax.n, spot.height ?? (spot.high ? 1.75 : 0.7));
     const mesh = new THREE.Mesh(this.geo, this.mat);
     mesh.position.copy(pos);
     // A torus already faces +Z, which is straight back at a runner heading -Z.
@@ -125,13 +129,14 @@ export class Coins {
   }
 
   /** Returns how many coins were picked up this step. */
-  collect(players: { position(out: THREE.Vector3): THREE.Vector3 }[], out: THREE.Vector3[]): number {
+  collect(players: { position(out: THREE.Vector3): THREE.Vector3 }[], out: THREE.Vector3[], drum?: Drum): number {
     let got = 0;
     const p = new THREE.Vector3();
     for (const c of this.coins) {
       if (c.taken) continue;
       for (const player of players) {
         player.position(p);
+        drum?.toLocal(p);
         // A little magnetism: brushing past a coin should take it, so the reward
         // never feels like it needed pixel-accurate steering.
         if (p.distanceToSquared(c.pos) > 2.25) continue;
@@ -139,14 +144,15 @@ export class Coins {
         c.mesh.visible = false;
         this.collected++;
         got++;
-        out.push(c.pos);
+        out.push(drum ? drum.toWorld(c.pos.clone()) : c.pos.clone());
         break;
       }
     }
     return got;
   }
 
-  update(dt: number) {
+  update(dt: number, angle = 0) {
+    this.group.rotation.z = angle;
     this.time += dt;
     for (const c of this.coins) {
       if (c.taken) continue;

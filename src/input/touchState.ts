@@ -1,4 +1,6 @@
 export interface TouchState {
+  p1g: boolean;
+  p2g: boolean;
   p1l: boolean;
   p1r: boolean;
   p1j: boolean;
@@ -10,6 +12,8 @@ export interface TouchState {
 }
 
 export const touchState: TouchState = {
+  p1g: false,
+  p2g: false,
   p1l: false,
   p1r: false,
   p1j: false,

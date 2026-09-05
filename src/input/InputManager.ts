@@ -6,12 +6,14 @@ export interface PlayerInput {
   lateral: number;
   jumpHeld: boolean;
   jumpPressed: boolean;
+  gripHeld: boolean;
 }
 
 export interface BotSource {
   lat: number;
   jump: boolean;
   active: boolean;
+  grip?: boolean;
 }
 
 export class InputManager {
@@ -58,6 +60,9 @@ export class InputManager {
     let lat = 0;
     let jumpHeld = false;
     let jumpPressed = false;
+    let gripHeld = player === 0
+      ? this.keys.has("KeyS") || touchState.p1g
+      : this.keys.has("ArrowDown") || touchState.p2g;
     if (player === 0) {
       if (this.keys.has("KeyA")) lat -= 1;
       if (this.keys.has("KeyD")) lat += 1;
@@ -90,6 +95,7 @@ export class InputManager {
       const ax = p.axes[0] ?? 0;
       if (Math.abs(ax) > 0.35) lat += Math.sign(ax);
       const j = p.buttons[0]?.pressed ?? false;
+      gripHeld ||= p.buttons[4]?.pressed ?? false;
       if (!this.padJumpPrev[player]) this.padJumpPrev[player] = [false];
       if (j && !this.padJumpPrev[player][0]) jumpPressed = true;
       if (j) jumpHeld = true;
@@ -100,17 +106,19 @@ export class InputManager {
     if (bot?.active) {
       lat = Math.max(-1, Math.min(1, bot.lat));
       jumpHeld = bot.jump;
+      gripHeld = !!bot.grip;
       jumpPressed = bot.jump && !this.prevBotJump[player];
       this.prevBotJump[player] = bot.jump;
     }
     if (player === 1 && this.remoteSrc?.active) {
       lat = Math.max(-1, Math.min(1, this.remoteSrc.lat));
       jumpHeld = this.remoteSrc.jump;
+      gripHeld = !!this.remoteSrc.grip;
       jumpPressed = this.remoteSrc.jump && !this.prevRemoteJump;
       this.prevRemoteJump = this.remoteSrc.jump;
     }
     lat = Math.max(-1, Math.min(1, lat));
-    return { lateral: lat, jumpHeld, jumpPressed };
+    return { lateral: lat, jumpHeld, jumpPressed, gripHeld };
   }
 
   clearMovementKeys() {
@@ -122,6 +130,7 @@ export class InputManager {
     touchState.p1l = touchState.p1r = touchState.p1j = false;
     touchState.p2l = touchState.p2r = touchState.p2j = false;
     touchState.p1jLatch = touchState.p2jLatch = false;
+    touchState.p1g = touchState.p2g = false;
   }
 
   private keyPrevW = false;
@@ -133,6 +142,6 @@ function isGameKey(code: string): boolean {
   return (
     code === "ArrowLeft" || code === "ArrowRight" || code === "ArrowUp" ||
     code === "ArrowDown" || code === "Space" || code === "KeyA" ||
-    code === "KeyD" || code === "KeyW"
+    code === "KeyD" || code === "KeyW" || code === "KeyS"
   );
 }

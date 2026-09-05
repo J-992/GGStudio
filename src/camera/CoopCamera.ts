@@ -36,7 +36,7 @@ export class CoopCamera {
     this.initialized = false;
   }
 
-  update(dt: number, p1: Player, p2: Player, orientation: Orientation) {
+  update(dt: number, p1: Player, p2: Player, orientation: Orientation, drumAngle = 0) {
     if (this.rollT < 1) {
       this.rollT = Math.min(1, this.rollT + dt / ROT_ANIM_TIME);
       const k = this.smoothstep(this.rollT);
@@ -46,7 +46,7 @@ export class CoopCamera {
     }
     void stepOrientation;
 
-    const up = _up.set(0, 1, 0).applyQuaternion(this.currentRoll);
+    const up = _up.set(0, 1, 0).applyQuaternion(this.currentRoll).applyAxisAngle(_axis, drumAngle);
 
     _mid1.copy(p1.container.position);
     _mid2.copy(p2.container.position);
@@ -54,7 +54,7 @@ export class CoopCamera {
 
     const sep = _mid1.distanceTo(_mid2);
     const sepK = Math.max(0, Math.min(1, (sep - 3) / 4.5));
-    const back = CAM_BACK * (1 + 0.3 * sepK);
+    const back = CAM_BACK * (1.2 + 0.55 * sepK);
     const lift = CAM_UP * (1 + 0.22 * sepK);
 
     _look.copy(_target).addScaledVector(FORWARD, LOOK_AHEAD);
@@ -96,6 +96,7 @@ export class CoopCamera {
 }
 
 const _up = new THREE.Vector3();
+const _axis = new THREE.Vector3(0, 0, 1);
 const _mid1 = new THREE.Vector3();
 const _mid2 = new THREE.Vector3();
 const _target = new THREE.Vector3();

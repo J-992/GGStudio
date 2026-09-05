@@ -12,7 +12,7 @@
   <main id="game">
     <canvas id="canvas" tabindex="0" aria-label="Squish game: hold Space or touch to flatten; release to jump."></canvas>
     <header id="hud">
-      <button id="home" class="wordmark" aria-label="Return to menu">squish<span>!</span></button>
+      <button id="home" class="wordmark" aria-label="Choose a level">squish<span>!</span></button>
       <div id="level-info"><span id="level-name">THE GREAT JELLY ESCAPE</span><div id="progress-track"><i id="progress-fill"></i></div></div>
       <div class="tools"><span id="hearts">♥♥</span><span id="score">✦ 0</span><button id="sound" class="icon" aria-label="Mute sound">♫</button><button id="pause" class="icon" aria-label="Pause game">Ⅱ</button></div>
     </header>
@@ -26,13 +26,15 @@
       </div>
       <div class="stamp">100%<br><b>SQUISHABLE</b><span>✦</span></div>
     </section>
-    <div id="hint" aria-live="polite"></div>
     <section id="ready"><div class="eyebrow">SQUISH! / THE GREAT JELLY ESCAPE</div><h1 id="ready-title"></h1><p id="ready-copy"></p><button id="begin" class="primary">LET’S BOUNCE ↗</button></section>
-    <div id="power"></div>
-    <div id="boss-hud" class="hidden"><span id="boss-name"></span><b id="boss-hearts"></b></div>
+    <div id="messages">
+      <div id="boss-hud" class="hidden"><span id="boss-name"></span><b id="boss-hearts"></b></div>
+      <div id="power"></div>
+      <div id="hint" aria-live="polite"></div>
+      <div id="failure-tip" aria-live="polite"></div>
+      <div id="toast" class="hidden" aria-live="polite"></div>
+    </div>
     <section id="clear-banner" class="hidden"><h2 id="clear-title"></h2><p id="clear-detail"></p><small id="clear-next"></small></section>
-    <div id="failure-tip" aria-live="polite"></div>
-    <div id="toast" aria-live="polite"></div>
     <footer id="bottom"><span id="world-label">01 / THE SOFT START</span><span id="control-label">HOLD ↓ &nbsp; SQUISH &nbsp; · &nbsp; RELEASE ↗ &nbsp; JUMP</span><span id="attempt-label">MADE OF JELLY. BUILT FOR TROUBLE.</span></footer>
     <section id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="card"><div id="modal-kicker" class="eyebrow"></div><h2 id="modal-title"></h2><p id="modal-copy"></p><div id="modal-extra"></div><button id="modal-primary" class="primary"></button><button id="modal-secondary" class="text-button"></button></div></section>
   </main>

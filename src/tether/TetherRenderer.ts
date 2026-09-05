@@ -66,7 +66,8 @@ export class TetherRenderer {
     if (_side.lengthSq() < 1e-6) _side.set(0, 1, 0);
     _side.normalize();
 
-    const width = 0.05 + tension * 0.05 + Math.sin(time * (6 + tension * 26)) * 0.012 * tension;
+    const anchored = p1.gripping || p2.gripping;
+    const width = 0.05 + tension * 0.05 + (anchored ? 0.025 : 0) + Math.sin(time * (6 + tension * 26)) * 0.012 * tension;
     const heat = tension;
 
     for (let i = 0; i <= SEGMENTS; i++) {
@@ -77,9 +78,9 @@ export class TetherRenderer {
       _pnt.set(mx, my, mz).addScaledVector(_sagDir, midDrop * 4 * t * (1 - t));
       const pulse = heat > 0.75 ? Math.sin(time * 30 - t * 12) * 0.25 + 0.85 : 1;
 
-      const r = 0.45 + heat * 0.55 * pulse;
+      const r = anchored ? 1 : 0.45 + heat * 0.55 * pulse;
       const g = 0.62 + heat * 0.3 * pulse;
-      const b = 0.85;
+      const b = anchored ? 0.25 + 0.3 * Math.sin(time * 12 - t * 18) ** 2 : 0.85;
 
       const o = i * 6;
       this.positions[o] = _pnt.x - _side.x * width;

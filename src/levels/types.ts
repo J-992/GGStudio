@@ -30,9 +30,9 @@ export interface SliceDef {
 
 export type FaceKey = "f" | "l" | "r" | "c";
 
-export const LEGAL_CHARS = "#.~^<>=+!?";
-export const SOLID_CHARS = "#^<>!?";
-export const FEATURE_CHARS = "^<>=+!?";
+export const LEGAL_CHARS = "#.~^<>=+!?M";
+export const SOLID_CHARS = "#^<>!?M";
+export const FEATURE_CHARS = "^<>=+!?M";
 
 export interface HintDef {
   atSlice: number;
@@ -48,6 +48,12 @@ export interface SpinnerDef {
 
 export interface LevelDef {
   name: string;
+  /** Signed rotation in radians/second for a rigid whole-course drum. */
+  drum?: { speed: number };
+  /** Learning courses retry locally; challenge courses retain the run stakes. */
+  localRetry?: boolean;
+  /** Optional authored rewards; negative height invites a below-face swing. */
+  elasticRewards?: { face: FaceKey; col: number; atSlice: number; height: number }[];
   slices: SliceDef[];
   hints?: HintDef[];
   spinners?: SpinnerDef[];

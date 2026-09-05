@@ -12,6 +12,8 @@ import {
   SHUTTER_LETHAL_FRAC, SHUTTER_PERIOD,
 } from "../game/Constants";
 import type { SurfaceFrame } from "./SurfaceOrientation";
+import type { Player } from "../player/Player";
+import { Drum } from "./Drum";
 
 /**
  * Each face has an inward normal (the direction you launch or a shutter rises)
@@ -63,6 +65,10 @@ export class Tunnel {
   readonly group = new THREE.Group();
   readonly finishZ: number;
   readonly startZ = -6;
+  readonly drum: Drum;
+  private scenery = new THREE.Group();
+  private magnets: { pos: THREE.Vector3; axes: FaceAxes }[] = [];
+  private magnetGeos: THREE.BufferGeometry[] = [];
   private turbines: { obj: THREE.Object3D; speed: number }[] = [];
   private portalDisc!: THREE.Mesh;
   private disposables: (THREE.BufferGeometry | THREE.Material | THREE.Texture)[] = [];
@@ -75,6 +81,14 @@ export class Tunnel {
   private sliders: Slider[] = [];
   private shutters: Shutter[] = [];
   private featureTime = 0;
+  get featureClock() { return this.featureTime; }
+  syncClock(time: number, angle: number) {
+    this.featureTime = time;
+    this.drum.setAngle(angle, true);
+    this.updateFeatures(0);
+    for (const sp of this.spinners) sp.angle = sp.speed * time;
+    this.updateSpinners(0);
+  }
   private art: LevelArt;
   private crumbleMat!: THREE.MeshStandardMaterial;
   private padMat!: THREE.MeshStandardMaterial;
@@ -90,6 +104,10 @@ export class Tunnel {
     addStaticBox: (x: number, y: number, z: number, hx: number, hy: number, hz: number) => void,
   ) {
     const slices = def.slices;
+    if (def.drum && (!Number.isFinite(def.drum.speed) || slices.some(s => Object.values(s).some(pattern => /[^#.M]/.test(pattern))) || def.spinners?.length)) {
+      throw new Error("Rotating drum courses support rigid # and M panels only");
+    }
+    this.drum = new Drum(def.drum?.speed ?? 0);
     this.finishZ = -(slices.length * SLICE_LEN - 5);
 
     const floorBoxes: RunBox[] = [];
@@ -158,6 +176,7 @@ export class Tunnel {
             this.addCrumbleTile(this.boxForFace(key, col, i, 1), world, R);
           }
           if (ch === "^") this.addPad(key, col, i);
+          else if (ch === "M") this.addMagnet(key, col, i);
           else if (ch === "<" || ch === ">") this.addBelt(key, col, i, ch === ">" ? 1 : -1);
           else if (ch === "=" || ch === "+") this.addSlider(key, col, i, ch === "+" ? 0.5 : 0, world, R);
           else if (ch === "!" || ch === "?") this.addShutter(key, col, i, ch === "?" ? 0.5 : 0, world, R);
@@ -165,6 +184,14 @@ export class Tunnel {
       }
     }
     const all = [...floorBoxes, ...ceilBoxes, ...leftBoxes, ...rightBoxes];
+    if (this.magnetGeos.length) {
+      const geometry = mergeGeometries(this.magnetGeos)!;
+      this.magnetGeos.forEach(g => g.dispose());
+      this.magnetGeos = [];
+      const material = new THREE.MeshStandardMaterial({ color: 0xf4c45e, emissive: 0xffa825, emissiveIntensity: 0.8, metalness: 0.7, roughness: 0.3 });
+      this.disposables.push(geometry, material);
+      this.group.add(new THREE.Mesh(geometry, material));
+    }
     for (const b of all) {
       addStaticBox(b.x, b.y, b.z, b.w / 2, b.h / 2, b.d / 2);
     }
@@ -194,11 +221,47 @@ export class Tunnel {
 
     this.buildSpinners(def, world, R);
     this.buildBackground(slices.length * SLICE_LEN);
+    // Keep distant machinery still so the rotating course has a visible reference.
+    for (const child of [...this.group.children]) {
+      if (child.userData.scenery) this.scenery.add(child);
+    }
     this.buildPortal();
     this.art = new LevelArt(def);
     this.group.add(this.art.group);
 
     scene.add(this.group);
+    scene.add(this.scenery);
+    this.drum.attach(world, R);
+  }
+
+  private addMagnet(key: FaceKey, col: number, slice: number) {
+    const axes = FACE_AXES[key];
+    const pos = this.surfaceCenter(key, col, slice);
+    // Twin gold rails + transverse ties are legible without relying on color.
+    for (const offset of [-0.55, 0.55]) {
+      const geo = key === "f" || key === "c"
+        ? new THREE.BoxGeometry(0.12, 0.08, SLICE_LEN)
+        : new THREE.BoxGeometry(0.08, 0.12, SLICE_LEN);
+      const at = pos.clone().addScaledVector(axes.normal, 0.055).addScaledVector(axes.colAxis, offset);
+      geo.translate(at.x, at.y, at.z);
+      this.magnetGeos.push(geo);
+    }
+    const tie = key === "f" || key === "c" ? new THREE.BoxGeometry(1.1, 0.06, 0.11) : new THREE.BoxGeometry(0.06, 1.1, 0.11);
+    const at = pos.clone().addScaledVector(axes.normal, 0.05);
+    tie.translate(at.x, at.y, at.z);
+    this.magnetGeos.push(tie);
+    this.magnets.push({ pos, axes });
+  }
+
+  preparePlayers(players: Player[]) {
+    for (const p of players) {
+      p.position(_fv);
+      p.supportVelocity.set(0, 0, 0);
+      if (p.grounded || p.gripping) p.supportVelocity.set(-this.drum.speed * _fv.y, this.drum.speed * _fv.x, 0);
+      this.drum.toLocal(_fv);
+      const available = this.magnets.some(m => this.onFeature(_fv, m.pos, m.axes, TILE / 2 - 0.08, SLICE_LEN / 2 + 0.05, 0.85));
+      p.updateGrip(available);
+    }
   }
 
   private boxForFace(key: FaceKey, col: number, startSlice: number, len: number): RunBox {
@@ -419,6 +482,8 @@ export class Tunnel {
       if (!p.grounded) continue;
       p.position(_fv);
 
+      this.drum.toLocal(_fv);
+
       for (const pad of this.pads) {
         if (this.onFeature(_fv, pad.pos, pad.axes, TILE / 2 + 0.3, SLICE_LEN / 2 + 0.3, 1.25)) {
           p.boostUp = LAUNCH_V;
@@ -427,7 +492,7 @@ export class Tunnel {
       }
       for (const belt of this.belts) {
         if (this.onFeature(_fv, belt.pos, belt.axes, TILE / 2 + 0.1, SLICE_LEN / 2 + 0.25, 1.1)) {
-          p.platformLat += CONVEYOR_SPEED * belt.dir * belt.axes.colAxis.dot(frame.right);
+          p.platformLat += CONVEYOR_SPEED * belt.dir * belt.axes.colAxis.dot(this.drum.toLocal(_localRight.copy(frame.right)));
           break;
         }
       }
@@ -454,6 +519,8 @@ export class Tunnel {
   /** Advances everything time-driven. Runs inside the fixed step. */
   updateFeatures(dt: number) {
     this.featureTime += dt;
+    this.drum.advance(dt);
+    this.group.quaternion.copy(this.drum.rotation);
     const t = this.featureTime;
 
     for (const sl of this.sliders) {
@@ -487,6 +554,7 @@ export class Tunnel {
    * barriers kill people who had correctly stepped aside.
    */
   shutterHazard(p: THREE.Vector3, _halfW: number, halfH: number): boolean {
+    p = this.drum.toLocal(_localPoint.copy(p));
     for (const sh of this.shutters) {
       if (sh.ext < SHUTTER_LETHAL_FRAC) continue;
       const acrossIsX = sh.axes.colAxis.y === 0;
@@ -524,11 +592,16 @@ export class Tunnel {
 
   /** Feature positions, for the QA harness to aim a player at one. */
   featurePositions(): {
+    magnets: [number, number, number][];
     pads: [number, number, number][];
     belts: { pos: [number, number, number]; dir: number }[];
     shutters: [number, number, number][];
   } {
     return {
+      magnets: this.magnets.map(m => {
+        const p = this.drum.toWorld(m.pos.clone());
+        return [p.x, p.y, p.z];
+      }),
       pads: this.pads.map((p) => [p.pos.x, p.pos.y, p.pos.z]),
       belts: this.belts.map((b) => ({ pos: [b.pos.x, b.pos.y, b.pos.z], dir: b.dir })),
       shutters: this.shutters.map((sh) => [sh.surface.x, sh.surface.y, sh.surface.z]),
@@ -611,6 +684,7 @@ export class Tunnel {
     for (let i = 0; i < nRings; i++) {
       const ring = new THREE.Mesh(ringGeo, ringMat);
       ring.position.z = -i * 13 - 6;
+      ring.userData.scenery = true;
       this.group.add(ring);
     }
 
@@ -623,6 +697,7 @@ export class Tunnel {
       pipe.scale.set(0.3 + (i % 4) * 0.14, 1, 0.3 + (i % 4) * 0.14);
       pipe.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, -length / 2);
       pipe.rotation.x = Math.PI / 2;
+      pipe.userData.scenery = true;
       this.group.add(pipe);
     }
 
@@ -643,6 +718,7 @@ export class Tunnel {
       const ang = (i / Math.max(2, Math.floor(length / 45))) * Math.PI * 2 + 0.7;
       t.position.set(Math.cos(ang) * (HALF + 5.5), Math.sin(ang) * (HALF + 5.5), -18 - i * 45);
       this.turbines.push({ obj: t, speed: 0.5 + (i % 4) * 0.22 });
+      t.userData.scenery = true;
       this.group.add(t);
     }
   }
@@ -681,6 +757,7 @@ export class Tunnel {
 
   dispose(scene: THREE.Scene) {
     scene.remove(this.group);
+    scene.remove(this.scenery);
     this.art.dispose();
     for (const d of this.disposables) d.dispose();
     this.disposables = [];
@@ -693,6 +770,9 @@ export class Tunnel {
     this.shutters = [];
   }
 }
+
+const _localRight = new THREE.Vector3();
+const _localPoint = new THREE.Vector3();
 
 
 interface CrumbleTile {

@@ -27,6 +27,8 @@ try{
   await page.keyboard.down('Space');await page.clock.runFor(80);check('air press triggers pancake dive',(await snap()).diving&&(await snap()).vy>0);
   await page.keyboard.up('Space');await page.keyboard.press('Escape');const frozen=(await snap()).x;await page.clock.runFor(500);check('pause freezes movement',(await snap()).state==='paused'&&(await snap()).x===frozen);
   check('music stops on pause',!(await snap()).music.playing);
+  await page.getByRole('button',{name:'♫ Music: on',exact:true}).click();check('music can be muted independently',(await snap()).save.musicMuted);
+  await page.getByRole('button',{name:'♫ Music: off',exact:true}).click();
   await page.keyboard.press('Escape');await page.clock.runFor(30);check('music resumes with gameplay',(await snap()).music.playing&&(await snap()).music.initialized);
   await page.keyboard.press('KeyM');check('mute persists',JSON.parse(await page.evaluate(()=>localStorage.getItem('squish-adventure-v2'))).muted);
   await page.close();
@@ -34,12 +36,14 @@ try{
   for(const i of [0,2,3,4,6,7,8,13,15,16,17,23]){
     const route=routes.find(r=>r.index===i);check('solver found level '+(i+1),route&&!route.failed);
     const p=await pageFor(i);await p.click('#begin');let down=false,done=false;
+    let checkpointVerified=false;
     for(let step=0;step<route.path.length+3;step++){
       const state=await p.evaluate(()=>window.__SQUISH__.snapshot());
       if(state.index!==i||state.state==='won'){done=true;break;}
       if(state.state==='dead')throw Error('Browser route failed level '+(i+1)+' at '+state.x+', '+state.y+' t='+state.time);
       const want=route.path[Math.min(step,route.path.length-1)];if(want!==down){await p.keyboard[want?'down':'up']('Space');down=want;}
       await p.clock.runFor(100);
+      if(i===2&&!checkpointVerified&&state.checkpoint.x>130){check('checkpoint records a safe restart',state.checkpoint.x>130&&state.checkpoint.sweets>=0);checkpointVerified=true;}
       if(step===45&&[2,4,6,8,13,16,17].includes(i))await p.screenshot({path:shots+'adventure-level-'+String(i+1).padStart(2,'0')+'.png'});
       if(i===7&&step===55)await p.screenshot({path:shots+'adventure-boss.png'});
       if(i>=2){if(step===30)check('no tutorial prompts in level '+(i+1),await p.locator('#hint').textContent()==='');}
@@ -50,6 +54,12 @@ try{
     check('level '+(i+1)+' reward saved',await p.evaluate(i=>window.__SQUISH__.snapshot().save.stars[i]>0,i));
     await p.close();
   }
+  const recovery=await pageFor(2);await recovery.click('#begin');let held=false;
+  for(const down of routes.find(r=>r.index===2).path){if(down!==held){await recovery.keyboard[down?'down':'up']('Space');held=down;}await recovery.clock.runFor(100);const s=await recovery.evaluate(()=>window.__SQUISH__.snapshot());if(s.checkpoint.x>130){if(held)await recovery.keyboard.up('Space');const cp=s.checkpoint;await recovery.keyboard.press('KeyR');const restored=await recovery.evaluate(()=>window.__SQUISH__.snapshot());check('R restores checkpoint position and sweets',restored.index===2&&Math.abs(restored.x-cp.x)<5&&restored.sweets===cp.sweets);break;}}
+  await recovery.close();
+  const migrated=await browser.newPage();await migrated.addInitScript(()=>localStorage.setItem('squish-v1',JSON.stringify({unlocked:12,bank:70,skin:2})));
+  await migrated.goto('http://127.0.0.1:5197/?poki=mock');await migrated.waitForFunction(()=>window.__SQUISH__);
+  check('old flavors migrate while new adventure starts at level one',await migrated.evaluate(()=>{const s=window.__SQUISH__.snapshot();return s.index===0&&s.save.bank===70&&s.save.skin===2&&JSON.parse(localStorage.getItem('squish-v1')).unlocked===12;}));await migrated.close();
   const mobile=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:2,isMobile:true,hasTouch:true});mobile.on('pageerror',e=>errors.push(e.message));
   await mobile.addInitScript(()=>{Object.defineProperty(window,'localStorage',{get(){throw new DOMException('Storage disabled','SecurityError');}});});
   await mobile.goto('http://127.0.0.1:5197/?poki=mock');await mobile.waitForFunction(()=>window.__SQUISH__);await mobile.screenshot({path:shots+'adventure-mobile.png'});
