@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-const PLACEHOLDER = "REPLACE_WITH_ID_FROM_DEVELOPERS_POKI_COM";
+const PLACEHOLDER = "REPLACE_WITH_POKI_GAME_ID";
 
 export function readGame(configPath = "poki.json") {
   const path = resolve(configPath);
