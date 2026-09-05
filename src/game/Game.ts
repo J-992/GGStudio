@@ -14,6 +14,10 @@ import { Tunnel } from "../tunnel/Tunnel";
 import { Orientation, getFrame, stepOrientation } from "../tunnel/SurfaceOrientation";
 import { Player, PLAYER_GROUP, STATIC_GROUP } from "../player/Player";
 import { ACT_NAMES, ACT_SIZE, actOf, actStart, progress } from "../progress/Progress";
+
+/** A catch is a helping hand, not a safety harness: act one allows a few. */
+const MAX_RECOVERIES = 4;
+const RECOVER_COOLDOWN = 0.7;
 import { Coach } from "../ui/Coach";
 import { Coins } from "../tunnel/Coins";
 import { SKINS, TRAILS, skinById, trailById } from "./Skins";
@@ -284,6 +288,9 @@ export class Game {
   private practising = false;
   private runStart = 0;
   private runOverTimer = 0;
+  /** Per-robot cooldown so a catch cannot fire every frame. */
+  private recoverCooldown = [0, 0];
+  private recoveries = 0;
   private coach = new Coach();
   private coins!: Coins;
   private trails: RobotTrail[] = [];
@@ -343,6 +350,8 @@ export class Game {
     this.coopCam.snapTo(this.orientation);
     this.rotCooldown = 0;
     this.hintFlags = (def.hints ?? []).map(() => false);
+    this.recoveries = 0;
+    this.recoverCooldown = [0, 0];
     this.tetherPhysics.wasHigh = false;
     this.ui.clearHint();
     this.ui.setLevel(idx + 1, LEVELS.length, def.name);
@@ -574,6 +583,10 @@ export class Game {
     this.players[0].postStep(RAPIER, this.world, frame, RAY_GROUPS, dt, ev0);
     this.players[1].postStep(RAPIER, this.world, frame, RAY_GROUPS, dt, ev1);
 
+    for (let i = 0; i < 2; i++) {
+      if (this.recoverCooldown[i] > 0) this.recoverCooldown[i] -= dt;
+    }
+
     this.safetyCheck();
     if (this.state !== GameState.Playing) return;
 
@@ -667,19 +680,32 @@ export class Game {
     }
   }
 
-  /** Drops a fallen robot back beside its partner, on the surface they are on. */
-  private recover(p: Player, mateIdx: number) {
+  /**
+   * Drops a fallen robot back beside its partner. Only works while the partner is
+   * itself safe: the two are tethered, so they usually go over the edge together,
+   * and putting a falling robot next to a falling robot just re-triggers this
+   * every frame — which read as the pair bouncing around, never dying.
+   */
+  private recover(p: Player, mateIdx: number): boolean {
+    if (this.recoverCooldown[p.index] > 0) return true;
+    if (this.recoveries >= MAX_RECOVERIES) return false;
     const mate = this.players[mateIdx];
+    if (!mate.grounded || mate.beyond > 0.5) return false;
+
     mate.position(this.tmpB);
     const frame = getFrame(this.orientation);
     this.tmpA.copy(this.tmpB).addScaledVector(frame.right, p.index === 0 ? -1.1 : 1.1);
     this.tmpA.addScaledVector(frame.up, 0.6);
     p.warp(this.tmpA.x, this.tmpA.y, this.tmpA.z);
     p.stopMotion();
+    p.wasFar = false;
+    this.recoverCooldown[p.index] = RECOVER_COOLDOWN;
+    this.recoveries++;
     this.rescues++;
     this.ui.rescuePopup();
     audio.save();
     this.effects.burst(this.tmpA, 0x7dffc8, 24, 8, 0.7, 0);
+    return true;
   }
 
   private checkShutters() {
@@ -728,10 +754,7 @@ export class Game {
         // partner instead of ending the run: playtests showed the median session
         // dying out inside the first minute, which is the tutorial failing, not
         // the player.
-        if (this.levelIdx < ACT_SIZE) {
-          this.recover(p, i === 0 ? 1 : 0);
-          continue;
-        }
+        if (this.levelIdx < ACT_SIZE && this.recover(p, i === 0 ? 1 : 0)) continue;
         anyDead = true;
         this.noteDeath(p.airTime > MAX_AIR_TIME ? "air-time" : "fell-out", i);
       }
