@@ -15,6 +15,8 @@ import { Orientation, getFrame, stepOrientation } from "../tunnel/SurfaceOrienta
 import { Player, PLAYER_GROUP, STATIC_GROUP } from "../player/Player";
 import { ACT_NAMES, ACT_SIZE, actOf, actStart, progress } from "../progress/Progress";
 import { Coach } from "../ui/Coach";
+import { Coins } from "../tunnel/Coins";
+import { skinById } from "./Skins";
 import { TetherState } from "../tether/TetherPhysics";
 import { TetherRenderer } from "../tether/TetherRenderer";
 import { CoopCamera } from "../camera/CoopCamera";
@@ -149,15 +151,21 @@ export class Game {
     this.showTitleScreen();
     this.ui.hideLoading();
 
-    this.ui.bindGameOverActions(
-      () => this.handleRestart(),
-      () => this.showTitleScreen(),
-    );
-
     if (debug) this.exposeDebug();
   }
 
   /** Shows the title with its act shortcuts rebuilt from the current record. */
+  /** Repaints both robots for whichever skin is equipped. */
+  applySkin() {
+    const skin = skinById(progress.skin);
+    this.players[0].applySkin(skin.body, skin.p1);
+    this.players[1].applySkin(skin.body, skin.p2);
+    // Keep the coach labels wearing the same colours as the robots they name.
+    const hex = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
+    document.getElementById("coach-p1")?.style.setProperty("--coach-c", hex(skin.p1));
+    document.getElementById("coach-p2")?.style.setProperty("--coach-c", hex(skin.p2));
+  }
+
   private showTitleScreen() {
     this.state = GameState.Title;
     this.ui.hideGameOver();
@@ -166,13 +174,15 @@ export class Game {
       this.ui.showTitle(false);
       this.startRun(actStart(act));
     });
+    this.ui.buildShop(() => this.applySkin());
+    this.ui.setCoins(progress.coins, 0);
     this.ui.showTitle(true);
   }
 
   private handleAnyKey() {
     audio.resume();
     if (this.state === GameState.RunOver) {
-      this.handleRestart();
+      this.runOverTimer = Math.min(this.runOverTimer, 0.25);
       return;
     }
     if (this.state === GameState.Title && this.titleInputEnabled) {
@@ -230,8 +240,7 @@ export class Game {
   private handleRestart() {
     audio.resume();
     if (this.state === GameState.RunOver) {
-      this.ui.hideGameOver();
-      this.startRun(this.practising ? actStart(actOf(this.levelIdx)) : 0);
+      this.runOverTimer = Math.min(this.runOverTimer, 0.25);
       return;
     }
     if (this.state === GameState.Finished) {
@@ -252,11 +261,17 @@ export class Game {
   /** Set while the run began at an act shortcut, so it cannot set a record. */
   private practising = false;
   private runStart = 0;
+  private runOverTimer = 0;
   private coach = new Coach();
+  private coins!: Coins;
+  /** Coins picked up this run, banked when the run ends or a level is cleared. */
+  private runCoins = 0;
 
   private startRun(level: number) {
     this.deaths = 0;
     this.rescues = 0;
+    this.runCoins = 0;
+    this.applySkin();
     this.practising = level > 0;
     this.runStart = performance.now();
     this.ui.hideGameOver();
@@ -285,6 +300,9 @@ export class Game {
         .setCollisionGroups((STATIC_GROUP << 16) | 0xffff);
       this.world.createCollider(col, body);
     });
+
+    if (this.coins) this.coins.dispose(this.scene);
+    this.coins = new Coins(this.scene, def);
 
     const spawns = [
       new THREE.Vector3(-1.2, spawnY, -4),
@@ -363,9 +381,10 @@ export class Game {
     const previousBest = progress.best;
     const isBest = this.practising ? false : progress.reached(reached);
     this.state = GameState.RunOver;
+    this.runOverTimer = 1.9;
     this.ui.bannerHide();
     this.ui.clearHint();
-    this.ui.showGameOver(reached, LEVELS.length, isBest ? previousBest : progress.best, isBest);
+    this.ui.showGameOver(reached, LEVELS.length, isBest ? previousBest : progress.best, isBest, this.runCoins);
     this.onGameplayStop?.(reached, "fail");
   }
 
@@ -423,6 +442,7 @@ export class Game {
       this.players[0].updateShadow(RAPIER, this.world, frameUp, RAY_GROUPS);
       this.players[1].updateShadow(RAPIER, this.world, frameUp, RAY_GROUPS);
       this.tunnel.update(visDt);
+      this.coins.update(visDt);
       if (this.networkGuest && this.state === GameState.Playing) {
         this.tunnel.updateSpinners(visDt);
         this.tunnel.updateFeatures(visDt);
@@ -452,6 +472,12 @@ export class Game {
     if (this.state === GameState.Dying) {
       this.dyingTimer -= dtReal;
       if (this.dyingTimer <= 0) this.endRun();
+    }
+    if (this.state === GameState.RunOver) {
+      this.runOverTimer -= dtReal;
+      if (this.runOverTimer <= 0) {
+        this.startRun(this.practising ? actStart(actOf(this.levelIdx)) : 0);
+      }
     }
     if (this.state === GameState.Complete) {
       this.completeTimer -= dtReal;
@@ -500,6 +526,15 @@ export class Game {
     this.tunnel.updateSpinners(dt);
     this.tunnel.updateFeatures(dt);
     this.world.step();
+
+    const picked: THREE.Vector3[] = [];
+    if (this.coins.collect(this.players, picked)) {
+      for (const at of picked) this.effects.burst(at, 0xffd75e, 14, 6, 0.5, 0);
+      this.runCoins += picked.length;
+      progress.addCoins(picked.length);
+      this.ui.setCoins(progress.coins, this.runCoins);
+      audio.coin();
+    }
 
     const cev = this.tunnel.updateCrumble(dt, this.players, this.world, frame.up);
     if (cev.broken.length) {

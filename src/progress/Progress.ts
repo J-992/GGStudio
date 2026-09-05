@@ -18,10 +18,19 @@ interface Record_ {
   clears: number;
   /** Set once a player has moved and jumped both robots. Retires the coach. */
   learned: boolean;
+  /** Coins banked across every run. Never spent by dying. */
+  coins: number;
+  /** Skin ids bought so far. The starter skin is always owned. */
+  owned: string[];
+  /** Skin currently worn. */
+  skin: string;
 }
 
 const KEY = "tether-run.record.v1";
-const EMPTY: Record_ = { best: 0, acts: 1, bestTime: 0, clears: 0, learned: false };
+const EMPTY: Record_ = {
+  best: 0, acts: 1, bestTime: 0, clears: 0, learned: false,
+  coins: 0, owned: ["conduit"], skin: "conduit",
+};
 
 /**
  * Remembers how far a pair has ever got. Every read and write is guarded: the
@@ -56,6 +65,34 @@ class Progress {
   get bestTime() { return this.data.bestTime; }
   get clears() { return this.data.clears; }
   get learned() { return this.data.learned; }
+  get coins() { return this.data.coins; }
+  get skin() { return this.data.skin; }
+
+  owns(id: string) { return id === "conduit" || this.data.owned.includes(id); }
+
+  /** Coins survive death — that is the point of them. */
+  addCoins(n: number) {
+    if (n <= 0) return;
+    this.data.coins += n;
+    this.save();
+  }
+
+  /** Spends the coins and equips, or returns false if they cannot afford it. */
+  buySkin(id: string, price: number): boolean {
+    if (this.owns(id)) { this.equipSkin(id); return true; }
+    if (this.data.coins < price) return false;
+    this.data.coins -= price;
+    this.data.owned = [...new Set([...this.data.owned, id])];
+    this.data.skin = id;
+    this.save();
+    return true;
+  }
+
+  equipSkin(id: string) {
+    if (!this.owns(id)) return;
+    this.data.skin = id;
+    this.save();
+  }
 
   markLearned() {
     if (this.data.learned) return;

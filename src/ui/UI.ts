@@ -1,4 +1,5 @@
 import { ACT_NAMES, ACT_SIZE, actCount, formatTime, progress } from "../progress/Progress";
+import { SKINS } from "../game/Skins";
 
 export class UI {
   private levelLabel = document.getElementById("level-label")!;
@@ -14,6 +15,9 @@ export class UI {
   private finishStats = document.getElementById("finish-stats")!;
   private loadingEl = document.getElementById("loading")!;
   private gameOverEl = document.getElementById("gameover-screen")!;
+  private coinCount = document.getElementById("coin-count")!;
+  private coinRun = document.getElementById("coin-run")!;
+  private coinRunTimer = 0;
   private hintTimer = 0;
 
   /**
@@ -89,7 +93,7 @@ export class UI {
     this.finishStats.innerHTML =
       (fastest ? `<b class="new-best">NEW BEST TIME — ${time}</b>` : `TIME ${time} · BEST ${formatTime(progress.bestTime)}`) +
       `<br/>RESCUES ${rescues} · RUNS CLEARED ${clears}<br/>` +
-      (rescues > 0 ? "the tether held." : "no rescues needed — try letting each other fall.");
+      (rescues > 0 ? "the tether held." : "clean run — nobody needed pulling back.");
     this.finishEl.style.display = "flex";
     this.refreshOverlay();
   }
@@ -98,7 +102,51 @@ export class UI {
    * The end of a run is the moment a pair finds out whether they got further
    * than last time, so it says so rather than silently dropping them at level 1.
    */
-  showGameOver(reached: number, total: number, best: number, isBest: boolean) {
+  /** Banked total, plus a brief "+n" for what this run has added. */
+  setCoins(total: number, thisRun: number) {
+    this.coinCount.textContent = String(total);
+    if (thisRun > 0) {
+      this.coinRun.textContent = `+${thisRun}`;
+      this.coinRun.classList.add("show");
+      this.coinRunTimer = 1.6;
+    }
+  }
+
+  /** Title-screen skin shop. Buys with coins, equips what is already owned. */
+  buildShop(onChange: () => void) {
+    const host = document.getElementById("shop-items")!;
+    host.innerHTML = "";
+    for (const skin of SKINS) {
+      const owned = progress.owns(skin.id);
+      const active = progress.skin === skin.id;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `skin-chip${active ? " active" : ""}`;
+      const afford = owned || progress.coins >= skin.price;
+      b.disabled = !afford;
+      b.innerHTML =
+        `<span class="skin-swatch">` +
+        `<i style="background:#${skin.p1.toString(16).padStart(6, "0")}"></i>` +
+        `<i style="background:#${skin.p2.toString(16).padStart(6, "0")}"></i>` +
+        `</span>${skin.name}` +
+        (owned ? (active ? " ·ON" : "") : ` <span class="skin-price">◎${skin.price}</span>`);
+      if (afford) {
+        b.addEventListener("click", () => {
+          if (progress.buySkin(skin.id, skin.price)) {
+            onChange();
+            this.buildShop(onChange);
+            this.buildActSelect(this.lastActPick!);
+          }
+        });
+      }
+      host.append(b);
+    }
+    document.getElementById("shop-label")!.textContent = `SKINS · ◎${progress.coins}`;
+  }
+
+  private lastActPick: ((act: number) => void) | null = null;
+
+  showGameOver(reached: number, total: number, best: number, isBest: boolean, runCoins = 0) {
     (document.getElementById("run-reached") as HTMLElement).textContent =
       `REACHED LEVEL ${reached} OF ${total}`;
     (document.getElementById("run-reached-name") as HTMLElement).textContent =
@@ -109,18 +157,14 @@ export class UI {
     const bestMark = document.getElementById("run-bar-best") as HTMLElement;
     bestMark.style.display = best > 0 ? "block" : "none";
     bestMark.style.left = `${(best / total) * 100}%`;
-    (document.getElementById("run-record") as HTMLElement).innerHTML = isBest
-      ? `<b class="new-best">FURTHEST YET</b>`
-      : `YOUR BEST — <b>LEVEL ${best}</b>`;
+    (document.getElementById("run-record") as HTMLElement).innerHTML =
+      (isBest ? `<b class="new-best">FURTHEST YET</b>` : `YOUR BEST — <b>LEVEL ${best}</b>`) +
+      (runCoins > 0 ? ` · <b class="skin-price">◎${runCoins} KEPT</b>` : "");
     this.gameOverEl.style.display = "flex";
     this.refreshOverlay();
   }
 
-  /** Wires the two buttons on the run-over card. Called once at boot. */
-  bindGameOverActions(onAgain: () => void, onTitle: () => void) {
-    document.getElementById("btn-again")!.addEventListener("click", onAgain);
-    document.getElementById("btn-to-title")!.addEventListener("click", onTitle);
-  }
+
 
   hideGameOver() {
     this.gameOverEl.style.display = "none";
@@ -129,6 +173,7 @@ export class UI {
 
   /** Title-screen act shortcuts, opened by reaching an act in a full run. */
   buildActSelect(onPick: (act: number) => void) {
+    this.lastActPick = onPick;
     const host = document.getElementById("act-buttons")!;
     host.innerHTML = "";
     const unlocked = progress.acts;
@@ -156,6 +201,10 @@ export class UI {
   }
 
   update(dt: number) {
+    if (this.coinRunTimer > 0) {
+      this.coinRunTimer -= dt;
+      if (this.coinRunTimer <= 0) this.coinRun.classList.remove("show");
+    }
     if (this.hintTimer > 0) {
       this.hintTimer -= dt;
       if (this.hintTimer <= 0) this.hintEl.style.opacity = "0";

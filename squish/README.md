@@ -5,7 +5,7 @@ Small blob. Big escape. An original one-button jelly platformer built alongside 
 From the repository root:
 
 ```sh
-npm run dev:squish
+npm run dev
 ```
 
 Open http://127.0.0.1:5174. Hold Space, the mouse, or a finger on the game to flatten and charge. Release to jump. Longer holds give bigger jumps. Escape pauses, R retries, M toggles sound. On touchscreens, hold anywhere on the game world.

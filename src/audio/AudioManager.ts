@@ -126,6 +126,10 @@ class AudioManager {
   }
   snap() { this.noise(0.12, 2000, 0.2, "bandpass"); }
   crumble() { this.noise(0.16, 900, 0.2); this.tone("square", 220, 80, 0.14, 0.1); }
+  coin() {
+    this.tone("triangle", 900, 1350, 0.09, 0.1);
+    this.tone("triangle", 1350, 1800, 0.08, 0.07, 0.05);
+  }
   launch() {
     this.tone("square", 260, 1050, 0.26, 0.18);
     this.noise(0.18, 1800, 0.09, "highpass");

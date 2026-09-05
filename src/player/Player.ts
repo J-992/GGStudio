@@ -57,7 +57,7 @@ function rayHit(
 
 export class Player {
   readonly index: PlayerIndex;
-  readonly color: number;
+  color: number;
   body!: RAPIER.RigidBody;
   spawn = new THREE.Vector3();
 
@@ -107,6 +107,7 @@ export class Player {
   private legR!: THREE.Group;
   private visorMat!: THREE.MeshBasicMaterial;
   private accentMat!: THREE.MeshStandardMaterial;
+  private bodyMat!: THREE.MeshStandardMaterial;
   shadow: THREE.Mesh;
 
   constructor(index: PlayerIndex, color: number, scene: THREE.Scene) {
@@ -123,10 +124,20 @@ export class Player {
     scene.add(this.shadow);
   }
 
+  /** Repaints the robot for a bought skin. Materials are shared per robot. */
+  applySkin(body: number, accent: number) {
+    this.color = accent;
+    this.bodyMat.color.setHex(body);
+    this.accentMat.color.setHex(accent);
+    this.accentMat.emissive.setHex(accent);
+    this.visorMat.color.setHex(accent);
+  }
+
   private buildModel() {
     const dark = new THREE.MeshStandardMaterial({
       color: 0x46536b, roughness: 0.5, metalness: 0.35,
     });
+    this.bodyMat = dark;
     this.accentMat = new THREE.MeshStandardMaterial({
       color: this.color, roughness: 0.35, metalness: 0.2,
       emissive: this.color, emissiveIntensity: 0.45,

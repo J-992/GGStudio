@@ -342,3 +342,46 @@ body.coaching .tc-right .tc-btn { animation: pad-hint 1.4s ease-in-out infinite 
   0%, 100% { background: rgba(20, 32, 48, 0.35); }
   50% { background: rgba(60, 110, 150, 0.45); }
 }
+
+/* --- coins and skins ----------------------------------------------------- */
+
+#coin-hud {
+  position: absolute;
+  top: 14px;
+  right: 84px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 15px;
+  letter-spacing: 0.12em;
+  color: #ffd75e;
+  text-shadow: 0 0 10px rgba(255, 174, 26, 0.5);
+  pointer-events: none;
+}
+#coin-icon { font-size: 13px; }
+#coin-run { font-size: 11px; color: #7dffc8; opacity: 0; transition: opacity 0.3s; }
+#coin-run.show { opacity: 1; }
+
+#shop { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 6px; }
+#shop-label { margin: 0; font-size: 10px; letter-spacing: 0.3em; color: var(--dim); }
+#shop-items { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 640px; }
+.skin-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  padding: 6px 10px;
+  color: #cfe6f5;
+  background: rgba(20, 32, 46, 0.7);
+  border: 1px solid rgba(120, 200, 230, 0.28);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.skin-chip:hover:not(:disabled) { border-color: #35e0ff; color: #fff; }
+.skin-chip:disabled { opacity: 0.4; cursor: default; }
+.skin-chip.active { border-color: #7dffc8; color: #7dffc8; }
+.skin-swatch { display: inline-flex; gap: 2px; }
+.skin-swatch i { width: 7px; height: 12px; border-radius: 2px; display: block; }
+.skin-price { color: #ffd75e; }

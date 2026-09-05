@@ -11,6 +11,7 @@
     <canvas id="game-canvas"></canvas>
     <div id="hud">
       <div id="level-label"></div>
+      <div id="coin-hud"><span id="coin-icon">◎</span><span id="coin-count">0</span><span id="coin-run"></span></div>
       <div id="hint"></div>
       <div id="rescue-popup">RESCUE!</div>
       <div id="banner"><div id="banner-main"></div><div id="banner-sub"></div></div>
@@ -56,6 +57,10 @@
         <div id="act-buttons"></div>
       </div>
       <p id="title-record" class="local-intro"></p>
+      <div id="shop" class="local-intro">
+        <p id="shop-label">SKINS</p>
+        <div id="shop-items"></div>
+      </div>
       <p class="press local-intro keys">ONE PLAYER OR TWO · GAMEPADS SUPPORTED</p>
       <p class="press local-intro taps">ONE PLAYER OR TWO</p>
       <p class="save-note local-intro">ARCADE RUN · ONE DEATH ENDS IT · ACTS UNLOCK AS YOU REACH THEM</p>
@@ -82,10 +87,7 @@
       <div id="run-depth"><span id="run-reached"></span><small id="run-reached-name"></small></div>
       <div id="run-bar"><div id="run-bar-fill"></div><div id="run-bar-best"></div></div>
       <p id="run-record"></p>
-      <div id="run-actions">
-        <button id="btn-again" type="button">RUN IT AGAIN</button>
-        <button id="btn-to-title" class="quiet" type="button">TITLE</button>
-      </div>
+      <p class="press" id="run-again">RESTARTING&hellip;</p>
     </div>
     <div id="loading">BOOTING CONDUIT&hellip;</div>
   </div>

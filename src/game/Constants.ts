@@ -34,8 +34,12 @@ export const TETHER_HARD_RELAX = 0.3;
 export const TETHER_REEL_STEP = 0.06;
 export const TETHER_VEL_CLAMP = 26;
 
-export const KILL_DIST = 30;
-export const MAX_AIR_TIME = 6;
+// Off the map is dead, and distance is what says so: a robot dangling under the
+// tunnel on a taut rope is already past this, so it dies at once instead of
+// waiting out a timer. Air time is only a backstop now, and has to stay clear of
+// a launch pad taken with jump held, which is a legitimate two seconds of flight.
+export const KILL_DIST = 6.5;
+export const MAX_AIR_TIME = 3.2;
 export const SCREEN_KILL_GRACE = 0.3;
 
 export const CRUMBLE_DELAY = 0.3;
