@@ -20,9 +20,13 @@ import { level18 } from "./data/level18";
 import { level19 } from "./data/level19";
 import { level20 } from "./data/level20";
 
+const environments: NonNullable<LevelDef["environment"]>[] = [
+  "dock", "orbital", "induction", "transit", "reactor",
+];
+
 export const LEVELS: LevelDef[] = [
   level01, level02, level03, level04, level05,
   level06, level07, level08, level09, level10,
   level11, level12, level13, level14, level15,
   level16, level17, level18, level19, level20,
-];
+].map((level, index) => ({ ...level, environment: environments[Math.floor(index / 4)] }));

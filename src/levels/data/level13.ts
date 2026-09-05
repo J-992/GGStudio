@@ -1,24 +1,26 @@
-import type { LevelDef } from "../types";
-import { pat, rep, seq, solidRun } from "../helpers";
+import { course } from "../authoring";
+import { rep, seq, solidRun } from "../helpers";
 
-// ACT IV — moving ground, and doors that close.
-export const level13: LevelDef = {
-  name: "TRACKING",
-  hints: [
-    { atSlice: 10, text: "VIOLET PLATFORMS TRACK ACROSS — RIDE THEM" },
-    { atSlice: 46, text: "THIS ONE IS NARROWER" },
-  ],
-  slices: seq(
-    solidRun(12),
-    rep(4, { f: pat(".===.") }),
-    solidRun(10),
-    rep(5, { f: pat(".===.") }),
-    solidRun(8),
-    rep(4, { f: pat(".===.") }),
-    solidRun(8),
-    rep(4, { f: pat(".===.") }),
-    solidRun(10),
-    rep(5, { f: pat(".===.") }),
-    solidRun(16),
-  ),
-};
+export const level13 = course(
+  "TRACKING",
+  {
+    label: "MOVING GROUND",
+    hint: "VIOLET DECKS MOVE SIDEWAYS — STAY NEAR THEIR MIDDLE",
+    slices: seq(solidRun(12), rep(5, { f: "#===#" }), solidRun(6)),
+  },
+  {
+    label: "FREE FLOAT",
+    hint: "THE WHOLE BRIDGE NOW MOVES",
+    slices: seq(solidRun(8), rep(5, { f: ".###." }), rep(4, { f: ".===." }), solidRun(8)),
+  },
+  {
+    label: "CHANGE OF PHASE",
+    hint: "THE NEXT DECK SWINGS THE OTHER WAY",
+    slices: seq(solidRun(8), rep(5, { f: ".###." }), rep(4, { f: ".+++." }), solidRun(6)),
+  },
+  {
+    label: "NARROW CROSSING",
+    hint: "LINE UP TOGETHER FOR THE TWO-LANE DECK",
+    slices: seq(solidRun(8), rep(5, { f: ".##.." }), rep(4, { f: ".==.." }), solidRun(8), rep(4, { f: ".===." }), solidRun(12)),
+  },
+);

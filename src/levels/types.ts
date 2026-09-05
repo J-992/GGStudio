@@ -51,4 +51,8 @@ export interface LevelDef {
   slices: SliceDef[];
   hints?: HintDef[];
   spinners?: SpinnerDef[];
+  /** Visual identity only; never changes collision or mechanic colors. */
+  environment?: "dock" | "orbital" | "induction" | "transit" | "reactor";
+  /** Authored phrase boundaries, also used for environmental signs. */
+  beats?: { atSlice: number; label: string }[];
 }

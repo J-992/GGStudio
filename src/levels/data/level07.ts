@@ -6,8 +6,8 @@ const E = ".....";
 export const level07: LevelDef = {
   name: "SKYLINE",
   hints: [
-    { atSlice: 24, text: "THE WALL HAS HOLES TOO" },
-    { atSlice: 52, text: "THE CEILING IS THE ONLY WAY ON" },
+    { atSlice: 18, text: "THE WALL NARROWS TOO — FOLLOW THE PANELS" },
+    { atSlice: 56, text: "KEEP CLIMBING — THE CEILING IS THE NEXT FLOOR" },
   ],
   slices: seq(
     solidRun(10),

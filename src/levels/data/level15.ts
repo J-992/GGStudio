@@ -1,29 +1,25 @@
-import type { LevelDef } from "../types";
-import { pat, rep, seq, solidRun } from "../helpers";
+import { course } from "../authoring";
+import { rep, seq, solidRun } from "../helpers";
 
-export const level15: LevelDef = {
-  name: "SHUTTER LINE",
-  hints: [
-    { atSlice: 8, text: "RED BARRIERS KILL WHILE THEY ARE UP — READ THE RHYTHM" },
-    { atSlice: 50, text: "TWO BARRIERS, ONE ALWAYS DOWN" },
-  ],
-  slices: seq(
-    solidRun(12),
-    rep(1, { f: pat("!####") }),
-    solidRun(7),
-    rep(1, { f: pat("####!") }),
-    solidRun(7),
-    rep(1, { f: pat("##!##") }),
-    solidRun(7),
-    rep(1, { f: pat("!###?") }),
-    solidRun(7),
-    rep(1, { f: pat("?###!") }),
-    solidRun(7),
-    rep(1, { f: pat("!#?#!") }),
-    solidRun(8),
-    rep(1, { f: pat("?#!#?") }),
-    solidRun(6),
-    rep(1, { f: pat("!#!#!") }),
-    solidRun(18),
-  ),
-};
+export const level15 = course(
+  "SHUTTER LINE",
+  {
+    label: "READ THE SIGNAL",
+    hint: "RED GRILLES HURT WHEN RAISED — USE AN OPEN LANE",
+    slices: seq(solidRun(12), rep(1, { f: "##!##" }), solidRun(9)),
+  },
+  {
+    label: "ALTERNATING DOORS",
+    hint: "THE STRIPED BASE MARKS WHERE A BARRIER WILL RISE",
+    slices: seq(solidRun(8), rep(1, { f: "!###?" }), solidRun(8), rep(1, { f: "?###!" }), solidRun(6)),
+  },
+  {
+    label: "WEAVE THROUGH",
+    hint: "LOOK AHEAD FOR THE NEXT OPEN LANE",
+    slices: seq(solidRun(8), rep(1, { f: "!#?#!" }), solidRun(7), rep(1, { f: "?#!#?" }), solidRun(6)),
+  },
+  {
+    label: "RHYTHM CHECK",
+    slices: seq(solidRun(6), rep(1, { f: "!#!#!" }), solidRun(6), rep(1, { f: "#!#!#" }), solidRun(14)),
+  },
+);

@@ -3,6 +3,9 @@
 Two robots, one elastic tether, a square tunnel that can turn under you. This is
 the reference for how a level is written and how the twenty of them are paced.
 
+See [CAMPAIGN_RESEARCH.md](CAMPAIGN_RESEARCH.md) for the revised curriculum,
+visual language, evidence, playtest criteria and rotating-drum mechanic proposal.
+
 ## Reading a level
 
 A level is a list of slices. One slice is 2 units of tunnel; the pair covers
@@ -86,22 +89,23 @@ learned.
 | 7 | Skyline | holes in a wall | gaps off the floor |
 | 8 | Carousel | a full lap of four faces | — |
 | 9 | Slingshot | launch pads | true voids |
-| 10 | High Wire | pads on a wall | tether drag |
-| 11 | Beltway | conveyors | forced drift |
+| 10 | High Wire | pads on a wall | wall crumble; finish on the wall |
+| 11 | Beltway | conveyors | forced drift and counterflow |
 | 12 | Crosscurrent | belts that aim you at a wall | belts that climb |
 | 13 | Tracking | ferries | ground that moves |
-| 14 | Ferry | pad into ferry | a one-lane ferry |
+| 14 | Ferry | pad into ferry | opposite-phase decks and transfers |
 | 15 | Shutter Line | shutters | reading a rhythm |
 | 16 | Split Second | paired shutters | two lanes, one open |
 | 17 | Overdrive | belts feeding barriers | barriers on a wall |
 | 18 | Helix | a lap with moving ground | — |
 | 19 | Longfall | pad, ferry, barrier in sequence | living on the wall |
-| 20 | Terminus | all of it | fifty-five seconds of it |
+| 20 | Terminus | all of it | mandatory four-face finale |
 
-The ramp is deliberately lopsided. The first four levels are close to unfailable
-— one-slice holes, wide floors, nothing that punishes a slow reaction. The back
-four are meant to end runs, because a death restarts the campaign and the finale
-should be the reason it does.
+Introductions give players space to read the next demand, then narrow or combine
+it after practice. The back four keep the hardest combinations, with recovery
+space at face transfers and landings. Levels 8, 18 and 20 require all four faces;
+unused faces disappear so the intended circuit cannot be skipped on the opposite
+wall. Automated completion is a traversal check, not evidence of human fairness.
 
 ## Verifying a level
 

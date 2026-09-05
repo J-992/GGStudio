@@ -5,7 +5,7 @@ export const level16: LevelDef = {
   name: "SPLIT SECOND",
   spinners: [{ atSlice: 72, speed: 2.4 }],
   hints: [
-    { atSlice: 14, text: "TWO LANES. ONE OF THEM IS ALWAYS SHUT" },
+    { atSlice: 6, text: "PAIRED GATES ALTERNATE — AIM FOR THE LOWERED ONE" },
     { atSlice: 56, text: "SWAP LANES ON THE BEAT" },
   ],
   slices: seq(

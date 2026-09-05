@@ -7,7 +7,7 @@ export const level12: LevelDef = {
   name: "CROSSCURRENT",
   hints: [
     { atSlice: 30, text: "THE BELT IS AIMING YOU AT THE WALL — GO WITH IT" },
-    { atSlice: 60, text: "BELTS CLIMB WALLS" },
+    { atSlice: 54, text: "BELTS CLIMB WALLS" },
   ],
   slices: seq(
     solidRun(10),

@@ -3,6 +3,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type RAPIER from "@dimforge/rapier3d-compat";
 import type { FaceKey, LevelDef, SliceDef } from "../levels/types";
 import { SOLID_CHARS } from "../levels/types";
+import { ENVIRONMENTS, LevelArt, movingDeckTexture, panelTexture, shutterTexture } from "./LevelArt";
 import {
   COLS, CRUMBLE_DELAY, HALF, SLAB_T, SLICE_LEN, TILE,
   CONVEYOR_SPEED, LAUNCH_V,
@@ -40,34 +41,6 @@ function shutterExtension(time: number, phase: number): number {
   return 0;
 }
 
-function makePanelTexture(): THREE.CanvasTexture {
-  const c = document.createElement("canvas");
-  c.width = c.height = 256;
-  const g = c.getContext("2d")!;
-  g.fillStyle = "#2c3644";
-  g.fillRect(0, 0, 256, 256);
-  g.fillStyle = "#313d4e";
-  g.fillRect(14, 14, 228, 228);
-  g.strokeStyle = "rgba(90,190,220,0.75)";
-  g.lineWidth = 3;
-  g.strokeRect(3, 3, 250, 250);
-  g.strokeStyle = "rgba(0,0,0,0.4)";
-  g.lineWidth = 2;
-  g.strokeRect(14, 14, 228, 228);
-  g.fillStyle = "#242e3b";
-  for (const [x, y] of [[26, 26], [230, 26], [26, 230], [230, 230]]) {
-    g.beginPath();
-    g.arc(x, y, 7, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.fillStyle = "rgba(150,215,245,0.07)";
-  g.fillRect(14, 14, 228, 30);
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = 4;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
 
 function scaleBoxUVs(geo: THREE.BoxGeometry, w: number, h: number, d: number) {
   const uv = geo.attributes.uv as THREE.BufferAttribute;
@@ -102,6 +75,7 @@ export class Tunnel {
   private sliders: Slider[] = [];
   private shutters: Shutter[] = [];
   private featureTime = 0;
+  private art: LevelArt;
   private crumbleMat!: THREE.MeshStandardMaterial;
   private padMat!: THREE.MeshStandardMaterial;
   private beltMat!: THREE.MeshStandardMaterial;
@@ -123,26 +97,32 @@ export class Tunnel {
     const leftBoxes: RunBox[] = [];
     const rightBoxes: RunBox[] = [];
 
-    const tex = makePanelTexture();
-    this.disposables.push(tex);
+    const environment = def.environment ?? "dock";
+    const tex = panelTexture(environment);
+    const cracked = panelTexture(environment, true);
+    this.disposables.push(tex, cracked);
     const slabMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0.35 });
     this.disposables.push(slabMat);
     this.crumbleMat = new THREE.MeshStandardMaterial({
-      map: tex, color: 0xffd9b0, emissive: 0x8a3c12, emissiveIntensity: 0.4,
+      map: cracked, color: 0xffd9b0, emissive: 0x8a3c12, emissiveIntensity: 0.4,
       roughness: 0.7, metalness: 0.3, transparent: true,
     });
     this.disposables.push(this.crumbleMat);
     this.padMat = new THREE.MeshStandardMaterial({
-      color: 0x0d3f33, emissive: 0x2effa8, emissiveIntensity: 1.1, roughness: 0.4, metalness: 0.2,
+      color: 0x0d3f33, emissive: 0x2effa8, emissiveIntensity: 0.45, roughness: 0.4, metalness: 0.2,
     });
     this.beltMat = new THREE.MeshStandardMaterial({
-      color: 0x123a52, emissive: 0x1f9bd6, emissiveIntensity: 0.75, roughness: 0.6, metalness: 0.3,
+      color: 0x123a52, emissive: 0x1f9bd6, emissiveIntensity: 0.3, roughness: 0.6, metalness: 0.3,
     });
+    const deckTexture = movingDeckTexture();
+    this.disposables.push(deckTexture);
     this.sliderMat = new THREE.MeshStandardMaterial({
-      map: tex, color: 0xc9a7ff, emissive: 0x5a2ea8, emissiveIntensity: 0.55, roughness: 0.6, metalness: 0.4,
+      map: deckTexture, color: 0xc9a7ff, emissive: 0x5a2ea8, emissiveIntensity: 0.55, roughness: 0.6, metalness: 0.4,
     });
+    const grille = shutterTexture();
+    this.disposables.push(grille);
     this.shutterMat = new THREE.MeshStandardMaterial({
-      color: 0x3a0d14, emissive: 0xff3a2f, emissiveIntensity: 1.0, roughness: 0.45, metalness: 0.3,
+      map: grille, emissiveMap: grille, color: 0xffffff, emissive: 0xff3a2f, emissiveIntensity: 0.8, roughness: 0.45, metalness: 0.3,
     });
     this.disposables.push(this.padMat, this.beltMat, this.sliderMat, this.shutterMat);
 
@@ -201,7 +181,7 @@ export class Tunnel {
     this.disposables.push(merged);
     this.group.add(new THREE.Mesh(merged, slabMat));
 
-    const trimMat = new THREE.MeshBasicMaterial({ color: 0x2a7d96 });
+    const trimMat = new THREE.MeshBasicMaterial({ color: ENVIRONMENTS[environment].trim });
     const railGeo = new THREE.BoxGeometry(0.14, 0.14, slices.length * SLICE_LEN + 8);
     this.disposables.push(trimMat, railGeo);
     for (const sx of [-1, 1]) {
@@ -215,6 +195,8 @@ export class Tunnel {
     this.buildSpinners(def, world, R);
     this.buildBackground(slices.length * SLICE_LEN);
     this.buildPortal();
+    this.art = new LevelArt(def);
+    this.group.add(this.art.group);
 
     scene.add(this.group);
   }
@@ -636,9 +618,9 @@ export class Tunnel {
     this.disposables.push(pipeGeo);
     for (let i = 0; i < 11; i++) {
       const pipe = new THREE.Mesh(pipeGeo, darkMat);
-      const ang = Math.random() * Math.PI * 2;
-      const rad = HALF + 3 + Math.random() * 6;
-      pipe.scale.setScalar(0.3 + Math.random() * 0.55);
+      const ang = i * 2.3999632297;
+      const rad = HALF + 3 + (i * 7 % 11) * 0.55;
+      pipe.scale.set(0.3 + (i % 4) * 0.14, 1, 0.3 + (i % 4) * 0.14);
       pipe.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, -length / 2);
       pipe.rotation.x = Math.PI / 2;
       this.group.add(pipe);
@@ -660,7 +642,7 @@ export class Tunnel {
       }
       const ang = (i / Math.max(2, Math.floor(length / 45))) * Math.PI * 2 + 0.7;
       t.position.set(Math.cos(ang) * (HALF + 5.5), Math.sin(ang) * (HALF + 5.5), -18 - i * 45);
-      this.turbines.push({ obj: t, speed: 0.5 + Math.random() * 0.9 });
+      this.turbines.push({ obj: t, speed: 0.5 + (i % 4) * 0.22 });
       this.group.add(t);
     }
   }
@@ -699,6 +681,7 @@ export class Tunnel {
 
   dispose(scene: THREE.Scene) {
     scene.remove(this.group);
+    this.art.dispose();
     for (const d of this.disposables) d.dispose();
     this.disposables = [];
     this.turbines = [];

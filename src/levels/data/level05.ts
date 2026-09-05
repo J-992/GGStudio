@@ -7,8 +7,8 @@ const E = ".....";
 export const level05: LevelDef = {
   name: "WALL ROLL",
   hints: [
-    { atSlice: 12, text: "STEER INTO A WALL AND HOLD — THE WALL BECOMES THE FLOOR" },
-    { atSlice: 46, text: "HOLD BACK THE OTHER WAY TO COME DOWN" },
+    { atSlice: 4, text: "STEER INTO THE RIGHT WALL AND HOLD — IT BECOMES THE FLOOR" },
+    { atSlice: 32, text: "STEER BACK TOWARD THE FLOOR AS IT RETURNS" },
   ],
   slices: seq(
     solidRun(12),

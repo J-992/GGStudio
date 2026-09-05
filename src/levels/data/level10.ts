@@ -8,7 +8,7 @@ export const level10: LevelDef = {
   name: "HIGH WIRE",
   hints: [
     { atSlice: 24, text: "PADS WORK ON A WALL TOO" },
-    { atSlice: 60, text: "STAY CLOSE — THE ROPE DRAGS WHOEVER FALLS BEHIND" },
+    { atSlice: 44, text: "STAY CLOSE — FOLLOW THE WALL TO THE PORTAL" },
   ],
   slices: seq(
     solidRun(10),
@@ -16,14 +16,10 @@ export const level10: LevelDef = {
     rep(16, { f: E, c: E, l: E }),
     rep(2, { f: E, c: E, l: E, r: pat("^^^^^") }),
     voidRun(3),
+    rep(18, { f: E, c: E, l: E }),
+    rep(6, { f: E, c: E, l: E, r: pat(".###.") }),
     rep(8, { f: E, c: E, l: E }),
-    rep(2, { f: E, c: E, l: E, r: pat("^^^^^") }),
-    voidRun(3),
-    rep(10, { f: E, c: E, l: E }),
-    rep(8, { f: pat("...##"), c: E, l: E }),
-    rep(8, { f: pat("...##"), r: E, c: E, l: E }),
-    rep(2, { f: pat("^^^^^") }),
-    voidRun(3),
-    solidRun(18),
+    rep(5, { f: E, c: E, l: E, r: pat(".~~~.") }),
+    rep(16, { f: E, c: E, l: E }),
   ),
 };
