@@ -1,5 +1,4 @@
 import { ACT_NAMES, ACT_SIZE, actCount, formatTime, progress } from "../progress/Progress";
-import { SKINS, TRAILS } from "../game/Skins";
 
 export class UI {
   private levelLabel = document.getElementById("level-label")!;
@@ -123,91 +122,6 @@ export class UI {
     this.toastTimer = 4.5;
   }
 
-  /** Title-screen skin shop. Buys with coins, equips what is already owned. */
-  buildShop(onChange: () => void) {
-    this.buildShopInto("shop-items", "shop-label", onChange);
-  }
-
-  /** The same shop inside the pause menu, the only way back to it mid-session. */
-  buildPauseShop(onChange: () => void) {
-    this.buildShopInto("pause-shop-items", "pause-shop-label", onChange);
-  }
-
-  private buildShopInto(hostId: string, labelId: string, onChange: () => void) {
-    const host = document.getElementById(hostId)!;
-    this.buildTrailsInto(hostId, onChange);
-    host.innerHTML = "";
-    for (const skin of SKINS) {
-      const owned = progress.owns(skin.id);
-      const active = progress.skin === skin.id;
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = `skin-chip${active ? " active" : ""}`;
-      const afford = owned || progress.coins >= skin.price;
-      b.disabled = !afford;
-      b.innerHTML =
-        `<span class="skin-swatch">` +
-        `<i style="background:#${skin.p1.toString(16).padStart(6, "0")}"></i>` +
-        `<i style="background:#${skin.p2.toString(16).padStart(6, "0")}"></i>` +
-        `</span>${skin.name}` +
-        (owned ? (active ? " ·ON" : "") : ` <span class="skin-price">◎${skin.price}</span>`);
-      if (afford) {
-        b.addEventListener("click", () => {
-          if (progress.buySkin(skin.id, skin.price)) {
-            onChange();
-            this.buildShopInto(hostId, labelId, onChange);
-            if (hostId === "shop-items" && this.lastActPick) this.buildActSelect(this.lastActPick);
-          }
-        });
-      }
-      host.append(b);
-    }
-    document.getElementById(labelId)!.textContent = `SKINS · ◎${progress.coins}`;
-  }
-
-  /**
-   * Trails are bought once and fitted per robot, so each player picks their own.
-   * Clicking cycles which robot it goes on rather than needing a second control.
-   */
-  private buildTrailsInto(shopHostId: string, onChange: () => void) {
-    const id = `${shopHostId}-trails`;
-    let host = document.getElementById(id);
-    if (!host) {
-      host = document.createElement("div");
-      host.id = id;
-      host.className = "trail-row";
-      document.getElementById(shopHostId)!.parentElement!.append(host);
-    }
-    host.innerHTML = "";
-    for (let player = 0; player < 2; player++) {
-      const lane = document.createElement("div");
-      lane.className = `trail-lane p${player + 1}`;
-      const tag = document.createElement("span");
-      tag.className = "trail-tag";
-      tag.textContent = player === 0 ? "IGNIS" : "VOLTA";
-      lane.append(tag);
-      for (const trail of TRAILS) {
-        const owned = progress.ownsTrail(trail.id);
-        const worn = progress.trailFor(player) === trail.id;
-        const afford = owned || progress.coins >= trail.price;
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = `trail-chip${worn ? " active" : ""}`;
-        b.disabled = !afford;
-        b.textContent = owned ? trail.name : `${trail.name} ◎${trail.price}`;
-        if (afford) {
-          b.addEventListener("click", () => {
-            if (progress.buyTrail(trail.id, trail.price, player)) {
-              onChange();
-              this.buildShopInto(shopHostId, shopHostId === "shop-items" ? "shop-label" : "pause-shop-label", onChange);
-            }
-          });
-        }
-        lane.append(b);
-      }
-      host.append(lane);
-    }
-  }
 
   private lastActPick: ((act: number) => void) | null = null;
 

@@ -361,30 +361,6 @@ body.coaching .tc-right .tc-btn { animation: pad-hint 1.4s ease-in-out infinite 
 #coin-run { font-size: 11px; color: #7dffc8; opacity: 0; transition: opacity 0.3s; }
 #coin-run.show { opacity: 1; }
 
-#shop { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 6px; }
-#shop-label { margin: 0; font-size: 10px; letter-spacing: 0.3em; color: var(--dim); }
-#shop-items { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 640px; }
-.skin-chip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font: inherit;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  padding: 6px 10px;
-  color: #cfe6f5;
-  background: rgba(20, 32, 46, 0.7);
-  border: 1px solid rgba(120, 200, 230, 0.28);
-  border-radius: 6px;
-  cursor: pointer;
-}
-.skin-chip:hover:not(:disabled) { border-color: #35e0ff; color: #fff; }
-.skin-chip:disabled { opacity: 0.4; cursor: default; }
-.skin-chip.active { border-color: #7dffc8; color: #7dffc8; }
-.skin-swatch { display: inline-flex; gap: 2px; }
-.skin-swatch i { width: 7px; height: 12px; border-radius: 2px; display: block; }
-.skin-price { color: #ffd75e; }
-
 /* --- unlock toast and the pause-menu shop -------------------------------- */
 
 #unlock-toast {
@@ -410,36 +386,7 @@ body.coaching .tc-right .tc-btn { animation: pad-hint 1.4s ease-in-out infinite 
 #unlock-toast.show { opacity: 1; transform: translateY(0); }
 #unlock-toast small { display: block; margin-top: 3px; font-size: 10px; color: var(--dim); letter-spacing: 0.2em; }
 
-#pause-shop { margin-top: 14px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
-#pause-shop-label { margin: 0 !important; font-size: 10px; letter-spacing: 0.3em; color: var(--dim); }
-#pause-shop-items { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 460px; }
-@media (max-height: 500px) {
-  #unlock-toast { top: 40px; right: 12px; font-size: 10px; padding: 6px 10px; }
-  #pause-shop-items { max-width: 380px; }
-}
-
 /* --- trails -------------------------------------------------------------- */
-
-.trail-row { display: flex; flex-direction: column; gap: 4px; align-items: center; margin-top: 4px; }
-.trail-lane { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px; }
-.trail-tag { font-size: 9px; letter-spacing: 0.22em; width: 52px; text-align: right; }
-.trail-lane.p1 .trail-tag { color: #ff8a3d; }
-.trail-lane.p2 .trail-tag { color: #35e0ff; }
-.trail-chip {
-  font: inherit;
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  padding: 4px 8px;
-  color: #cfe6f5;
-  background: rgba(20, 32, 46, 0.7);
-  border: 1px solid rgba(120, 200, 230, 0.22);
-  border-radius: 5px;
-  cursor: pointer;
-}
-.trail-chip:hover:not(:disabled) { border-color: #35e0ff; color: #fff; }
-.trail-chip:disabled { opacity: 0.35; cursor: default; }
-.trail-lane.p1 .trail-chip.active { border-color: #ff8a3d; color: #ff8a3d; }
-.trail-lane.p2 .trail-chip.active { border-color: #35e0ff; color: #35e0ff; }
 
 /* Portrait is narrow: the hint has to wrap and the coin counter has to get out
    of the way of the mute and pause buttons. */
@@ -465,4 +412,164 @@ body.coaching .tc-right .tc-btn { animation: pad-hint 1.4s ease-in-out infinite 
   .tc-row { gap: 10px; }
   #unlock-toast { top: 92px; right: 12px; font-size: 10px; max-width: 76vw; }
   .coach-tag span { font-size: 11px; padding: 3px 7px; }
+}
+
+/* --- menu ---------------------------------------------------------------- */
+
+.menu-hero { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+#mode-actions { display: flex; gap: 10px; align-items: stretch; margin-bottom: 4px; }
+#mode-actions button {
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  padding: 13px 20px;
+  color: #d8ecfa;
+  background: rgba(18, 28, 42, 0.78);
+  border: 1px solid rgba(120, 200, 230, 0.35);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: border-color 0.18s, color 0.18s, transform 0.12s;
+}
+#mode-actions button:hover { border-color: #35e0ff; color: #fff; transform: translateY(-1px); }
+#mode-actions button.primary {
+  font-size: 16px;
+  padding: 15px 44px;
+  letter-spacing: 0.34em;
+  color: #05121a;
+  background: linear-gradient(135deg, #7ee9ff, #35e0ff 55%, #46b6ff);
+  border-color: transparent;
+  font-weight: 700;
+  box-shadow: 0 6px 24px rgba(53, 224, 255, 0.28);
+}
+#mode-actions button.primary:hover { box-shadow: 0 8px 30px rgba(53, 224, 255, 0.45); }
+
+#menu-footer { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+#title-record { margin: 0; font-size: 10px; letter-spacing: 0.24em; color: var(--dim); }
+#act-select { display: flex; align-items: center; gap: 8px; }
+#act-label { margin: 0; font-size: 9px; letter-spacing: 0.3em; color: var(--dim); }
+#act-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+#act-buttons button {
+  font: inherit; font-size: 9px; letter-spacing: 0.14em; padding: 5px 9px;
+  color: #b9d4e6; background: rgba(20, 32, 46, 0.6);
+  border: 1px solid rgba(120, 200, 230, 0.22); border-radius: 5px; cursor: pointer;
+}
+#act-buttons button:hover:not(:disabled) { border-color: #35e0ff; color: #fff; }
+#act-buttons button:disabled { opacity: 0.28; cursor: default; }
+
+#btn-pause-locker {
+  margin-top: 12px; font: inherit; font-size: 11px; letter-spacing: 0.2em;
+  padding: 10px 22px; color: #d8ecfa; background: rgba(18, 28, 42, 0.8);
+  border: 1px solid rgba(120, 200, 230, 0.35); border-radius: 8px; cursor: pointer;
+}
+#btn-pause-locker:hover { border-color: #35e0ff; color: #fff; }
+
+/* --- locker -------------------------------------------------------------- */
+
+#locker {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  background: radial-gradient(ellipse at 50% 18%, #12202f, #05070c 72%);
+  z-index: 30;
+  overflow-y: auto;
+}
+#locker.open { display: flex; }
+.locker-head { display: flex; align-items: center; gap: 14px; width: min(560px, 100%); }
+.locker-head h2 { margin: 0; font-size: 18px; letter-spacing: 0.34em; color: #eaf6ff; flex: 1; }
+#locker-coins { font-size: 14px; letter-spacing: 0.12em; color: #ffd75e; }
+#locker-close {
+  font: inherit; font-size: 15px; width: 32px; height: 32px; line-height: 1;
+  color: #cfe3f2; background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(160, 200, 225, 0.28); border-radius: 8px; cursor: pointer;
+}
+#locker-close:hover { border-color: #35e0ff; color: #fff; }
+
+#locker-canvas {
+  width: min(560px, 100%);
+  height: min(30vh, 190px);
+  border-radius: 12px;
+  background: radial-gradient(ellipse at 50% 70%, rgba(38, 68, 96, 0.5), rgba(6, 10, 16, 0.2));
+  border: 1px solid rgba(120, 200, 230, 0.18);
+}
+.locker-caption { text-align: center; display: flex; flex-direction: column; gap: 2px; min-height: 30px; }
+#locker-name { font-size: 14px; letter-spacing: 0.26em; color: #eaf6ff; }
+#locker-blurb { font-size: 10px; letter-spacing: 0.12em; color: var(--dim); }
+
+.locker-tabs { display: flex; gap: 6px; }
+.locker-tab {
+  font: inherit; font-size: 10px; letter-spacing: 0.26em; padding: 7px 20px;
+  color: var(--dim); background: transparent;
+  border: 1px solid rgba(120, 200, 230, 0.2); border-radius: 7px; cursor: pointer;
+}
+.locker-tab.active { color: #35e0ff; border-color: #35e0ff; }
+
+#locker-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 7px;
+  width: min(560px, 100%);
+}
+.cos-card {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  font: inherit; font-size: 9px; letter-spacing: 0.14em;
+  padding: 9px 6px; cursor: pointer;
+  color: #cfe6f5; background: rgba(17, 27, 40, 0.8);
+  border: 1px solid rgba(120, 200, 230, 0.2); border-radius: 9px;
+  transition: border-color 0.15s, transform 0.12s;
+}
+.cos-card:hover { transform: translateY(-2px); border-color: rgba(120, 200, 230, 0.5); }
+.cos-card.selected { border-color: #35e0ff; box-shadow: 0 0 0 1px #35e0ff inset; }
+.cos-card.locked { opacity: 0.72; }
+.cos-swatch { display: flex; gap: 3px; height: 22px; align-items: center; }
+.cos-swatch i { width: 12px; height: 20px; border-radius: 3px; display: block; }
+.cos-ribbon { width: 46px; height: 8px; border-radius: 4px; }
+.cos-name { color: #eaf6ff; }
+.cos-cost { color: #ffd75e; }
+.cos-owned { color: #7dffc8; }
+.cos-worn { position: absolute; top: 5px; right: 6px; font-size: 8px; color: #7dffc8; }
+
+#locker-action {
+  font: inherit; font-size: 13px; letter-spacing: 0.24em; padding: 13px 34px;
+  border-radius: 9px; cursor: pointer; border: 1px solid transparent;
+  color: #05121a; background: linear-gradient(135deg, #7ee9ff, #35e0ff);
+  font-weight: 700;
+}
+#locker-action:disabled { background: rgba(255, 255, 255, 0.07); color: var(--dim); cursor: default; }
+#locker-action.equip { background: linear-gradient(135deg, #9dffd0, #3ff0a8); }
+
+.locker-who { display: flex; gap: 6px; align-items: center; justify-content: center; }
+.locker-who button {
+  font: inherit; font-size: 9px; letter-spacing: 0.18em; padding: 5px 12px;
+  background: transparent; border: 1px solid rgba(120, 200, 230, 0.25);
+  border-radius: 6px; cursor: pointer; color: var(--dim);
+}
+.locker-who button.on:first-child { color: #ff8a3d; border-color: #ff8a3d; }
+.locker-who button.on:last-child { color: #35e0ff; border-color: #35e0ff; }
+
+/* The locker owns the screen while it is open. */
+body.locker-open #sys-buttons,
+body.locker-open #touch-ui { display: none; }
+
+@media (max-height: 560px) {
+  #locker { gap: 4px; padding: 6px 10px 10px; }
+  #locker-canvas { height: 92px; }
+  .locker-head { gap: 8px; }
+  .locker-head h2 { font-size: 13px; letter-spacing: 0.24em; }
+  #locker-close { width: 26px; height: 26px; font-size: 13px; }
+  .locker-caption { min-height: 0; }
+  #locker-name { font-size: 11px; }
+  #locker-blurb { font-size: 8px; }
+  .locker-tab { padding: 5px 14px; font-size: 9px; }
+  #locker-body { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 5px; }
+  .cos-card { padding: 6px 4px; gap: 3px; font-size: 8px; }
+  .cos-swatch { height: 15px; }
+  .cos-swatch i { width: 9px; height: 14px; }
+  .cos-ribbon { width: 34px; height: 6px; }
+  #locker-action { padding: 9px 22px; font-size: 10px; }
 }

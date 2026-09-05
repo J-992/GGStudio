@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import RAPIER from "@dimforge/rapier3d-compat";
 import {
   FIXED_DT, MAX_FRAME_DT, KILL_DIST, MAX_AIR_TIME,
@@ -19,6 +20,7 @@ import { ACT_NAMES, ACT_SIZE, actOf, actStart, progress } from "../progress/Prog
 const MAX_RECOVERIES = 4;
 const RECOVER_COOLDOWN = 0.7;
 import { Coach } from "../ui/Coach";
+import { LockerPanel } from "../ui/LockerPanel";
 import { Coins } from "../tunnel/Coins";
 import { SKINS, TRAILS, skinById, trailById } from "./Skins";
 import { RobotTrail } from "../effects/Trails";
@@ -114,6 +116,13 @@ export class Game {
     this.scene.background = new THREE.Color(0x05070c);
     this.scene.fog = new THREE.Fog(0x05070c, 24, 92);
 
+    // A polished skin at metalness 1 has nothing to reflect without an
+    // environment and renders almost black. This gives the metals a room to be
+    // shiny in; it costs one small render at boot.
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+
     const hemi = new THREE.HemisphereLight(0xb8d4ff, 0x33281c, 1.9);
     this.scene.add(hemi);
     const amb = new THREE.AmbientLight(0x2a3a52, 1.1);
@@ -157,6 +166,11 @@ export class Game {
     this.showTitleScreen();
     this.ui.hideLoading();
 
+    this.locker = new LockerPanel();
+    const openLocker = () => this.locker.open(() => this.applySkin());
+    document.getElementById("btn-locker")?.addEventListener("click", openLocker);
+    document.getElementById("btn-pause-locker")?.addEventListener("click", openLocker);
+
     if (debug) this.exposeDebug();
   }
 
@@ -179,8 +193,8 @@ export class Game {
   /** Repaints both robots for whichever skin is equipped. */
   applySkin() {
     const skin = skinById(progress.skin);
-    this.players[0].applySkin(skin.body, skin.p1);
-    this.players[1].applySkin(skin.body, skin.p2);
+    this.players[0].applySkin(skin, skin.p1);
+    this.players[1].applySkin(skin, skin.p2);
     // Keep the coach labels wearing the same colours as the robots they name.
     const hex = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
     document.getElementById("coach-p1")?.style.setProperty("--coach-c", hex(skin.p1));
@@ -199,7 +213,6 @@ export class Game {
       this.ui.showTitle(false);
       this.startRun(actStart(act));
     });
-    this.ui.buildShop(() => this.applySkin());
     this.ui.setCoins(progress.coins, 0);
     this.ui.showTitle(true);
   }
@@ -222,9 +235,12 @@ export class Game {
   }
 
   private async handlePause() {
+    if (this.locker?.isOpen) {
+      this.locker.close();
+      return;
+    }
     if (this.state === GameState.Playing) {
       this.state = GameState.Paused;
-      this.ui.buildPauseShop(() => this.applySkin());
       this.ui.pause(true);
       audio.suspend();
       this.onGameplayStop?.(this.levelIdx + 1);
@@ -292,6 +308,7 @@ export class Game {
   private recoverCooldown = [0, 0];
   private recoveries = 0;
   private coach = new Coach();
+  private locker!: LockerPanel;
   private coins!: Coins;
   private trails: RobotTrail[] = [];
   /** Coins picked up this run, banked when the run ends or a level is cleared. */
@@ -955,7 +972,6 @@ export class Game {
 
     if (previousState === GameState.Paused && s.state === GameState.Playing) {
       this.state = GameState.Paused;
-      this.ui.buildPauseShop(() => this.applySkin());
       this.ui.pause(true);
       if (!this.resuming) {
         this.resuming = true;

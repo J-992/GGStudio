@@ -30,45 +30,41 @@
       <div class="panel">
         <h2>PAUSED</h2>
         <p>ESC — Resume<br/>R — Restart level<br/>M — Mute</p>
-        <div id="pause-shop">
-          <p id="pause-shop-label">SKINS</p>
-          <div id="pause-shop-items"></div>
-        </div>
+        <button id="btn-pause-locker" type="button">LOCKER</button>
       </div>
     </div>
     <div id="title-screen">
-      <h1>TETHER<span>RUN</span></h1>
-      <p class="tag">two robots · one elastic tether · every wall is a floor</p>
-      <p class="how local-intro keys">PLAY SOLO WITH BOTH HANDS — OR TAKE ONE ROBOT EACH</p>
-      <p class="how local-intro taps">PLAY SOLO WITH BOTH THUMBS — OR TAKE ONE ROBOT EACH</p>
-      <div class="controls-grid local-intro">
-        <div class="ctl p1">
-          <h3>LEFT · IGNIS</h3>
-          <p class="keys">A / D — move<br/>W — jump</p>
-          <p class="taps">left pads<br/>move &amp; jump</p>
+      <div class="menu-hero">
+        <h1>TETHER<span>RUN</span></h1>
+        <p class="tag">two robots · one elastic tether · every wall is a floor</p>
+        <p class="how local-intro keys">PLAY SOLO WITH BOTH HANDS — OR TAKE ONE ROBOT EACH</p>
+        <p class="how local-intro taps">PLAY SOLO WITH BOTH THUMBS — OR TAKE ONE ROBOT EACH</p>
+        <div class="controls-grid local-intro">
+          <div class="ctl p1">
+            <h3>LEFT · IGNIS</h3>
+            <p class="keys">A / D — move<br/>W — jump</p>
+            <p class="taps">left pads<br/>move &amp; jump</p>
+          </div>
+          <div class="ctl p2">
+            <h3>RIGHT · VOLTA</h3>
+            <p class="keys">&larr; / &rarr; — move<br/>&uarr; — jump</p>
+            <p class="taps">right pads<br/>move &amp; jump</p>
+          </div>
         </div>
-        <div class="ctl p2">
-          <h3>RIGHT · VOLTA</h3>
-          <p class="keys">&larr; / &rarr; — move<br/>&uarr; — jump</p>
-          <p class="taps">right pads<br/>move &amp; jump</p>
+        <div id="mode-actions">
+          <button id="btn-local" class="primary" type="button">PLAY</button>
+          <button id="btn-locker" type="button">LOCKER</button>
+          <button id="btn-online" type="button">ONLINE</button>
+        </div>
+        <div id="menu-footer" class="local-intro">
+          <p id="title-record"></p>
+          <div id="act-select">
+            <p id="act-label">ACTS</p>
+            <div id="act-buttons"></div>
+          </div>
         </div>
       </div>
-      <div id="mode-actions">
-        <button id="btn-local" type="button">PLAY</button>
-        <button id="btn-online" type="button">PLAY WITH A FRIEND ONLINE</button>
-      </div>
-      <div id="act-select" class="local-intro">
-        <p id="act-label">PRACTISE AN ACT</p>
-        <div id="act-buttons"></div>
-      </div>
-      <p id="title-record" class="local-intro"></p>
-      <div id="shop" class="local-intro">
-        <p id="shop-label">SKINS</p>
-        <div id="shop-items"></div>
-      </div>
-      <p class="press local-intro keys">ONE PLAYER OR TWO · GAMEPADS SUPPORTED</p>
-      <p class="press local-intro taps">ONE PLAYER OR TWO</p>
-      <p class="save-note local-intro">ARCADE RUN · ONE DEATH ENDS IT · ACTS UNLOCK AS YOU REACH THEM</p>
+
       <div id="online-panel" aria-live="polite">
         <p>PLAY WITH ONE FRIEND ON ANOTHER DEVICE</p>
         <div class="online-actions">
@@ -82,6 +78,26 @@
         <button id="btn-online-cancel" class="quiet" type="button">BACK</button>
       </div>
     </div>
+
+    <div id="locker">
+      <div class="locker-head">
+        <h2>LOCKER</h2>
+        <span id="locker-coins">◎ 0</span>
+        <button id="locker-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <canvas id="locker-canvas"></canvas>
+      <div class="locker-caption">
+        <strong id="locker-name"></strong>
+        <small id="locker-blurb"></small>
+      </div>
+      <div class="locker-tabs">
+        <button class="locker-tab active" data-tab="skins" type="button">SKINS</button>
+        <button class="locker-tab" data-tab="trails" type="button">TRAILS</button>
+      </div>
+      <div id="locker-body"></div>
+      <button id="locker-action" type="button"></button>
+    </div>
+
     <div id="finish-screen">
       <h1>ALL CONDUITS CLEAR</h1>
       <p id="finish-stats"></p>

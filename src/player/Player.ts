@@ -12,6 +12,7 @@ const ROPE_CLIMB_ACCEL = 20;
 const ROPE_CLIMB_MAX_V = 8;
 import { FORWARD, type SurfaceFrame } from "../tunnel/SurfaceOrientation";
 import type { PlayerIndex } from "../input/InputManager";
+import { makeGlowSprite } from "../effects/Glow";
 
 export interface PlayerInputSample {
   lateral: number;
@@ -124,13 +125,35 @@ export class Player {
     scene.add(this.shadow);
   }
 
-  /** Repaints the robot for a bought skin. Materials are shared per robot. */
-  applySkin(body: number, accent: number) {
+  /**
+   * Repaints and re-finishes the robot for a bought skin. The loud ones also get
+   * a halo shell around the chassis, which is what makes them read as expensive.
+   */
+  applySkin(skin: { body: number; metalness: number; roughness: number; glow: number; rim?: boolean }, accent: number) {
     this.color = accent;
-    this.bodyMat.color.setHex(body);
+    this.bodyMat.color.setHex(skin.body);
+    this.bodyMat.metalness = skin.metalness;
+    this.bodyMat.roughness = skin.roughness;
     this.accentMat.color.setHex(accent);
     this.accentMat.emissive.setHex(accent);
+    this.accentMat.emissiveIntensity = skin.glow;
+    this.accentMat.metalness = skin.metalness;
+    this.accentMat.roughness = skin.roughness;
     this.visorMat.color.setHex(accent);
+    this.setRim(!!skin.rim, accent);
+  }
+
+  private rimSprite: THREE.Sprite | null = null;
+
+  private setRim(on: boolean, accent: number) {
+    if (on && !this.rimSprite) {
+      this.rimSprite = makeGlowSprite(accent, 1.7);
+      this.modelRoot.add(this.rimSprite);
+    }
+    if (this.rimSprite) {
+      this.rimSprite.visible = on;
+      this.rimSprite.material.color.setHex(accent);
+    }
   }
 
   private buildModel() {
