@@ -287,3 +287,58 @@ body.touch.overlay-open #touch-ui { display: none; }
   #gameover-screen h1 { font-size: clamp(20px, 7vh, 32px); }
   #run-reached { font-size: clamp(15px, 4.5vh, 24px); }
 }
+
+/* --- control coach ------------------------------------------------------- */
+/* Labels ride above each robot for the first level, so a player learns which
+   keys drive which one by watching, not by reading a line that scrolls away. */
+
+#coach { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.coach-tag {
+  position: absolute;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transform: translate(-50%, -100%);
+  white-space: nowrap;
+  transition: opacity 0.35s ease;
+}
+.coach-tag.show { display: flex; }
+.coach-tag span {
+  padding: 6px 12px;
+  border-radius: 7px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: #f2f8ff;
+  background: rgba(9, 15, 24, 0.86);
+  /* currentColor would resolve to the span's own text colour, not the robot's. */
+  border: 1.5px solid var(--coach-c, #9ff5ff);
+  box-shadow: 0 0 14px rgba(0, 0, 0, 0.5), 0 0 10px var(--coach-c, transparent);
+  animation: coach-pulse 1.4s ease-in-out infinite;
+}
+.coach-tag span.done {
+  animation: none;
+  opacity: 0.4;
+  color: #7dffc8;
+  border-color: #7dffc8;
+  box-shadow: none;
+}
+#coach-p1 { --coach-c: #ff8a3d; }
+#coach-p2 { --coach-c: #35e0ff; }
+@keyframes coach-pulse {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+body.touch .coach-tag span { font-size: 12px; padding: 4px 9px; }
+
+/* Each thumb cluster wears its robot's colour, so which pad drives which one is
+   readable at a glance and not only while the coach is up. */
+.tc-left .tc-btn { border-color: rgba(255, 138, 61, 0.55); color: #ffc79a; }
+.tc-right .tc-btn { border-color: rgba(53, 224, 255, 0.55); color: #bfeeff; }
+body.coaching .tc-left .tc-btn { animation: pad-hint 1.4s ease-in-out infinite; }
+body.coaching .tc-right .tc-btn { animation: pad-hint 1.4s ease-in-out infinite 0.2s; }
+@keyframes pad-hint {
+  0%, 100% { background: rgba(20, 32, 48, 0.35); }
+  50% { background: rgba(60, 110, 150, 0.45); }
+}

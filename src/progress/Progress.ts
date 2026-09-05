@@ -16,10 +16,12 @@ interface Record_ {
   bestTime: number;
   /** Number of complete campaigns. */
   clears: number;
+  /** Set once a player has moved and jumped both robots. Retires the coach. */
+  learned: boolean;
 }
 
 const KEY = "tether-run.record.v1";
-const EMPTY: Record_ = { best: 0, acts: 1, bestTime: 0, clears: 0 };
+const EMPTY: Record_ = { best: 0, acts: 1, bestTime: 0, clears: 0, learned: false };
 
 /**
  * Remembers how far a pair has ever got. Every read and write is guarded: the
@@ -53,6 +55,13 @@ class Progress {
   get acts() { return Math.max(1, Math.min(actCount(), this.data.acts)); }
   get bestTime() { return this.data.bestTime; }
   get clears() { return this.data.clears; }
+  get learned() { return this.data.learned; }
+
+  markLearned() {
+    if (this.data.learned) return;
+    this.data.learned = true;
+    this.save();
+  }
 
   /** Records reaching a level. Returns true if it beat the old record. */
   reached(level: number): boolean {

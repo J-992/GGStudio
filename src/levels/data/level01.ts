@@ -7,11 +7,7 @@ const E = ".....";
 export const level01: LevelDef = {
   name: "WARMUP CONDUIT",
   hints: [
-    {
-      atSlice: 1,
-      text: "P1  A/D MOVE · W JUMP        P2  ←/→ MOVE · ↑ JUMP",
-      touchText: "LEFT PADS DRIVE IGNIS · RIGHT PADS DRIVE VOLTA",
-    },
+    { atSlice: 1, text: "MOVE BOTH ROBOTS — THE TETHER KEEPS THEM TOGETHER" },
     { atSlice: 30, text: "YOU RUN FORWARD ON YOUR OWN — STEER AND JUMP" },
   ],
   slices: seq(

@@ -14,6 +14,7 @@ import { Tunnel } from "../tunnel/Tunnel";
 import { Orientation, getFrame, stepOrientation } from "../tunnel/SurfaceOrientation";
 import { Player, PLAYER_GROUP, STATIC_GROUP } from "../player/Player";
 import { ACT_NAMES, ACT_SIZE, actOf, actStart, progress } from "../progress/Progress";
+import { Coach } from "../ui/Coach";
 import { TetherState } from "../tether/TetherPhysics";
 import { TetherRenderer } from "../tether/TetherRenderer";
 import { CoopCamera } from "../camera/CoopCamera";
@@ -251,6 +252,7 @@ export class Game {
   /** Set while the run began at an act shortcut, so it cannot set a record. */
   private practising = false;
   private runStart = 0;
+  private coach = new Coach();
 
   private startRun(level: number) {
     this.deaths = 0;
@@ -264,6 +266,8 @@ export class Game {
   }
 
   private loadLevel(idx: number) {
+    this.coach.stop();
+    if (idx === 0 && !progress.learned) this.coach.start();
     this.levelIdx = idx;
     const def = LEVELS[idx];
 
@@ -426,6 +430,13 @@ export class Game {
       _gravDir.copy(frameUp.up).negate();
       this.effects.update(visDt, _gravDir, this.coopCam.camera.position.z);
       this.coopCam.update(visDt, this.players[0], this.players[1], this.orientation);
+      if (this.state === GameState.Playing) {
+        this.players[0].position(this.tmpA);
+        this.players[1].position(this.tmpB);
+        this.coach.update(visDt, this.coopCam.camera, this.renderer.domElement, [this.tmpA, this.tmpB]);
+      } else {
+        this.coach.stop();
+      }
 
       if (this.state === GameState.Playing && !this.coopCam.rolling) {
         this.checkScreenDeath(dtReal * this.timeScale);
@@ -502,6 +513,12 @@ export class Game {
     this.safetyCheck();
     if (this.state !== GameState.Playing) return;
 
+    if (ev0.jumped) this.coach.note(0, "jumped");
+    if (ev1.jumped) this.coach.note(1, "jumped");
+    for (let i = 0; i < 2; i++) {
+      if (Math.abs(this.players[i].latVel) > 2) this.coach.note(i, "moved");
+    }
+    if (this.coach.complete) progress.markLearned();
     if (ev0.jumped || ev1.jumped) audio.jump();
     if (ev0.launched || ev1.launched) {
       audio.launch();

@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "dev:squish": "vite --config squish/vite.config.ts",
+    "build:squish": "tsc --project squish/tsconfig.json && vite build --config squish/vite.config.ts",
+    "qa:squish": "node squish/qa.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
