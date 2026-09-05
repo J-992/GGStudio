@@ -1,0 +1,21 @@
+{
+  "game_id": "REPLACE_WITH_ID_FROM_DEVELOPERS_POKI_COM",
+  "build_dir": "dist",
+  "ggs": {
+    "package_manager": "npm",
+    "install": "npm ci",
+    "build": "npm run build",
+    "verify": ["npm run qa:dist"],
+    "allow_origins": [
+      "https://game-cdn.poki.com",
+      "https://netlib.poki.io"
+    ],
+    "ignore_origins": [
+      "(^|\\.)w3\\.org$",
+      "(^|\\.)jcgt\\.org$"
+    ],
+    "max_bytes": 8388608,
+    "node_version": "22",
+    "token_git_secret_name": "POKI_UPLOAD_TOKEN"
+  }
+}

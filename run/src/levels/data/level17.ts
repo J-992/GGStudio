@@ -1,28 +1,43 @@
 import type { LevelDef } from "../types";
-import { faceGap } from "../sections";
-import { pat, rep, seq, solidRun, slice } from "../helpers";
+import { pat, rep, seq, solidRun } from "../helpers";
 
 const E = ".....";
 
+// ACT V — everything at once, and it stops being polite.
 export const level17: LevelDef = {
   name: "OVERDRIVE",
+  hints: [
+    { atSlice: 16, text: "THE BELT IS AIMING YOU AT A BARRIER" },
+    { atSlice: 62, text: "BARRIERS ON THE WALL TOO" },
+  ],
   slices: seq(
-    solidRun(8),
-    slice({ f: pat("#..##") }), solidRun(2),
-    slice({ f: pat("##..#") }), solidRun(2),
-    slice({ f: pat("#..##") }), solidRun(2),
-    rep(2, { f: E }),
-    solidRun(4),
-    rep(2, { f: E }),
-    rep(2, { f: E, r: E }),
-    rep(4, { f: E }),
-    solidRun(4),
-    faceGap("r", 10),
+    solidRun(12),
+    rep(6, { f: pat(">>>>>") }),
+    solidRun(3),
+    rep(1, { f: pat("###!#") }),
+    rep(5, { f: pat(">>>>>") }),
+    solidRun(3),
+    rep(1, { f: pat("####?") }),
     solidRun(6),
-    rep(8, { f: pat("..#..") }),
-    slice({ f: E }), solidRun(2),
-    slice({ f: E }), solidRun(2),
-    rep(2, { f: E }),
-    solidRun(14),
+    rep(6, { f: pat("<<<<<") }),
+    solidRun(3),
+    rep(1, { f: pat("!####") }),
+    rep(5, { f: pat("<<<<<") }),
+    solidRun(3),
+    rep(1, { f: pat("?#!##") }),
+    solidRun(6),
+    rep(6, { f: pat(">>>>>") }),
+    rep(10, { f: E, c: E, l: E }),
+    rep(6, { f: E, c: E, l: E, r: pat(">>###") }),
+    rep(3, { f: E, c: E, l: E }),
+    rep(1, { f: E, c: E, l: E, r: pat("####!") }),
+    rep(5, { f: E, c: E, l: E, r: pat("##<<<") }),
+    rep(3, { f: E, c: E, l: E }),
+    rep(1, { f: E, c: E, l: E, r: pat("!###?") }),
+    rep(6, { f: E, c: E, l: E, r: pat(".####") }),
+    rep(12, { c: E, l: E }),
+    rep(8, { r: E, c: E, l: E }),
+    rep(1, { f: pat("!#?#!") }),
+    solidRun(16),
   ),
 };

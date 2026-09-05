@@ -1,0 +1,88 @@
+# Uploads a new build to Poki for Developers on every push to main.
+#
+# What gets built, what the build may reach, and how big it may be all live in
+# poki.json, so changing any of that never means editing this workflow.
+#
+# An upload creates a *version*. It does not put it in front of players — that is
+# make_public, off by default, because replacing what a live game serves should
+# be a decision somebody makes rather than a side effect of a push.
+
+name: Poki deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'shots/**'
+  workflow_dispatch:
+    inputs:
+      make_public:
+        description: 'Publish the version immediately, replacing what players see'
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Build and preflight only — upload nothing'
+        type: boolean
+        default: false
+
+# Read-only. Nothing here writes to the repo; the one credential is the Poki
+# upload token, which arrives as a secret on the single step that needs it.
+permissions:
+  contents: read
+
+# One upload at a time. cancel-in-progress stays false: cancelling mid-upload
+# leaves a half-created version on Poki's side.
+concurrency:
+  group: poki-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and upload
+    # A fork has no token and no business uploading to this account's game.
+    if: github.event.repository.fork != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify the packaged build
+        # Loads the real dist/ from a nested subpath inside an iframe, which is
+        # how Poki serves it. Catches the absolute-path regression that got a
+        # submission rejected once already.
+        run: npm run qa:dist
+
+      - name: Upload to Poki
+        env:
+          POKI_UPLOAD_TOKEN: ${{ secrets.POKI_UPLOAD_TOKEN }}
+          POKI_MAKE_PUBLIC: ${{ inputs.make_public }}
+          # Through the environment, never interpolated into the script body: a
+          # commit message is text somebody else wrote, and `${{ }}` inside a
+          # `run:` block pastes it in before bash ever sees a quote.
+          POKI_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          POKI_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          subject=$(printf '%s' "${POKI_COMMIT_MESSAGE}" | head -n 1)
+          export POKI_VERSION_NAME="${GITHUB_SHA:0:7}"
+          export POKI_VERSION_NOTES="${subject}
+
+          ${GITHUB_SHA} on ${GITHUB_REF_NAME}
+          ${POKI_RUN_URL}"
+          if [ "${DRY_RUN}" = "true" ]; then
+            node scripts/poki/upload.mjs --dry-run
+          else
+            node scripts/poki/upload.mjs
+          fi

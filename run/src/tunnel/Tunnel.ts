@@ -1,37 +1,46 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type RAPIER from "@dimforge/rapier3d-compat";
-import type { LevelDef, SliceDef } from "../levels/types";
-import { COLS, CRUMBLE_DELAY, HALF, SLAB_T, SLICE_LEN, TILE } from "../game/Constants";
+import type { FaceKey, LevelDef, SliceDef } from "../levels/types";
+import { SOLID_CHARS } from "../levels/types";
+import { ENVIRONMENTS, LevelArt, movingDeckTexture, panelTexture, shutterTexture } from "./LevelArt";
+import {
+  COLS, CRUMBLE_DELAY, HALF, SLAB_T, SLICE_LEN, TILE,
+  CONVEYOR_SPEED, LAUNCH_V,
+  SLIDER_PERIOD, SLIDER_TRAVEL,
+  SHUTTER_CLOSED_FRAC, SHUTTER_EDGE_FRAC, SHUTTER_HEIGHT,
+  SHUTTER_LETHAL_FRAC, SHUTTER_PERIOD,
+} from "../game/Constants";
+import type { SurfaceFrame } from "./SurfaceOrientation";
 
-function makePanelTexture(): THREE.CanvasTexture {
-  const c = document.createElement("canvas");
-  c.width = c.height = 256;
-  const g = c.getContext("2d")!;
-  g.fillStyle = "#2c3644";
-  g.fillRect(0, 0, 256, 256);
-  g.fillStyle = "#313d4e";
-  g.fillRect(14, 14, 228, 228);
-  g.strokeStyle = "rgba(90,190,220,0.75)";
-  g.lineWidth = 3;
-  g.strokeRect(3, 3, 250, 250);
-  g.strokeStyle = "rgba(0,0,0,0.4)";
-  g.lineWidth = 2;
-  g.strokeRect(14, 14, 228, 228);
-  g.fillStyle = "#242e3b";
-  for (const [x, y] of [[26, 26], [230, 26], [26, 230], [230, 230]]) {
-    g.beginPath();
-    g.arc(x, y, 7, 0, Math.PI * 2);
-    g.fill();
+/**
+ * Each face has an inward normal (the direction you launch or a shutter rises)
+ * and a column axis (the direction a belt pushes and a slider tracks). Both are
+ * fixed world vectors: the tunnel geometry never moves, only gravity turns.
+ */
+interface FaceAxes { normal: THREE.Vector3; colAxis: THREE.Vector3 }
+
+const FACE_AXES: Record<FaceKey, FaceAxes> = {
+  f: { normal: new THREE.Vector3(0, 1, 0), colAxis: new THREE.Vector3(1, 0, 0) },
+  c: { normal: new THREE.Vector3(0, -1, 0), colAxis: new THREE.Vector3(1, 0, 0) },
+  l: { normal: new THREE.Vector3(1, 0, 0), colAxis: new THREE.Vector3(0, 1, 0) },
+  r: { normal: new THREE.Vector3(-1, 0, 0), colAxis: new THREE.Vector3(0, 1, 0) },
+};
+
+const _fd = new THREE.Vector3();
+const _fv = new THREE.Vector3();
+
+/** 0 while a shutter is stowed, 1 while it is fully across the lane. */
+function shutterExtension(time: number, phase: number): number {
+  const u = (((time / SHUTTER_PERIOD + phase) % 1) + 1) % 1;
+  if (u < SHUTTER_EDGE_FRAC) return u / SHUTTER_EDGE_FRAC;
+  if (u < SHUTTER_CLOSED_FRAC) return 1;
+  if (u < SHUTTER_CLOSED_FRAC + SHUTTER_EDGE_FRAC) {
+    return 1 - (u - SHUTTER_CLOSED_FRAC) / SHUTTER_EDGE_FRAC;
   }
-  g.fillStyle = "rgba(150,215,245,0.07)";
-  g.fillRect(14, 14, 228, 30);
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = 4;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+  return 0;
 }
+
 
 function scaleBoxUVs(geo: THREE.BoxGeometry, w: number, h: number, d: number) {
   const uv = geo.attributes.uv as THREE.BufferAttribute;
@@ -61,7 +70,17 @@ export class Tunnel {
 
   private crumbleTiles: CrumbleTile[] = [];
   private spinners: Spinner[] = [];
+  private pads: Pad[] = [];
+  private belts: Belt[] = [];
+  private sliders: Slider[] = [];
+  private shutters: Shutter[] = [];
+  private featureTime = 0;
+  private art: LevelArt;
   private crumbleMat!: THREE.MeshStandardMaterial;
+  private padMat!: THREE.MeshStandardMaterial;
+  private beltMat!: THREE.MeshStandardMaterial;
+  private sliderMat!: THREE.MeshStandardMaterial;
+  private shutterMat!: THREE.MeshStandardMaterial;
 
   constructor(
     scene: THREE.Scene,
@@ -78,17 +97,36 @@ export class Tunnel {
     const leftBoxes: RunBox[] = [];
     const rightBoxes: RunBox[] = [];
 
-    const tex = makePanelTexture();
-    this.disposables.push(tex);
+    const environment = def.environment ?? "dock";
+    const tex = panelTexture(environment);
+    const cracked = panelTexture(environment, true);
+    this.disposables.push(tex, cracked);
     const slabMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0.35 });
     this.disposables.push(slabMat);
     this.crumbleMat = new THREE.MeshStandardMaterial({
-      map: tex, color: 0xffd9b0, emissive: 0x8a3c12, emissiveIntensity: 0.4,
+      map: cracked, color: 0xffd9b0, emissive: 0x8a3c12, emissiveIntensity: 0.4,
       roughness: 0.7, metalness: 0.3, transparent: true,
     });
     this.disposables.push(this.crumbleMat);
+    this.padMat = new THREE.MeshStandardMaterial({
+      color: 0x0d3f33, emissive: 0x2effa8, emissiveIntensity: 0.45, roughness: 0.4, metalness: 0.2,
+    });
+    this.beltMat = new THREE.MeshStandardMaterial({
+      color: 0x123a52, emissive: 0x1f9bd6, emissiveIntensity: 0.3, roughness: 0.6, metalness: 0.3,
+    });
+    const deckTexture = movingDeckTexture();
+    this.disposables.push(deckTexture);
+    this.sliderMat = new THREE.MeshStandardMaterial({
+      map: deckTexture, color: 0xc9a7ff, emissive: 0x5a2ea8, emissiveIntensity: 0.55, roughness: 0.6, metalness: 0.4,
+    });
+    const grille = shutterTexture();
+    this.disposables.push(grille);
+    this.shutterMat = new THREE.MeshStandardMaterial({
+      map: grille, emissiveMap: grille, color: 0xffffff, emissive: 0xff3a2f, emissiveIntensity: 0.8, roughness: 0.45, metalness: 0.3,
+    });
+    this.disposables.push(this.padMat, this.beltMat, this.sliderMat, this.shutterMat);
 
-    const faces: { key: keyof SliceDef; out: RunBox[] }[] = [
+    const faces: { key: FaceKey; out: RunBox[] }[] = [
       { key: "f", out: floorBoxes },
       { key: "c", out: ceilBoxes },
       { key: "l", out: leftBoxes },
@@ -100,14 +138,15 @@ export class Tunnel {
         let runStart = -1;
         for (let i = 0; i <= slices.length; i++) {
           const s: SliceDef | undefined = slices[i];
+          let ch = "";
           let kind: "static" | "crumble" | "empty";
           if (!s) kind = "empty";
           else {
             const p = s[key];
             if (!p) kind = "static";
             else {
-              const ch = p[col];
-              kind = ch === "#" ? "static" : ch === "~" ? "crumble" : "empty";
+              ch = p[col];
+              kind = SOLID_CHARS.includes(ch) ? "static" : ch === "~" ? "crumble" : "empty";
             }
           }
           if (kind === "static" && runStart < 0) runStart = i;
@@ -118,6 +157,10 @@ export class Tunnel {
           if (kind === "crumble") {
             this.addCrumbleTile(this.boxForFace(key, col, i, 1), world, R);
           }
+          if (ch === "^") this.addPad(key, col, i);
+          else if (ch === "<" || ch === ">") this.addBelt(key, col, i, ch === ">" ? 1 : -1);
+          else if (ch === "=" || ch === "+") this.addSlider(key, col, i, ch === "+" ? 0.5 : 0, world, R);
+          else if (ch === "!" || ch === "?") this.addShutter(key, col, i, ch === "?" ? 0.5 : 0, world, R);
         }
       }
     }
@@ -138,7 +181,7 @@ export class Tunnel {
     this.disposables.push(merged);
     this.group.add(new THREE.Mesh(merged, slabMat));
 
-    const trimMat = new THREE.MeshBasicMaterial({ color: 0x2a7d96 });
+    const trimMat = new THREE.MeshBasicMaterial({ color: ENVIRONMENTS[environment].trim });
     const railGeo = new THREE.BoxGeometry(0.14, 0.14, slices.length * SLICE_LEN + 8);
     this.disposables.push(trimMat, railGeo);
     for (const sx of [-1, 1]) {
@@ -152,11 +195,13 @@ export class Tunnel {
     this.buildSpinners(def, world, R);
     this.buildBackground(slices.length * SLICE_LEN);
     this.buildPortal();
+    this.art = new LevelArt(def);
+    this.group.add(this.art.group);
 
     scene.add(this.group);
   }
 
-  private boxForFace(key: keyof SliceDef, col: number, startSlice: number, len: number): RunBox {
+  private boxForFace(key: FaceKey, col: number, startSlice: number, len: number): RunBox {
     const c = -HALF + (col + 0.5) * TILE;
     const z = -(startSlice + len / 2) * SLICE_LEN;
     const depth = len * SLICE_LEN;
@@ -250,8 +295,269 @@ export class Tunnel {
     }
   }
 
+  /** z of the first crumble tile, so QA can stand a player on one. */
+  crumbleZ(): number {
+    return this.crumbleTiles[0]?.z ?? 0;
+  }
+
   crumbleBrokenCount(): number {
     return this.crumbleTiles.filter((t) => t.broken).length;
+  }
+
+  // --- Level mechanics -----------------------------------------------------
+
+  private surfaceCenter(key: FaceKey, col: number, sliceIdx: number): THREE.Vector3 {
+    const b = this.boxForFace(key, col, sliceIdx, 1);
+    return new THREE.Vector3(b.x, b.y, b.z).addScaledVector(FACE_AXES[key].normal, SLAB_T / 2);
+  }
+
+  /** A thin slab lying flat on `key`, sized in that face's own axes. */
+  private plateGeo(key: FaceKey, thickness: number, shrink: number): THREE.BoxGeometry {
+    const w = TILE * shrink;
+    const d = SLICE_LEN * shrink;
+    const g = key === "f" || key === "c"
+      ? new THREE.BoxGeometry(w, thickness, d)
+      : new THREE.BoxGeometry(thickness, w, d);
+    this.disposables.push(g);
+    return g;
+  }
+
+  private addPad(key: FaceKey, col: number, sliceIdx: number) {
+    const axes = FACE_AXES[key];
+    const pos = this.surfaceCenter(key, col, sliceIdx);
+    const plate = new THREE.Mesh(this.plateGeo(key, 0.16, 0.82), this.padMat);
+    plate.position.copy(pos).addScaledVector(axes.normal, 0.06);
+    this.group.add(plate);
+
+    const barGeo = this.plateGeo(key, 0.09, 0.5);
+    const bars: THREE.Mesh[] = [];
+    for (let i = 0; i < 3; i++) {
+      const bar = new THREE.Mesh(barGeo, this.padMat);
+      this.group.add(bar);
+      bars.push(bar);
+    }
+    this.pads.push({ pos, axes, bars });
+  }
+
+  private addBelt(key: FaceKey, col: number, sliceIdx: number, dir: number) {
+    const axes = FACE_AXES[key];
+    const pos = this.surfaceCenter(key, col, sliceIdx);
+    const plate = new THREE.Mesh(this.plateGeo(key, 0.14, 0.9), this.beltMat);
+    plate.position.copy(pos).addScaledVector(axes.normal, 0.05);
+    this.group.add(plate);
+
+    const barGeo = this.plateGeo(key, 0.1, 0.26);
+    const bars: THREE.Mesh[] = [];
+    for (let i = 0; i < 3; i++) {
+      const bar = new THREE.Mesh(barGeo, this.beltMat);
+      this.group.add(bar);
+      bars.push(bar);
+    }
+    this.belts.push({ pos, axes, dir, bars });
+  }
+
+  private addSlider(
+    key: FaceKey, col: number, sliceIdx: number, phase: number,
+    world: RAPIER.World, R: typeof RAPIER,
+  ) {
+    const axes = FACE_AXES[key];
+    const b = this.boxForFace(key, col, sliceIdx, 1);
+    const base = new THREE.Vector3(b.x, b.y, b.z);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, b.d), this.sliderMat);
+    this.disposables.push(mesh.geometry);
+    mesh.position.copy(base);
+    this.group.add(mesh);
+
+    const body = world.createRigidBody(
+      R.RigidBodyDesc.kinematicPositionBased().setTranslation(base.x, base.y, base.z),
+    );
+    const desc = R.ColliderDesc.cuboid(b.w / 2, b.h / 2, b.d / 2)
+      .setFriction(0)
+      .setRestitution(0)
+      .setCollisionGroups((0x0001 << 16) | 0xffff);
+    world.createCollider(desc, body);
+    this.sliders.push({
+      body, mesh, base, axes, phase,
+      pos: base.clone().addScaledVector(axes.normal, SLAB_T / 2),
+      vel: 0,
+    });
+  }
+
+  private addShutter(
+    key: FaceKey, col: number, sliceIdx: number, phase: number,
+    world: RAPIER.World, R: typeof RAPIER,
+  ) {
+    const axes = FACE_AXES[key];
+    const surface = this.surfaceCenter(key, col, sliceIdx);
+    const across = TILE * 0.9;
+    const thin = 0.36;
+    const geo = key === "f" || key === "c"
+      ? new THREE.BoxGeometry(across, SHUTTER_HEIGHT, thin)
+      : new THREE.BoxGeometry(SHUTTER_HEIGHT, across, thin);
+    this.disposables.push(geo);
+    const mesh = new THREE.Mesh(geo, this.shutterMat);
+    this.group.add(mesh);
+
+    const half = key === "f" || key === "c"
+      ? new THREE.Vector3(across / 2, SHUTTER_HEIGHT / 2, thin / 2)
+      : new THREE.Vector3(SHUTTER_HEIGHT / 2, across / 2, thin / 2);
+    this.shutters.push({
+      mesh, axes, phase, half, surface,
+      center: surface.clone(), ext: 0,
+    });
+    void world; void R;
+  }
+
+  /**
+   * Hands each player the launch and carry it has earned this step. Called
+   * before the players integrate, so the values land in the same frame.
+   */
+  applyFeatures(players: FeatureTarget[], frame: SurfaceFrame) {
+    for (const p of players) {
+      p.platformLat = 0;
+      p.boostUp = 0;
+      if (!p.grounded) continue;
+      p.position(_fv);
+
+      for (const pad of this.pads) {
+        if (this.onFeature(_fv, pad.pos, pad.axes, TILE / 2 + 0.3, SLICE_LEN / 2 + 0.3, 1.25)) {
+          p.boostUp = LAUNCH_V;
+          break;
+        }
+      }
+      for (const belt of this.belts) {
+        if (this.onFeature(_fv, belt.pos, belt.axes, TILE / 2 + 0.1, SLICE_LEN / 2 + 0.25, 1.1)) {
+          p.platformLat += CONVEYOR_SPEED * belt.dir * belt.axes.colAxis.dot(frame.right);
+          break;
+        }
+      }
+      for (const sl of this.sliders) {
+        if (this.onFeature(_fv, sl.pos, sl.axes, TILE / 2 + 0.2, SLICE_LEN / 2 + 0.25, 1.1)) {
+          p.platformLat += sl.vel * sl.axes.colAxis.dot(frame.right);
+          break;
+        }
+      }
+    }
+  }
+
+  private onFeature(
+    p: THREE.Vector3, center: THREE.Vector3, axes: FaceAxes,
+    halfCol: number, halfZ: number, maxNormal: number,
+  ): boolean {
+    _fd.subVectors(p, center);
+    const n = _fd.dot(axes.normal);
+    if (n < -0.25 || n > maxNormal) return false;
+    if (Math.abs(_fd.dot(axes.colAxis)) > halfCol) return false;
+    return Math.abs(_fd.z) <= halfZ;
+  }
+
+  /** Advances everything time-driven. Runs inside the fixed step. */
+  updateFeatures(dt: number) {
+    this.featureTime += dt;
+    const t = this.featureTime;
+
+    for (const sl of this.sliders) {
+      const w = (Math.PI * 2) / SLIDER_PERIOD;
+      const a = w * (t + sl.phase * SLIDER_PERIOD);
+      const offset = Math.sin(a) * SLIDER_TRAVEL;
+      sl.vel = Math.cos(a) * SLIDER_TRAVEL * w;
+      _fv.copy(sl.base).addScaledVector(sl.axes.colAxis, offset);
+      sl.body.setNextKinematicTranslation({ x: _fv.x, y: _fv.y, z: _fv.z });
+      sl.mesh.position.copy(_fv);
+      sl.pos.copy(_fv).addScaledVector(sl.axes.normal, SLAB_T / 2);
+    }
+
+    for (const sh of this.shutters) {
+      const ext = shutterExtension(t, sh.phase);
+      sh.ext = ext;
+      const reach = SHUTTER_HEIGHT * ext;
+      sh.center.copy(sh.surface).addScaledVector(sh.axes.normal, reach / 2 - SHUTTER_HEIGHT * 0.02);
+      sh.mesh.position.copy(sh.center);
+      const squash = Math.max(0.01, ext);
+      if (sh.axes.colAxis.y === 0) sh.mesh.scale.set(1, squash, 1);
+      else sh.mesh.scale.set(squash, 1, 1);
+      sh.mesh.visible = ext > 0.02;
+    }
+  }
+
+  /**
+   * True when a player at `p` is inside a barrier that is across the lane.
+   * Across the face this tests the player's centre rather than their full width,
+   * so standing in the neighbouring lane is genuinely safe — an inflated box made
+   * barriers kill people who had correctly stepped aside.
+   */
+  shutterHazard(p: THREE.Vector3, _halfW: number, halfH: number): boolean {
+    for (const sh of this.shutters) {
+      if (sh.ext < SHUTTER_LETHAL_FRAC) continue;
+      const acrossIsX = sh.axes.colAxis.y === 0;
+      const dAcross = acrossIsX ? Math.abs(p.x - sh.center.x) : Math.abs(p.y - sh.center.y);
+      const dUp = acrossIsX ? Math.abs(p.y - sh.center.y) : Math.abs(p.x - sh.center.x);
+      if (dAcross > (acrossIsX ? sh.half.x : sh.half.y)) continue;
+      if (dUp > (SHUTTER_HEIGHT * sh.ext) / 2 + halfH) continue;
+      if (Math.abs(p.z - sh.center.z) > sh.half.z + 0.28) continue;
+      return true;
+    }
+    return false;
+  }
+
+  /** Where each slider is right now, in column space, for the verification bot. */
+  sliderStates(): { z: number; col: number; baseCol: number; phase: number }[] {
+    return this.sliders.map((sl) => ({
+      z: sl.base.z,
+      col: (sl.mesh.position.dot(sl.axes.colAxis) + HALF) / TILE - 0.5,
+      baseCol: (sl.base.dot(sl.axes.colAxis) + HALF) / TILE - 0.5,
+      phase: sl.phase,
+    }));
+  }
+
+  /** Where a slider will be `ahead` seconds from now, in column space. */
+  sliderColAt(ahead: number, baseCol: number, phase: number): number {
+    const w = (Math.PI * 2) / SLIDER_PERIOD;
+    const a = w * (this.featureTime + ahead + phase * SLIDER_PERIOD);
+    return baseCol + (Math.sin(a) * SLIDER_TRAVEL) / TILE;
+  }
+
+  /** Shutter extension `ahead` seconds from now, so the bot can plan a lane. */
+  shutterExtensionAt(ahead: number, phase: number): number {
+    return shutterExtension(this.featureTime + ahead, phase);
+  }
+
+  /** Feature positions, for the QA harness to aim a player at one. */
+  featurePositions(): {
+    pads: [number, number, number][];
+    belts: { pos: [number, number, number]; dir: number }[];
+    shutters: [number, number, number][];
+  } {
+    return {
+      pads: this.pads.map((p) => [p.pos.x, p.pos.y, p.pos.z]),
+      belts: this.belts.map((b) => ({ pos: [b.pos.x, b.pos.y, b.pos.z], dir: b.dir })),
+      shutters: this.shutters.map((sh) => [sh.surface.x, sh.surface.y, sh.surface.z]),
+    };
+  }
+
+  /** Live shutter timing, so the verification bot can plan around a closed lane. */
+  shutterStates(): { z: number; ext: number; phase: number }[] {
+    return this.shutters.map((sh) => ({ z: sh.surface.z, ext: sh.ext, phase: sh.phase }));
+  }
+
+  private animateFeatures(dt: number) {
+    const t = this.featureTime;
+    for (const pad of this.pads) {
+      for (let i = 0; i < pad.bars.length; i++) {
+        const u = ((t * 1.5 + i / pad.bars.length) % 1);
+        pad.bars[i].position.copy(pad.pos).addScaledVector(pad.axes.normal, 0.25 + u * 1.5);
+        pad.bars[i].scale.setScalar(Math.max(0.05, 1 - u));
+      }
+    }
+    for (const belt of this.belts) {
+      for (let i = 0; i < belt.bars.length; i++) {
+        const u = ((t * 1.4 * belt.dir + i / belt.bars.length) % 1 + 1) % 1;
+        belt.bars[i].position.copy(belt.pos)
+          .addScaledVector(belt.axes.colAxis, (u - 0.5) * TILE * 0.86)
+          .addScaledVector(belt.axes.normal, 0.12);
+      }
+    }
+    void dt;
   }
 
   updateSpinners(dt: number) {
@@ -312,9 +618,9 @@ export class Tunnel {
     this.disposables.push(pipeGeo);
     for (let i = 0; i < 11; i++) {
       const pipe = new THREE.Mesh(pipeGeo, darkMat);
-      const ang = Math.random() * Math.PI * 2;
-      const rad = HALF + 3 + Math.random() * 6;
-      pipe.scale.setScalar(0.3 + Math.random() * 0.55);
+      const ang = i * 2.3999632297;
+      const rad = HALF + 3 + (i * 7 % 11) * 0.55;
+      pipe.scale.set(0.3 + (i % 4) * 0.14, 1, 0.3 + (i % 4) * 0.14);
       pipe.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, -length / 2);
       pipe.rotation.x = Math.PI / 2;
       this.group.add(pipe);
@@ -336,7 +642,7 @@ export class Tunnel {
       }
       const ang = (i / Math.max(2, Math.floor(length / 45))) * Math.PI * 2 + 0.7;
       t.position.set(Math.cos(ang) * (HALF + 5.5), Math.sin(ang) * (HALF + 5.5), -18 - i * 45);
-      this.turbines.push({ obj: t, speed: 0.5 + Math.random() * 0.9 });
+      this.turbines.push({ obj: t, speed: 0.5 + (i % 4) * 0.22 });
       this.group.add(t);
     }
   }
@@ -367,6 +673,7 @@ export class Tunnel {
 
   update(dt: number) {
     this.time += dt;
+    this.animateFeatures(dt);
     for (const t of this.turbines) t.obj.rotation.z += t.speed * dt;
     const pulse = 0.16 + Math.sin(this.time * 3.2) * 0.09;
     (this.portalDisc.material as THREE.MeshBasicMaterial).opacity = pulse;
@@ -374,11 +681,16 @@ export class Tunnel {
 
   dispose(scene: THREE.Scene) {
     scene.remove(this.group);
+    this.art.dispose();
     for (const d of this.disposables) d.dispose();
     this.disposables = [];
     this.turbines = [];
     this.crumbleTiles = [];
     this.spinners = [];
+    this.pads = [];
+    this.belts = [];
+    this.sliders = [];
+    this.shutters = [];
   }
 }
 
@@ -404,4 +716,45 @@ interface Spinner {
   angle: number;
   speed: number;
   z: number;
+}
+
+interface Pad {
+  pos: THREE.Vector3;
+  axes: FaceAxes;
+  bars: THREE.Mesh[];
+}
+
+interface Belt {
+  pos: THREE.Vector3;
+  axes: FaceAxes;
+  dir: number;
+  bars: THREE.Mesh[];
+}
+
+interface Slider {
+  body: RAPIER.RigidBody;
+  mesh: THREE.Mesh;
+  base: THREE.Vector3;
+  pos: THREE.Vector3;
+  axes: FaceAxes;
+  phase: number;
+  vel: number;
+}
+
+interface Shutter {
+  mesh: THREE.Mesh;
+  axes: FaceAxes;
+  phase: number;
+  half: THREE.Vector3;
+  surface: THREE.Vector3;
+  center: THREE.Vector3;
+  ext: number;
+}
+
+/** What Tunnel needs from a player to hand it a launch or a carry. */
+export interface FeatureTarget {
+  grounded: boolean;
+  platformLat: number;
+  boostUp: number;
+  position(out: THREE.Vector3): THREE.Vector3;
 }

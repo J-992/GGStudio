@@ -12,6 +12,7 @@ const ROPE_CLIMB_ACCEL = 20;
 const ROPE_CLIMB_MAX_V = 8;
 import { FORWARD, type SurfaceFrame } from "../tunnel/SurfaceOrientation";
 import type { PlayerIndex } from "../input/InputManager";
+import { makeGlowSprite } from "../effects/Glow";
 
 export interface PlayerInputSample {
   lateral: number;
@@ -23,6 +24,7 @@ export interface PlayerEvents {
   jumped: boolean;
   landed: boolean;
   landImpact: number;
+  launched?: boolean;
 }
 
 export const STATIC_GROUP = 0x0001;
@@ -56,7 +58,7 @@ function rayHit(
 
 export class Player {
   readonly index: PlayerIndex;
-  readonly color: number;
+  color: number;
   body!: RAPIER.RigidBody;
   spawn = new THREE.Vector3();
 
@@ -73,6 +75,12 @@ export class Player {
   rotHoldLeft = 0;
   rotHoldRight = 0;
   time = 0;
+
+  /** Lateral carry from a conveyor or a slider, in units per second. */
+  platformLat = 0;
+  /** Set by a launch pad; spent on the next integrate. */
+  boostUp = 0;
+  private launchArc = false;
 
   tensionPull = new THREE.Vector3();
   tensionAmount = 0;
@@ -100,6 +108,7 @@ export class Player {
   private legR!: THREE.Group;
   private visorMat!: THREE.MeshBasicMaterial;
   private accentMat!: THREE.MeshStandardMaterial;
+  private bodyMat!: THREE.MeshStandardMaterial;
   shadow: THREE.Mesh;
 
   constructor(index: PlayerIndex, color: number, scene: THREE.Scene) {
@@ -116,10 +125,42 @@ export class Player {
     scene.add(this.shadow);
   }
 
+  /**
+   * Repaints and re-finishes the robot for a bought skin. The loud ones also get
+   * a halo shell around the chassis, which is what makes them read as expensive.
+   */
+  applySkin(skin: { body: number; metalness: number; roughness: number; glow: number; rim?: boolean }, accent: number) {
+    this.color = accent;
+    this.bodyMat.color.setHex(skin.body);
+    this.bodyMat.metalness = skin.metalness;
+    this.bodyMat.roughness = skin.roughness;
+    this.accentMat.color.setHex(accent);
+    this.accentMat.emissive.setHex(accent);
+    this.accentMat.emissiveIntensity = skin.glow;
+    this.accentMat.metalness = skin.metalness;
+    this.accentMat.roughness = skin.roughness;
+    this.visorMat.color.setHex(accent);
+    this.setRim(!!skin.rim, accent);
+  }
+
+  private rimSprite: THREE.Sprite | null = null;
+
+  private setRim(on: boolean, accent: number) {
+    if (on && !this.rimSprite) {
+      this.rimSprite = makeGlowSprite(accent, 1.7);
+      this.modelRoot.add(this.rimSprite);
+    }
+    if (this.rimSprite) {
+      this.rimSprite.visible = on;
+      this.rimSprite.material.color.setHex(accent);
+    }
+  }
+
   private buildModel() {
     const dark = new THREE.MeshStandardMaterial({
       color: 0x46536b, roughness: 0.5, metalness: 0.35,
     });
+    this.bodyMat = dark;
     this.accentMat = new THREE.MeshStandardMaterial({
       color: this.color, roughness: 0.35, metalness: 0.2,
       emissive: this.color, emissiveIntensity: 0.45,
@@ -179,7 +220,13 @@ export class Player {
       .lockRotations()
       .setCanSleep(false);
     this.body = world.createRigidBody(bodyDesc);
-    const colDesc = R.ColliderDesc.cuboid(PLAYER_HALF_W, PLAYER_HALF_H, PLAYER_HALF_W)
+    const radius = 0.08;
+    const colDesc = R.ColliderDesc.roundCuboid(
+      PLAYER_HALF_W - radius,
+      PLAYER_HALF_H - radius,
+      PLAYER_HALF_W - radius,
+      radius,
+    )
       .setFriction(0)
       .setRestitution(0)
       .setCollisionGroups((PLAYER_GROUP << 16) | (STATIC_GROUP | PLAYER_GROUP));
@@ -211,6 +258,9 @@ export class Player {
     this.wasFar = false;
     this.rotHoldLeft = 0;
     this.rotHoldRight = 0;
+    this.platformLat = 0;
+    this.boostUp = 0;
+    this.launchArc = false;
     this.tensionPull.set(0, 0, 0);
     this.tensionAmount = 0;
   }
@@ -241,11 +291,22 @@ export class Player {
 
     let vUp = this.velocityAlong(frame.up);
 
+    // A released jump is cut short on purpose. A launch pad is not a jump, so it
+    // keeps its full arc whether or not anyone is holding the button.
     let gMult: number;
-    if (vUp > 0.001) gMult = input.jumpHeld ? JUMP_HOLD_GRAVITY_MULT : JUMP_RELEASE_GRAVITY_MULT;
-    else gMult = FALL_GRAVITY_MULT;
+    if (vUp > 0.001) {
+      if (this.launchArc) gMult = input.jumpHeld ? JUMP_HOLD_GRAVITY_MULT : 1;
+      else gMult = input.jumpHeld ? JUMP_HOLD_GRAVITY_MULT : JUMP_RELEASE_GRAVITY_MULT;
+    } else {
+      gMult = FALL_GRAVITY_MULT;
+      this.launchArc = false;
+    }
     if (!this.grounded || vUp > 0 || this.tensionPull.dot(frame.up) < 0) vUp -= GRAVITY * gMult * dt;
 
+    // A pad fires whether or not you also pressed jump. Without the saved flag the
+    // jump clears `grounded` first and quietly swallows the launch, which is
+    // exactly what you do not want on the lip of a chasm.
+    const groundedBeforeJump = this.grounded;
     if (this.jumpBufferTimer > 0 && (this.grounded || this.coyoteTimer > 0)) {
       vUp = JUMP_V;
       this.jumpBufferTimer = 0;
@@ -254,6 +315,16 @@ export class Player {
       this.squashVel = 2.6;
       ev.jumped = true;
     }
+
+    if (this.boostUp > 0 && groundedBeforeJump) {
+      vUp = this.boostUp;
+      this.coyoteTimer = 0;
+      this.grounded = false;
+      this.launchArc = true;
+      this.squashVel = 3.4;
+      ev.launched = true;
+    }
+    this.boostUp = 0;
 
     vUp += this.tensionPull.dot(frame.up) * dt;
     this.latVel += this.tensionPull.dot(frame.right) * dt;
@@ -270,12 +341,10 @@ export class Player {
 
     if (this.grounded && vUp <= 0.01 && !ev.jumped) vUp = 0;
 
-    const vx =
-      frame.right.x * this.latVel + FORWARD.x * this.fwdVel + frame.up.x * vUp;
-    const vy =
-      frame.right.y * this.latVel + FORWARD.y * this.fwdVel + frame.up.y * vUp;
-    const vz =
-      frame.right.z * this.latVel + FORWARD.z * this.fwdVel + frame.up.z * vUp;
+    const lat = this.latVel + this.platformLat;
+    const vx = frame.right.x * lat + FORWARD.x * this.fwdVel + frame.up.x * vUp;
+    const vy = frame.right.y * lat + FORWARD.y * this.fwdVel + frame.up.y * vUp;
+    const vz = frame.right.z * lat + FORWARD.z * this.fwdVel + frame.up.z * vUp;
     this.body.setLinvel({ x: vx, y: vy, z: vz }, true);
   }
 

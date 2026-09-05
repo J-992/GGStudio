@@ -1,20 +1,23 @@
 import type { LevelDef } from "../types";
-import { pat, rep, seq, slice, solidRun } from "../helpers";
+import { pat, rep, seq, solidRun } from "../helpers";
 
+const E = ".....";
+
+// ACT II — the tunnel turns. Every wall is a floor if you commit to it.
 export const level05: LevelDef = {
   name: "WALL ROLL",
   hints: [
-    { atSlice: 3, text: "STEER INTO A WALL AND HOLD — THE WALL BECOMES THE FLOOR" },
-    { atSlice: 40, text: "EVERY SURFACE IS A ROUTE" },
+    { atSlice: 4, text: "STEER INTO THE RIGHT WALL AND HOLD — IT BECOMES THE FLOOR" },
+    { atSlice: 32, text: "STEER BACK TOWARD THE FLOOR AS IT RETURNS" },
   ],
   slices: seq(
     solidRun(12),
-    rep(12, { f: pat(".....") }),
-    rep(2, { f: pat("....."), l: pat(".....") }),
-    rep(10, { f: pat(".....") }),
-    solidRun(17),
-    rep(24, { l: pat(".....") }),
-    solidRun(3),
+    rep(4, { f: pat("..###") }),
+    rep(4, { f: pat("....#") }),
+    rep(18, { f: E, c: E, l: E }),
+    rep(8, { f: pat("...##"), c: E, l: E }),
+    rep(6, { f: pat("....#"), r: E, c: E, l: E }),
+    rep(6, { f: pat("...##") }),
+    solidRun(16),
   ),
 };
-void slice;

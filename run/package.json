@@ -4,19 +4,30 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev:squish": "vite --config squish/vite.config.ts",
+    "build:squish": "tsc --project squish/tsconfig.json && vite build --config squish/vite.config.ts",
+    "qa:squish": "node squish/solve.mjs && node squish/mechanics.mjs && node squish/qa.mjs",
+    "dev": "vite --config squish/vite.config.ts",
+    "dev:tether": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "qa": "node scripts/qa.mjs"
+    "qa": "node scripts/qa.mjs",
+    "qa:online": "node scripts/online-qa.mjs",
+    "qa:dist": "node scripts/dist-check.mjs",
+    "qa:levels": "node scripts/levels-qa.mjs all",
+    "poki:preflight": "node scripts/poki/preflight.mjs",
+    "poki:upload": "npm run build && node scripts/poki/upload.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0",
+    "@poki/netlib": "^0.0.20",
     "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/three": "^0.185.4",
     "playwright-core": "^1.62.1",
     "typescript": "^5.9.2",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "@poki/cli": "^0.1.19"
   }
 }

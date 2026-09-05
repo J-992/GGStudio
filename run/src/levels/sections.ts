@@ -5,6 +5,13 @@ export const runway = (n: number): SliceDef[] => rep(n);
 
 export const gap = (n = 1): SliceDef[] => rep(n, { f: EMPTY });
 
+/**
+ * A true break in the tunnel: every face gone. Rolling onto a wall is not an
+ * escape here, so a void has to be crossed by a jump or a launch pad.
+ */
+export const voidRun = (n = 1): SliceDef[] =>
+  rep(n, { f: EMPTY, l: EMPTY, r: EMPTY, c: EMPTY });
+
 export const floorP = (p: string, n = 1): SliceDef[] => rep(n, { f: pat(p) });
 
 export function faceGap(face: "l" | "r" | "c" | "f", n = 1): SliceDef[] {

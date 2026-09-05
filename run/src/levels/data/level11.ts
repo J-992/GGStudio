@@ -1,31 +1,26 @@
-import type { LevelDef } from "../types";
-import { pat, rep, seq, solidRun } from "../helpers";
+import { course } from "../authoring";
+import { rep, seq, solidRun } from "../helpers";
 
-const E = ".....";
-
-export const level11: LevelDef = {
-  name: "THE DROP",
-  hints: [
-    { atSlice: 1, text: "A FALLING PARTNER CAN BE REELED BACK IN" },
-    { atSlice: 50, text: "HOLD JUMP ON A TAUT TETHER TO CLIMB" },
-  ],
-  slices: seq(
-    solidRun(9),
-    rep(2, { f: E }),
-    solidRun(9),
-    rep(8, { f: pat("..#..") }),
-    solidRun(8),
-    rep(10, { f: E }),
-    rep(8, { f: E, r: pat("..#..") }),
-    rep(10, { r: E }),
-    rep(8, { f: pat(".#...") }),
-    solidRun(8),
-    rep(4, { f: pat("#....") }),
-    rep(4, { f: pat("....#") }),
-    rep(4, { f: pat("#....") }),
-    rep(4, { f: pat("....#") }),
-    solidRun(8),
-    rep(10, { f: pat("..#..") }),
-    solidRun(13),
-  ),
-};
+export const level11 = course(
+  "BELTWAY",
+  {
+    label: "FEEL THE CURRENT",
+    hint: "BLUE ARROWS CARRY YOU SIDEWAYS — STEER AGAINST THEM",
+    slices: seq(solidRun(12), rep(5, { f: ">>>>>" }), solidRun(6)),
+  },
+  {
+    label: "REVERSE THE FLOW",
+    hint: "THE ARROWS SHOW WHICH WAY YOU WILL DRIFT",
+    slices: seq(solidRun(8), rep(5, { f: "<<<<<" }), solidRun(6)),
+  },
+  {
+    label: "RIDE THE CURRENT",
+    hint: "RIDE RIGHT, THEN STAY ON THE LANDING",
+    slices: seq(solidRun(8), rep(5, { f: ">>>##" }), rep(4, { f: "...##" }), solidRun(8)),
+  },
+  {
+    label: "COUNTERFLOW",
+    hint: "OPPOSING BELTS PUSH YOU APART — STEER TOGETHER",
+    slices: seq(solidRun(8), rep(5, { f: "<<#>>" }), solidRun(6), rep(5, { f: "##<<<" }), rep(4, { f: "##..." }), solidRun(12)),
+  },
+);

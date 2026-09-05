@@ -1,24 +1,27 @@
-import type { LevelDef } from "../types";
-import { pat, rep, seq, solidRun } from "../helpers";
+import { course } from "../authoring";
+import { rep, seq, solidRun } from "../helpers";
+import { voidRun } from "../sections";
 
-const E = ".....";
-
-export const level14: LevelDef = {
-  name: "SPIRE",
-  hints: [{ atSlice: 8, text: "LAND ON THE WALL — GAPS AHEAD" }],
-  slices: seq(
-    solidRun(8),
-    rep(4, { f: pat(E) }),
-    rep(2, { f: pat(E), r: pat(E) }),
-    rep(2, { f: pat(E) }),
-    rep(2, { f: pat(E), r: pat(E) }),
-    rep(2, { f: pat(E) }),
-    solidRun(10),
-    rep(4, { f: pat(E) }),
-    rep(2, { f: pat(E), l: pat(E) }),
-    rep(2, { f: pat(E) }),
-    rep(2, { f: pat(E), l: pat(E) }),
-    rep(2, { f: pat(E) }),
-    solidRun(14),
-  ),
-};
+export const level14 = course(
+  "FERRY",
+  {
+    label: "CATCH THE FERRY",
+    hint: "LAUNCH, LAND, THEN RIDE THE MOVING DECK",
+    slices: seq(solidRun(12), rep(2, { f: "^^^^^" }), voidRun(3), solidRun(9), rep(5, { f: ".===." }), solidRun(6)),
+  },
+  {
+    label: "PASSING TRAINS",
+    hint: "THE TWO DECKS MOVE IN OPPOSITE DIRECTIONS",
+    slices: seq(solidRun(8), rep(5, { f: "==#++" }), solidRun(6)),
+  },
+  {
+    label: "SPLIT CROSSING",
+    hint: "PICK A DECK — KEEP YOUR PARTNER CLOSE",
+    slices: seq(solidRun(8), rep(5, { f: ".###." }), rep(4, { f: ".=+++" }), solidRun(8)),
+  },
+  {
+    label: "TRANSFER",
+    hint: "REGROUP ON THE ISLAND BEFORE THE NEXT DECK",
+    slices: seq(solidRun(8), rep(5, { f: ".##.." }), rep(4, { f: ".===." }), solidRun(8), rep(5, { f: ".##.." }), rep(4, { f: ".+++." }), solidRun(14)),
+  },
+);

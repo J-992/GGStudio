@@ -1,4 +1,5 @@
 import type { FacePattern, SliceDef } from "./types";
+import { LEGAL_CHARS } from "./types";
 import { COLS } from "../game/Constants";
 
 export const FULL: FacePattern = "#".repeat(COLS);
@@ -6,6 +7,9 @@ export const EMPTY: FacePattern = ".".repeat(COLS);
 
 export function pat(s: string): FacePattern {
   if (s.length !== COLS) throw new Error(`pattern "${s}" must be ${COLS} chars`);
+  for (const ch of s) {
+    if (!LEGAL_CHARS.includes(ch)) throw new Error(`pattern "${s}" has unknown tile "${ch}"`);
+  }
   return s;
 }
 

@@ -11,34 +11,115 @@
     <canvas id="game-canvas"></canvas>
     <div id="hud">
       <div id="level-label"></div>
+      <div id="coin-hud"><span id="coin-icon">◎</span><span id="coin-count">0</span><span id="coin-run"></span></div>
       <div id="hint"></div>
       <div id="rescue-popup">RESCUE!</div>
+      <div id="auto-offer">
+        <span id="auto-offer-text"></span>
+        <button id="auto-offer-yes" type="button">AUTOPILOT</button>
+      </div>
+      <div id="auto-badges">
+        <span class="auto-badge p1" id="auto-badge-0">IGNIS · AUTO</span>
+        <span class="auto-badge p2" id="auto-badge-1">VOLTA · AUTO</span>
+      </div>
       <div id="banner"><div id="banner-main"></div><div id="banner-sub"></div></div>
     </div>
     <div id="flash"></div>
+    <div id="unlock-toast"></div>
+    <div id="coach">
+      <div class="coach-tag" id="coach-p1">
+        <span class="coach-move"></span><span class="coach-jump"></span>
+      </div>
+      <div class="coach-tag" id="coach-p2">
+        <span class="coach-move"></span><span class="coach-jump"></span>
+      </div>
+    </div>
     <div id="pause-overlay">
       <div class="panel">
         <h2>PAUSED</h2>
-        <p>ESC — Resume<br/>R — Restart level<br/>M — Mute</p>
+        <p>ESC — Resume<br/>R — Restart level<br/>TAB — Autopilot on the idle robot<br/>M — Mute</p>
+        <button id="btn-pause-locker" type="button">LOCKER</button>
       </div>
     </div>
     <div id="title-screen">
-      <h1>TETHER<span>RUN</span></h1>
-      <p class="tag">two robots · one elastic tether · every wall is a floor</p>
-      <div class="controls-grid">
-        <div class="ctl p1"><h3>P1 · IGNIS</h3><p>A / D — move<br/>W — jump</p></div>
-        <div class="ctl p2"><h3>P2 · VOLTA</h3><p>&larr; / &rarr; — move<br/>&uarr; — jump</p></div>
+      <div class="menu-hero">
+        <h1>TETHER<span>RUN</span></h1>
+        <p class="tag">two robots · one elastic tether · every wall is a floor</p>
+        <p class="how local-intro keys">PLAY SOLO WITH BOTH HANDS — OR TAKE ONE ROBOT EACH</p>
+        <p class="how local-intro taps">PLAY SOLO WITH BOTH THUMBS — OR TAKE ONE ROBOT EACH</p>
+        <div class="controls-grid local-intro">
+          <div class="ctl p1">
+            <h3>LEFT · IGNIS</h3>
+            <p class="keys">A / D — move<br/>W — jump</p>
+            <p class="taps">left pads<br/>move &amp; jump</p>
+          </div>
+          <div class="ctl p2">
+            <h3>RIGHT · VOLTA</h3>
+            <p class="keys">&larr; / &rarr; — move<br/>&uarr; — jump</p>
+            <p class="taps">right pads<br/>move &amp; jump</p>
+          </div>
+        </div>
+        <div id="mode-actions">
+          <button id="btn-local" class="primary" type="button">PLAY</button>
+          <button id="btn-locker" type="button">LOCKER</button>
+          <button id="btn-online" type="button">ONLINE</button>
+        </div>
+        <div id="menu-footer" class="local-intro">
+          <p id="title-record"></p>
+          <div id="act-select">
+            <p id="act-label">ACTS</p>
+            <div id="act-buttons"></div>
+          </div>
+        </div>
       </div>
-      <p class="press">GAMEPADS SUPPORTED · PRESS ANY KEY TO START</p>
+
+      <div id="online-panel" aria-live="polite">
+        <p>PLAY WITH ONE FRIEND ON ANOTHER DEVICE</p>
+        <div class="online-actions">
+          <button id="btn-host" type="button">CREATE ROOM</button>
+          <span>OR</span>
+          <input id="room-code" aria-label="Room code" maxlength="8" autocomplete="off" placeholder="ROOM CODE" />
+          <button id="btn-join" type="button">JOIN</button>
+        </div>
+        <p id="online-status"></p>
+        <strong id="online-code"></strong>
+        <button id="btn-online-cancel" class="quiet" type="button">BACK</button>
+      </div>
     </div>
+
+    <div id="locker">
+      <div class="locker-head">
+        <h2>LOCKER</h2>
+        <span id="locker-coins">◎ 0</span>
+        <button id="locker-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <canvas id="locker-canvas"></canvas>
+      <div class="locker-caption">
+        <strong id="locker-name"></strong>
+        <small id="locker-blurb"></small>
+      </div>
+      <div class="locker-tabs">
+        <button class="locker-tab active" data-tab="skins" type="button">SKINS</button>
+        <button class="locker-tab" data-tab="trails" type="button">TRAILS</button>
+      </div>
+      <div id="locker-body"></div>
+      <button id="locker-action" type="button"></button>
+    </div>
+
     <div id="finish-screen">
       <h1>ALL CONDUITS CLEAR</h1>
       <p id="finish-stats"></p>
       <p class="press">PRESS R TO RUN IT AGAIN</p>
     </div>
+    <div id="gameover-screen">
+      <h1>RUN OVER</h1>
+      <div id="run-depth"><span id="run-reached"></span><small id="run-reached-name"></small></div>
+      <div id="run-bar"><div id="run-bar-fill"></div><div id="run-bar-best"></div></div>
+      <p id="run-record"></p>
+      <p class="press" id="run-again">RESTARTING&hellip;</p>
+    </div>
     <div id="loading">BOOTING CONDUIT&hellip;</div>
   </div>
-    <div id="rotate-overlay"><p>ROTATE YOUR DEVICE<span>landscape plays best</span></p></div>
     <div id="sys-buttons">
       <div id="btn-mute" class="sys-btn">&#9834;</div>
       <div id="btn-pause" class="sys-btn">II</div>
