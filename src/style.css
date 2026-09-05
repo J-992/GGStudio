@@ -259,3 +259,31 @@ body.touch #hint { top: 14%; bottom: auto; }
   letter-spacing: 0.24em;
   color: #9ff5ff;
 }
+
+/* --- device-appropriate copy and overlay behaviour ----------------------- */
+
+.taps { display: none; }
+body.touch .keys { display: none; }
+body.touch .taps { display: block; }
+
+/* The thumb pads must never sit on top of a menu. */
+body.touch.overlay-open #touch-ui { display: none; }
+
+/* Landscape phones are short. Let the title fit rather than overflow it. */
+@media (max-height: 500px) {
+  #title-screen { justify-content: center; padding: 10px 12px; overflow-y: auto; }
+  #title-screen h1 { font-size: clamp(22px, 7vh, 34px); margin: 2px 0 0; }
+  #title-screen .tag { margin: 4px 12px 6px; font-size: 10px; }
+  .how { font-size: 9px; letter-spacing: 0.18em; margin-bottom: 4px; }
+  .controls-grid { gap: 8px; margin-bottom: 8px; }
+  .ctl { padding: 6px 10px; }
+  .ctl h3 { font-size: 10px; }
+  .ctl p { font-size: 10px; line-height: 1.35; }
+  #mode-actions { margin-bottom: 6px; }
+  #mode-actions button { padding: 8px 12px; font-size: 10px; }
+  #act-buttons button { padding: 5px 8px; font-size: 9px; }
+  #act-label, #title-record, .save-note, .press { font-size: 9px; }
+  #gameover-screen { gap: 8px; padding: 10px; }
+  #gameover-screen h1 { font-size: clamp(20px, 7vh, 32px); }
+  #run-reached { font-size: clamp(15px, 4.5vh, 24px); }
+}

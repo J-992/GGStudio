@@ -37,6 +37,8 @@ export const FEATURE_CHARS = "^<>=+!?";
 export interface HintDef {
   atSlice: number;
   text: string;
+  /** Shown instead of `text` on a touch device, where key names mean nothing. */
+  touchText?: string;
 }
 
 export interface SpinnerDef {

@@ -205,7 +205,7 @@ export class Game {
 
   private handleMute() {
     const muted = audio.toggleMute();
-    this.ui.hint(muted ? "MUTED" : "SOUND ON", 1.2);
+    this.ui.hint(muted ? "MUTED" : "SOUND ON", undefined, 1.2);
   }
 
   pauseGame() {
@@ -660,7 +660,7 @@ export class Game {
       const zTrigger = -(hints[i].atSlice * SLICE_LEN + 3);
       if (minZ <= zTrigger) {
         this.hintFlags[i] = true;
-        this.ui.hint(hints[i].text);
+        this.ui.hint(hints[i].text, hints[i].touchText);
       }
     }
   }

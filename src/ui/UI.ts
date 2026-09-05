@@ -16,12 +16,23 @@ export class UI {
   private gameOverEl = document.getElementById("gameover-screen")!;
   private hintTimer = 0;
 
+  /**
+   * Keeps `body.overlay-open` in sync with the menus. The touch pads are hidden
+   * while any of them is up — they used to render straight over the title.
+   */
+  private refreshOverlay() {
+    const open = [this.titleEl, this.pauseEl, this.finishEl, this.gameOverEl]
+      .some((el) => getComputedStyle(el).display !== "none");
+    document.body.classList.toggle("overlay-open", open);
+  }
+
   hideLoading() {
     this.loadingEl.style.display = "none";
   }
 
   showTitle(v: boolean) {
     this.titleEl.style.display = v ? "flex" : "none";
+    this.refreshOverlay();
   }
 
   setLevel(n: number, total: number, name: string) {
@@ -29,8 +40,9 @@ export class UI {
     this.levelLabel.style.opacity = "1";
   }
 
-  hint(text: string, dur = 4.5) {
-    this.hintEl.textContent = text;
+  hint(text: string, touchText?: string, dur = 4.5) {
+    this.hintEl.textContent =
+      touchText && document.body.classList.contains("touch") ? touchText : text;
     this.hintEl.style.opacity = "1";
     this.hintTimer = dur;
   }
@@ -69,6 +81,7 @@ export class UI {
 
   pause(v: boolean) {
     this.pauseEl.style.display = v ? "flex" : "none";
+    this.refreshOverlay();
   }
 
   showFinish(seconds: number, rescues: number, fastest: boolean, clears: number) {
@@ -78,6 +91,7 @@ export class UI {
       `<br/>RESCUES ${rescues} · RUNS CLEARED ${clears}<br/>` +
       (rescues > 0 ? "the tether held." : "no rescues needed — try letting each other fall.");
     this.finishEl.style.display = "flex";
+    this.refreshOverlay();
   }
 
   /**
@@ -99,6 +113,7 @@ export class UI {
       ? `<b class="new-best">FURTHEST YET</b>`
       : `YOUR BEST — <b>LEVEL ${best}</b>`;
     this.gameOverEl.style.display = "flex";
+    this.refreshOverlay();
   }
 
   /** Wires the two buttons on the run-over card. Called once at boot. */
@@ -109,6 +124,7 @@ export class UI {
 
   hideGameOver() {
     this.gameOverEl.style.display = "none";
+    this.refreshOverlay();
   }
 
   /** Title-screen act shortcuts, opened by reaching an act in a full run. */
@@ -136,6 +152,7 @@ export class UI {
 
   hideFinish() {
     this.finishEl.style.display = "none";
+    this.refreshOverlay();
   }
 
   update(dt: number) {
