@@ -385,3 +385,36 @@ body.coaching .tc-right .tc-btn { animation: pad-hint 1.4s ease-in-out infinite 
 .skin-swatch { display: inline-flex; gap: 2px; }
 .skin-swatch i { width: 7px; height: 12px; border-radius: 2px; display: block; }
 .skin-price { color: #ffd75e; }
+
+/* --- unlock toast and the pause-menu shop -------------------------------- */
+
+#unlock-toast {
+  position: absolute;
+  top: 52px;
+  right: 24px;
+  max-width: 60vw;
+  padding: 9px 14px;
+  border-radius: 8px;
+  background: rgba(12, 18, 28, 0.92);
+  border: 1px solid #ffd75e;
+  box-shadow: 0 0 18px rgba(255, 174, 26, 0.35);
+  color: #ffd75e;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-align: right;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  pointer-events: none;
+  z-index: 8;
+}
+#unlock-toast.show { opacity: 1; transform: translateY(0); }
+#unlock-toast small { display: block; margin-top: 3px; font-size: 10px; color: var(--dim); letter-spacing: 0.2em; }
+
+#pause-shop { margin-top: 14px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+#pause-shop-label { margin: 0 !important; font-size: 10px; letter-spacing: 0.3em; color: var(--dim); }
+#pause-shop-items { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 460px; }
+@media (max-height: 500px) {
+  #unlock-toast { top: 40px; right: 12px; font-size: 10px; padding: 6px 10px; }
+  #pause-shop-items { max-width: 380px; }
+}

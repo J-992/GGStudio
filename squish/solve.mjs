@@ -7,7 +7,7 @@ const {Simulation,makeLevel}=await import('./.qa/simulation.mjs?'+Date.now());
 const DT=.1;
 function clone(sim){const copy=Object.create(Simulation.prototype);Object.assign(copy,structuredClone({...sim,events:[]}));return copy;}
 function key(s){return [Math.round(s.x/18),Math.round(s.y/10),Math.round(s.vy/80),s.held,Math.round(s.charge*4),s.health,s.power,Math.round(s.powerTime),s.direction,s.bossHP,Math.round(s.bossFlash*2),s.standing].join('|');}
-function score(s){return s.level.boss?(3-s.bossHP)*2000+s.health*120+s.sweets*2-Math.abs(s.x-s.bossX)*.07:s.x+s.health*110+s.friends*55+s.sweets*2+Math.min(200,-s.y)*.04;}
+function score(s){return s.level.boss?(s.bossMax-s.bossHP)*2000+s.health*120+s.sweets*2-Math.abs(s.x-s.bossX)*.07:s.x+s.health*110+s.friends*55+s.sweets*2+Math.min(200,-s.y)*.04;}
 function solve(index,seed){const initial=new Simulation(makeLevel(index,seed));initial.state='playing';let beam=[{s:initial,path:[],events:{}}],best=null;
   for(let frame=0;frame<900;frame++){
     const candidates=new Map();

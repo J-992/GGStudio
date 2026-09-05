@@ -14,8 +14,9 @@ export function obstacleRect(o:Obstacle,time:number){const gap=o.kind==='gate'?3
 export class Simulation {
   x=130;y=0;vy=0;direction=1;charge=0;held=false;grounded=true;diving=false;time=0;sweets=0;friends=0;combo=0;jumps=0;health=2;invincible=0;power:'bubble'|'chili'|null=null;powerTime=0;fever=0;checkpoint:Checkpoint={x:130,y:0,sweets:0,friends:0,got:[]};
   state:'ready'|'playing'|'dead'|'won'|'paused'='ready';events:GameEvent[]=[];reason='';standing=-1;coyote=.1;jumpBuffer=0;bufferCharge=0;checkpointIndex=0;stompChain=0;lastSpring=-1;springLock=0;
-  bossHP=3;bossFlash=0;bossTime=0;bossX=1180;bossY=-82;bossActive=false;bossAttack=0;bossTell=0;shots:{x:number;y:number;vx:number;kind:'wave'|'drop';life:number}[]=[];
+  bossHP=3;bossMax=3;bossFlash=0;bossTime=0;bossX=1180;bossY=-82;bossActive=false;bossAttack=0;bossTell=0;hotX=0;hotPhase=0;shots:{x:number;y:number;vx:number;vy?:number;kind:'wave'|'drop'|'fall';life:number}[]=[];
   constructor(public level:Level,checkpoint?:Checkpoint){
+    this.bossMax=level.boss==='king'?5:level.boss==='oven'?4:3;this.bossHP=this.bossMax;
     if(checkpoint){this.checkpoint=structuredClone(checkpoint);this.x=checkpoint.x;this.y=checkpoint.y;this.sweets=checkpoint.sweets;this.friends=checkpoint.friends;checkpoint.got.forEach(i=>{if(level.pickups[i])level.pickups[i].got=true;});this.checkpointIndex=level.checkpoints.filter(x=>x<=this.x).length;}
   }
   get flat(){return this.held&&(this.grounded||this.diving);}
@@ -99,10 +100,16 @@ export class Simulation {
     if(this.bossActive)this.updateBoss(dt,prevY);if(!this.level.boss&&this.x>=this.level.length)this.win();
   }
   updateBoss(dt:number,prevY:number){
-    this.bossTime+=dt;this.bossX=1150+Math.sin(this.bossTime*.7)*155;this.bossY=-82;
+    this.bossTime+=dt;this.bossX=1150+Math.sin(this.bossTime*(this.level.boss==='oven'?.9:.7))*(this.level.boss==='oven'?230:155);this.bossY=this.level.boss==='oven'?-70:-82;
+    if(this.level.boss==='oven'){
+      const cycle=this.bossTime%4;this.hotX=Math.floor(this.bossTime/4)%2===0?865:1420;this.hotPhase=cycle>3.1?2:cycle>2.2?1:0;
+      if(this.hotPhase===2&&Math.abs(this.x-this.hotX)<70&&this.y>-29)this.hurt('The oven warms a patch before it flares. Bounce over the glow.');
+    }
     this.bossAttack+=dt;const interval=this.level.boss==='king'?1.85:2.5;this.bossTell=this.bossAttack>interval-.7?1:0;
-    if(this.bossAttack>interval){this.bossAttack=0;const high=Math.floor(this.bossTime/interval)%3===2;this.shots.push({x:this.bossX,y:high?-48:-6,vx:(this.x<this.bossX?-1:1)*(high?240:190),kind:high?'drop':'wave',life:6});}
-    for(let i=this.shots.length-1;i>=0;i--){const shot=this.shots[i];shot.x+=shot.vx*dt;shot.life-=dt;if(shot.life<0){this.shots.splice(i,1);continue;}if(Math.abs(shot.x-this.x)<26&&this.y>shot.y-22&&this.y-this.height<shot.y+6){this.hurt('Hop the low doughballs. Squish beneath the high ones.');this.shots.splice(i,1);}}
+    if(this.bossAttack>interval){this.bossAttack=0;const high=Math.floor(this.bossTime/interval)%3===2;this.shots.push({x:this.bossX,y:high?-48:-6,vx:(this.x<this.bossX?-1:1)*(high?240:190),kind:high?'drop':'wave',life:6});
+      if(this.level.boss==='king')this.shots.push({x:Math.max(730,Math.min(1580,this.x+this.direction*150)),y:-380,vx:0,vy:60,kind:'fall',life:2});
+    }
+    for(let i=this.shots.length-1;i>=0;i--){const shot=this.shots[i];shot.x+=shot.vx*dt;if(shot.kind==='fall'){shot.vy=(shot.vy||0)+480*dt;shot.y+=(shot.vy||0)*dt;}shot.life-=dt;if(shot.life<0||shot.y>30){this.shots.splice(i,1);continue;}if(Math.abs(shot.x-this.x)<26&&this.y>shot.y-22&&this.y-this.height<shot.y+6){this.hurt('Hop the low doughballs. Squish beneath the high ones.');this.shots.splice(i,1);}}
     if(Math.abs(this.x-this.bossX)<67&&this.y>this.bossY&&this.y-this.height<this.bossY+75){
       if(this.vy>0&&prevY<this.bossY+13&&this.bossFlash===0){this.bossHP--;this.bossFlash=1.3;this.vy=-740;this.grounded=false;this.diving=false;this.standing=-1;this.health=Math.min(3,this.health+1);this.emit('bossHit',this.bossHP===0?'YOU DID IT!':`${this.bossHP} TO GO!`,this.bossX,this.bossY);if(this.bossHP<=0){this.sweets+=15;this.win();}}
       else if(this.bossFlash===0)this.hurt('Its soft spot is on top. Give it a big bounce!');

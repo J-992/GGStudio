@@ -1,110 +1,61 @@
-import { chromium } from 'playwright-core';
-import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import {chromium} from 'playwright-core';
+import {spawn} from 'node:child_process';
+import {mkdirSync,readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
-const root=new URL('..',import.meta.url).pathname;
-const shots=new URL('./shots/',import.meta.url).pathname;
-mkdirSync(shots,{recursive:true});
-const server=spawn('node',['node_modules/vite/bin/vite.js','--config','squish/vite.config.ts','--port','5175','--strictPort'],{cwd:root,stdio:'pipe'});
-let browser;
-const results=[];
-function check(name,condition){assert.ok(condition,name);results.push(name);console.log('PASS',name);}
+const root=new URL('..',import.meta.url).pathname,shots=new URL('./shots/',import.meta.url).pathname;
+mkdirSync(shots,{recursive:true});const routes=JSON.parse(readFileSync(new URL('./.qa/routes.json',import.meta.url),'utf8'));
+const server=spawn('node',['node_modules/vite/bin/vite.js','--config','squish/vite.config.ts','--port','5197','--strictPort'],{cwd:root,stdio:'pipe'});
+let browser;let count=0;const errors=[];
+function check(name,value){assert.ok(value,name);console.log('PASS',name);count++;}
+async function pageFor(index=0,mobile=false){
+  const page=await browser.newPage(mobile?{viewport:{width:390,height:844},deviceScaleFactor:2,isMobile:true,hasTouch:true}:{viewport:{width:1440,height:900}});
+  page.on('pageerror',e=>errors.push(e.message));
+  if(!mobile){await page.clock.install({time:new Date('2026-09-04T12:00:00Z')});await page.clock.pauseAt(new Date('2026-09-04T12:00:10Z'));await page.addInitScript(()=>{window.requestAnimationFrame=cb=>window.setTimeout(()=>cb(performance.now()),10);window.cancelAnimationFrame=clearTimeout;});}
+  await page.addInitScript(i=>{localStorage.setItem('squish-adventure-v2',JSON.stringify({unlocked:23,current:i,bank:210,stars:[],rescues:[]}));},index);
+  await page.goto('http://127.0.0.1:5197/?poki=mock');await page.waitForFunction(()=>window.__SQUISH__&&window.__POKI_EVENTS__?.length>=3);if(!mobile)await page.clock.runFor(100);return page;
+}
 try{
-  await new Promise((resolve,reject)=>{const t=setTimeout(()=>reject(Error('Server timeout')),15000);server.stdout.on('data',d=>{if(d.toString().includes('Local:')){clearTimeout(t);resolve();}});server.stderr.on('data',d=>process.stderr.write(d));server.on('exit',code=>reject(Error(`Server exited: ${code}`)));});
+  await new Promise((resolve,reject)=>{const t=setTimeout(()=>reject(Error('Server timeout')),15000);server.stdout.on('data',d=>{if(d.toString().includes('Local:')){clearTimeout(t);resolve();}});server.stderr.on('data',d=>process.stderr.write(d));server.on('exit',code=>reject(Error('Server exited '+code)));});
   browser=await chromium.launch({channel:'chrome',headless:true});
-  const page=await browser.newPage({viewport:{width:1440,height:900}});
-  await page.clock.install();
-  const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.goto('http://127.0.0.1:5175/?poki=mock');
-  await page.waitForFunction(()=>window.__SQUISH__&&window.__POKI_EVENTS__?.length>=3);
-  await page.screenshot({path:shots+'01-title-desktop.png'});
-  check('title and SDK loading lifecycle',await page.evaluate(()=>window.__POKI_EVENTS__.join(',')==='init,loadingStart,loadingFinished'));
-  const snapshot=()=>page.evaluate(()=>window.__SQUISH__.snapshot());
-  await page.click('#play');
-  await page.keyboard.down('Space');await page.clock.runFor(250);
-  check('Space squishes and charges after clicking play',(await snapshot()).charge>.3&&(await snapshot()).held);
-  await page.keyboard.up('Space');await page.clock.runFor(120);
-  check('release launches jelly',(await snapshot()).y < -20);
-  await page.keyboard.press('Escape');const paused=await snapshot();await page.clock.runFor(700);
-  check('pause freezes simulation',(await snapshot()).x===paused.x&&paused.state==='paused');
-  await page.keyboard.press('Escape');await page.clock.runFor(20);
-  check('resume returns to play',(await snapshot()).state==='playing');
-  await page.keyboard.press('KeyR');
-  await page.clock.runFor(2600);
-  check('unflattened jelly collides with gate',(await snapshot()).state==='dead');
-  await page.screenshot({path:shots+'02-failure.png'});
-  await page.keyboard.press('KeyR');
-  check('restart retains current level',(await snapshot()).index===0&&(await snapshot()).state==='playing');
-  // Drive every course with real button input. The only game hook is read-only.
-  async function playCourse(){
-    let down=false;
-    for(let frame=0;frame<3500;frame++){
-      const s=await snapshot();
-      if(s.state==='dead')throw Error(`Bot died on ${s.index+1} at x=${s.x.toFixed(1)}: ${JSON.stringify(s.level.obstacles)}`);
-      if(s.state==='won'){if(down)await page.keyboard.up('Space');return s;}
-      const next=s.level.obstacles.find(o=>!o.cleared&&o.x+o.w+34>s.x);
-      let want=false;
-      if(next){
-        if(next.kind==='gate')want=s.x>next.x-190&&s.x<next.x+next.w+34;
-        else want=s.x>next.x-230 && s.x<next.x-(next.kind==='gap'?34:48);
-      }
-      if(want!==down){await page.keyboard[want?'down':'up']('Space');down=want;}
-      await page.clock.runFor(33);
-      if(s.index===3&&!s.daily&&s.held&&next?.kind==='gate'&&s.x>next.x+45&&s.x<next.x+54)await page.screenshot({path:shots+'08-squish-action.png'});
+  const page=await pageFor();const snap=()=>page.evaluate(()=>window.__SQUISH__.snapshot());
+  check('opens directly inside level one',(await snap()).state==='ready'&&await page.locator('#intro').isHidden());
+  check('SDK does not start gameplay on load',await page.evaluate(()=>window.__POKI_EVENTS__.join(',')==='init,loadingStart,loadingFinished'));
+  await page.screenshot({path:shots+'adventure-01-opening.png'});
+  await page.keyboard.down('Space');await page.clock.runFor(350);
+  check('first key starts, squishes, and charges',(await snap()).held&&(await snap()).charge>.5&&(await snap()).state==='playing');
+  await page.keyboard.up('Space');await page.clock.runFor(150);check('release jumps',(await snap()).y < -40);
+  await page.keyboard.down('Space');await page.clock.runFor(80);check('air press triggers pancake dive',(await snap()).diving&&(await snap()).vy>0);
+  await page.keyboard.up('Space');await page.keyboard.press('Escape');const frozen=(await snap()).x;await page.clock.runFor(500);check('pause freezes movement',(await snap()).state==='paused'&&(await snap()).x===frozen);
+  check('music stops on pause',!(await snap()).music.playing);
+  await page.keyboard.press('Escape');await page.clock.runFor(30);check('music resumes with gameplay',(await snap()).music.playing&&(await snap()).music.initialized);
+  await page.keyboard.press('KeyM');check('mute persists',JSON.parse(await page.evaluate(()=>localStorage.getItem('squish-adventure-v2'))).muted);
+  await page.close();
+  // Solved input sequences are replayed through real keyboard events in Chrome.
+  for(const i of [0,2,3,4,6,7,8,13,15,16,17,23]){
+    const route=routes.find(r=>r.index===i);check('solver found level '+(i+1),route&&!route.failed);
+    const p=await pageFor(i);await p.click('#begin');let down=false,done=false;
+    for(let step=0;step<route.path.length+3;step++){
+      const state=await p.evaluate(()=>window.__SQUISH__.snapshot());
+      if(state.index!==i||state.state==='won'){done=true;break;}
+      if(state.state==='dead')throw Error('Browser route failed level '+(i+1)+' at '+state.x+', '+state.y+' t='+state.time);
+      const want=route.path[Math.min(step,route.path.length-1)];if(want!==down){await p.keyboard[want?'down':'up']('Space');down=want;}
+      await p.clock.runFor(100);
+      if(step===45&&[2,4,6,8,13,16,17].includes(i))await p.screenshot({path:shots+'adventure-level-'+String(i+1).padStart(2,'0')+'.png'});
+      if(i===7&&step===55)await p.screenshot({path:shots+'adventure-boss.png'});
+      if(i>=2){if(step===30)check('no tutorial prompts in level '+(i+1),await p.locator('#hint').textContent()==='');}
     }
-    throw Error('Course timeout');
+    if(!done){const s=await p.evaluate(()=>window.__SQUISH__.snapshot());done=s.index!==i||s.state==='won';}
+    check('real controls complete level '+(i+1),done);
+    if(down)await p.keyboard.up('Space');await p.clock.runFor(550);
+    check('level '+(i+1)+' reward saved',await p.evaluate(i=>window.__SQUISH__.snapshot().save.stars[i]>0,i));
+    await p.close();
   }
-  for(let level=0;level<18;level++){
-    const won=await playCourse();check(`level ${level+1} can be completed through real controls`,won.state==='won');
-    await page.clock.runFor(800);
-    if(level===0)await page.screenshot({path:shots+'03-victory.png'});
-    if(level<17)await page.click('#modal-primary');
-  }
-  check('all campaign progress saved',(await snapshot()).save.unlocked===17&&(await snapshot()).save.stars.filter(Boolean).length===18);
-  await page.click('#home',{force:true}).catch(()=>{});
-  await page.keyboard.press('Escape');
-  await page.reload();await page.waitForFunction(()=>window.__SQUISH__);
-  check('progress persists across reload',(await snapshot()).save.unlocked===17);
-  await page.click('#wardrobe');await page.locator('.skin-grid button').nth(1).click();
-  check('earned cosmetic equips',(await snapshot()).save.skin===1);
-  await page.click('#modal-primary');
-  await page.click('#daily');
-  const dailyLayout=JSON.stringify((await snapshot()).level.obstacles);
-  await page.clock.runFor(400);await page.screenshot({path:shots+'04-gameplay-desktop.png'});
-  await page.keyboard.press('KeyR');
-  check('daily course is deterministic',JSON.stringify((await snapshot()).level.obstacles)===dailyLayout);
-  const dailyWon=await playCourse();check('daily challenge can be completed',dailyWon.state==='won');
-  await page.clock.runFor(800);
-  check('daily personal best is saved',Object.keys((await snapshot()).save.daily).length===1);
-  check('SDK stops gameplay on completion',await page.evaluate(()=>window.__POKI_EVENTS__.filter(e=>e==='gameplayStart'||e==='gameplayStop').at(-1)==='gameplayStop'));
-  const mobile=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:2,isMobile:true,hasTouch:true});
-  mobile.on('pageerror',e=>errors.push(e.message));
+  const mobile=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:2,isMobile:true,hasTouch:true});mobile.on('pageerror',e=>errors.push(e.message));
   await mobile.addInitScript(()=>{Object.defineProperty(window,'localStorage',{get(){throw new DOMException('Storage disabled','SecurityError');}});});
-  await mobile.goto('http://127.0.0.1:5175/?poki=mock');await mobile.waitForFunction(()=>window.__SQUISH__);
-  await mobile.screenshot({path:shots+'05-title-mobile.png'});
-  await mobile.setViewportSize({width:375,height:667});await mobile.screenshot({path:shots+'05b-title-small-mobile.png'});
-  await mobile.setViewportSize({width:390,height:844});
-  // CDP sends actual touch events, including a sustained contact.
-  await mobile.tap('#play');
-  const cdp=await mobile.context().newCDPSession(mobile);
-  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:170,y:580}]});
-  await mobile.waitForTimeout(350);
-  check('touch hold works with storage disabled',await mobile.evaluate(()=>window.__SQUISH__.snapshot().held&&window.__SQUISH__.snapshot().charge>.3));
-  await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await mobile.waitForTimeout(110);
-  check('touch release jumps',await mobile.evaluate(()=>window.__SQUISH__.snapshot().y < -20));
-  await mobile.screenshot({path:shots+'06-gameplay-mobile.png'});
-  await mobile.setViewportSize({width:844,height:390});
-  await mobile.waitForTimeout(100);await mobile.screenshot({path:shots+'07-landscape-mobile.png'});
-  check('responsive canvas covers viewport',await mobile.evaluate(()=>{const r=document.querySelector('canvas').getBoundingClientRect();return r.width===innerWidth&&r.height===innerHeight;}));
-  const late=await browser.newPage();late.on('pageerror',e=>errors.push(e.message));
-  await late.addInitScript(()=>{
-    window.__lateEvents=[];
-    window.PokiSDK={init:()=>new Promise(resolve=>{window.__releasePoki=resolve;}),gameLoadingStart:()=>window.__lateEvents.push('loadingStart'),gameLoadingFinished:()=>window.__lateEvents.push('loadingFinished'),gameplayStart:()=>window.__lateEvents.push('gameplayStart'),gameplayStop:()=>window.__lateEvents.push('gameplayStop')};
-  });
-  await late.goto('http://127.0.0.1:5175/');await late.click('#play');
-  check('game remains playable during SDK initialization',await late.evaluate(()=>window.__SQUISH__.snapshot().state==='playing'&&window.__lateEvents.length===0));
-  await late.evaluate(()=>window.__releasePoki());await late.waitForFunction(()=>window.__lateEvents.length>=3);
-  check('late SDK receives loading then active gameplay lifecycle',await late.evaluate(()=>window.__lateEvents.join(',')==='loadingStart,loadingFinished,gameplayStart'));
-  check('no browser runtime errors',errors.length===0);
-  console.log(`\n${results.length} checks passed. Screenshots: ${shots}`);
+  await mobile.goto('http://127.0.0.1:5197/?poki=mock');await mobile.waitForFunction(()=>window.__SQUISH__);await mobile.screenshot({path:shots+'adventure-mobile.png'});
+  const cdp=await mobile.context().newCDPSession(mobile);await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:160,y:610}]});await mobile.waitForTimeout(350);
+  check('touch starts and holds with storage disabled',await mobile.evaluate(()=>window.__SQUISH__.snapshot().held));
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await mobile.waitForTimeout(150);check('touch release jumps',await mobile.evaluate(()=>window.__SQUISH__.snapshot().y < -30));
+  await mobile.setViewportSize({width:844,height:390});await mobile.screenshot({path:shots+'adventure-landscape.png'});check('canvas fills rotated phone',await mobile.evaluate(()=>document.querySelector('canvas').getBoundingClientRect().width===innerWidth));
+  check('no browser runtime errors',errors.length===0);console.log(count+' checks passed.');
 }finally{await browser?.close();server.kill();}

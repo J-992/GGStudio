@@ -16,7 +16,7 @@ import { Player, PLAYER_GROUP, STATIC_GROUP } from "../player/Player";
 import { ACT_NAMES, ACT_SIZE, actOf, actStart, progress } from "../progress/Progress";
 import { Coach } from "../ui/Coach";
 import { Coins } from "../tunnel/Coins";
-import { skinById } from "./Skins";
+import { SKINS, skinById } from "./Skins";
 import { TetherState } from "../tether/TetherPhysics";
 import { TetherRenderer } from "../tether/TetherRenderer";
 import { CoopCamera } from "../camera/CoopCamera";
@@ -155,6 +155,21 @@ export class Game {
   }
 
   /** Shows the title with its act shortcuts rebuilt from the current record. */
+  /**
+   * Surfaces skins the coin total has just brought into reach. Cheapest first,
+   * once each, and it points at the pause menu because that is where the shop
+   * lives once a run is under way.
+   */
+  private announceUnlocks() {
+    const fresh = progress.newlyAffordable(SKINS);
+    if (!fresh.length) return;
+    const cheapest = fresh.reduce((a, b) => (a.price <= b.price ? a : b));
+    const skin = skinById(cheapest.id);
+    this.ui.unlockToast(skin.name, skin.price, fresh.length - 1);
+    progress.markAnnounced(fresh.map((f) => f.id));
+    audio.save();
+  }
+
   /** Repaints both robots for whichever skin is equipped. */
   applySkin() {
     const skin = skinById(progress.skin);
@@ -182,7 +197,7 @@ export class Game {
   private handleAnyKey() {
     audio.resume();
     if (this.state === GameState.RunOver) {
-      this.runOverTimer = Math.min(this.runOverTimer, 0.25);
+      this.runOverTimer = Math.min(this.runOverTimer, 0.2);
       return;
     }
     if (this.state === GameState.Title && this.titleInputEnabled) {
@@ -199,6 +214,7 @@ export class Game {
   private async handlePause() {
     if (this.state === GameState.Playing) {
       this.state = GameState.Paused;
+      this.ui.buildPauseShop(() => this.applySkin());
       this.ui.pause(true);
       audio.suspend();
       this.onGameplayStop?.(this.levelIdx + 1);
@@ -240,7 +256,7 @@ export class Game {
   private handleRestart() {
     audio.resume();
     if (this.state === GameState.RunOver) {
-      this.runOverTimer = Math.min(this.runOverTimer, 0.25);
+      this.runOverTimer = Math.min(this.runOverTimer, 0.2);
       return;
     }
     if (this.state === GameState.Finished) {
@@ -381,7 +397,7 @@ export class Game {
     const previousBest = progress.best;
     const isBest = this.practising ? false : progress.reached(reached);
     this.state = GameState.RunOver;
-    this.runOverTimer = 1.9;
+    this.runOverTimer = 0.95;
     this.ui.bannerHide();
     this.ui.clearHint();
     this.ui.showGameOver(reached, LEVELS.length, isBest ? previousBest : progress.best, isBest, this.runCoins);
@@ -534,6 +550,7 @@ export class Game {
       progress.addCoins(picked.length);
       this.ui.setCoins(progress.coins, this.runCoins);
       audio.coin();
+      this.announceUnlocks();
     }
 
     const cev = this.tunnel.updateCrumble(dt, this.players, this.world, frame.up);
@@ -880,6 +897,7 @@ export class Game {
 
     if (previousState === GameState.Paused && s.state === GameState.Playing) {
       this.state = GameState.Paused;
+      this.ui.buildPauseShop(() => this.applySkin());
       this.ui.pause(true);
       if (!this.resuming) {
         this.resuming = true;

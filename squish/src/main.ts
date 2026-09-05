@@ -39,10 +39,10 @@ function loadLevel(level:number,isDaily=false,cp?:Checkpoint,auto=false){
   $('clear-banner').classList.add('hidden');$('canvas').focus({preventScroll:true});
   if(auto){gameplayStart();poki.measureLevel(daily?99:index+1,'start');}
 }
-function begin(){audio.unlock();if(sim.state!=='ready')return;sim.state='playing';age=0;gameplayStart();poki.measureLevel(daily?99:index+1,'start');}
+function begin(){audio.unlock();if(sim.state!=='ready')return;sim.state='playing';age=0;$('canvas').focus({preventScroll:true});gameplayStart();poki.measureLevel(daily?99:index+1,'start');}
 function retry(full=false){attempt++;const cp=full?undefined:sim.checkpoint;loadLevel(index,daily,cp,true);}
 function freeze(){if(sim.state==='playing'||sim.state==='ready'){sim.state='paused';poki.gameplayStop();}audio.playing=false;}
-function resume(){closeModal();if(sim.state==='paused'){sim.state='playing';gameplayStart();}audio.unlock();$('canvas').focus({preventScroll:true});}
+function resume(){closeModal();if(sim.state==='won'){loadLevel(daily?save.current:index===23?0:index+1);return;}if(sim.state==='paused'){sim.state='playing';gameplayStart();}audio.unlock();$('canvas').focus({preventScroll:true});}
 function extraButton(text:string,action:()=>void){const b=document.createElement('button');b.className='text-button';b.textContent=text;b.onclick=action;$('modal-extra').append(b);}
 function pause(){if(sim.state==='paused'&&!$('modal').classList.contains('hidden')){resume();return;}if(sim.state!=='playing'&&sim.state!=='ready')return;freeze();modal('TAKE A BREATHER','Stay soft.','Your next little adventure is right here.','KEEP BOUNCING ↗',resume,'CHOOSE A LEVEL',showMap);extraButton('✿ Jelly closet',closet);extraButton('☀ Daily expedition',()=>loadLevel(12,true));extraButton('↺ Restart this level',()=>retry(true));extraButton(audio.musicMuted?'♫ Music: off':'♫ Music: on',()=>{audio.musicMuted=!audio.musicMuted;save.musicMuted=audio.musicMuted;persist();$('modal-extra').replaceChildren();extraButton(audio.musicMuted?'♫ Music: off':'♫ Music: on',()=>{audio.musicMuted=!audio.musicMuted;save.musicMuted=audio.musicMuted;persist();resume();});});}
 function showMap(){freeze();modal('A LITTLE JELLY. A BIG WORLD.','Your adventure.',save.rescues.reduce((a,b)=>a+b,0)+' friends rescued · '+save.stars.reduce((a,b)=>a+b,0)+' stars earned','KEEP BOUNCING',resume);
@@ -100,10 +100,10 @@ function frame(now:number){const dt=Math.max(0,Math.min((now-last)/1000,.05));la
   while(accumulator>=1/120){sim.step(1/120);accumulator-=1/120;}events();renderer.draw(sim,dt,false);
   audio.playing=sim.state==='playing';audio.world=sim.level.world;audio.boss=sim.bossActive;audio.tick();
   if(sim.state==='playing'){save.activeSeconds+=dt;saveTimer+=dt;if(saveTimer>15){persist();saveTimer=0;}}
-  $('progress-fill').style.width=(sim.level.boss?Math.max(0,(3-sim.bossHP)/3*100):Math.min(100,(sim.x-130)/(sim.level.length-130)*100))+'%';
+  $('progress-fill').style.width=(sim.level.boss?Math.max(0,(sim.bossMax-sim.bossHP)/sim.bossMax*100):Math.min(100,(sim.x-130)/(sim.level.length-130)*100))+'%';
   $('score').textContent='✦ '+sim.sweets;$('hearts').textContent='♥'.repeat(Math.max(0,sim.health))+'♡'.repeat(Math.max(0,2-sim.health));
   $('power').textContent=sim.power?(sim.power==='bubble'?'◌ BUBBLE':'♨ CHILI')+' '+Math.ceil(sim.powerTime)+'s':sim.fever>0?'✦ SWEET MAGNET '+Math.ceil(sim.fever)+'s':'';
-  $('boss-hud').classList.toggle('hidden',!sim.bossActive||sim.state==='won');$('boss-name').textContent=sim.level.boss==='king'?'THE PANTRY KING':sim.level.boss==='oven'?'THE RUNAWAY OVEN':'THE GRUMPY WHISK';$('boss-hearts').textContent='◆'.repeat(Math.max(0,sim.bossHP))+'◇'.repeat(3-Math.max(0,sim.bossHP));
+  $('boss-hud').classList.toggle('hidden',!sim.bossActive||sim.state==='won');$('boss-name').textContent=sim.level.boss==='king'?'THE PANTRY KING':sim.level.boss==='oven'?'THE RUNAWAY OVEN':'THE GRUMPY WHISK';$('boss-hearts').textContent='◆'.repeat(Math.max(0,sim.bossHP))+'◇'.repeat(sim.bossMax-Math.max(0,sim.bossHP));
   $('ready').classList.toggle('hidden',sim.state!=='ready');
   $('ready-title').textContent=index===0&&!daily?'Small blob. Big adventure.':daily?'The daily expedition':NAMES[index];$('ready-copy').textContent=index<2&&!daily?'Hold to squish. Release to spring.':NEXT[index];
   $('hint').textContent='';$('failure-tip').textContent='';
@@ -120,6 +120,6 @@ function frame(now:number){const dt=Math.max(0,Math.min((now-last)/1000,.05));la
   if(toastTime>0){toastTime-=dt;if(toastTime<=0)$('toast').style.opacity='0';}
   requestAnimationFrame(frame);
 }
-if(import.meta.env.DEV)(window as unknown as {__SQUISH__:unknown}).__SQUISH__={snapshot:()=>({state:sim.state,x:sim.x,y:sim.y,vy:sim.vy,direction:sim.direction,charge:sim.charge,held:sim.held,diving:sim.diving,grounded:sim.grounded,index,daily,attempt,totalDeaths,sweets:sim.sweets,friends:sim.friends,health:sim.health,power:sim.power,bossHP:sim.bossHP,bossX:sim.bossX,bossY:sim.bossY,checkpoint:sim.checkpoint,level:sim.level,save,music:{playing:audio.playing,muted:audio.musicMuted,initialized:!!audio.ctx}})};
+if(import.meta.env.DEV)(window as unknown as {__SQUISH__:unknown}).__SQUISH__={snapshot:()=>({state:sim.state,time:sim.time,x:sim.x,y:sim.y,vy:sim.vy,direction:sim.direction,charge:sim.charge,held:sim.held,diving:sim.diving,grounded:sim.grounded,index,daily,attempt,totalDeaths,sweets:sim.sweets,friends:sim.friends,health:sim.health,power:sim.power,bossHP:sim.bossHP,bossX:sim.bossX,bossY:sim.bossY,checkpoint:sim.checkpoint,level:sim.level,save,music:{playing:audio.playing,muted:audio.musicMuted,initialized:!!audio.ctx}})};
 void(async()=>{await poki.init();poki.loadingStart();poki.loadingFinished();platformReady=true;if(sim.state==='playing'){gameplayStart();poki.measureLevel(daily?99:index+1,'start');}})();
 loadLevel(requestedDate?12:save.current,!!requestedDate);requestAnimationFrame(frame);

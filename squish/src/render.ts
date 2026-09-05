@@ -55,7 +55,7 @@ export class Renderer {
       for(let j=0;j<16;j++){const xx=x+18+(j*47)%wind.w,yy=g-((this.clock*110+j*39)%390);c.beginPath();c.moveTo(xx,yy);c.quadraticCurveTo(xx+12,yy-15,xx,yy-35);c.stroke();}
       this.rr(x+wind.w/2-27,g+3,54,18,6,'#abc9bc');this.text('≋',x+wind.w/2,g+17,22);
     }
-    for(const s of sim.level.surfaces){
+    for(const s of [...sim.level.surfaces].sort((a,b)=>(a.kind==='ground'?0:1)-(b.kind==='ground'?0:1))){
       if(s.broken)continue;const x=s.x-this.camera,y=g+surfaceY(s,sim.time);
       if(x+s.w<-30||x>w+30||y>h+100)continue;
       if(s.kind==='ground'){const left=Math.max(-20,x),right=Math.min(w+20,x+s.w);this.groundPiece(left,y,right-left,h,palette[2]);continue;}
@@ -148,7 +148,11 @@ export class Renderer {
     c.strokeStyle=INK;c.lineWidth=3;c.beginPath();c.moveTo(x-39,y+12);c.lineTo(x-20,y+18);c.moveTo(x+39,y+12);c.lineTo(x+20,y+18);c.stroke();
     if(sim.bossTell){this.ellipse(x,y+49,12,10,'#80504e');this.text('!',x+85,y+15,27,'#b65767');}
     c.restore();
-    for(const shot of sim.shots){const xx=shot.x-this.camera,yy=g+shot.y;this.ellipse(xx,yy-8,16,13,shot.kind==='wave'?'#d9a778':'#dbaaac');this.ellipse(xx-4,yy-13,5,3,'#f4d6b2');}
+    if(sim.hotPhase){const xx=sim.hotX-this.camera;this.rr(xx-70,g-4,140,8,4,sim.hotPhase===1?'#e8ac6255':'#e58c64','');if(sim.hotPhase===2)for(let j=0;j<8;j++)this.ellipse(xx-60+j*17,g-10-Math.sin(this.clock*15+j)*5,7,14,'#efa85a');}
+    for(const shot of sim.shots){const xx=shot.x-this.camera,yy=g+shot.y;
+      if(shot.kind==='fall'){this.ellipse(xx,g,25,4,'#bc6b752e');this.star(xx,yy-8,18,'#d9acce',sim.time*3);}
+      else{this.ellipse(xx,yy-8,16,13,shot.kind==='wave'?'#d9a778':'#dbaaac');this.ellipse(xx-4,yy-13,5,3,'#f4d6b2');}
+    }
     for(const edge of [675,1635]){const xx=edge-this.camera;this.rr(xx-5,g-60,10,60,5,'#a0b996');this.text(edge<1000?'↪':'↩',xx,g-78,25,'#627a69');}
   }
   groundPiece(x:number,y:number,w:number,h:number,color:string){if(w<=0)return;const c=this.ctx;c.fillStyle=color;c.fillRect(x,y,w,h-y);c.strokeStyle=INK;c.lineWidth=3;c.beginPath();c.moveTo(x,y);c.lineTo(x+w,y);c.stroke();c.fillStyle='#c4be9d40';c.fillRect(x,y+9,w,6);for(let i=0;i<w;i+=42){this.ellipse(x+i+13,y+35,2,1.4,'#b6b28d50');}}

@@ -24,12 +24,14 @@ interface Record_ {
   owned: string[];
   /** Skin currently worn. */
   skin: string;
+  /** Skin ids the player has already been told they can afford. */
+  announced: string[];
 }
 
 const KEY = "tether-run.record.v1";
 const EMPTY: Record_ = {
   best: 0, acts: 1, bestTime: 0, clears: 0, learned: false,
-  coins: 0, owned: ["conduit"], skin: "conduit",
+  coins: 0, owned: ["conduit"], skin: "conduit", announced: [],
 };
 
 /**
@@ -74,6 +76,22 @@ class Progress {
   addCoins(n: number) {
     if (n <= 0) return;
     this.data.coins += n;
+    this.save();
+  }
+
+  /**
+   * Skins the player can now afford but has not been told about. Each is only
+   * ever announced once, so the toast cannot nag.
+   */
+  newlyAffordable(all: { id: string; price: number }[]): { id: string; price: number }[] {
+    return all.filter(
+      (s) => !this.owns(s.id) && s.price > 0 && this.data.coins >= s.price && !this.data.announced.includes(s.id),
+    );
+  }
+
+  markAnnounced(ids: string[]) {
+    if (!ids.length) return;
+    this.data.announced = [...new Set([...this.data.announced, ...ids])];
     this.save();
   }
 

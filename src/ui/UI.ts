@@ -18,6 +18,8 @@ export class UI {
   private coinCount = document.getElementById("coin-count")!;
   private coinRun = document.getElementById("coin-run")!;
   private coinRunTimer = 0;
+  private toastEl = document.getElementById("unlock-toast")!;
+  private toastTimer = 0;
   private hintTimer = 0;
 
   /**
@@ -112,9 +114,27 @@ export class UI {
     }
   }
 
+  /** Announces a skin the player has just earned enough coins for. */
+  unlockToast(name: string, price: number, extra: number) {
+    this.toastEl.innerHTML =
+      `NEW SKIN — ${name} ◎${price}` +
+      `<small>${extra > 0 ? `AND ${extra} MORE · ` : ""}PAUSE TO EQUIP</small>`;
+    this.toastEl.classList.add("show");
+    this.toastTimer = 4.5;
+  }
+
   /** Title-screen skin shop. Buys with coins, equips what is already owned. */
   buildShop(onChange: () => void) {
-    const host = document.getElementById("shop-items")!;
+    this.buildShopInto("shop-items", "shop-label", onChange);
+  }
+
+  /** The same shop inside the pause menu, the only way back to it mid-session. */
+  buildPauseShop(onChange: () => void) {
+    this.buildShopInto("pause-shop-items", "pause-shop-label", onChange);
+  }
+
+  private buildShopInto(hostId: string, labelId: string, onChange: () => void) {
+    const host = document.getElementById(hostId)!;
     host.innerHTML = "";
     for (const skin of SKINS) {
       const owned = progress.owns(skin.id);
@@ -134,14 +154,14 @@ export class UI {
         b.addEventListener("click", () => {
           if (progress.buySkin(skin.id, skin.price)) {
             onChange();
-            this.buildShop(onChange);
-            this.buildActSelect(this.lastActPick!);
+            this.buildShopInto(hostId, labelId, onChange);
+            if (hostId === "shop-items" && this.lastActPick) this.buildActSelect(this.lastActPick);
           }
         });
       }
       host.append(b);
     }
-    document.getElementById("shop-label")!.textContent = `SKINS · ◎${progress.coins}`;
+    document.getElementById(labelId)!.textContent = `SKINS · ◎${progress.coins}`;
   }
 
   private lastActPick: ((act: number) => void) | null = null;
@@ -201,6 +221,10 @@ export class UI {
   }
 
   update(dt: number) {
+    if (this.toastTimer > 0) {
+      this.toastTimer -= dt;
+      if (this.toastTimer <= 0) this.toastEl.classList.remove("show");
+    }
     if (this.coinRunTimer > 0) {
       this.coinRunTimer -= dt;
       if (this.coinRunTimer <= 0) this.coinRun.classList.remove("show");
