@@ -14,12 +14,19 @@ import { audio } from "../audio/AudioManager";
 import { Tunnel } from "../tunnel/Tunnel";
 import { Orientation, getFrame, stepOrientation } from "../tunnel/SurfaceOrientation";
 import { Player, PLAYER_GROUP, STATIC_GROUP } from "../player/Player";
+import type { PlayerInputSample } from "../player/Player";
 import { ACT_NAMES, ACT_SIZE, actOf, actStart, progress } from "../progress/Progress";
+
+/** How long a robot goes untouched before the game offers to fly it. */
+const AUTOPILOT_OFFER_AFTER = 4;
+/** Reaction latency, so the autopilot plays like a hand rather than a script. */
+const AUTOPILOT_REACTION = 0.1;
 
 /** A catch is a helping hand, not a safety harness: act one allows a few. */
 const MAX_RECOVERIES = 4;
 const RECOVER_COOLDOWN = 0.7;
 import { Coach } from "../ui/Coach";
+import { Autopilot } from "./Autopilot";
 import { LockerPanel } from "../ui/LockerPanel";
 import { Coins } from "../tunnel/Coins";
 import { SKINS, TRAILS, skinById, trailById } from "./Skins";
@@ -166,6 +173,13 @@ export class Game {
     this.showTitleScreen();
     this.ui.hideLoading();
 
+    this.ui.bindAutopilotOffer((player) => this.setAutopilot(player, true));
+    // Tab takes the standing offer, or flies whichever robot is idle.
+    this.input.onAutopilot = () => {
+      const idle = this.humanIdle[1] >= this.humanIdle[0] ? 1 : 0;
+      this.setAutopilot(idle, !this.autoOn[idle]);
+      this.ui.hideAutopilotOffer();
+    };
     this.locker = new LockerPanel();
     const openLocker = () => this.locker.open(() => this.applySkin());
     document.getElementById("btn-locker")?.addEventListener("click", openLocker);
@@ -308,6 +322,16 @@ export class Game {
   private recoverCooldown = [0, 0];
   private recoveries = 0;
   private coach = new Coach();
+  /** Drives whichever robot nobody is playing. */
+  private pilot = new Autopilot();
+  private autoOn = [false, false];
+  private humanIdle = [0, 0];
+  private autoOffered = [false, false];
+  /** Decisions are held briefly so the autopilot reads as a hand, not a script. */
+  private autoHold = [0, 0];
+  private autoLast: { lat: number; jump: boolean }[] = [
+    { lat: 0, jump: false }, { lat: 0, jump: false },
+  ];
   private locker!: LockerPanel;
   private coins!: Coins;
   private trails: RobotTrail[] = [];
@@ -561,6 +585,8 @@ export class Game {
 
     const in0 = this.input.sample(0);
     const in1 = this.input.sample(1);
+    this.driveIdleRobot(0, in0, dt);
+    this.driveIdleRobot(1, in1, dt);
     this.players[0].preStep(in0);
     this.players[1].preStep(in1);
 
@@ -724,6 +750,59 @@ export class Game {
     this.effects.burst(this.tmpA, 0x7dffc8, 24, 8, 0.7, 0);
     return true;
   }
+
+  /**
+   * Watches one robot for a human, and flies it when there is not one. Any real
+   * input hands it straight back — the autopilot never fights the player for a
+   * robot they have picked up.
+   */
+  private driveIdleRobot(i: number, sample: PlayerInputSample, dt: number) {
+    const touched = Math.abs(sample.lateral) > 0.15 || sample.jumpHeld || sample.jumpPressed;
+    if (touched) {
+      this.humanIdle[i] = 0;
+      if (this.autoOn[i]) this.setAutopilot(i, false);
+      return;
+    }
+    if (this.state !== GameState.Playing) return;
+
+    this.humanIdle[i] += dt;
+    if (!this.autoOn[i]) {
+      // Offer once, after long enough that a pause for breath is not mistaken
+      // for an empty seat.
+      if (this.humanIdle[i] > AUTOPILOT_OFFER_AFTER && !this.autoOffered[i]) {
+        this.autoOffered[i] = true;
+        this.ui.offerAutopilot(i);
+      }
+      return;
+    }
+
+    this.autoHold[i] -= dt;
+    if (this.autoHold[i] <= 0) {
+      const read = this.botRead();
+      const lead = i === 0 ? null : this.autoLast[0].lat;
+      const plan = this.pilot.plan(read, i, this.autoOn[1 - i] ? null : lead);
+      // A touch of slop: a partner who tracks the exact centre of every lane
+      // reads as a machine, and the point is that it feels like somebody is there.
+      const slop = Math.random() < 0.12 ? 0 : plan.lat;
+      this.autoLast[i] = { lat: slop, jump: plan.jump };
+      this.autoHold[i] = AUTOPILOT_REACTION * (0.7 + Math.random() * 0.6);
+    }
+    sample.lateral = this.autoLast[i].lat;
+    const wasHeld = sample.jumpHeld;
+    sample.jumpHeld = this.autoLast[i].jump;
+    sample.jumpPressed = this.autoLast[i].jump && !wasHeld;
+  }
+
+  setAutopilot(i: number, on: boolean) {
+    if (this.autoOn[i] === on) return;
+    this.autoOn[i] = on;
+    this.autoHold[i] = 0;
+    this.autoLast[i] = { lat: 0, jump: false };
+    if (on) this.pilot.reset();
+    this.ui.setAutopilot(i, on);
+  }
+
+  autopilotOn(i: number) { return this.autoOn[i]; }
 
   private checkShutters() {
     for (const p of this.players) {

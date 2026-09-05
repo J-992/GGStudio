@@ -34,6 +34,7 @@ export class InputManager {
   onPauseToggle?: () => void;
   onRestart?: () => void;
   onMuteToggle?: () => void;
+  onAutopilot?: () => void;
 
   constructor() {
     window.addEventListener("keydown", (e) => {
@@ -46,6 +47,7 @@ export class InputManager {
       if (e.code === "Escape") this.onPauseToggle?.();
       if (e.code === "KeyR") this.onRestart?.();
       if (e.code === "KeyM") this.onMuteToggle?.();
+      if (e.code === "Tab") { e.preventDefault(); this.onAutopilot?.(); }
       this.onAnyKey?.();
     });
     window.addEventListener("keyup", (e) => this.keys.delete(e.code));

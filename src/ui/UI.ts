@@ -19,6 +19,10 @@ export class UI {
   private coinRunTimer = 0;
   private toastEl = document.getElementById("unlock-toast")!;
   private toastTimer = 0;
+  private autoOffer = document.getElementById("auto-offer")!;
+  private autoOfferText = document.getElementById("auto-offer-text")!;
+  private autoOfferTimer = 0;
+  private offerFor = -1;
   private hintTimer = 0;
 
   /**
@@ -113,6 +117,36 @@ export class UI {
     }
   }
 
+  /**
+   * Offers to fly a robot nobody is holding. Phrased as an offer, not a warning:
+   * one person running the pair is a supported way to play, not a mistake.
+   */
+  offerAutopilot(player: number) {
+    this.offerFor = player;
+    this.autoOfferText.textContent =
+      `${player === 0 ? "IGNIS" : "VOLTA"} IS UNMANNED — FLY IT?`;
+    this.autoOffer.classList.add("show");
+    this.autoOfferTimer = 8;
+  }
+
+  hideAutopilotOffer() {
+    this.autoOffer.classList.remove("show");
+    this.autoOfferTimer = 0;
+  }
+
+  /** Wired once at boot; hands back which robot the offer was about. */
+  bindAutopilotOffer(accept: (player: number) => void) {
+    document.getElementById("auto-offer-yes")!.addEventListener("click", () => {
+      if (this.offerFor >= 0) accept(this.offerFor);
+      this.hideAutopilotOffer();
+    });
+  }
+
+  setAutopilot(player: number, on: boolean) {
+    document.getElementById(`auto-badge-${player}`)!.classList.toggle("show", on);
+    if (on) this.hideAutopilotOffer();
+  }
+
   /** Announces a skin the player has just earned enough coins for. */
   unlockToast(name: string, price: number, extra: number) {
     this.toastEl.innerHTML =
@@ -180,6 +214,10 @@ export class UI {
   }
 
   update(dt: number) {
+    if (this.autoOfferTimer > 0) {
+      this.autoOfferTimer -= dt;
+      if (this.autoOfferTimer <= 0) this.hideAutopilotOffer();
+    }
     if (this.toastTimer > 0) {
       this.toastTimer -= dt;
       if (this.toastTimer <= 0) this.toastEl.classList.remove("show");
