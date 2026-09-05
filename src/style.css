@@ -105,9 +105,8 @@ body.online .tc-left { left: 50%; transform: translateX(-50%); }
 body.touch #touch-ui { display: block; }
 body.touch #sys-buttons { display: flex; }
 body.touch #hint { top: 14%; bottom: auto; }
-@media (orientation: portrait) {
-  body.touch #rotate-overlay { display: flex; }
-}
+/* Portrait plays: the camera widens to keep the tunnel in frame, so there is no
+   reason to send a phone player away. */
 .tc-cluster { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); width: 200px; z-index: 6; }
 .tc-left { left: 16px; }
 .tc-right { right: 16px; }
@@ -417,4 +416,53 @@ body.coaching .tc-right .tc-btn { animation: pad-hint 1.4s ease-in-out infinite 
 @media (max-height: 500px) {
   #unlock-toast { top: 40px; right: 12px; font-size: 10px; padding: 6px 10px; }
   #pause-shop-items { max-width: 380px; }
+}
+
+/* --- trails -------------------------------------------------------------- */
+
+.trail-row { display: flex; flex-direction: column; gap: 4px; align-items: center; margin-top: 4px; }
+.trail-lane { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px; }
+.trail-tag { font-size: 9px; letter-spacing: 0.22em; width: 52px; text-align: right; }
+.trail-lane.p1 .trail-tag { color: #ff8a3d; }
+.trail-lane.p2 .trail-tag { color: #35e0ff; }
+.trail-chip {
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  padding: 4px 8px;
+  color: #cfe6f5;
+  background: rgba(20, 32, 46, 0.7);
+  border: 1px solid rgba(120, 200, 230, 0.22);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.trail-chip:hover:not(:disabled) { border-color: #35e0ff; color: #fff; }
+.trail-chip:disabled { opacity: 0.35; cursor: default; }
+.trail-lane.p1 .trail-chip.active { border-color: #ff8a3d; color: #ff8a3d; }
+.trail-lane.p2 .trail-chip.active { border-color: #35e0ff; color: #35e0ff; }
+
+/* Portrait is narrow: the hint has to wrap and the coin counter has to get out
+   of the way of the mute and pause buttons. */
+@media (max-aspect-ratio: 1/1) {
+  #hint {
+    left: 8px;
+    right: 8px;
+    /* The default centres with a transform; that has to go or the box shifts. */
+    transform: none;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.5;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+  }
+  #coin-hud { top: 62px; right: 14px; font-size: 13px; }
+  /* Two 200px clusters do not fit a 390px phone; they were overlapping. */
+  .tc-cluster { width: 42vw; }
+  .tc-left { left: 10px; }
+  .tc-right { right: 10px; }
+  .tc-btn { width: 56px; height: 56px; font-size: 18px; }
+  .tc-jump { width: auto; }
+  .tc-row { gap: 10px; }
+  #unlock-toast { top: 92px; right: 12px; font-size: 10px; max-width: 76vw; }
+  .coach-tag span { font-size: 11px; padding: 3px 7px; }
 }

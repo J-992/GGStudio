@@ -20,7 +20,7 @@ export const level01: LevelDef = {
     solidRun(8),
     rep(3, { f: pat("##.##") }),
     solidRun(6),
-    rep(5, { f: pat("..#..") }),
+    rep(5, { f: pat(".###.") }),
     solidRun(10),
   ),
 };

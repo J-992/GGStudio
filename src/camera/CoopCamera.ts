@@ -76,7 +76,13 @@ export class CoopCamera {
       _look.z + up.z * LOOK_UP_OFFSET,
     );
 
-    const targetFov = FOV_BASE + 11 * sepK;
+    // Vertical FOV is what three renders with, so a narrow viewport would crop the
+    // tunnel's walls away. Widen it until the horizontal view matches the 16:9
+    // framing the levels were built for, which is what makes portrait playable.
+    const wide = FOV_BASE + 11 * sepK;
+    const targetFov = this.camera.aspect >= 16 / 9
+      ? wide
+      : (2 * Math.atan(Math.tan((wide * Math.PI) / 360) * (16 / 9) / this.camera.aspect) * 180) / Math.PI;
     this.fov += (targetFov - this.fov) * (1 - Math.exp(-4 * dt));
     if (Math.abs(this.camera.fov - this.fov) > 0.01) {
       this.camera.fov = this.fov;

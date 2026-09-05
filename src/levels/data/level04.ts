@@ -9,9 +9,9 @@ export const level04: LevelDef = {
   hints: [{ atSlice: 30, text: "THE ARM SWEEPS LOW — TAKE AN OUTSIDE LANE" }],
   slices: seq(
     solidRun(10),
-    rep(5, { f: pat("..#..") }),
+    rep(5, { f: pat(".###.") }),
     solidRun(6),
-    rep(5, { f: pat(".#.#.") }),
+    rep(5, { f: pat("##.##") }),
     solidRun(11),
     rep(3, { f: pat("##.##") }),
     rep(2, { f: E }),

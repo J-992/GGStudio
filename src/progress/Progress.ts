@@ -26,12 +26,17 @@ interface Record_ {
   skin: string;
   /** Skin ids the player has already been told they can afford. */
   announced: string[];
+  /** Trail ids bought so far. */
+  trailsOwned: string[];
+  /** Trail worn by each robot, indexed by player. */
+  trails: [string, string];
 }
 
 const KEY = "tether-run.record.v1";
 const EMPTY: Record_ = {
   best: 0, acts: 1, bestTime: 0, clears: 0, learned: false,
   coins: 0, owned: ["conduit"], skin: "conduit", announced: [],
+  trailsOwned: ["none"], trails: ["none", "none"],
 };
 
 /**
@@ -71,6 +76,23 @@ class Progress {
   get skin() { return this.data.skin; }
 
   owns(id: string) { return id === "conduit" || this.data.owned.includes(id); }
+
+  ownsTrail(id: string) { return id === "none" || (this.data.trailsOwned ?? []).includes(id); }
+  trailFor(player: number) { return (this.data.trails ?? ["none", "none"])[player] ?? "none"; }
+
+  /** Buys a trail if needed, then fits it to one robot. */
+  buyTrail(id: string, price: number, player: number): boolean {
+    if (!this.ownsTrail(id)) {
+      if (this.data.coins < price) return false;
+      this.data.coins -= price;
+      this.data.trailsOwned = [...new Set([...(this.data.trailsOwned ?? []), id])];
+    }
+    const t = [...(this.data.trails ?? ["none", "none"])] as [string, string];
+    t[player] = id;
+    this.data.trails = t;
+    this.save();
+    return true;
+  }
 
   /** Coins survive death — that is the point of them. */
   addCoins(n: number) {

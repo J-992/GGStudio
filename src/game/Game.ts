@@ -16,7 +16,8 @@ import { Player, PLAYER_GROUP, STATIC_GROUP } from "../player/Player";
 import { ACT_NAMES, ACT_SIZE, actOf, actStart, progress } from "../progress/Progress";
 import { Coach } from "../ui/Coach";
 import { Coins } from "../tunnel/Coins";
-import { SKINS, skinById } from "./Skins";
+import { SKINS, TRAILS, skinById, trailById } from "./Skins";
+import { RobotTrail } from "../effects/Trails";
 import { TetherState } from "../tether/TetherPhysics";
 import { TetherRenderer } from "../tether/TetherRenderer";
 import { CoopCamera } from "../camera/CoopCamera";
@@ -126,6 +127,7 @@ export class Game {
 
     const p1 = new Player(0, P1_COLOR, this.scene);
     const p2 = new Player(1, P2_COLOR, this.scene);
+    this.trails = [new RobotTrail(this.scene), new RobotTrail(this.scene)];
     this.players = [p1, p2];
 
     this.input.onAnyKey = () => this.handleAnyKey();
@@ -179,6 +181,10 @@ export class Game {
     const hex = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
     document.getElementById("coach-p1")?.style.setProperty("--coach-c", hex(skin.p1));
     document.getElementById("coach-p2")?.style.setProperty("--coach-c", hex(skin.p2));
+    const accents = [skin.p1, skin.p2];
+    for (let i = 0; i < 2; i++) {
+      this.trails[i]?.setTrail(trailById(progress.trailFor(i)), accents[i]);
+    }
   }
 
   private showTitleScreen() {
@@ -280,6 +286,7 @@ export class Game {
   private runOverTimer = 0;
   private coach = new Coach();
   private coins!: Coins;
+  private trails: RobotTrail[] = [];
   /** Coins picked up this run, banked when the run ends or a level is cleared. */
   private runCoins = 0;
 
@@ -287,6 +294,7 @@ export class Game {
     this.deaths = 0;
     this.rescues = 0;
     this.runCoins = 0;
+    for (const t of this.trails) t.clear();
     this.applySkin();
     this.practising = level > 0;
     this.runStart = performance.now();
@@ -459,6 +467,10 @@ export class Game {
       this.players[1].updateShadow(RAPIER, this.world, frameUp, RAY_GROUPS);
       this.tunnel.update(visDt);
       this.coins.update(visDt);
+      for (let i = 0; i < 2; i++) {
+        this.players[i].position(this.tmpA);
+        this.trails[i].update(visDt, this.tmpA, frameUp.up, this.state === GameState.Playing);
+      }
       if (this.networkGuest && this.state === GameState.Playing) {
         this.tunnel.updateSpinners(visDt);
         this.tunnel.updateFeatures(visDt);
@@ -655,6 +667,21 @@ export class Game {
     }
   }
 
+  /** Drops a fallen robot back beside its partner, on the surface they are on. */
+  private recover(p: Player, mateIdx: number) {
+    const mate = this.players[mateIdx];
+    mate.position(this.tmpB);
+    const frame = getFrame(this.orientation);
+    this.tmpA.copy(this.tmpB).addScaledVector(frame.right, p.index === 0 ? -1.1 : 1.1);
+    this.tmpA.addScaledVector(frame.up, 0.6);
+    p.warp(this.tmpA.x, this.tmpA.y, this.tmpA.z);
+    p.stopMotion();
+    this.rescues++;
+    this.ui.rescuePopup();
+    audio.save();
+    this.effects.burst(this.tmpA, 0x7dffc8, 24, 8, 0.7, 0);
+  }
+
   private checkShutters() {
     for (const p of this.players) {
       p.position(this.tmpA);
@@ -697,6 +724,14 @@ export class Game {
         this.effects.burst(this.tmpA, 0x7dffc8, 30, 8, 0.8, 0);
       }
       if (p.beyond > KILL_DIST || p.airTime > MAX_AIR_TIME) {
+        // Act one teaches. A robot that falls there is put back beside its
+        // partner instead of ending the run: playtests showed the median session
+        // dying out inside the first minute, which is the tutorial failing, not
+        // the player.
+        if (this.levelIdx < ACT_SIZE) {
+          this.recover(p, i === 0 ? 1 : 0);
+          continue;
+        }
         anyDead = true;
         this.noteDeath(p.airTime > MAX_AIR_TIME ? "air-time" : "fell-out", i);
       }

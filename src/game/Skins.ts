@@ -22,3 +22,30 @@ export const SKINS: Skin[] = [
 ];
 
 export const skinById = (id: string): Skin => SKINS.find((s) => s.id === id) ?? SKINS[0];
+
+export interface Trail {
+  id: string;
+  name: string;
+  price: number;
+  /** Ribbon colour. `null` means the robot's own accent colour. */
+  color: number | null;
+  /** Seconds a puff lives. Longer reads as a heavier tail. */
+  life: number;
+  /** Puffs per second. */
+  rate: number;
+  /** How much a puff drifts against gravity, in units per second. */
+  rise: number;
+  size: number;
+}
+
+export const TRAILS: Trail[] = [
+  { id: "none", name: "NONE", price: 0, color: null, life: 0, rate: 0, rise: 0, size: 0 },
+  { id: "spark", name: "SPARK", price: 80, color: null, life: 0.36, rate: 34, rise: 1.1, size: 0.055 },
+  { id: "flame", name: "FLAME", price: 150, color: 0xff6a1a, life: 0.5, rate: 46, rise: 2.4, size: 0.085 },
+  { id: "frost", name: "FROST", price: 150, color: 0x8ce6ff, life: 0.62, rate: 30, rise: 0.5, size: 0.07 },
+  { id: "toxin", name: "TOXIN", price: 260, color: 0x9dff3d, life: 0.7, rate: 38, rise: 1.6, size: 0.075 },
+  { id: "void", name: "RIFT", price: 400, color: 0xb46bff, life: 0.85, rate: 44, rise: -0.8, size: 0.095 },
+  { id: "gold", name: "COMET", price: 650, color: 0xffd75e, life: 0.9, rate: 54, rise: 0.9, size: 0.105 },
+];
+
+export const trailById = (id: string): Trail => TRAILS.find((t) => t.id === id) ?? TRAILS[0];

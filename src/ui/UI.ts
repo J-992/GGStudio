@@ -1,5 +1,5 @@
 import { ACT_NAMES, ACT_SIZE, actCount, formatTime, progress } from "../progress/Progress";
-import { SKINS } from "../game/Skins";
+import { SKINS, TRAILS } from "../game/Skins";
 
 export class UI {
   private levelLabel = document.getElementById("level-label")!;
@@ -135,6 +135,7 @@ export class UI {
 
   private buildShopInto(hostId: string, labelId: string, onChange: () => void) {
     const host = document.getElementById(hostId)!;
+    this.buildTrailsInto(hostId, onChange);
     host.innerHTML = "";
     for (const skin of SKINS) {
       const owned = progress.owns(skin.id);
@@ -162,6 +163,50 @@ export class UI {
       host.append(b);
     }
     document.getElementById(labelId)!.textContent = `SKINS · ◎${progress.coins}`;
+  }
+
+  /**
+   * Trails are bought once and fitted per robot, so each player picks their own.
+   * Clicking cycles which robot it goes on rather than needing a second control.
+   */
+  private buildTrailsInto(shopHostId: string, onChange: () => void) {
+    const id = `${shopHostId}-trails`;
+    let host = document.getElementById(id);
+    if (!host) {
+      host = document.createElement("div");
+      host.id = id;
+      host.className = "trail-row";
+      document.getElementById(shopHostId)!.parentElement!.append(host);
+    }
+    host.innerHTML = "";
+    for (let player = 0; player < 2; player++) {
+      const lane = document.createElement("div");
+      lane.className = `trail-lane p${player + 1}`;
+      const tag = document.createElement("span");
+      tag.className = "trail-tag";
+      tag.textContent = player === 0 ? "IGNIS" : "VOLTA";
+      lane.append(tag);
+      for (const trail of TRAILS) {
+        const owned = progress.ownsTrail(trail.id);
+        const worn = progress.trailFor(player) === trail.id;
+        const afford = owned || progress.coins >= trail.price;
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = `trail-chip${worn ? " active" : ""}`;
+        b.disabled = !afford;
+        b.textContent = owned ? trail.name : `${trail.name} ◎${trail.price}`;
+        if (afford) {
+          b.addEventListener("click", () => {
+            if (progress.buyTrail(trail.id, trail.price, player)) {
+              onChange();
+              this.buildShopInto(shopHostId, shopHostId === "shop-items" ? "shop-label" : "pause-shop-label", onChange);
+            }
+          });
+        }
+        lane.append(b);
+      }
+      host.append(lane);
+    }
   }
 
   private lastActPick: ((act: number) => void) | null = null;
