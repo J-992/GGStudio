@@ -3,14 +3,25 @@
 ## Implemented and verified
 
 - Desktop, tablet and mobile layouts; full-viewport canvas and scrolling prevention.
+  Landscape only on phones, with a rotate prompt that fits any viewport.
+- Plays solo or with a second person. Poki's traffic is overwhelmingly single
+  player, so the title leads with solo — one hand per robot on the keyboard, one
+  thumb cluster per robot on touch — and offers co-op as the alternative rather
+  than the requirement.
 - Same-computer two-player co-op: keyboard, two gamepads, and split touch controls.
 - Online private two-player rooms using the official `@poki/netlib` WebRTC library.
   The host runs authoritative physics; the guest sends input and receives game state.
-- PokiSDK initialization and `gameLoadingFinished`, deduplicated `gameplayStart` /
-  `gameplayStop`, pause-resume `commercialBreak`, and level funnel events.
+- PokiSDK `init`, `gameLoadingStart` / `gameLoadingFinished`, deduplicated
+  `gameplayStart` / `gameplayStop`, pause-resume `commercialBreak`, and level
+  funnel events. `gameplayStart` fires on the player's first input, never on
+  load; `gameplayStop` fires on pause, death, level end and run end. Audio is
+  suspended before a commercial break and resumed after it.
 - Gameplay pauses and clears held input when focus/visibility is lost.
 - No runtime fonts, images, analytics, accounts, chat, outgoing links, or third-party ads.
-- No localStorage dependency; private/incognito browsing remains playable.
+- Progress is saved (furthest level, fastest clear, acts opened for practice) and
+  every storage call is wrapped: with localStorage unavailable the game plays
+  identically and simply forgets between sessions. Verified by blocking the API
+  outright — the game boots with no errors.
 - The production build does not include or expose the QA bot/API; `?bot=1` is dev-only.
 - `npm run build`, `npm run qa`, `npm run qa:online`, and `npm run qa:dist` pass.
 - The build uses `base: "./"`, so assets resolve from the subdirectory a portal serves

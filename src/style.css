@@ -132,8 +132,9 @@ body.touch #hint { top: 14%; bottom: auto; }
 #rotate-overlay {
   position: absolute; inset: 0; background: #05070c; z-index: 60;
   display: none; align-items: center; justify-content: center;
-  text-align: center; flex-direction: column;
-  color: #9fd8ff; letter-spacing: 0.3em; font-size: 17px;
+  text-align: center; flex-direction: column; gap: 10px;
+  padding: 24px; box-sizing: border-box;
+  color: #9fd8ff; letter-spacing: 0.24em; font-size: clamp(13px, 4.2vw, 18px);
 }
 #rotate-overlay span { margin-top: 12px; font-size: 11px; color: var(--dim); }
 
@@ -252,3 +253,9 @@ body.touch #hint { top: 14%; bottom: auto; }
 #run-actions button.quiet { border-color: rgba(150, 170, 190, 0.25); color: var(--dim); }
 #act-select { margin-top: 4px; }
 #title-record { margin-bottom: 6px; }
+.how {
+  margin: 0 0 2px;
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  color: #9ff5ff;
+}

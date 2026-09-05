@@ -1,5 +1,6 @@
 interface PokiApi {
   init(): Promise<void>;
+  gameLoadingStart(): void;
   gameLoadingFinished(): void;
   gameplayStart(): void;
   gameplayStop(): void;
@@ -57,6 +58,10 @@ class PokiPlatform {
     }
   }
 
+  loadingStart() {
+    try { this.sdk?.gameLoadingStart(); } catch { /* keep the game playable */ }
+  }
+
   loadingFinished() {
     try { this.sdk?.gameLoadingFinished(); } catch { /* keep the game playable */ }
   }
@@ -86,6 +91,7 @@ class PokiPlatform {
     window.__POKI_EVENTS__ = events;
     window.PokiSDK = {
       init: async () => { events.push("init"); },
+      gameLoadingStart: () => { events.push("loadingStart"); },
       gameLoadingFinished: () => { events.push("loadingFinished"); },
       gameplayStart: () => { events.push("gameplayStart"); },
       gameplayStop: () => { events.push("gameplayStop"); },

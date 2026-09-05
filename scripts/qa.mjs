@@ -67,7 +67,7 @@ async function main() {
   check("loads without errors", errors.length === 0, errors.slice(0, 3).join(" | "));
   check("title state", s.state === "Title", s.state);
   const initialPoki = await page.evaluate(() => window.__POKI_EVENTS__);
-  check("Poki loading lifecycle", initialPoki.join(",") === "init,loadingFinished", initialPoki.join(","));
+  check("Poki loading lifecycle", initialPoki.join(",") === "init,loadingStart,loadingFinished", initialPoki.join(","));
   check("local and online modes offered", await page.evaluate(() => {
     return !!document.getElementById("btn-local") && !!document.getElementById("btn-online");
   }), "");

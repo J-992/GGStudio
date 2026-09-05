@@ -30,7 +30,10 @@ if (matchMedia("(pointer: coarse)").matches || "ontouchstart" in window) {
 const botMode = new URLSearchParams(location.search).has("bot");
 const debugMode = import.meta.env.DEV && botMode;
 
-void poki.init().then(() => game.init(canvas, debugMode)).then(() => {
+void poki.init().then(() => {
+  poki.loadingStart();
+  return game.init(canvas, debugMode);
+}).then(() => {
   game.onGameplayStart = (level) => {
     poki.gameplayStart();
     poki.measureLevel(level, "start");
