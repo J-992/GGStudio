@@ -33,8 +33,13 @@
         <button id="btn-local" type="button">PLAY LOCAL CO-OP</button>
         <button id="btn-online" type="button">PLAY ONLINE</button>
       </div>
+      <div id="act-select" class="local-intro">
+        <p id="act-label">PRACTISE AN ACT</p>
+        <div id="act-buttons"></div>
+      </div>
+      <p id="title-record" class="local-intro"></p>
       <p class="press local-intro">2 PLAYERS · GAMEPADS SUPPORTED · PRESS ANY MOVE KEY</p>
-      <p class="save-note local-intro">ARCADE RUN · NO SAVED CHECKPOINTS</p>
+      <p class="save-note local-intro">ARCADE RUN · ONE DEATH ENDS IT · ACTS UNLOCK AS YOU REACH THEM</p>
       <div id="online-panel" aria-live="polite">
         <p>PLAY WITH ONE FRIEND ON ANOTHER DEVICE</p>
         <div class="online-actions">
@@ -52,6 +57,16 @@
       <h1>ALL CONDUITS CLEAR</h1>
       <p id="finish-stats"></p>
       <p class="press">PRESS R TO RUN IT AGAIN</p>
+    </div>
+    <div id="gameover-screen">
+      <h1>RUN OVER</h1>
+      <div id="run-depth"><span id="run-reached"></span><small id="run-reached-name"></small></div>
+      <div id="run-bar"><div id="run-bar-fill"></div><div id="run-bar-best"></div></div>
+      <p id="run-record"></p>
+      <div id="run-actions">
+        <button id="btn-again" type="button">RUN IT AGAIN</button>
+        <button id="btn-to-title" class="quiet" type="button">TITLE</button>
+      </div>
     </div>
     <div id="loading">BOOTING CONDUIT&hellip;</div>
   </div>

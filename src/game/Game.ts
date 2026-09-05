@@ -13,6 +13,7 @@ import { audio } from "../audio/AudioManager";
 import { Tunnel } from "../tunnel/Tunnel";
 import { Orientation, getFrame, stepOrientation } from "../tunnel/SurfaceOrientation";
 import { Player, PLAYER_GROUP, STATIC_GROUP } from "../player/Player";
+import { ACT_NAMES, ACT_SIZE, actOf, actStart, progress } from "../progress/Progress";
 import { TetherState } from "../tether/TetherPhysics";
 import { TetherRenderer } from "../tether/TetherRenderer";
 import { CoopCamera } from "../camera/CoopCamera";
@@ -25,6 +26,7 @@ export enum GameState {
   Dying,
   Complete,
   Finished,
+  RunOver,
 }
 
 export interface NetworkPlayerState {
@@ -143,14 +145,35 @@ export class Game {
 
     this.loadLevel(0);
     this.state = GameState.Title;
-    this.ui.showTitle(true);
+    this.showTitleScreen();
     this.ui.hideLoading();
+
+    this.ui.bindGameOverActions(
+      () => this.handleRestart(),
+      () => this.showTitleScreen(),
+    );
 
     if (debug) this.exposeDebug();
   }
 
+  /** Shows the title with its act shortcuts rebuilt from the current record. */
+  private showTitleScreen() {
+    this.state = GameState.Title;
+    this.ui.hideGameOver();
+    this.ui.hideFinish();
+    this.ui.buildActSelect((act) => {
+      this.ui.showTitle(false);
+      this.startRun(actStart(act));
+    });
+    this.ui.showTitle(true);
+  }
+
   private handleAnyKey() {
     audio.resume();
+    if (this.state === GameState.RunOver) {
+      this.handleRestart();
+      return;
+    }
     if (this.state === GameState.Title && this.titleInputEnabled) {
       this.ui.showTitle(false);
       this.startRun(0);
@@ -205,6 +228,11 @@ export class Game {
 
   private handleRestart() {
     audio.resume();
+    if (this.state === GameState.RunOver) {
+      this.ui.hideGameOver();
+      this.startRun(this.practising ? actStart(actOf(this.levelIdx)) : 0);
+      return;
+    }
     if (this.state === GameState.Finished) {
       this.ui.hideFinish();
       this.startRun(0);
@@ -220,9 +248,16 @@ export class Game {
     }
   }
 
+  /** Set while the run began at an act shortcut, so it cannot set a record. */
+  private practising = false;
+  private runStart = 0;
+
   private startRun(level: number) {
     this.deaths = 0;
     this.rescues = 0;
+    this.practising = level > 0;
+    this.runStart = performance.now();
+    this.ui.hideGameOver();
     this.loadLevel(level);
     this.state = GameState.Playing;
     this.onGameplayStart?.(level + 1);
@@ -302,7 +337,12 @@ export class Game {
     this.completeTimer = 1.15;
     this.onGameplayStop?.(this.levelIdx + 1, "complete");
     audio.portal();
-    this.ui.bannerShow("LEVEL COMPLETE", "", "#9ff5ff");
+    const finishedAct = actOf(this.levelIdx) !== actOf(this.levelIdx + 1);
+    if (finishedAct && this.levelIdx + 1 < LEVELS.length) {
+      this.ui.bannerShow(`ACT ${actOf(this.levelIdx) + 1} CLEAR`, ACT_NAMES[actOf(this.levelIdx)] ?? "", "#7dffc8");
+    } else {
+      this.ui.bannerShow("LEVEL COMPLETE", "", "#9ff5ff");
+    }
     this.bannerTimer = 1.1;
     this.tunnel.group.getWorldPosition(this.tmpB);
     this.tmpA.set(0, 0, this.tunnel.finishZ);
@@ -313,13 +353,28 @@ export class Game {
     }
   }
 
+  /** A run is over: bank how far they got and show it before restarting. */
+  private endRun() {
+    const reached = this.levelIdx + 1;
+    const previousBest = progress.best;
+    const isBest = this.practising ? false : progress.reached(reached);
+    this.state = GameState.RunOver;
+    this.ui.bannerHide();
+    this.ui.clearHint();
+    this.ui.showGameOver(reached, LEVELS.length, isBest ? previousBest : progress.best, isBest);
+    this.onGameplayStop?.(reached, "fail");
+  }
+
   private advanceAfterComplete() {
     this.ui.bannerHide();
     if (this.levelIdx + 1 >= LEVELS.length) {
       this.state = GameState.Finished;
-      this.ui.showFinish(this.deaths, this.rescues);
+      const seconds = (performance.now() - this.runStart) / 1000;
+      const fastest = this.practising ? false : progress.cleared(seconds);
+      this.ui.showFinish(seconds, this.rescues, fastest, progress.clears);
     } else {
       this.loadLevel(this.levelIdx + 1);
+      if (!this.practising) progress.reached(this.levelIdx + 1);
       this.state = GameState.Playing;
       this.onGameplayStart?.(this.levelIdx + 1);
     }
@@ -385,11 +440,7 @@ export class Game {
 
     if (this.state === GameState.Dying) {
       this.dyingTimer -= dtReal;
-      if (this.dyingTimer <= 0) {
-        this.loadLevel(0);
-        this.state = GameState.Playing;
-        this.onGameplayStart?.(1);
-      }
+      if (this.dyingTimer <= 0) this.endRun();
     }
     if (this.state === GameState.Complete) {
       this.completeTimer -= dtReal;
@@ -762,8 +813,18 @@ export class Game {
     this.state = s.state;
     this.ui.showTitle(false);
     this.ui.pause(s.state === GameState.Paused);
-    if (s.state === GameState.Finished) this.ui.showFinish(s.deaths, s.rescues);
-    else this.ui.hideFinish();
+    // The guest mirrors the host's screens. Records belong to whoever is running
+    // the campaign, so a guest never banks one.
+    if (s.state === GameState.Finished) {
+      this.ui.showFinish((performance.now() - this.runStart) / 1000, s.rescues, false, progress.clears);
+    } else {
+      this.ui.hideFinish();
+    }
+    if (s.state === GameState.RunOver) {
+      this.ui.showGameOver(this.levelIdx + 1, LEVELS.length, progress.best, false);
+    } else {
+      this.ui.hideGameOver();
+    }
 
     if (previousState === GameState.Paused && s.state === GameState.Playing) {
       this.state = GameState.Paused;
