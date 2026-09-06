@@ -45,6 +45,21 @@ html, body {
   pointer-events: auto;
 }
 
+/* `.hud` and `.touch-layer` are full-screen (`inset: 0`) overlays sitting
+   directly in `#ui`, so the blanket `#ui > *` rule above (an ID selector,
+   which outranks these two plain classes on specificity alone) would make
+   them each swallow every click/touch on the whole screen — including the
+   canvas click that requests pointer lock. These two overrides need to beat
+   that ID selector, hence matching on `#ui > .hud`/`#ui > .touch-layer`
+   rather than just `.hud`/`.touch-layer`. Pointer input reaches specific
+   children (`.touch-zone`, `.touch-stick`) via their own `pointer-events:
+   auto`, set further down. */
+#ui > .hud,
+#ui > .touch-layer,
+#ui > .title-panel {
+  pointer-events: none;
+}
+
 .placeholder-title {
   position: absolute;
   top: 50%;
@@ -104,4 +119,351 @@ html, body {
   fill: currentColor;
   display: inline-block;
   vertical-align: middle;
+}
+
+/* ================================================================
+   TITLE PANEL (src/main.js) — P2 stub, replaced by ui/Screens.js (P6).
+================================================================ */
+.title-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(10, 6, 4, 0.45);
+  text-align: center;
+  z-index: 20;
+}
+
+.title-panel[hidden] {
+  display: none;
+}
+
+.title-panel__heading {
+  margin: 0;
+  font-size: clamp(32px, 8vw, 64px);
+  letter-spacing: 0.08em;
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.6);
+}
+
+.title-panel__prompt {
+  margin: 0;
+  font-size: clamp(14px, 3.2vw, 20px);
+  letter-spacing: 0.06em;
+  opacity: 0.85;
+  animation: title-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes title-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* ================================================================
+   HUD (src/ui/Hud.js)
+================================================================ */
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.hud-stats {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hud-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hud-icon {
+  width: 18px;
+  height: 18px;
+  color: #f6eedd;
+  flex: none;
+}
+
+.hud-bar {
+  width: 120px;
+  height: 12px;
+  border: 2px solid #0c0806;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.hud-bar__fill {
+  height: 100%;
+  width: 100%;
+  background: #e0523f;
+  transition: width 120ms ease-out;
+}
+
+.hud-bar--hp .hud-bar__fill {
+  background: #e0523f;
+}
+
+.hud-text {
+  font-size: 13px;
+  min-width: 1.6em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.hud-wave {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  opacity: 0.85;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.hud-build-countdown {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+}
+
+.hud-build-countdown[hidden] {
+  display: none;
+}
+
+.hud-boss {
+  position: absolute;
+  top: max(46px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(60vw, 420px);
+  height: 10px;
+  border: 2px solid #0c0806;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.hud-boss[hidden] {
+  display: none;
+}
+
+.hud-boss__fill {
+  height: 100%;
+  width: 100%;
+  background: #b3263d;
+  transition: width 150ms ease-out;
+}
+
+.hud-combo {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hud-combo[hidden] {
+  display: none;
+}
+
+.hud-combo__fill {
+  width: 70px;
+  height: 8px;
+  border-radius: 3px;
+  background: #f2c14e;
+}
+
+.hud-combo__text {
+  font-size: 13px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.hud-reticle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 28px;
+  pointer-events: none;
+}
+
+.hud-reticle__ring {
+  position: absolute;
+  inset: 0;
+  border: 2px solid rgba(246, 238, 221, 0.7);
+  border-radius: 50%;
+}
+
+.hud-reticle__dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(246, 238, 221, 0.9);
+}
+
+.hud-reticle.is-target .hud-reticle__ring {
+  border-color: #ff4b3e;
+}
+
+.hud-reticle.is-target .hud-reticle__dot {
+  background: #ff4b3e;
+}
+
+.hud-hint {
+  position: absolute;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  opacity: 0.7;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+/* Device detection toggles `body.touch`/`body.keyboard` (see ui/input.js);
+   only the matching hint is ever shown. */
+body.keyboard .hud-hint--touch,
+body.touch .hud-hint--keyboard {
+  display: none;
+}
+
+.hud-toast {
+  position: absolute;
+  bottom: max(70px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  padding: 6px 14px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 160ms ease-out, transform 160ms ease-out;
+}
+
+.hud-toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ================================================================
+   TOUCH CONTROLS (src/ui/TouchControls.js)
+================================================================ */
+.touch-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Only shown at all in touch mode — keyboard sessions never pay for an
+   invisible input shield. */
+body.keyboard .touch-layer {
+  display: none;
+}
+
+.touch-zone {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-zone--move {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  z-index: 9;
+}
+
+.touch-zone--look {
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  z-index: 9;
+}
+
+.touch-stick {
+  position: absolute;
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + var(--joystick-radius, 56px));
+  left: calc(max(16px, env(safe-area-inset-left)) + var(--joystick-radius, 56px));
+  width: 0;
+  height: 0;
+  opacity: 0.7;
+  pointer-events: none;
+  touch-action: none;
+  z-index: 10;
+}
+
+.touch-stick.is-engaged {
+  opacity: 1;
+}
+
+.touch-stick__base,
+.touch-stick__knob {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.touch-stick__base {
+  width: calc(var(--joystick-radius, 56px) * 2);
+  height: calc(var(--joystick-radius, 56px) * 2);
+  margin: calc(var(--joystick-radius, 56px) * -1);
+  border: 3px solid #f6eedd;
+  border-radius: 50%;
+  background: rgba(20, 14, 10, 0.46);
+}
+
+.touch-stick__knob {
+  width: 52px;
+  height: 52px;
+  margin: -26px;
+  border: 3px solid #e0523f;
+  border-radius: 50%;
+  background: rgba(224, 82, 63, 0.86);
+  transition: transform 110ms ease-out;
+}
+
+.touch-stick.is-engaged .touch-stick__knob {
+  transition: none;
+}
+
+/* ================================================================
+   DEBUG STATS (src/game/Game.js, ?debug=1)
+================================================================ */
+.debug-stats {
+  position: absolute;
+  top: max(4px, env(safe-area-inset-top));
+  right: max(4px, env(safe-area-inset-right));
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  color: #9ee08a;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 30;
 }

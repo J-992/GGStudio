@@ -1,10 +1,14 @@
-// Placeholder entry point proving the pipeline end to end: Poki lifecycle
-// hooks fire in the right order, three.js renders something, and the loading
-// screen comes down. Real gameplay wiring (Game.js, the state machine, asset
-// loading, etc.) lands in later work packages — see the plan. Every path
-// used here is either relative or driven by `window.__ASSET_BASE__`; nothing
-// is fetched yet, so `import.meta.env.BASE_URL` never needs to appear.
+// Entry point: Poki lifecycle hooks fire in the right order, assets load
+// with a visible progress bar, the arena/player/HUD come up, and the loading
+// screen comes down. Every path used here is either relative or driven by
+// `window.__ASSET_BASE__`; nothing is fetched via `import.meta.env.BASE_URL`.
 import * as THREE from 'three';
+import { CONFIG } from './config.js';
+import { Input } from './ui/input.js';
+import { loadAll } from './game/assets.js';
+import { Hud } from './ui/Hud.js';
+import { Audio } from './platform/audio.js';
+import { Game } from './game/Game.js';
 
 // Installed first so a `?poki=mock` run captures every call from here on,
 // including the very next line's `gameLoadingStart`.
@@ -23,57 +27,38 @@ try {
 
 boot();
 
-function boot() {
+async function boot() {
   loadDisplayFont();
 
-  const canvas = document.getElementById('scene');
-  const ui = document.getElementById('ui');
+  const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('scene'));
+  const loading = document.getElementById('loading');
+  const loadingStatus = loading?.querySelector('.loading-status');
 
-  const title = document.createElement('h1');
-  title.className = 'placeholder-title';
-  title.textContent = 'ARENA DEFENSE';
-  ui.appendChild(title);
+  // Constructed before assets finish loading so touch/keyboard detection and
+  // the title panel's silent input-swap are live the instant the page paints.
+  const input = new Input(canvas, CONFIG);
+
+  const assets = await loadAll((progress) => {
+    if (loadingStatus) loadingStatus.textContent = `Loading… ${Math.round(progress * 100)}%`;
+  });
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1b1310);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 100);
+  // `Player` parents the gun viewmodel to `camera` (so it moves/recoils with
+  // the view). `renderer.render(scene, camera)` only ever traverses `scene`
+  // looking for things to draw, so unless `camera` itself is somewhere in
+  // that graph, its children are invisible — added here, not in Player,
+  // since owning the scene graph's shape is main.js's job.
+  scene.add(camera);
 
-  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
-  camera.position.set(0, 1.5, 4);
-  camera.lookAt(0, 0, 0);
+  const hud = new Hud(CONFIG);
+  const audio = new Audio(assets);
 
-  scene.add(new THREE.HemisphereLight(0xfff2e0, 0x2a1a12, 1.2));
+  const game = new Game({ renderer, scene, camera, assets, input, hud, audio, config: CONFIG });
 
-  const cube = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshStandardMaterial({ color: 0xe0523f }),
-  );
-  scene.add(cube);
+  installTitlePanel(game, input);
 
-  function resize() {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    renderer.setSize(w, h, false);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-  }
-  window.addEventListener('resize', resize);
-  resize();
-
-  let last = performance.now();
-  function tick(now) {
-    const dt = (now - last) / 1000;
-    last = now;
-    cube.rotation.x += dt * 0.6;
-    cube.rotation.y += dt * 0.9;
-    renderer.render(scene, camera);
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
-
-  const loading = document.getElementById('loading');
   if (loading) loading.hidden = true;
 
   try {
@@ -81,6 +66,45 @@ function boot() {
   } catch {
     // Keep the game playable even if the SDK is unavailable.
   }
+
+  game.start();
+}
+
+/**
+ * Minimal title screen for P2 — P6 replaces this with the real title screen
+ * (brainrot boss portraits, credits, Poki `commercialBreak`/`gameplayStart`
+ * flow). `Game` already advances `title -> build` on the very first input
+ * frame, so this panel only needs to get out of the way once that happens;
+ * it never drives the transition itself.
+ *
+ * @param {Game} game
+ * @param {Input} input
+ */
+function installTitlePanel(game, input) {
+  const ui = document.getElementById('ui');
+  const panel = document.createElement('div');
+  panel.className = 'title-panel';
+
+  const heading = document.createElement('h1');
+  heading.className = 'title-panel__heading';
+  heading.textContent = 'ARENA DEFENSE';
+
+  const prompt = document.createElement('p');
+  prompt.className = 'title-panel__prompt';
+  prompt.textContent = input.mode === 'touch' ? 'TAP TO PLAY' : 'CLICK OR PRESS A KEY TO PLAY';
+
+  panel.append(heading, prompt);
+  ui.appendChild(panel);
+
+  input.onModeChange((mode) => {
+    prompt.textContent = mode === 'touch' ? 'TAP TO PLAY' : 'CLICK OR PRESS A KEY TO PLAY';
+  });
+
+  const unsubscribe = game.bus.on('state:changed', ({ state }) => {
+    if (state === 'title') return;
+    panel.hidden = true;
+    unsubscribe();
+  });
 }
 
 /**

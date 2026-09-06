@@ -96,4 +96,21 @@
  * @property {boolean} active
  */
 
+/**
+ * Per-frame movement/look/action sample handed from `ui/input.js` to
+ * `game/Player.js` and `game/Game.js`. Produced fresh every fixed step by
+ * `Input#frame()`, which also resets its own edge-triggered fields — see
+ * `docs/INTERFACES.md` for full semantics.
+ * @typedef {object} InputFrame
+ * @property {'touch'|'keyboard'} mode
+ * @property {number} moveX -1..1, positive = right (strafe).
+ * @property {number} moveY -1..1, positive = forward.
+ * @property {number} lookDX Pixels of look movement this frame, positive = right.
+ * @property {number} lookDY Pixels of look movement this frame, positive = down.
+ * @property {boolean} fire Level-triggered: true every frame the fire input is held.
+ * @property {0|1|2|3} select Edge-triggered turret-type pick; 0 = none, 1/2/3 = gun/tesla/cannon.
+ * @property {boolean} ready Edge-triggered "Ready" (skip build countdown).
+ * @property {boolean} pause Edge-triggered pause toggle.
+ */
+
 export {};
