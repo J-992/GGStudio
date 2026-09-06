@@ -8,6 +8,11 @@
  * wave -> waveClear     spawner.done && alive==0 && !boss.alive: bankWave(); wave==10 -> runEnd(victory)
  * wave -> death          hp<=0: gameplayStop(); discardPending()
  * waveClear -> build    after 1.5 s: wave++; pickActiveGates; save bestWave
+ * waveClear -> runEnd   only when the cleared wave is `run.finalWave` (victory) — chained
+ *                       immediately from the same wave-clear check, no delay
+ *                       (added in P3 so `Game.js` can honour the plan's
+ *                       documented "wave==10 -> runEnd(victory)" bullet above;
+ *                       `wave` itself still only ever goes to `waveClear`/`death`)
  * death -> wave         rewardedBreak() true (once/run): gameplayStart(); full hp; push enemies; invuln
  * death -> runEnd       decline / false / used
  * runEnd -> title       persist coins (doubled if rewarded doubler true)
@@ -25,7 +30,7 @@ export const TRANSITIONS = Object.freeze({
   title: Object.freeze(['build']),
   build: Object.freeze(['wave']),
   wave: Object.freeze(['waveClear', 'death']),
-  waveClear: Object.freeze(['build']),
+  waveClear: Object.freeze(['build', 'runEnd']),
   death: Object.freeze(['wave', 'runEnd']),
   runEnd: Object.freeze(['title', 'build']),
 });

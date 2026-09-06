@@ -467,3 +467,345 @@ body.keyboard .touch-layer {
   background: rgba(0, 0, 0, 0.5);
   z-index: 30;
 }
+
+/* ================================================================
+   P4 build overlay (src/ui/BuildOverlay.js)
+   Renders into the existing `#overlay` node (see the base `#overlay`/
+   `#overlay[hidden]` rules near the top of this file, which this block
+   does not touch) — a top-down SVG map plus HTML chrome, full-bleed.
+================================================================ */
+.bo {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+           max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  box-sizing: border-box;
+}
+
+.bo-mapwrap {
+  width: min(92vmin, 480px);
+  height: min(92vmin, 480px);
+  flex: none;
+}
+
+.bo-map {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.bo-wall {
+  fill: rgba(246, 238, 221, 0.05);
+  stroke: rgba(246, 238, 221, 0.55);
+  stroke-width: 1.4;
+}
+
+.bo-gate-arc {
+  fill: none;
+  stroke: rgba(150, 130, 110, 0.7);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.bo-gate-arc.is-active {
+  stroke: #ff4b3e;
+  animation: bo-gate-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes bo-gate-pulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+
+.bo-gate-closed {
+  stroke: rgba(246, 238, 221, 0.5);
+  stroke-width: 2;
+}
+
+.bo-gate-closed.is-hidden {
+  display: none;
+}
+
+.bo-slot-ring {
+  fill: none;
+  stroke: rgba(246, 238, 221, 0.6);
+  stroke-width: 1.2;
+  stroke-dasharray: 2.4 2;
+}
+
+.bo-slot.is-occupied .bo-slot-ring,
+.bo-slot.is-destroyed .bo-slot-ring {
+  stroke-dasharray: none;
+  stroke: rgba(246, 238, 221, 0.85);
+}
+
+.bo-slot-fill {
+  fill: transparent;
+}
+
+.bo-slot-cost {
+  fill: rgba(246, 238, 221, 0.85);
+  font-size: 5px;
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  pointer-events: none;
+}
+
+.bo-slot.is-occupied .bo-slot-cost,
+.bo-slot.is-destroyed .bo-slot-cost {
+  display: none;
+}
+
+.bo-slot-pip {
+  fill: rgba(246, 238, 221, 0.9);
+  opacity: 0;
+}
+
+/* `BuildOverlay#_renderSlots` doesn't reset a destroyed slot's leftover
+   per-instance fill colour / pip opacity from when it was alive — cheaper to
+   force both here (a destroyed slot never needs its own colour or level
+   read) than to touch every property in JS on every kill. */
+.bo-slot.is-destroyed .bo-slot-fill {
+  fill: rgba(120, 108, 96, 0.35) !important;
+}
+
+.bo-slot.is-destroyed .bo-slot-pip {
+  opacity: 0 !important;
+}
+
+.bo-slot-hpbg {
+  fill: rgba(0, 0, 0, 0.5);
+}
+
+.bo-slot.is-empty .bo-slot-hpbg,
+.bo-slot.is-destroyed .bo-slot-hpbg {
+  display: none;
+}
+
+.bo-slot-hpfill {
+  fill: #6fd66f;
+}
+
+.bo-slot-hpfill.is-low {
+  fill: #e0523f;
+}
+
+.bo-slot.is-empty .bo-slot-hpfill,
+.bo-slot.is-destroyed .bo-slot-hpfill {
+  display: none;
+}
+
+.bo-slot-x {
+  stroke: rgba(246, 238, 221, 0.55);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  display: none;
+}
+
+.bo-slot.is-destroyed .bo-slot-x {
+  display: block;
+}
+
+.bo-slot-hit {
+  fill: transparent;
+  stroke: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* Applied directly to whatever element was denied (a slot's hit circle, or
+   a sheet button) by `BuildOverlay#_deny` — deliberately not scoped under
+   `.bo-slot`, since the same deny feedback is reused on HTML buttons too. */
+.is-denied {
+  animation: bo-shake 320ms ease-in-out;
+}
+
+@keyframes bo-shake {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(-1.6px, 0); }
+  40% { transform: translate(1.6px, 0); }
+  60% { transform: translate(-1.2px, 0); }
+  80% { transform: translate(1.2px, 0); }
+}
+
+.bo-player {
+  fill: #ffd76b;
+  stroke: rgba(0, 0, 0, 0.5);
+  stroke-width: 0.4;
+}
+
+.bo-energy {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 999px;
+  color: #f6eedd;
+}
+
+.bo-energy__icon {
+  width: 16px;
+  height: 16px;
+}
+
+.bo-energy__value {
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+
+.bo-chips {
+  display: flex;
+  gap: 8px;
+}
+
+.bo-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 72px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 2px solid rgba(246, 238, 221, 0.35);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #f6eedd;
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  opacity: 0.55;
+  touch-action: manipulation;
+}
+
+.bo-chip.is-affordable {
+  opacity: 1;
+}
+
+.bo-chip.is-selected {
+  border-color: #ff4b3e;
+  background: rgba(224, 82, 63, 0.25);
+}
+
+.bo-chip__name {
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.bo-chip__cost {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.bo-ready {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  min-width: 44px;
+  min-height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #f6eedd;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+}
+
+.bo-ready__ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.bo-ready__ring-bg {
+  fill: none;
+  stroke: rgba(246, 238, 221, 0.2);
+  stroke-width: 3;
+}
+
+.bo-ready__ring-fill {
+  fill: none;
+  stroke: #ff4b3e;
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 200ms linear;
+}
+
+.bo-ready__label {
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  z-index: 1;
+}
+
+.bo-ready__seconds {
+  font-size: 15px;
+  z-index: 1;
+}
+
+.bo-sheet {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 6, 4, 0.5);
+  z-index: 2;
+}
+
+.bo-sheet[hidden] {
+  display: none;
+}
+
+.bo-sheet__card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+  padding: 16px;
+  background: #1f1712;
+  border: 2px solid rgba(246, 238, 221, 0.25);
+  border-radius: 12px;
+  color: #f6eedd;
+}
+
+.bo-sheet__title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  letter-spacing: 0.05em;
+  text-align: center;
+}
+
+.bo-sheet__btn {
+  min-height: 44px;
+  border: 2px solid rgba(246, 238, 221, 0.35);
+  border-radius: 8px;
+  background: rgba(246, 238, 221, 0.08);
+  color: #f6eedd;
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  touch-action: manipulation;
+}
+
+.bo-sheet__btn:disabled {
+  opacity: 0.4;
+}
+
+.bo-sheet__btn--close {
+  background: transparent;
+  border-color: rgba(246, 238, 221, 0.2);
+  opacity: 0.75;
+}

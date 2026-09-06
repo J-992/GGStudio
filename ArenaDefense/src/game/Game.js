@@ -3,23 +3,39 @@
 // P5 attach `Enemies`/`Turrets`/`Boss` through. See `docs/INTERFACES.md` for
 // the full contract (`world` shape, event names, `getSnapshot`).
 //
-// P2 wires only `boot -> title -> build -> wave`, with `build` timing out (or
-// "Ready") into `wave` and `wave` dropping to `death` on `hp <= 0` — the rest
-// of the state machine (`waveClear`, `runEnd`, revive) is a later package's
-// job; `wave` simply has nothing that ever clears it yet, which is expected
-// until P3's spawner/enemies land.
+// P3 wires the full wave loop: `build` spawns via `SpawnScheduler` into
+// `Enemies`, `wave` clears into `waveClear` once the scheduler is done and
+// nothing is left alive, `waveClear` either loops back to `build` (wave+1) or
+// — on the final wave — chains straight into `runEnd` (see the added
+// `waveClear -> runEnd` edge in `core/stateMachine.js`), and `death` (already
+// wired by P2) now also discards pending coins and, after a short delay,
+// moves on to `runEnd`. `runEnd` itself is a placeholder toast + delay until
+// P6 builds the real screen.
+import * as THREE from 'three';
 import { EventBus } from '../core/events.js';
 import { GameStateMachine } from '../core/stateMachine.js';
 import { Economy } from '../core/economy.js';
 import { makeRng } from '../core/rng.js';
-import { pickActiveGates } from '../core/waves.js';
+import { pickActiveGates, waveDef, flattenSpawns } from '../core/waves.js';
+import { SpawnScheduler } from '../core/spawner.js';
 import { slotPositions } from '../core/arenaGeometry.js';
 import { Player } from './Player.js';
 import { Arena } from './Arena.js';
 import { Effects } from './Effects.js';
+import { Enemies } from './Enemies.js';
+import { Billboards } from './Billboards.js';
 
 const FIXED_STEP_SAFETY_MAX_ITERATIONS = 8;
 const DEBUG_REFRESH_S = 0.5;
+
+// P6 owns the real run-end screen; until then this is how long the
+// "ARENA CLEARED"/"YOU DIED" toast stays up before looping back to title.
+// Not a `config.js` value because it belongs to a screen that doesn't exist
+// yet — P6 should move it there once it does.
+const RUN_END_DISPLAY_S = 3;
+
+const HIT_PARTICLE_COLOR = 0xffdd88;
+const HIT_PARTICLE_COUNT = 6;
 
 /**
  * @param {import('../core/types.js').InputFrame} frame
@@ -59,19 +75,23 @@ export class Game {
     const player = new Player(camera, assets, config);
     const arena = new Arena(scene, assets, config);
     const effects = new Effects(scene);
+    // +1 reserves a slot for a boss billboard (P5's `Boss.js`, not yet
+    // registered) on top of every enemy-cap-sized `tungtung`.
+    const billboards = new Billboards(scene, assets, config, config.enemies.cap + 1);
+    const enemies = new Enemies(scene, assets, config, this.bus, billboards, audio);
 
     /**
-     * The one bag every system reads/writes. `enemies`/`turrets`/`boss`/
-     * `billboards` are `null` until P3/P4/P5 register their systems and
-     * populate them — everything downstream reads them optional-chained.
+     * The one bag every system reads/writes. `turrets`/`boss` are `null`
+     * until P4/P5 register their systems and populate them — everything
+     * downstream reads them optional-chained (`world.turrets?.list() ?? []`).
      */
     this.world = {
       player,
       arena,
-      enemies: null,
+      enemies,
       turrets: null,
       boss: null,
-      billboards: null,
+      billboards,
       effects,
       bus: this.bus,
       time: 0,
@@ -80,12 +100,20 @@ export class Game {
 
     /** @type {{ name: string, system: { update(dt: number, world: object): void } }[]} */
     this._systems = [];
+    this.registerSystem('enemies', enemies);
 
     this._economy = new Economy(config);
     this._wave = 1;
     this._buildTimer = 0;
     this._prevGatePair = null;
     this._gateRng = makeRng((Date.now() ^ 0x9e3779b9) >>> 0);
+
+    /** @type {import('../core/spawner.js').SpawnScheduler|null} */
+    this._scheduler = null;
+    this._currentWaveDef = null;
+    this._waveClearTimer = 0;
+    this._deathTimer = 0;
+    this._runEndTimer = 0;
 
     this._paused = false;
     this._lastHp = undefined;
@@ -102,10 +130,28 @@ export class Game {
     window.addEventListener('resize', this._onResize);
     document.addEventListener('visibilitychange', this._onVisibility);
 
+    this.bus.on('enemy:killed', (e) => this._economy.addEnergy(e.energy));
+
     this._setupDebug();
 
+    const devWave = this._parseDevWaveParam();
     this.state.go('title');
     this.bus.emit('state:changed', { state: 'title' });
+    if (devWave !== null) this._startRun(devWave);
+  }
+
+  /**
+   * `?wave=N` dev param: jumps straight to wave N's build phase instead of
+   * waiting at the title screen. Used for owner verification (P5's boss at
+   * wave 5, late-wave balance, etc.) — never touched by normal play.
+   * @returns {number|null}
+   */
+  _parseDevWaveParam() {
+    const raw = new URLSearchParams(location.search).get('wave');
+    if (raw === null) return null;
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < 1 || n > this._config.run.finalWave) return null;
+    return n;
   }
 
   /**
@@ -140,16 +186,38 @@ export class Game {
     this._audio.resume();
   }
 
+  /** @returns {import('../core/economy.js').Economy} Read-only usage by P4/P5/P6 — only `Game` replaces the instance (new run). */
+  get economy() {
+    return this._economy;
+  }
+
+  /** @returns {number} Current wave number, 1-based. */
+  get wave() {
+    return this._wave;
+  }
+
+  /** @returns {number[]} The current wave's lit gate id pair (same array as `world.activeGates`). */
+  get activeGates() {
+    return this.world.activeGates;
+  }
+
+  /** @returns {import('../core/spawner.js').SpawnScheduler|null} The active wave's spawn schedule, or `null` outside `wave`. */
+  get scheduler() {
+    return this._scheduler;
+  }
+
   /**
    * Build-phase overlay snapshot (see the plan's "Build-phase overlay"
    * section). `turrets`/`slots` are placeholders until P4 lands.
-   * @returns {{ wave: number, activeGates: number[], energy: number, player: {x:number,z:number,yaw:number}, turrets: any[], slots: any[] }}
+   * @returns {{ wave: number, activeGates: number[], energy: number, economy: import('../core/economy.js').Economy, scheduler: import('../core/spawner.js').SpawnScheduler|null, player: {x:number,z:number,yaw:number}, turrets: any[], slots: any[] }}
    */
   getSnapshot() {
     return {
       wave: this._wave,
       activeGates: this.world.activeGates,
       energy: this._economy.energy,
+      economy: this._economy,
+      scheduler: this._scheduler,
       player: { x: this.world.player.x, z: this.world.player.z, yaw: this.world.player.yaw },
       turrets: this.world.turrets?.list?.() ?? [],
       slots: slotPositions(this._config),
@@ -183,7 +251,9 @@ export class Game {
     if (this._debugAccum < DEBUG_REFRESH_S) return;
     const fps = Math.round(this._debugFrames / this._debugAccum);
     const calls = this._renderer.info.render.calls;
-    this._debugEl.textContent = `${fps} fps · ${calls} draws`;
+    const alive = this.world.enemies?.alive ?? 0;
+    const cap = this._config.enemies.cap;
+    this._debugEl.textContent = `${fps} fps · ${calls} draws · ${alive}/${cap} alive`;
     this._debugAccum = 0;
     this._debugFrames = 0;
   }
@@ -265,15 +335,114 @@ export class Game {
         this._hud.setBuildCountdown(null);
         this.state.go('wave');
         this.bus.emit('state:changed', { state: 'wave' });
+        this._startWave();
+      }
+      return;
+    }
+
+    if (state === 'wave') {
+      this._waveTick(dt);
+      return;
+    }
+
+    if (state === 'waveClear') {
+      this._waveClearTimer -= dt;
+      if (this._waveClearTimer <= 0) {
+        this._wave += 1;
+        this._buildTimer = this._config.build.durationS;
+        this._pickGates();
+        this._hud.setWave(this._wave, this._config.run.finalWave);
+        this.state.go('build');
+        this.bus.emit('state:changed', { state: 'build' });
+      }
+      return;
+    }
+
+    if (state === 'death') {
+      this._deathTimer -= dt;
+      if (this._deathTimer <= 0) {
+        this.state.go('runEnd');
+        this.bus.emit('state:changed', { state: 'runEnd' });
+        this._runEndTimer = RUN_END_DISPLAY_S;
+      }
+      return;
+    }
+
+    if (state === 'runEnd') {
+      this._runEndTimer -= dt;
+      if (this._runEndTimer <= 0) {
+        this.state.go('title');
+        this.bus.emit('state:changed', { state: 'title' });
       }
     }
   }
 
-  _startRun() {
+  /**
+   * Builds this wave's spawn schedule from `core/waves.js`, capped at
+   * `min(def.maxAlive, cfg.enemies.cap)` — the cap check inside
+   * `SpawnScheduler` is what actually enforces this every tick.
+   */
+  _startWave() {
+    const def = waveDef(this._config, this._wave);
+    this._currentWaveDef = def;
+    const cap = Math.min(def.maxAlive, this._config.enemies.cap);
+    this._scheduler = new SpawnScheduler(flattenSpawns(def), cap);
+    this._audio.play('wave-start');
+    this.bus.emit('wave:started', { wave: this._wave, boss: def.boss ?? null });
+  }
+
+  /**
+   * @param {number} dt
+   */
+  _waveTick(dt) {
+    if (this._scheduler) {
+      const due = this._scheduler.update(dt, this.world.enemies.alive);
+      for (const entry of due) {
+        const gateId = this.world.activeGates[entry.gateId];
+        this.world.enemies.spawn(entry.enemy, gateId, this._currentWaveDef.hpMul);
+      }
+    }
+
+    // Boss support lands in P5; until `world.boss` exists this is always
+    // true, so a boss wave with no `spawns` (wave 5 today) clears instantly.
+    const bossAlive = this.world.boss?.alive ?? false;
+    if (this._scheduler?.done && this.world.enemies.alive === 0 && !bossAlive) {
+      this._onWaveClear();
+    }
+  }
+
+  _onWaveClear() {
+    this._economy.bankWave();
+    this.state.go('waveClear');
+    this.bus.emit('wave:cleared', { wave: this._wave });
+    this.bus.emit('state:changed', { state: 'waveClear' });
+
+    if (this._wave >= this._config.run.finalWave) {
+      // Victory — chain straight into runEnd (see the added
+      // `waveClear -> runEnd` edge in `core/stateMachine.js`). P6 replaces
+      // this toast-and-wait with the real run-end screen.
+      this._hud.toast('ARENA CLEARED');
+      this.state.go('runEnd');
+      this.bus.emit('state:changed', { state: 'runEnd' });
+      this._runEndTimer = RUN_END_DISPLAY_S;
+      return;
+    }
+
+    this._waveClearTimer = this._config.timing.waveClearDelayS;
+  }
+
+  /**
+   * @param {number} [startWave] Dev-only (`?wave=N`): begin the run already
+   * at this wave's build phase instead of wave 1.
+   */
+  _startRun(startWave = 1) {
     this.state.go('build');
     this.world.player.reset();
-    this._wave = 1;
+    this.world.enemies?.clear();
+    this._wave = startWave;
     this._economy = new Economy(this._config);
+    this._scheduler = null;
+    this._currentWaveDef = null;
     this._buildTimer = this._config.build.durationS;
     this._pickGates();
     this._hud.setWave(this._wave, this._config.run.finalWave);
@@ -301,8 +470,19 @@ export class Game {
     const shot = this.world.player.fire();
     if (!shot) return;
 
-    const end = shot.origin.clone().addScaledVector(shot.dir, this._config.player.gun.range);
-    this.world.effects.tracer(shot.origin, end);
+    const gun = this._config.player.gun;
+    const hit = this.world.enemies?.raycast?.(shot.origin, shot.dir, gun.range) ?? null;
+
+    let tracerEnd;
+    if (hit) {
+      this.world.enemies.damageAt(hit.idx, gun.dmg, 'player');
+      tracerEnd = new THREE.Vector3(hit.point.x, hit.point.y, hit.point.z);
+      this.world.effects.burst(hit.point.x, hit.point.y, hit.point.z, HIT_PARTICLE_COLOR, HIT_PARTICLE_COUNT);
+    } else {
+      tracerEnd = shot.origin.clone().addScaledVector(shot.dir, gun.range);
+    }
+
+    this.world.effects.tracer(shot.origin, tracerEnd);
     this._audio.play('pistol-shot-1');
     this.bus.emit('player:fired', { origin: shot.origin, dir: shot.dir });
   }
@@ -316,8 +496,11 @@ export class Game {
     this._lastHp = hp;
 
     if (this.state.state === 'wave' && !this.world.player.alive) {
+      this._economy.discardPending();
+      this._deathTimer = this._config.timing.deathScreenDelayS;
       this.state.go('death');
       this.bus.emit('state:changed', { state: 'death' });
+      this._hud.toast('YOU DIED');
     }
   }
 

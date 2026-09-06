@@ -303,3 +303,379 @@ Master gain `0.5`. Sound names available in v1 (all 14 files in
 `ui-place`, `ui-deny`, `wave-start`, `boss-alert`, `coin`, `pistol-shot-1`,
 `turret-shot-1`, `impact-heavy`, `zombie-death-1`, `zombie-attack-1`,
 `explosion-metal`, `mechanical-clunk`, `upgrade-confirm`.
+
+## P3 additions (P3 → P4/P5/P6)
+
+Everything below lives in `src/core/enemyBrain.js`, `src/game/{Enemies,
+Billboards}.js`, and P3's wiring in `src/game/Game.js`. `world.enemies` and
+`world.billboards` are populated from `boot` onward (never `null` — unlike
+`world.turrets`/`world.boss`, which stay `null` until P4/P5 register their
+own systems and populate them; code reading those two must still
+optional-chain).
+
+### `Enemies` (`src/game/Enemies.js`)
+
+Deviation from the plan's constructor sketch: takes an `audio` instance too
+— `new Enemies(scene, assets, cfg, bus, billboards, audio)` — rather than
+routing every combat sound through `bus` listeners in `Game.js`. It needs
+direct, per-sound-throttled control (30 zombies must not spam
+`zombie-attack-1`), and nothing outside this file needs to know about
+individual melee/impact sounds.
+
+```js
+class Enemies {
+  /** @returns {number} Count of currently-alive enemies. */
+  get alive() {}
+
+  /**
+   * @param {string} typeName Key into `cfg.enemies.types`.
+   * @param {number} gateId Arena gate id (0..2) — already resolved from the
+   *   wave's active-gate pair; `Game.js` does `activeGates[entry.gateId]`
+   *   before calling this, so this file never sees the 0/1 pair-relative index.
+   * @param {number} [hpMul]
+   * @returns {number} Pool index, or -1 when at cap.
+   */
+  spawn(typeName, gateId, hpMul) {}
+
+  /** @param {number} dt @param {object} world The `Game.world` bag. */
+  update(dt, world) {}
+
+  /**
+   * @param {number} idx
+   * @param {number} dmg
+   * @param {string} source Free-form origin tag: `'player'`, `'turret'`, ...
+   * @returns {boolean} Whether this hit killed the enemy.
+   */
+  damageAt(idx, dmg, source) {}
+
+  /** Splash damage; returns the number of kills it caused. @returns {number} */
+  damageRadius(x, z, r, dmg, source) {}
+
+  /**
+   * @param {number} idx
+   * @param {number} factor Speed MULTIPLIER while slowed — 1 = unaffected,
+   *   smaller = slower (e.g. 0.5 = half speed). This is the opposite sense
+   *   from `cfg.turrets.types.tesla.slow` (a *strength*, bigger = more
+   *   slow) — invert at the call site (`Turrets.js` already does: `1 -
+   *   stats.slow`).
+   * @param {number} durS
+   */
+  applySlow(idx, factor, durS) {}
+
+  /**
+   * Cylinder hit test (`typeDef.radius`, `typeDef.hitHeight`) per alive
+   * enemy, nearest hit wins. Used by `Game.js` for the player's hitscan gun.
+   * @param {THREE.Vector3} origin @param {THREE.Vector3} dir Normalized. @param {number} maxDist
+   * @returns {{idx:number, point:{x:number,y:number,z:number}, dist:number}|null}
+   */
+  raycast(origin, dir, maxDist) {}
+
+  /** @returns {{x:number,y:number,z:number,radius:number}[]} Centred at half `hitHeight` — feeds `player.aimTarget` for touch auto-fire. */
+  targets() {}
+
+  /** @returns {{idx:number,x:number,y:number,z:number,radius:number}[]} For turret targeting — `idx` is the real pool index `damageAt`/`applySlow` expect, `y` centred at half `hitHeight`. */
+  positions() {}
+
+  /** @param {(idx:number) => void} fn Calls `fn` once per currently-alive pool index. */
+  forEachAlive(fn) {}
+
+  /** Kills/hides every alive enemy and in-flight projectile. `Game.js` calls this at the start of every fresh run (`_startRun`) so a previous run's leftovers never carry into the next. */
+  clear() {}
+}
+```
+
+Rendering: two `InstancedMesh`es (one per voxel model, `zed_1`/shambler and
+`zed_3`/spitter, each sized `cfg.enemies.cap`) built from
+`assets.instanceSource(name)` with `localMatrix` applied, plus one billboard
+slot per `tungtung` via `Billboards.alloc/free/set`, plus a 64-capacity
+`InstancedMesh` of spheres for spitter projectiles (hit-tests the player and
+every `world.turrets?.list()` entry at a 0.5 m radius each step, expiring
+past `1.5 × typeDef.range`). All four meshes together are the "4 draw calls
+for all smalls" the P3 brief's acceptance check refers to (plus whatever
+`Billboards.js` itself adds for `tungtung`/a boss — see below).
+
+Sounds (each with its own minimum replay interval so a crowd of zombies
+doesn't spam the mixer): `zombie-attack-1` on a melee hit landing (player or
+turret), `impact-heavy` when a spitter projectile hits the player,
+`zombie-death-1` on every kill.
+
+### `Billboards` (`src/game/Billboards.js`)
+
+```js
+class Billboards {
+  /** @param {THREE.Scene} scene @param {import('./assets.js').Assets} assets @param {import('../core/types.js').GameConfig} cfg
+   *  @param {number} cap Max simultaneous billboard units. */
+  constructor(scene, assets, cfg, cap) {}
+
+  /**
+   * @param {string} spriteName Key into `assets.atlas().sprites`.
+   * @param {number} height Metres; width is `height * sprite.aspect`.
+   * @returns {number} Slot id, or -1 if the pool is exhausted.
+   */
+  alloc(spriteName, height) {}
+
+  /** @param {number} id */
+  free(id) {}
+
+  /**
+   * @param {number} id @param {number} x @param {number} z
+   * @param {{y:number, sx:number, sy:number}} anim From `core/spriteAnim.bob` (optionally combined with `castRaise` for a boss cast).
+   * @param {number} flash 0..1, from `core/spriteAnim.hitFlash`.
+   */
+  set(id, x, z, anim, flash) {}
+
+  /** @param {number} id @param {number} r @param {number} g @param {number} b */
+  setTint(id, r, g, b) {}
+
+  /** Uploads attributes to the GPU, only for what changed since the last call. @param {number} dt */
+  update(dt) {}
+
+  /** @type {number} Live count of allocated (not necessarily visible) slots. */
+  count;
+}
+```
+
+`Game.js` constructs one shared instance sized `cfg.enemies.cap + 1` (the
+`+1` reserves a slot for P5's boss on top of every enemy-cap-sized
+`tungtung`) and hands it to both `Enemies` (for `tungtung`) and, later, P5's
+`Boss.js` (for `patapim`) — both key off `render: 'sprite'` in
+`cfg.enemies.types`/`cfg.bosses`. One `InstancedMesh` of camera-facing quads
+(Y-axis-only billboarding, so feet stay planted regardless of camera pitch)
+draws every billboard unit in one call; a second `InstancedMesh` of flat,
+`depthWrite:false` discs draws their blob shadows. Hidden/free slots are
+invisible via `aScale = (0,0)` (a zero-area quad), not a zero-scale
+`instanceMatrix` — the per-instance `aScale` attribute is what actually
+controls a slot's rendered size, since the shader's own billboard basis
+doesn't look at `instanceMatrix`'s scale/rotation at all (only its
+translation — the slot's feet position).
+
+### Bus events (`game.bus`, `core/events.js`)
+
+In addition to P2's table:
+
+| Event | Payload | Emitted when |
+| --- | --- | --- |
+| `enemy:spawned` | `{ idx, type, gate }` | `Enemies#spawn` successfully allocates a pool slot. |
+| `enemy:killed` | `{ idx, type, x, z, source, energy }` | An enemy's hp reaches 0 via `damageAt`/`damageRadius`, from any source. `Game.js` subscribes to this itself to add `energy` to `game.economy` — no other listener needs to. |
+| `wave:started` | `{ wave, boss }` | `Game.js` enters `wave` (right after the `build -> wave` `state:changed`) and builds that wave's `SpawnScheduler`. `boss` is the wave's `cfg.waves[n].boss` string or `null`. |
+| `wave:cleared` | `{ wave }` | The wave-clear condition (`scheduler.done && enemies.alive === 0 && !world.boss?.alive`) is met — emitted right after the `wave -> waveClear` `state:changed`, on both an intermediate clear and the final-wave (victory) clear. |
+
+### `Game` additions
+
+`world.enemies` and `world.billboards` are constructed in the `Game`
+constructor and are never `null` (contrast `world.turrets`/`world.boss`,
+still `null`-until-registered). `Enemies` is registered via
+`registerSystem('enemies', enemies)`, so its `update(dt, world)` runs in the
+normal registered-systems pass — after `player.update()`/firing, before
+`effects.update()`.
+
+`Game` now also exposes (read-only from outside — only `Game` itself ever
+reassigns the underlying instance, on a fresh run):
+
+```js
+class Game {
+  /** @returns {import('../core/economy.js').Economy} */
+  get economy() {}
+  /** @returns {number} Current wave number, 1-based. */
+  get wave() {}
+  /** @returns {number[]} The current wave's lit gate id pair. */
+  get activeGates() {}
+  /** @returns {import('../core/spawner.js').SpawnScheduler|null} `null` outside `wave`. */
+  get scheduler() {}
+}
+```
+
+`getSnapshot()` additionally carries `economy` and `scheduler` (the raw
+instances, alongside the pre-existing `energy`/`wave`/`activeGates` fields).
+
+Player firing (`_handleFiring`) now does a real hitscan: `world.enemies
+.raycast(shot.origin, shot.dir, gun.range)`, and on a hit,
+`damageAt(hit.idx, gun.dmg, 'player')`, a tracer to the hit point (instead of
+the max-range point), and a small `effects.burst` at the hit point.
+
+`?wave=N` (1..`run.finalWave`) skips the title screen and starts the run
+directly at wave N's build phase — used for owner verification (P5's boss at
+wave 5, late-wave balance). `?debug=1`'s HUD line now also shows
+`alive/cap`.
+
+**State machine note:** `core/stateMachine.js`'s `TRANSITIONS.waveClear` now
+also allows `'runEnd'` (previously only `'build'`) — a minimal, additive
+edge so the final wave's clear can chain straight into `runEnd` per the
+plan's documented "wave==10 -> runEnd(victory)" behaviour, without touching
+`wave`'s own transition list (`wave` still only ever goes to
+`waveClear`/`death`). `death -> runEnd` (already legal) and the new
+`waveClear -> runEnd` are both, for now, followed by a 3-second toast
+("YOU DIED" / "ARENA CLEARED") and an automatic return to `title` — P6
+replaces this with the real run-end screen and (for death) the
+revive/decline flow.
+
+## P4 additions (P4 → orchestrator/P5/P6)
+
+Everything below lives in `src/core/turretLogic.js`, `src/game/Turrets.js`,
+`src/game/buildPhase.js`, and `src/ui/BuildOverlay.js`. Written concurrently
+with P3 — the `Enemies`/`positions()`/`applySlow()` shapes referenced here
+match what landed in "P3 additions" above (this file's authors coordinated
+the `1 - stats.slow` inversion note in both directions).
+
+### `core/turretLogic.js` (pure)
+
+```js
+/** @returns {TurretStats} See core/types.js. splash/slow/slowDurS keys are
+ *  only present when the type defines them (cannon: splash; tesla: slow +
+ *  slowDurS) — a gun's stats object never carries a `splash` key at all. */
+function statsFor(type, level, cfg) {}
+
+/** @returns {number|undefined} Cost from `level` to `level+1`; `undefined` at max level. */
+function upgradeCost(type, level, cfg) {}
+
+/** @returns {number} `max(minCost, ceil((hpMax-hp) * costPerHpMissing))`, `0` at full health. */
+function repairCost(turret, cfg) {}
+
+/** @returns {number} Index into `enemies`, or -1. gun/tesla: nearest in range.
+ *  cannon: most neighbours within `stats.splash`, ties broken by nearest. */
+function pickTarget(turret, enemies, stats) {}
+
+/** @returns {boolean} Mutates `turret.cooldown`; tops it back up by `1/stats.rate` (additive, not reset) on a ready call so cadence doesn't drift under a fixed step. */
+function fireReady(turret, dt, stats) {}
+```
+
+### `TurretRecord` (`core/types.js`)
+
+`{ slotId, type, level, hp, hpMax, x, z, alive }` (plus an internal
+`cooldown` field owned by `fireReady`). **`alive: false` marks a destroyed
+turret ("wreck") — the record is NOT removed from `Turrets`' bookkeeping
+until `clearWreck(slotId)` runs**, so `Enemies.js`'s own turret-targeting
+code (`chooseTarget`, the projectile-hit loop) must keep filtering
+`t.alive !== false` itself, same as it already does.
+
+### `Turrets` (`src/game/Turrets.js`)
+
+```js
+class Turrets {
+  constructor(scene, assets, cfg, bus, effects, audio) {}
+  place(slotId, type) {}   // throws if the slot already holds a record (alive or wrecked)
+  upgrade(slotId) {}       // throws if dead or already at max level
+  repair(slotId) {}        // throws if dead; no-op-safe to call at full hp (just re-sets hp = hpMax)
+  damage(slotId, n) {}     // emits turret:destroyed at 0hp, greys the mesh, keeps the record as a wreck
+  get(slotId) {}           // -> TurretRecord | null
+  /** Every tracked record — alive AND destroyed. Deliberately NOT "only
+   *  alive ones": `ui/BuildOverlay.js` renders a destroyed slot as a "grey
+   *  X" from this same list, and `Enemies.js` needs the `alive:false`
+   *  wrecks to skip in its own targeting — both read this one list. Code
+   *  that only wants live turrets (this file's own `update()`) filters
+   *  `.alive` itself. */
+  list() {}
+  clearWreck(slotId) {}    // no-op unless the slot holds a destroyed record; frees it for a new placement
+  update(dt, world) {}     // world.enemies?.positions() / damageAt / damageRadius / applySlow — see below
+  clear() {}
+}
+```
+
+Visuals: base = `assets.propMesh(typeDef.base)` (`AmmoBox_5` or
+`AttachedBoxes`), scaled up by a small fixed per-mesh factor
+(`BASE_EXTRA_SCALE` in `Turrets.js`) so both read as roughly the same size —
+**measured directly out of `props.glb`** (not in `manifest.json`, which
+doesn't record a height for these two meshes): `AmmoBox_5` ≈0.50m tall,
+`AttachedBoxes` ≈1.10m tall, both before the extra scale. Head: gun uses
+`assets.propMesh('Gun_02')` (≈0.8×0.15×0.05m, reads as a barrel) plus a
+small procedural mount; tesla and cannon heads are fully procedural
+(stacked cylinders + emissive tip; a thick short cylinder, respectively).
+Aiming uses `THREE.Object3D#lookAt` (self-updates its world matrix, so it's
+safe to call mid-fixed-step) rather than manual yaw trig.
+
+`update(dt, world)` reads `world.enemies?.positions() ?? []` — each entry is
+`{idx, x, z, radius}` where **`idx` is the enemy's real pool index**, NOT
+its position within that array (the array omits dead enemies, so the two
+diverge after the first kill). `pickTarget` returns a position within the
+array; `Turrets.js` resolves `enemies[pos].idx` before calling
+`damageAt`/`applySlow` — get this backwards and turret fire silently damages
+the wrong (or a since-freed) pool slot once any enemy has died.
+
+`tesla`'s `applySlow(idx, factor, durS)` call inverts `cfg.turrets.types.
+tesla.slow` (a *strength*, increasing with level) into the *speed
+multiplier* `Enemies#applySlow` expects (`1 - stats.slow`) — see the
+matching note on `applySlow` in "P3 additions" above.
+
+Emits `turret:placed {slotId, type}`, `turret:upgraded {slotId, level}`,
+`turret:repaired {slotId}`, `turret:destroyed {slotId}` on `game.bus`.
+
+### `BuildOverlay` (`src/ui/BuildOverlay.js`)
+
+```js
+class BuildOverlay {
+  constructor(cfg, audio) {}
+  open(snapshot) {}
+  close() {}
+  setCountdown(secondsLeft) {}
+  setEnergy(n) {}
+  setSelectedType(type) {}
+  refresh(snapshot) {}
+  /** @type {boolean} */
+  isOpen;
+  // Set by buildPhase.js after construction — mutable public fields, not
+  // constructor params, since the overlay is built before the game-state
+  // wiring that drives it exists:
+  /** @type {((slotId:number, type:string) => void)|null} */ onPlace;
+  /** @type {((slotId:number) => void)|null} */ onUpgrade;
+  /** @type {((slotId:number) => void)|null} */ onRepair;
+  /** @type {(() => void)|null} */ onReady;
+}
+```
+
+Renders into the `#overlay` node `index.html` already reserves (never
+recreates it). `worldToMap`/`arenaGeometry`'s "+z world = down on screen"
+convention needs no flip anywhere in this file — SVG's own y-axis already
+increases downward, and `worldToMap` is a uniform scale. Does its own
+affordability pre-check (shake + `ui-deny`) against its last-known energy
+number before calling `onPlace`/`onUpgrade`/`onRepair` at all, purely for
+snappy feedback tied to the tapped element — `buildPhase.js` re-checks
+affordability itself before spending regardless, since the overlay's cached
+energy can be up to 250ms stale (see `refresh`'s polling interval below).
+
+`InputFrame.select`/`.ready` have no touch equivalent in P2/P3 (documented
+on `InputFrame` above), so this file attaches its own `window` `keydown`
+listener while `isOpen` (1/2/3 = select type, Space/Enter = Ready, Escape =
+close the upgrade/repair sheet) rather than reading `InputFrame`.
+
+### `installBuildPhase(game, { turrets, overlay, audio, hud, cfg })` (`src/game/buildPhase.js`)
+
+The one call the orchestrator adds to wire P4 in, once `Turrets`/
+`BuildOverlay` instances exist:
+
+```js
+const turrets = new Turrets(scene, assets, cfg, game.bus, game.world.effects, audio);
+const overlay = new BuildOverlay(cfg, audio);
+installBuildPhase(game, { turrets, overlay, audio, hud, cfg });
+```
+
+What it does: sets `game.world.turrets = turrets` (so `Enemies`'
+targeting/damage and `Game#getSnapshot()` both see it — `Game.js` itself
+never assigns this) and `game.registerSystem('turrets', turrets)`; opens the
+overlay (`game.state.onEnter('build', ...)`) and closes it
+(`game.state.onExit('build', ...)`, also clearing any wrecked turret's
+record so its slot is free starting the *next* build phase — a destroyed
+slot stays visible as a "grey X" for the rest of the build phase it died
+into); mirrors `build:tick` into `overlay.setCountdown`; polls
+`overlay.refresh(game.getSnapshot())` every 250ms while open, plus
+immediately after every place/upgrade/repair/ready action; wires
+`onPlace`/`onUpgrade`/`onRepair` into `Turrets` + `game.economy` (spend on
+success, `ui-deny` on an unaffordable or otherwise-rejected attempt); wires
+`onReady` to compute `game.economy.readyRefund(secondsLeft, cfg)`,
+`addEnergy` it, toast it, and end the build phase via `game.state.go('wave')`
++ `game.bus.emit('state:changed', {state:'wave'})` — **the exact same two
+calls `Game.js`'s own countdown-expiry path uses** — rather than duplicating
+`Game`'s internal timer/refund bookkeeping, so a touch player tapping Ready
+(no `InputFrame.ready` equivalent exists for touch) and a keyboard player's
+Space/Enter both land in the same place with no double-refund risk (whichever
+fires first flips `game.state` out of `'build'`, so the other path's own
+`state === 'build'` guard — either `Game.js`'s or this file's — simply
+no-ops).
+
+**Known integration caveat:** `game.economy` is a live getter onto `Game`'s
+own internal `Economy` instance (the same one `Game`'s HUD sync and its
+own keyboard-Ready path already use), so as long as every P4 read goes
+through `game.economy` — never a cached reference — this stays a single
+shared source of truth with no further changes needed on P4's side. The
+defensive `game.economy ??= new Economy(cfg)` in `installBuildPhase` exists
+only for standalone use before that getter existed (or if a future refactor
+ever removes it) and never overwrites a real instance.

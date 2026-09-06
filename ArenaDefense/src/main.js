@@ -9,6 +9,9 @@ import { loadAll } from './game/assets.js';
 import { Hud } from './ui/Hud.js';
 import { Audio } from './platform/audio.js';
 import { Game } from './game/Game.js';
+import { Turrets } from './game/Turrets.js';
+import { BuildOverlay } from './ui/BuildOverlay.js';
+import { installBuildPhase } from './game/buildPhase.js';
 
 // Installed first so a `?poki=mock` run captures every call from here on,
 // including the very next line's `gameLoadingStart`.
@@ -56,6 +59,12 @@ async function boot() {
   const audio = new Audio(assets);
 
   const game = new Game({ renderer, scene, camera, assets, input, hud, audio, config: CONFIG });
+
+  // Turrets + the top-down build overlay (P4) attach through one call so
+  // Game.js never has to know about them; see docs/INTERFACES.md.
+  const turrets = new Turrets(scene, assets, CONFIG, game.bus, game.world.effects, audio);
+  const overlay = new BuildOverlay(CONFIG, audio);
+  installBuildPhase(game, { turrets, overlay, audio, hud, cfg: CONFIG });
 
   installTitlePanel(game, input);
 

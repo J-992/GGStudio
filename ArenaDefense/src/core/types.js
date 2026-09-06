@@ -113,4 +113,49 @@
  * @property {boolean} pause Edge-triggered pause toggle.
  */
 
+/**
+ * Resolved per-level combat numbers for one turret, from
+ * `core/turretLogic.js#statsFor`. `splash`/`slow`/`slowDurS` are only present
+ * on the object at all for the turret types that define them (cannon/tesla
+ * respectively) — see that function's doc comment.
+ * @typedef {object} TurretStats
+ * @property {number} dmg
+ * @property {number} rate Shots per second.
+ * @property {number} range Metres.
+ * @property {number} [splash] Splash radius in metres (cannon only).
+ * @property {number} [slow] Fractional speed reduction 0..1 (tesla only).
+ * @property {number} [slowDurS] Slow duration in seconds (tesla only).
+ */
+
+/**
+ * A placed turret's persistent state, owned by `game/Turrets.js` and read
+ * (via `Turrets#list()`/`Game#getSnapshot()`) by `ui/BuildOverlay.js`. Not a
+ * class — a plain mutable record, so `core/turretLogic.js` can stay pure and
+ * mutate only the `cooldown` field it owns.
+ * @typedef {object} TurretRecord
+ * @property {number} slotId Index into `arenaGeometry.slotPositions(cfg)`.
+ * @property {string} type One of `cfg.turrets.order`.
+ * @property {number} level 0-based, `cfg.turrets.types[type].levels.length - 1` at max.
+ * @property {number} hp
+ * @property {number} hpMax
+ * @property {number} x World metres.
+ * @property {number} z World metres.
+ * @property {boolean} alive `false` once destroyed — the record (a "wreck")
+ *   stays in `Turrets`' bookkeeping, still returned by `list()`, until
+ *   `Turrets#clearWreck(slotId)` removes it and frees the slot.
+ * @property {number} [cooldown] Seconds until the next shot is ready; owned by `core/turretLogic.js#fireReady`.
+ */
+
+/**
+ * `Game#getSnapshot()`'s return shape — everything `ui/BuildOverlay.js` needs
+ * to render one frame of the build-phase map, see `docs/INTERFACES.md`.
+ * @typedef {object} BuildSnapshot
+ * @property {number} wave Current wave number, 1-based.
+ * @property {number[]} activeGates The current wave's lit gate id pair.
+ * @property {number} energy
+ * @property {{x:number, z:number, yaw:number}} player
+ * @property {TurretRecord[]} turrets Every tracked turret record, alive and destroyed alike.
+ * @property {ReturnType<import('./arenaGeometry.js').slotPositions>} slots
+ */
+
 export {};
