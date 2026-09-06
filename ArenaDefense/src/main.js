@@ -7,11 +7,14 @@ import { CONFIG } from './config.js';
 import { Input } from './ui/input.js';
 import { loadAll } from './game/assets.js';
 import { Hud } from './ui/Hud.js';
+import { Screens } from './ui/Screens.js';
 import { Audio } from './platform/audio.js';
 import { Game } from './game/Game.js';
 import { Turrets } from './game/Turrets.js';
 import { BuildOverlay } from './ui/BuildOverlay.js';
 import { installBuildPhase } from './game/buildPhase.js';
+import { Boss } from './game/Boss.js';
+import { installBoss } from './game/bossPhase.js';
 
 // Installed first so a `?poki=mock` run captures every call from here on,
 // including the very next line's `gameLoadingStart`.
@@ -38,7 +41,7 @@ async function boot() {
   const loadingStatus = loading?.querySelector('.loading-status');
 
   // Constructed before assets finish loading so touch/keyboard detection and
-  // the title panel's silent input-swap are live the instant the page paints.
+  // silent input-swap are live the instant the page paints.
   const input = new Input(canvas, CONFIG);
 
   const assets = await loadAll((progress) => {
@@ -57,8 +60,12 @@ async function boot() {
 
   const hud = new Hud(CONFIG);
   const audio = new Audio(assets);
+  // Title/death/run-end screens (P6) — constructed before `Game` since its
+  // constructor drives the title screen synchronously; see
+  // docs/INTERFACES.md's "P6 additions".
+  const screens = new Screens(CONFIG, input, audio);
 
-  const game = new Game({ renderer, scene, camera, assets, input, hud, audio, config: CONFIG });
+  const game = new Game({ renderer, scene, camera, assets, input, hud, audio, config: CONFIG, screens });
 
   // Turrets + the top-down build overlay (P4) attach through one call so
   // Game.js never has to know about them; see docs/INTERFACES.md.
@@ -66,7 +73,9 @@ async function boot() {
   const overlay = new BuildOverlay(CONFIG, audio);
   installBuildPhase(game, { turrets, overlay, audio, hud, cfg: CONFIG });
 
-  installTitlePanel(game, input);
+  // P5: boss install
+  const boss = new Boss(scene, assets, CONFIG, game.bus, game.world.billboards, game.world.effects, audio);
+  installBoss(game, { boss, hud, audio, cfg: CONFIG });
 
   if (loading) loading.hidden = true;
 
@@ -77,43 +86,6 @@ async function boot() {
   }
 
   game.start();
-}
-
-/**
- * Minimal title screen for P2 — P6 replaces this with the real title screen
- * (brainrot boss portraits, credits, Poki `commercialBreak`/`gameplayStart`
- * flow). `Game` already advances `title -> build` on the very first input
- * frame, so this panel only needs to get out of the way once that happens;
- * it never drives the transition itself.
- *
- * @param {Game} game
- * @param {Input} input
- */
-function installTitlePanel(game, input) {
-  const ui = document.getElementById('ui');
-  const panel = document.createElement('div');
-  panel.className = 'title-panel';
-
-  const heading = document.createElement('h1');
-  heading.className = 'title-panel__heading';
-  heading.textContent = 'ARENA DEFENSE';
-
-  const prompt = document.createElement('p');
-  prompt.className = 'title-panel__prompt';
-  prompt.textContent = input.mode === 'touch' ? 'TAP TO PLAY' : 'CLICK OR PRESS A KEY TO PLAY';
-
-  panel.append(heading, prompt);
-  ui.appendChild(panel);
-
-  input.onModeChange((mode) => {
-    prompt.textContent = mode === 'touch' ? 'TAP TO PLAY' : 'CLICK OR PRESS A KEY TO PLAY';
-  });
-
-  const unsubscribe = game.bus.on('state:changed', ({ state }) => {
-    if (state === 'title') return;
-    panel.hidden = true;
-    unsubscribe();
-  });
 }
 
 /**

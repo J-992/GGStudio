@@ -3,22 +3,35 @@
 // P5 attach `Enemies`/`Turrets`/`Boss` through. See `docs/INTERFACES.md` for
 // the full contract (`world` shape, event names, `getSnapshot`).
 //
-// P3 wires the full wave loop: `build` spawns via `SpawnScheduler` into
+// P3 wired the wave loop: `build` spawns via `SpawnScheduler` into
 // `Enemies`, `wave` clears into `waveClear` once the scheduler is done and
-// nothing is left alive, `waveClear` either loops back to `build` (wave+1) or
-// — on the final wave — chains straight into `runEnd` (see the added
-// `waveClear -> runEnd` edge in `core/stateMachine.js`), and `death` (already
-// wired by P2) now also discards pending coins and, after a short delay,
-// moves on to `runEnd`. `runEnd` itself is a placeholder toast + delay until
-// P6 builds the real screen.
+// nothing is left alive, `waveClear` either loops back to `build` (wave+1)
+// or — on the final wave — chains straight into `runEnd` (see the
+// `waveClear -> runEnd` edge in `core/stateMachine.js`).
+//
+// P6 (this pass) replaces P3's placeholder toast-and-return-to-title with
+// the real flow: a combo tracker that pays coins into `economy.pendingCoins`
+// on every ended streak, `death` awaiting the player's revive/end-run choice
+// through `ui/Screens.js` (with an actual once-per-run revive, pushed back
+// via a stun rather than a reposition — see `_pushEnemiesFromPlayer`'s
+// comment), `runEnd` awaiting play-again/title (with an optional coin
+// doubler loop), and `game.save` persisted through `core/storage.js` +
+// `platform/storage.js`. `game.hooks` is P7's seam into all of this: the
+// default no-ads implementations below make every ad-gated choice behave as
+// if the player always declined, so the whole flow works (and is fully
+// playable) before P7 lands.
 import * as THREE from 'three';
 import { EventBus } from '../core/events.js';
 import { GameStateMachine } from '../core/stateMachine.js';
 import { Economy } from '../core/economy.js';
+import { ComboTracker } from '../core/combo.js';
 import { makeRng } from '../core/rng.js';
 import { pickActiveGates, waveDef, flattenSpawns } from '../core/waves.js';
 import { SpawnScheduler } from '../core/spawner.js';
 import { slotPositions } from '../core/arenaGeometry.js';
+import { loadSave, saveSave } from '../core/storage.js';
+import { coinsForRun, applyDoubler, bestWaveAfter } from '../core/runFlow.js';
+import { storageIO } from '../platform/storage.js';
 import { Player } from './Player.js';
 import { Arena } from './Arena.js';
 import { Effects } from './Effects.js';
@@ -28,24 +41,16 @@ import { Billboards } from './Billboards.js';
 const FIXED_STEP_SAFETY_MAX_ITERATIONS = 8;
 const DEBUG_REFRESH_S = 0.5;
 
-// P6 owns the real run-end screen; until then this is how long the
-// "ARENA CLEARED"/"YOU DIED" toast stays up before looping back to title.
-// Not a `config.js` value because it belongs to a screen that doesn't exist
-// yet — P6 should move it there once it does.
-const RUN_END_DISPLAY_S = 3;
-
 const HIT_PARTICLE_COLOR = 0xffdd88;
 const HIT_PARTICLE_COUNT = 6;
 
-/**
- * @param {import('../core/types.js').InputFrame} frame
- * @returns {boolean}
- */
-function hasAnyInput(frame) {
-  return frame.fire || frame.ready || frame.pause || frame.select !== 0
-    || frame.moveX !== 0 || frame.moveY !== 0
-    || Math.abs(frame.lookDX) > 0 || Math.abs(frame.lookDY) > 0;
-}
+// See `_pushEnemiesFromPlayer`: `Enemies` (P3, frozen contract — see
+// `docs/INTERFACES.md`) exposes no way to move an enemy's position from
+// outside, only `applySlow(idx, factor, durS)`. A revive's "push enemies
+// away" is therefore approximated as a near-stun (a very small speed
+// multiplier) for the same duration as the post-revive invulnerability,
+// rather than an actual knockback — see the P6 report's deviations list.
+const REVIVE_STUN_FACTOR = 0.05;
 
 export class Game {
   /**
@@ -58,8 +63,9 @@ export class Game {
    * @param {import('../ui/Hud.js').Hud} deps.hud
    * @param {import('../platform/audio.js').Audio} deps.audio
    * @param {import('../core/types.js').GameConfig} deps.config
+   * @param {import('../ui/Screens.js').Screens} deps.screens P6 addition — see "P6 additions" in docs/INTERFACES.md.
    */
-  constructor({ renderer, scene, camera, assets, input, hud, audio, config }) {
+  constructor({ renderer, scene, camera, assets, input, hud, audio, config, screens }) {
     this._renderer = renderer;
     this._scene = scene;
     this._camera = camera;
@@ -68,9 +74,26 @@ export class Game {
     this._hud = hud;
     this._audio = audio;
     this._config = config;
+    this._screens = screens;
 
     this.bus = new EventBus();
     this.state = new GameStateMachine('boot');
+
+    // P7's seam: every ad-gated choice defaults to "no ad, declined" so the
+    // whole run-end/death/title flow is playable without the Poki SDK.
+    // `onRunStart`/`onRunStop` are named hook points for P7's
+    // `commercialBreak`/`gameplayStart`/`gameplayStop` wiring — optional
+    // (called with `?.()`), so `null` is a valid no-op default.
+    this.hooks = {
+      /** @returns {Promise<boolean>} */
+      requestRevive: async () => false,
+      /** @returns {Promise<boolean>} */
+      requestDoubler: async () => false,
+      /** @type {(() => void)|null} Called synchronously at the very start of every fresh run (title/runEnd's Play/Play Again, and the `?wave=N` dev shortcut). */
+      onRunStart: null,
+      /** @type {(() => void)|null} Called synchronously the moment gameplay stops for good this run (entering `death`, or clearing the final wave) — pairs with Poki's `gameplayStop()`. */
+      onRunStop: null,
+    };
 
     const player = new Player(camera, assets, config);
     const arena = new Arena(scene, assets, config);
@@ -103,17 +126,25 @@ export class Game {
     this.registerSystem('enemies', enemies);
 
     this._economy = new Economy(config);
+    this._combo = new ComboTracker(config);
     this._wave = 1;
     this._buildTimer = 0;
     this._prevGatePair = null;
     this._gateRng = makeRng((Date.now() ^ 0x9e3779b9) >>> 0);
+
+    // Persisted save data, loaded once at boot; `saveSave` merges+persists a
+    // patch and returns the sanitized whole, which is what we keep as the
+    // running in-memory copy.
+    this._io = storageIO;
+    this._save = loadSave(this._io);
 
     /** @type {import('../core/spawner.js').SpawnScheduler|null} */
     this._scheduler = null;
     this._currentWaveDef = null;
     this._waveClearTimer = 0;
     this._deathTimer = 0;
-    this._runEndTimer = 0;
+    this._reviveUsed = false;
+    this._awaitingDeathDecision = false;
 
     this._paused = false;
     this._lastHp = undefined;
@@ -130,14 +161,26 @@ export class Game {
     window.addEventListener('resize', this._onResize);
     document.addEventListener('visibilitychange', this._onVisibility);
 
-    this.bus.on('enemy:killed', (e) => this._economy.addEnergy(e.energy));
+    this.bus.on('enemy:killed', (e) => {
+      this._economy.addEnergy(e.energy);
+      this._combo.onKill(this.world.time);
+      // P5's `Boss.js` tags a boss kill's payload with `boss:true` and
+      // `coins` (see docs/INTERFACES.md's P5 additions) — energy is added
+      // above unconditionally like any other kill (it's already on every
+      // `enemy:killed` payload), coins only for the boss.
+      if (e.boss) this._economy.addCoins(e.coins);
+    });
 
     this._setupDebug();
 
     const devWave = this._parseDevWaveParam();
     this.state.go('title');
     this.bus.emit('state:changed', { state: 'title' });
-    if (devWave !== null) this._startRun(devWave);
+    if (devWave !== null) {
+      this._startRun(devWave);
+    } else {
+      this._showTitleScreen();
+    }
   }
 
   /**
@@ -178,17 +221,33 @@ export class Game {
     this._audio.suspend();
   }
 
-  /** Reverses `pause()`. Idempotent. */
+  /**
+   * Reverses `pause()`. Idempotent. Leaves input frozen if a screen
+   * (`ui/Screens.js`) is currently up — e.g. the tab was backgrounded and
+   * restored while the death screen is waiting on a choice — so this never
+   * fights that screen's own freeze; the screen's own `hide()` is what
+   * unfreezes input once its outcome is acted on.
+   */
   resume() {
     if (!this._paused) return;
     this._paused = false;
-    this._input.freeze(false);
+    if (!this._screens.isOpen) this._input.freeze(false);
     this._audio.resume();
   }
 
   /** @returns {import('../core/economy.js').Economy} Read-only usage by P4/P5/P6 — only `Game` replaces the instance (new run). */
   get economy() {
     return this._economy;
+  }
+
+  /** @returns {import('../core/combo.js').ComboTracker} P6 addition. Read-only usage — only `Game` replaces the instance (new run). */
+  get combo() {
+    return this._combo;
+  }
+
+  /** @returns {import('../core/types.js').SaveData} P6 addition. Read-only usage — only `Game` persists via `core/storage.js#saveSave`. */
+  get save() {
+    return this._save;
   }
 
   /** @returns {number} Current wave number, 1-based. */
@@ -305,6 +364,7 @@ export class Game {
     for (const entry of this._systems) entry.system.update(dt, this.world);
 
     this._checkPlayerDamageAndDeath();
+    this._updateCombo();
 
     this.world.effects.update(dt);
 
@@ -319,7 +379,8 @@ export class Game {
     const state = this.state.state;
 
     if (state === 'title') {
-      if (hasAnyInput(frame)) this._startRun();
+      // Screen-driven (ui/Screens.js's Play button / Enter / tap-anywhere) —
+      // see `_showTitleScreen`. Nothing to poll here.
       return;
     }
 
@@ -360,21 +421,15 @@ export class Game {
 
     if (state === 'death') {
       this._deathTimer -= dt;
-      if (this._deathTimer <= 0) {
-        this.state.go('runEnd');
-        this.bus.emit('state:changed', { state: 'runEnd' });
-        this._runEndTimer = RUN_END_DISPLAY_S;
+      if (this._deathTimer <= 0 && !this._awaitingDeathDecision) {
+        this._awaitingDeathDecision = true;
+        this._runDeathFlow();
       }
       return;
     }
 
-    if (state === 'runEnd') {
-      this._runEndTimer -= dt;
-      if (this._runEndTimer <= 0) {
-        this.state.go('title');
-        this.bus.emit('state:changed', { state: 'title' });
-      }
-    }
+    // 'runEnd' is fully screen/Promise-driven (see `_runRunEndFlow`) — no
+    // per-frame polling needed.
   }
 
   /**
@@ -413,22 +468,146 @@ export class Game {
 
   _onWaveClear() {
     this._economy.bankWave();
+    this._save = saveSave(this._io, { bestWave: bestWaveAfter(this._save.bestWave, this._wave) });
+
     this.state.go('waveClear');
     this.bus.emit('wave:cleared', { wave: this._wave });
     this.bus.emit('state:changed', { state: 'waveClear' });
 
     if (this._wave >= this._config.run.finalWave) {
-      // Victory — chain straight into runEnd (see the added
-      // `waveClear -> runEnd` edge in `core/stateMachine.js`). P6 replaces
-      // this toast-and-wait with the real run-end screen.
-      this._hud.toast('ARENA CLEARED');
+      // Victory — chain straight into runEnd (see the `waveClear -> runEnd`
+      // edge in `core/stateMachine.js`). Gameplay has definitively stopped
+      // here, same as a death — see `hooks.onRunStop`'s doc comment.
+      this.hooks.onRunStop?.();
       this.state.go('runEnd');
       this.bus.emit('state:changed', { state: 'runEnd' });
-      this._runEndTimer = RUN_END_DISPLAY_S;
+      this._runRunEndFlow(true);
       return;
     }
 
     this._waveClearTimer = this._config.timing.waveClearDelayS;
+  }
+
+  /** Shows the title screen (boot, and after a run ends and the player picks "title"). */
+  _showTitleScreen() {
+    this._hud.show(false);
+    this._screens.showTitle({
+      bestWave: this._save.bestWave,
+      coins: this._save.coins,
+      credits: this._config.credits,
+      onPlay: () => this._startRun(),
+    });
+  }
+
+  /**
+   * Runs the death screen's revive/end-run choice to its conclusion, then
+   * either resumes the wave (revive) or moves on to `runEnd`. Guarded by
+   * `_awaitingDeathDecision` so the fixed-step loop (which keeps ticking
+   * while this `await`s) never starts a second one.
+   */
+  async _runDeathFlow() {
+    this._hud.show(false);
+    const canRevive = !(this._config.run.reviveOncePerRun && this._reviveUsed);
+    const choice = await this._screens.showDeath({ wave: this._wave, canRevive });
+
+    if (choice === 'revive' && canRevive) {
+      const granted = await this.hooks.requestRevive();
+      if (granted) {
+        this._reviveUsed = true;
+        this._awaitingDeathDecision = false;
+        this._doRevive();
+        return;
+      }
+    }
+
+    this._awaitingDeathDecision = false;
+    this.state.go('runEnd');
+    this.bus.emit('state:changed', { state: 'runEnd' });
+    this._runRunEndFlow(false);
+  }
+
+  /**
+   * Full hp, brief invulnerability, and enemies near the player stunned for
+   * the same window — see `REVIVE_STUN_FACTOR`'s comment on why this is a
+   * stun, not a reposition. Unlike every other screen outcome, nothing else
+   * mounts a fresh screen right after this one, so this is the one call
+   * site that must explicitly `screens.hide()` rather than relying on the
+   * next `_open()` to clean up the previous screen for it.
+   */
+  _doRevive() {
+    this._screens.hide();
+    const p = this._config.player;
+    this.world.player.hp = p.hp;
+    this.world.player.alive = true;
+    this.world.player.invulnUntil = this.world.time + p.invulnAfterReviveS;
+    this._pushEnemiesFromPlayer();
+    this._hud.show(true);
+    this.state.go('wave');
+    this.bus.emit('state:changed', { state: 'wave' });
+  }
+
+  /**
+   * "Push enemies away" on revive, approximated within `Enemies`' frozen,
+   * mutator-free-on-position public API (`docs/INTERFACES.md`'s P3
+   * additions — `applySlow` is the only per-enemy mutator it exposes
+   * besides damage): every enemy within `revivePushRadius` of the player is
+   * stunned (`applySlow` at a near-zero speed factor) for
+   * `invulnAfterReviveS` seconds, the same window the player is
+   * invulnerable for — enemies don't visually leap backward, but the
+   * player gets the same practical breathing room a knockback would buy.
+   */
+  _pushEnemiesFromPlayer() {
+    const p = this._config.player;
+    const r2 = p.revivePushRadius * p.revivePushRadius;
+    const px = this.world.player.x;
+    const pz = this.world.player.z;
+    for (const e of this.world.enemies.positions()) {
+      const dx = e.x - px;
+      const dz = e.z - pz;
+      if (dx * dx + dz * dz <= r2) {
+        this.world.enemies.applySlow(e.idx, REVIVE_STUN_FACTOR, p.invulnAfterReviveS);
+      }
+    }
+  }
+
+  /**
+   * Awaits the run-end screen to its conclusion — looping once through a
+   * coin-doubler ad if the player asks for one — then persists coins and
+   * either starts a fresh run or returns to the title screen.
+   * @param {boolean} victory
+   */
+  async _runRunEndFlow(victory) {
+    this._hud.show(false);
+    let earned = this._economy.bankedCoins; // Already final: banked on every clean wave clear, discarded (not included) on death. Never depends on an ad.
+    let canDouble = true;
+    let action;
+
+    // A loop, not a single await: sequential by design — each iteration is
+    // one player decision, and "double" re-shows the screen with the (now
+    // possibly doubled) total and the doubler option gone.
+    for (;;) {
+      action = await this._screens.showRunEnd({
+        wave: this._wave,
+        victory,
+        coinsEarned: earned,
+        coinsTotal: this._save.coins + earned,
+        canDouble,
+      });
+      if (action !== 'double') break;
+      canDouble = false; // One doubler offer per run-end, win or decline.
+      const granted = await this.hooks.requestDoubler();
+      if (granted) earned = applyDoubler(earned, true);
+    }
+
+    this._save = saveSave(this._io, { coins: coinsForRun(this._save.coins, earned) });
+
+    if (action === 'again') {
+      this._startRun();
+    } else {
+      this.state.go('title');
+      this.bus.emit('state:changed', { state: 'title' });
+      this._showTitleScreen();
+    }
   }
 
   /**
@@ -436,16 +615,23 @@ export class Game {
    * at this wave's build phase instead of wave 1.
    */
   _startRun(startWave = 1) {
+    this.hooks.onRunStart?.();
+    this._screens.hide();
+    this._hud.show(true);
     this.state.go('build');
     this.world.player.reset();
     this.world.enemies?.clear();
     this._wave = startWave;
     this._economy = new Economy(this._config);
+    this._combo = new ComboTracker(this._config);
+    this._reviveUsed = false;
+    this._awaitingDeathDecision = false;
     this._scheduler = null;
     this._currentWaveDef = null;
     this._buildTimer = this._config.build.durationS;
     this._pickGates();
     this._hud.setWave(this._wave, this._config.run.finalWave);
+    this._hud.setCombo(0, 0);
     this.bus.emit('state:changed', { state: 'build' });
   }
 
@@ -498,14 +684,31 @@ export class Game {
     if (this.state.state === 'wave' && !this.world.player.alive) {
       this._economy.discardPending();
       this._deathTimer = this._config.timing.deathScreenDelayS;
+      this.hooks.onRunStop?.();
       this.state.go('death');
       this.bus.emit('state:changed', { state: 'death' });
-      this._hud.toast('YOU DIED');
     }
+  }
+
+  /**
+   * Polls the combo tracker every fixed step (its own contract —
+   * `core/combo.js`'s doc comment). Banks a payout the instant a streak
+   * ends with `coins > 0`, and keeps the HUD combo bar (kill count + this
+   * tier's payout, from `Hud#setCombo`) current every step regardless.
+   */
+  _updateCombo() {
+    const result = this._combo.update(this.world.time);
+    if (result.ended && result.coins > 0) {
+      this._economy.addCoins(result.coins);
+      this._hud.toast(`COMBO x${result.kills} +${result.coins}`);
+      this._audio.play('coin');
+    }
+    this._hud.setCombo(result.kills, this._combo.remaining(this.world.time));
   }
 
   _syncHud() {
     this._hud.setHp(this.world.player.hp, this._config.player.hp);
     this._hud.setEnergy(this._economy.energy);
+    this._hud.setCoins(this._economy.bankedCoins + this._economy.pendingCoins);
   }
 }

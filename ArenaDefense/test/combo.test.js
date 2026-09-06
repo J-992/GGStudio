@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CONFIG } from '../src/config.js';
-import { ComboTracker } from '../src/core/combo.js';
+import { ComboTracker, tierFor } from '../src/core/combo.js';
 
 test('tierFor: below first tier is 0, at tiers matches configured coins', () => {
   const combo = new ComboTracker(CONFIG);
@@ -52,6 +52,13 @@ test('a new kill resets the rolling window rather than the combo start time', ()
   result = combo.update(CONFIG.combo.windowS - 0.01 + CONFIG.combo.windowS - 0.01);
   assert.equal(result.ended, false);
   assert.equal(result.kills, 2);
+});
+
+test('standalone tierFor(kills, cfg) matches ComboTracker#tierFor without an instance', () => {
+  const combo = new ComboTracker(CONFIG);
+  for (const kills of [0, 2, 3, 4, 8, 20, 1000]) {
+    assert.equal(tierFor(kills, CONFIG), combo.tierFor(kills));
+  }
 });
 
 test('remaining() is 1 right after a kill, 0 once expired, and 0 with no active combo', () => {

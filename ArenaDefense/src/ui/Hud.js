@@ -1,7 +1,9 @@
-// In-gameplay HUD: hp/energy/wave readouts, the reticle, and placeholders
-// (combo bar, boss bar) that later work packages (P5/P6) drive with real
-// numbers. Every element is built in the constructor and appended to `#ui` —
-// nothing here runs at module import time.
+// In-gameplay HUD: hp/energy/coins/wave readouts, the reticle, and the combo
+// and boss bars (driven with real numbers by P6/P5 respectively). Every
+// element is built in the constructor and appended to `#ui` — nothing here
+// runs at module import time.
+import { tierFor } from '../core/combo.js';
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const TOAST_VISIBLE_MS = 2200;
 
@@ -50,6 +52,12 @@ export class Hud {
     this._energyText.className = 'hud-text';
     energyRow.append(svgIcon('icon-plus'), this._energyText);
 
+    const coinsRow = document.createElement('div');
+    coinsRow.className = 'hud-row hud-coins';
+    this._coinsText = document.createElement('span');
+    this._coinsText.className = 'hud-text';
+    coinsRow.append(svgIcon('icon-coin'), this._coinsText);
+
     this._waveLabel = document.createElement('div');
     this._waveLabel.className = 'hud-wave';
 
@@ -57,7 +65,7 @@ export class Hud {
     this._buildCountdown.className = 'hud-build-countdown';
     this._buildCountdown.hidden = true;
 
-    this._statsBox.append(hpRow, energyRow, this._waveLabel);
+    this._statsBox.append(hpRow, energyRow, coinsRow, this._waveLabel);
 
     this._bossBar = document.createElement('div');
     this._bossBar.className = 'hud-boss';
@@ -102,6 +110,7 @@ export class Hud {
 
     this.setHp(config.player.hp, config.player.hp);
     this.setEnergy(0);
+    this.setCoins(0);
     this.setWave(1, config.run.finalWave);
     this.setBossHp(null);
     this.setCombo(0, 0);
@@ -123,6 +132,15 @@ export class Hud {
    */
   setEnergy(energy) {
     this._energyText.textContent = `${Math.floor(energy)}`;
+  }
+
+  /**
+   * Running total for the current run (banked + pending coins) — see
+   * `Game.js`'s `_syncHud`.
+   * @param {number} coins
+   */
+  setCoins(coins) {
+    this._coinsText.textContent = `${Math.floor(coins)}`;
   }
 
   /**
@@ -167,7 +185,8 @@ export class Hud {
     }
     this._comboBar.hidden = false;
     this._comboFill.style.width = `${Math.max(0, Math.min(1, fraction)) * 100}%`;
-    this._comboText.textContent = `x${kills}`;
+    const coins = tierFor(kills, this._config);
+    this._comboText.textContent = coins > 0 ? `x${kills} +${coins}` : `x${kills}`;
   }
 
   /**

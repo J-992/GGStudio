@@ -55,8 +55,7 @@ html, body {
    children (`.touch-zone`, `.touch-stick`) via their own `pointer-events:
    auto`, set further down. */
 #ui > .hud,
-#ui > .touch-layer,
-#ui > .title-panel {
+#ui > .touch-layer {
   pointer-events: none;
 }
 
@@ -119,46 +118,6 @@ html, body {
   fill: currentColor;
   display: inline-block;
   vertical-align: middle;
-}
-
-/* ================================================================
-   TITLE PANEL (src/main.js) — P2 stub, replaced by ui/Screens.js (P6).
-================================================================ */
-.title-panel {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  background: rgba(10, 6, 4, 0.45);
-  text-align: center;
-  z-index: 20;
-}
-
-.title-panel[hidden] {
-  display: none;
-}
-
-.title-panel__heading {
-  margin: 0;
-  font-size: clamp(32px, 8vw, 64px);
-  letter-spacing: 0.08em;
-  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.6);
-}
-
-.title-panel__prompt {
-  margin: 0;
-  font-size: clamp(14px, 3.2vw, 20px);
-  letter-spacing: 0.06em;
-  opacity: 0.85;
-  animation: title-pulse 1.6s ease-in-out infinite;
-}
-
-@keyframes title-pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
 }
 
 /* ================================================================
@@ -808,4 +767,130 @@ body.keyboard .touch-layer {
   background: transparent;
   border-color: rgba(246, 238, 221, 0.2);
   opacity: 0.75;
+}
+
+/* P6 screens */
+/* ================================================================
+   TITLE / DEATH / RUN-END SCREENS (src/ui/Screens.js)
+   Full-viewport panels mounted into #ui; Screens#hide() removes them and
+   restores input. Buttons are >=48px tall for a comfortable touch target.
+================================================================ */
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+           max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  box-sizing: border-box;
+  text-align: center;
+  background: rgba(10, 6, 4, 0.86);
+  color: #f6eedd;
+  touch-action: manipulation;
+  overflow-y: auto;
+}
+
+.screen-heading {
+  margin: 0;
+  font-size: clamp(30px, 7vw, 56px);
+  letter-spacing: 0.06em;
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.6);
+}
+
+.screen-heading--death {
+  color: #ff6b57;
+}
+
+.screen-sub {
+  margin: 0;
+  font-size: clamp(14px, 3vw, 18px);
+  opacity: 0.85;
+}
+
+.screen-portraits {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: min(90vw, 420px);
+}
+
+.screen-portrait {
+  width: clamp(48px, 14vw, 76px);
+  height: clamp(48px, 14vw, 76px);
+  object-fit: contain;
+  background: rgba(246, 238, 221, 0.08);
+  border: 2px solid rgba(246, 238, 221, 0.25);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.screen-portraits-caption {
+  margin: -6px 0 0;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  opacity: 0.6;
+}
+
+.screen-stats {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: 15px;
+}
+
+.screen-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.screen-stat--earned {
+  font-size: 17px;
+  color: #ffd76b;
+}
+
+.screen-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.screen-btn {
+  min-width: 220px;
+  min-height: 52px;
+  padding: 10px 22px;
+  border: 2px solid rgba(246, 238, 221, 0.35);
+  border-radius: 12px;
+  background: rgba(246, 238, 221, 0.08);
+  color: #f6eedd;
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  font-size: 17px;
+  letter-spacing: 0.05em;
+  touch-action: manipulation;
+}
+
+.screen-btn:disabled {
+  opacity: 0.4;
+}
+
+.screen-btn--primary {
+  border-color: #ff4b3e;
+  background: rgba(224, 82, 63, 0.35);
+}
+
+.screen-btn[hidden] {
+  display: none;
+}
+
+.screen-credits {
+  margin: 6px 0 0;
+  max-width: min(90vw, 480px);
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0.55;
 }

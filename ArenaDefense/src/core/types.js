@@ -30,6 +30,50 @@
  */
 
 /**
+ * `cfg.bosses.patapim`'s shape (the only non-stub entry in `cfg.bosses` in
+ * v1 — the other keys there are `{stub:true, ...}` data placeholders with no
+ * corresponding `BossDef` fields beyond `sprite`/`kind`, not consumed by
+ * `core/bossBrain.js` or `game/Boss.js`).
+ * @typedef {object} BossDef
+ * @property {'sprite'} render
+ * @property {string} sprite
+ * @property {number} height Metres; billboard width is `height * sprite.aspect`.
+ * @property {number} hp
+ * @property {number} speed
+ * @property {'melee'} kind
+ * @property {number} dmg
+ * @property {number} range
+ * @property {number} cooldown Seconds between melee attacks.
+ * @property {string} addType Key into `cfg.enemies.types` — the add this boss spawns while casting.
+ * @property {number} addEveryS Seconds between casts (cadence measured start-to-start; see `core/bossBrain.js`).
+ * @property {number} maxAdds This boss's own adds cap — independent of, and additionally bounded by, `cfg.enemies.cap`.
+ * @property {number} castDurationS Seconds a cast takes; the add spawns at 60% of the way through it.
+ * @property {number} energy Energy awarded (via the generic `enemy:killed` listener in `Game.js`) on death.
+ * @property {number} coins Coins P6's combo/coin system awards on death (`enemy:killed`'s `coins` field).
+ * @property {number} radius Metres, for hit-testing (`game/Boss.js#hitTest`/`positions`) and arena-edge clamping.
+ * @property {number} hitHeight Metres, the hit-test cylinder's height.
+ */
+
+/**
+ * The plain-object snapshot `game/Boss.js` hands `core/bossBrain.js#update`
+ * every fixed step.
+ * @typedef {object} BossBrainCtx
+ * @property {{x:number, z:number}} self
+ * @property {{x:number, z:number, dist:number}} target
+ * @property {number} addsAlive Count of this boss's own currently-alive adds (capped independently of `cfg.enemies.cap` — see `BossDef.maxAdds`).
+ * @property {number} time Seconds, `world.time`-equivalent. Unused by `bossBrain.js` today (every timer there is dt-accumulated, not absolute) — accepted for parity with `EnemyTypeDef`-consuming functions and in case a future boss's cadence needs an absolute clock.
+ */
+
+/**
+ * `core/bossBrain.js#update`'s return shape.
+ * @typedef {object} BossBrainResult
+ * @property {'walk'|'cast'|'attack'|'idle'} action
+ * @property {{x:number, z:number}|null} moveDir Unit vector, only non-null when `action === 'walk'`.
+ * @property {boolean} spawnAdd `true` on exactly one tick per cast (at 60% `castProgress`) — see `core/bossBrain.js`.
+ * @property {number} castProgress 0..1 through the current cast; `0` when `action !== 'cast'`.
+ */
+
+/**
  * @typedef {object} WaveSpawnEntryDef
  * @property {string} enemy
  * @property {number} n

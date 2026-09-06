@@ -8,6 +8,25 @@
  * reports `ended: true` exactly once, on the frame the rolling window since
  * the last kill finally expires.
  */
+/**
+ * Coins for the highest tier reached by `kills`, or 0 if below the first
+ * tier. Pure, stateless version of `ComboTracker#tierFor` (which delegates
+ * to this) — importable without constructing a tracker, so `ui/Hud.js` can
+ * show "coins this tier would pay" from a live kill count without touching
+ * combo state it doesn't own.
+ *
+ * @param {number} kills
+ * @param {import('./types.js').GameConfig} cfg
+ * @returns {number}
+ */
+export function tierFor(kills, cfg) {
+  let coins = 0;
+  for (const tier of cfg.combo.tiers) {
+    if (kills >= tier.kills) coins = tier.coins;
+  }
+  return coins;
+}
+
 export class ComboTracker {
   /**
    * @param {import('./types.js').GameConfig} cfg
@@ -60,10 +79,6 @@ export class ComboTracker {
    * @returns {number}
    */
   tierFor(kills) {
-    let coins = 0;
-    for (const tier of this._cfg.combo.tiers) {
-      if (kills >= tier.kills) coins = tier.coins;
-    }
-    return coins;
+    return tierFor(kills, this._cfg);
   }
 }

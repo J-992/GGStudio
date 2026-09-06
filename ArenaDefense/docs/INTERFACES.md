@@ -679,3 +679,483 @@ shared source of truth with no further changes needed on P4's side. The
 defensive `game.economy ??= new Economy(cfg)` in `installBuildPhase` exists
 only for standalone use before that getter existed (or if a future refactor
 ever removes it) and never overwrites a real instance.
+
+## P5 additions (P5 → orchestrator/P6/P7)
+
+Everything below lives in `src/core/bossBrain.js`, `src/game/Boss.js`, and
+`src/game/bossPhase.js`. Written against the `Enemies`/`Billboards`/`Turrets`
+shapes documented above (`Enemies#spawn`, `Billboards#alloc/free/set`,
+`Turrets#list/damage`) — this file's authors read those sections rather than
+guessing at them.
+
+### `core/bossBrain.js` (pure)
+
+```js
+class BossBrain {
+  /** @param {import('./types.js').BossDef} def `cfg.bosses.patapim`.
+   *  @param {import('./types.js').GameConfig} cfg */
+  constructor(def, cfg) {}
+
+  /** Resets every internal timer — call whenever a fresh boss instance is (re)spawned. */
+  reset() {}
+
+  /** @param {number} dt @param {import('./types.js').BossBrainCtx} ctx
+   *  @returns {import('./types.js').BossBrainResult} */
+  update(dt, ctx) {}
+
+  /** @type {number} Seconds until the next melee attack is ready (0 = ready now). Debug/HUD use only. */
+  attackCooldown;
+  /** @type {number} Seconds until a new cast is eligible (0 = eligible now, pending the add cap). Debug/HUD use only. */
+  castCooldown;
+}
+```
+
+Priority every step: finish/continue an in-progress cast (blocks movement
+and attacking; the add spawns exactly once, at 60% `castProgress`) > start a
+new cast if the cadence timer (`def.addEveryS`, measured start-to-start —
+**not** paused while casting, only while a cast is *not* in progress) has
+elapsed and `ctx.addsAlive < def.maxAdds` > melee attack if
+`ctx.target.dist <= def.range` and off `def.cooldown` > otherwise walk
+toward the target (a normalised `moveDir`), or `action:'idle'` in the
+degenerate case where the target is already exactly coincident with `self`.
+`reset()` (not a plain `castCooldown = 0`) seeds a **full** `addEveryS`
+interval so a freshly spawned boss walks in for a beat before its first
+cast, rather than summoning an add the instant it spawns.
+
+### `Boss` (`src/game/Boss.js`)
+
+```js
+class Boss {
+  /** @param {import('three').Scene} scene Unused directly (renders entirely through `billboards`, like `Enemies`' `tungtung`) — kept for constructor-signature parity and a future 3D-model boss.
+   *  @param {import('./assets.js').Assets} assets Unused directly today, same reason.
+   *  @param {import('../core/types.js').GameConfig} cfg
+   *  @param {import('../core/events.js').EventBus} bus
+   *  @param {import('./Billboards.js').Billboards} billboards
+   *  @param {import('./Effects.js').Effects} effects
+   *  @param {import('../platform/audio.js').Audio} audio */
+  constructor(scene, assets, cfg, bus, billboards, effects, audio) {}
+
+  /** @param {number} gateId Arena gate id (0..2), already resolved from the wave's active-gate pair — same convention as `Enemies#spawn`. */
+  spawn(gateId) {}
+
+  /** @param {number} dt @param {object} world The `Game.world` bag. */
+  update(dt, world) {}
+
+  /** @param {number} n @param {string} source Free-form origin tag, matching `Enemies#damageAt`'s convention. */
+  damage(n, source) {}
+
+  /** Cylinder hit test (`def.radius`, `def.hitHeight`) — see "Player firing" below.
+   *  @param {{x:number,y:number,z:number}} origin @param {{x:number,y:number,z:number}} dir Normalized. @param {number} maxDist
+   *  @returns {{point:{x:number,y:number,z:number}, dist:number}|null} */
+  hitTest(origin, dir, maxDist) {}
+
+  /** `Enemies#positions()`-shaped, `idx` always `-1` (a sentinel, not a real `Enemies` pool index) — see "Turret targeting" below.
+   *  @returns {{idx:number,x:number,y:number,z:number,radius:number}[]} */
+  positions() {}
+
+  /** Kills/hides the boss and resets every timer. Called on every fresh run (see "Reset on a fresh run" below). Does NOT unsubscribe from `bus` — the `enemy:killed` subscription is a singleton for this instance's whole lifetime, taken once in the constructor. */
+  clear() {}
+
+  /** @type {boolean} */ alive;
+  /** @type {number} */ hp;
+  /** @type {number} */ hpMax;
+  /** @type {number} */ x;
+  /** @type {number} */ z;
+  /** @type {number} */ yaw; // cosmetic only — the billboard shader ignores yaw entirely (Y-axis-only camera facing); kept for a future 3D-model swap.
+  /** @type {number} */ cooldown; // mirrors `brain.attackCooldown` after every `update()`.
+  /** @type {number} */ addsAlive;
+}
+```
+
+Rendering: one `Billboards` slot (`billboards.alloc(def.sprite, def.height)`,
+freed on death/`clear()`), bob-while-walking via `core/spriteAnim.bob`, hit
+flash via `core/spriteAnim.hitFlash` — same as `Enemies.js`'s `tungtung`
+path. **Cast "raise" scale**: `Billboards#set`'s `anim` parameter only
+carries a vertical offset plus an x/y squash pair (no separate uniform-scale
+channel) — `Boss.js` multiplies both squash axes (`anim.sx`/`anim.sy`) by
+`core/spriteAnim.castRaise(castProgress)` while casting, which scales the
+whole quad uniformly since `Billboards.js`'s vertex shader already
+multiplies width/height by `aAnim.y`/`aAnim.z` respectively. No Billboards.js
+change was needed for this.
+
+**Targeting**: nearest of {player, alive turrets} — `Boss.js` reimplements
+the melee branch of `core/enemyBrain.chooseTarget` directly (a handful of
+lines) rather than calling it, since that function's `typeDef` lookup keys
+off `cfg.enemies.types[enemy.type]` and the boss's def lives in
+`cfg.bosses` instead.
+
+**Adds**: `Boss.js` tracks its own adds' `Enemies#spawn`-returned pool
+indices in a `Set`, subscribed once (constructor) to `bus`'s `enemy:killed`
+to decrement `addsAlive` when one of those indices dies — this is the only
+way to know an add died, since `Enemies` has no "notify me when idx X dies"
+API beyond the shared bus event every kill already emits. **Cap
+interaction**: `Enemies#spawn` returns `-1` at `cfg.enemies.cap` (boss adds
+share that one pool with every other enemy) — `Boss.js` only counts a spawn
+toward `addsAlive` when the returned index is `>= 0`, so a saturated cap
+never permanently blocks this boss's own cast cadence.
+
+**Add spawn position — v1 compromise**: the plan brief's "spawn at the
+boss's own feet" is not implemented literally. `Enemies#spawn(typeName,
+gateId, hpMul)`'s frozen contract only ever positions a new enemy at a real
+arena gate (with small cosmetic jitter) — it exposes no method to place or
+teleport an enemy to an arbitrary world point. `Boss.js` instead spawns the
+add at the boss's *nearest* gate. Fixing this properly would mean adding a
+position-setter to `Enemies.js` (out of P5's owned-files list) — flagged
+here for whichever package next touches `Enemies.js`.
+
+**Player firing — v1 compromise (no `Game.js` edit)**: `Game.js`'s own
+hitscan (`_handleFiring`) only tests `world.enemies.raycast(...)` — it has
+no knowledge of the boss at all, and P5 may not edit `Game.js`.
+`bossPhase.js` instead subscribes to the same `player:fired {origin, dir}`
+bus event `Game.js` already emits after resolving its own shot, and
+independently cylinder-hit-tests the boss over the full `gun.range`,
+applying `gun.dmg` on a hit. Because `player:fired` fires *after* `Game.js`
+has already resolved (and applied) its own enemy hit for that same shot,
+this handler has no way to learn whether an enemy stood in front of the
+boss and "used up" the shot first (that enemy may already be dead and
+freed by the time this handler runs, so re-running `world.enemies.raycast`
+here would silently see through it) — so a shot that kills an enemy
+standing in front of the boss can also damage the boss behind it. This is
+an accepted v1 compromise, not a bug to chase down under P5. **The better
+fix, for whichever package next touches `Game.js`**: expose
+`boss.hitTest(origin, dir, maxDist)` (already implemented, see above) and
+have `Game.js#_handleFiring` call it alongside `world.enemies.raycast`,
+comparing both hits' distances before applying either — this file's
+`hitTest` is written exactly for that call site.
+
+**Turret targeting**: `Boss.js` exposes `positions()` in the same shape as
+`Enemies#positions()` (`idx` is always `-1`, a sentinel — not a real
+`Enemies` pool index) so a future package can point `Turrets` at the boss.
+Checked `Turrets.js`'s `update(dt, world)`: it only ever reads
+`world.enemies?.positions()`, never `world.boss?.positions()` — so in v1
+**turrets simply ignore the boss** (they never damage it, and it never
+appears as a turret's target). No `Turrets.js` change was made or needed.
+
+**Reset on a fresh run**: a previous run's boss can still be `alive` when a
+new run begins — e.g. the player died mid-fight without killing it
+(`Game.js`'s death path only checks the player's hp, never the boss's).
+`bossPhase.js` calls `boss.clear()` exactly on the `title -> build` and
+`runEnd -> build` edges (the state machine's two "start a fresh run"
+transitions), detected via `game.state.onExit('title'|'runEnd', ...)` +
+`game.state.onEnter('build', ...)` (`GameStateMachine#go` fires the
+outgoing exit hook immediately before the incoming enter hook — see
+`core/stateMachine.js`) rather than by inspecting any bus event payload.
+Like every other registered system, `boss.update(dt, world)` still runs
+every fixed step regardless of the top-level game state (it early-returns
+on `!alive`) — this matches `Enemies.js`'s own pre-existing behaviour (its
+`update()` isn't state-gated either; only `Game.js`'s spawn *scheduler* is
+gated to `state === 'wave'`), so a boss left alive across the brief
+death→runEnd→title window can keep acting for a few seconds (harmlessly:
+`Player#takeDamage` already no-ops while the player is dead) until the next
+`build` entry clears it. Not treated as a P5-introduced regression since
+`Enemies` already has the identical characteristic.
+
+### Bus events (`game.bus`, `core/events.js`)
+
+In addition to P2/P3's tables:
+
+| Event | Payload | Emitted when |
+| --- | --- | --- |
+| `enemy:killed` | `{ idx:-1, type:'patapim', boss:true, x, z, source, energy, coins }` | The boss's hp reaches 0 via `Boss#damage`. Deliberately the **same event name** `Enemies` uses (`idx:-1` and `boss:true` mark it as not a real `Enemies` pool slot) — `Game.js`'s existing generic listener (`this._economy.addEnergy(e.energy)`) applies unmodified with no `Game.js` change; P6's combo/coin system should key off `e.boss`/`e.coins` on this same event rather than a new one. |
+
+`Boss.js` does not itself emit `enemy:spawned`/`wave:started`/`wave:cleared`
+— those stay exactly as P2/P3 defined them; `wave:started`'s pre-existing
+`boss` field (the wave def's `boss` string or `null`) is what
+`bossPhase.js` reads to decide whether to spawn.
+
+### `installBoss(game, { boss, hud, audio, cfg })` (`src/game/bossPhase.js`)
+
+The one call the orchestrator adds to wire P5 in, once a `Boss` instance
+exists (mirrors P4's `installBuildPhase` pattern). `src/main.js` (P6-owned —
+not edited by this package) already carries a `// P5: boss install goes
+here` marker comment at the exact spot; the two imports plus this snippet
+(using `main.js`'s own local variable names — `CONFIG`, `game`, `scene`,
+`assets`, `audio`, `hud`) are what go there:
+
+```js
+import { Boss } from './game/Boss.js';
+import { installBoss } from './game/bossPhase.js';
+// …
+const boss = new Boss(scene, assets, CONFIG, game.bus, game.world.billboards, game.world.effects, audio);
+installBoss(game, { boss, hud, audio, cfg: CONFIG });
+```
+
+What it does: sets `game.world.boss = boss` (so `Game.js`'s own
+`!world.boss?.alive` wave-clear check and `Game#getSnapshot()` both see it —
+`Game.js` itself never assigns this, same pattern as `world.turrets`) and
+`game.registerSystem('boss', boss)`; registers a second tiny system
+(`'bossHud'`) that calls `hud.setBossHp(boss.alive ? boss.hp/boss.hpMax :
+null)` every fixed step (not a bus listener — there's no per-step "boss hp
+changed" event, and this must also fire the exact step hp reaches 0); on
+`wave:started` with a non-null `boss` name, spawns the boss at
+`game.activeGates[0]` and plays `boss-alert`; resets the boss on a fresh run
+(see above); and subscribes to `player:fired` to hit-test/damage the boss
+(see the "Player firing" compromise above).
+
+**Known integration caveat**, matching P4's `installBuildPhase` pattern: the
+`+1` `Billboards` pool slot `Game.js`'s constructor already reserves
+(`config.enemies.cap + 1`) is exactly what `Boss#spawn`'s single
+`billboards.alloc` call consumes — no `Billboards.js` change was needed
+either.
+
+**Orchestration note (done by P6):** the `// P5: boss install` two-line
+snippet above has been pasted into `src/main.js` verbatim (P6 owns
+`main.js` and P5's own doc explicitly handed the snippet to "whichever
+package wires it in" — leaving it unwired would have meant wave 5 never
+spawns a boss at all, which would have made P6's own boss-coin/energy path
+in `Game.js`'s `enemy:killed` handler untestable). No other P5 file was
+touched.
+
+## P6 additions (P6 → P7)
+
+Everything below lives in `src/game/Game.js`, `src/main.js`,
+`src/platform/storage.js`, `src/ui/{Screens,Hud}.js`, and
+`src/core/{combo,runFlow}.js`. Replaces P3's placeholder "toast + 3s +
+return to title" for `death`/`runEnd` (see the old note under "P3
+additions" → "State machine note" — still accurate for the
+`waveClear -> runEnd` state-machine edge itself, just not for what happens
+once `runEnd` is entered) with the real combo/coin/save/screen flow.
+
+### `Game` additions
+
+```js
+class Game {
+  /** @param {object} deps ...as before, plus:
+   *  @param {import('../ui/Screens.js').Screens} deps.screens */
+  constructor(deps) {}
+
+  /** @returns {import('../core/combo.js').ComboTracker} Read-only from outside — only `Game` replaces the instance, on a fresh run. */
+  get combo() {}
+
+  /** @returns {import('../core/types.js').SaveData} Read-only from outside — only `Game` persists (via `core/storage.js#saveSave`) and reassigns this. */
+  get save() {}
+
+  /**
+   * P7's seam into every ad-gated decision and the two Poki lifecycle call
+   * points this package couldn't itself make real. Mutable — P7 replaces
+   * these functions wholesale (not by wrapping them); the defaults below
+   * make the entire death/run-end/title flow fully playable with no ads at
+   * all.
+   * @type {{
+   *   requestRevive: () => Promise<boolean>,   // default: async () => false
+   *   requestDoubler: () => Promise<boolean>,  // default: async () => false
+   *   onRunStart: (() => void) | null,          // default: null. Called synchronously at the very top of every fresh-run start (title's Play, run-end's Play Again, and the `?wave=N` dev shortcut) — this is where P7's `commercialBreak()` + `gameplayStart()` pairing goes.
+   *   onRunStop: (() => void) | null,           // default: null. Called synchronously the instant gameplay stops for good this run — entering `death`, or a clean clear of `run.finalWave` — pairs with Poki's `gameplayStop()`. Never called twice for the same run-ending event.
+   * }}
+   */
+  hooks;
+}
+```
+
+`_startRun()` (title's Play, run-end's Play Again, `?wave=N`) now, in order:
+calls `hooks.onRunStart?.()`, `screens.hide()`, `hud.show(true)`, resets
+`economy`/`combo` (fresh instances) and `_reviveUsed`/wave/scheduler, then
+proceeds exactly as before (`state.go('build')`, `pickGates`, etc.).
+
+### Combo → coins wiring
+
+`Game`'s constructor's existing `enemy:killed` listener (previously just
+`economy.addEnergy(e.energy)`) now also calls `combo.onKill(world.time)` on
+every kill (boss kills included — a boss kill counts toward whatever streak
+is in progress) and, only when `e.boss` is true, `economy.addCoins(e.coins)`
+— this is a *separate* coin source from the combo payout below, not a
+double-count of the same coins (see P5's `enemy:killed` payload shape
+above: `energy` is on every kill's payload and was already being added
+unconditionally before this package touched anything; `coins` only exists
+on a boss kill's payload).
+
+Every fixed step (`_updateCombo`, called from `_fixedStep` after
+`_checkPlayerDamageAndDeath`): polls `combo.update(world.time)` — **using
+the fixed-step game clock, never wall time** (`combo.js`'s own contract).
+When a streak just ended with `coins > 0`: `economy.addCoins(coins)`,
+`hud.toast('COMBO x{kills} +{coins}')`, and the `coin` sound. Every step
+regardless: `hud.setCombo(result.kills, combo.remaining(world.time))` — see
+`Hud` additions below for what that now renders. A combo whose window
+happens to still be open when a wave is banked pays out later, into
+whatever wave is current by then (correct, not a bug — see the P6 report's
+"adversarial re-read" notes for the full trace).
+
+### Coin/save timing
+
+- `waveClear` (`_onWaveClear`, both the loop-back and the final-wave/victory
+  chain into `runEnd`): `economy.bankWave()` (pending → banked), then
+  `save = saveSave(io, { bestWave: bestWaveAfter(save.bestWave, wave) })`.
+- `death` (`_checkPlayerDamageAndDeath`, already wired by P3):
+  `economy.discardPending()` — unchanged, still fires before this
+  package's death-screen flow begins.
+- `runEnd` (`_runRunEndFlow`): `earned` starts as `economy.bankedCoins`
+  (final — never touched by discard, and banked wave-by-wave regardless of
+  any ad) and is persisted via `save = saveSave(io, { coins:
+  coinsForRun(save.coins, earned) })` once the screen loop below concludes.
+  **Coins never depend on an ad**: the doubler can only ever increase
+  `earned` before that one `saveSave` call, never gate whether the base
+  amount is saved at all.
+
+### `core/runFlow.js` (pure)
+
+```js
+/** @returns {number} `coins`, doubled when `doubled` is true. */
+function applyDoubler(coins, doubled) {}
+
+/** @returns {number} `savedCoins + earnedCoins` — clamping to `cfg.save.maxCoins` is `core/storage.js#sanitize`'s job, not this function's. */
+function coinsForRun(savedCoins, earnedCoins) {}
+
+/** @returns {number} `Math.max(prevBestWave, wave)`. */
+function bestWaveAfter(prevBestWave, wave) {}
+```
+
+### `core/combo.js` addition
+
+```js
+/** Pure, stateless version of `ComboTracker#tierFor` (which now delegates to
+ *  this) — importable without constructing a tracker, so `ui/Hud.js` can
+ *  show "coins this tier would pay" from a live kill count.
+ *  @returns {number} */
+function tierFor(kills, cfg) {}
+```
+
+### Death / revive flow
+
+`death`'s existing entry (P3, unchanged: `economy.discardPending()`,
+`deathTimer = timing.deathScreenDelayS`) now also calls
+`hooks.onRunStop?.()` right there — gameplay has stopped for the run at
+that exact instant, matching the state-machine doc's `wave -> death:
+gameplayStop()` bullet. Once `deathTimer` elapses (`_runDeathFlow`, guarded
+by `_awaitingDeathDecision` so the still-ticking fixed-step loop never
+starts a second one while this `await`s):
+
+1. `hud.show(false)`; `canRevive = !(cfg.run.reviveOncePerRun &&
+   _reviveUsed)`.
+2. `await screens.showDeath({ wave, canRevive })` → `'revive'|'end'`.
+3. If `'revive'` and `canRevive`: `await hooks.requestRevive()`. If
+   granted: `_reviveUsed = true`, `_doRevive()` (below), stay in `death`'s
+   caller no further — the wave resumes.
+4. Otherwise (declined, `!canRevive`, or the ad wasn't granted):
+   `state.go('runEnd')` + `state:changed`, then `_runRunEndFlow(false)`.
+
+`_doRevive()`: **first** `screens.hide()` (the one outcome with no
+follow-up screen to lean on for cleanup — every other outcome's next
+`_open()` call removes the previous screen for free, this one doesn't),
+then full hp, `alive = true`, `invulnUntil = world.time +
+invulnAfterReviveS`, `_pushEnemiesFromPlayer()` (below), `hud.show(true)`,
+`state.go('wave')`.
+
+**Deviation — "push enemies away" is a stun, not a reposition.** The plan
+brief calls for pushing nearby enemies outward on revive. `Enemies.js`'s
+frozen public contract (P3's "P3 additions" section above) exposes exactly
+one per-enemy mutator besides damage: `applySlow(idx, factor, durS)` — no
+`setPosition`/knockback of any kind, and P6 is not in a position to add one
+(out of this package's owned-files list, same reasoning P5 gave for not
+adding an add-spawn-position setter). `_pushEnemiesFromPlayer` instead
+calls `world.enemies.positions()`, finds every entry within
+`revivePushRadius` of the player, and `applySlow(idx, 0.05,
+invulnAfterReviveS)`s each one — a near-stun for exactly the same window
+the player is invulnerable for. Enemies don't visually leap backward, but
+the player gets equivalent practical breathing room. Flagged here for
+whichever package next touches `Enemies.js`, same spirit as P5's add-spawn
+flag above.
+
+### Run-end flow
+
+`_runRunEndFlow(victory)` (entered from `_onWaveClear`'s final-wave chain,
+or `_runDeathFlow`'s decline path — both already call `state.go('runEnd')`
++ `state:changed` before invoking this): `hud.show(false)`; loops on
+`await screens.showRunEnd({ wave, victory, coinsEarned: earned, coinsTotal:
+save.coins + earned, canDouble })` — `canDouble` starts `true` and flips to
+`false` the moment `'double'` is picked once (win or decline; one offer per
+run-end) — until the result isn't `'double'`. A `'double'` result:
+`await hooks.requestDoubler()`, and if granted, `earned =
+applyDoubler(earned, true)`, then loops back (re-showing the screen with
+the updated total and the doubler button now hidden). Once the loop exits
+with `'again'`/`'title'`: persists coins (see "Coin/save timing" above),
+then `'again'` → `_startRun()`; `'title'` → `state.go('title')` +
+`state:changed` + `_showTitleScreen()`.
+
+### `ui/Screens.js`
+
+```js
+class Screens {
+  /** @param {import('../core/types.js').GameConfig} cfg @param {import('../ui/input.js').Input} input @param {import('../platform/audio.js').Audio} audio */
+  constructor(cfg, input, audio) {}
+
+  /** @type {boolean} True while a screen is mounted. */
+  isOpen;
+
+  /** Removes any mounted screen and restores input + pointer-lock state. Idempotent. */
+  hide() {}
+
+  /** Callback style (stays up indefinitely until the player acts — no Promise to await). @param {{bestWave:number, coins:number, credits:string, onPlay:() => void}} opts */
+  showTitle(opts) {}
+
+  /** @param {{wave:number, canRevive:boolean}} opts @returns {Promise<'revive'|'end'>} */
+  showDeath(opts) {}
+
+  /** @param {{wave:number, victory:boolean, coinsEarned:number, coinsTotal:number, canDouble:boolean}} opts @returns {Promise<'double'|'again'|'title'>} */
+  showRunEnd(opts) {}
+}
+```
+
+Every `show*` call freezes input (`input.freeze(true)`) and releases
+pointer lock (`document.exitPointerLock()` if currently locked) for as long
+as the screen is up; `hide()` reverses both and removes the mounted DOM
+node. `showDeath`/`showRunEnd`'s buttons are disabled (not removed) the
+instant a choice is made, so a `'double'`-then-ad round trip can't be
+double-fired while `Game.js` awaits the ad hook — the next `show*` call's
+own `hide()` (via its `_open()`) is what actually clears that disabled DOM.
+All three screens render into `#ui` (mobile-first, `Lilita One`, buttons
+≥48px tall — see the `/* P6 screens */` block in `style.css`); every button
+is reachable by click/tap and by keyboard (title: Space/Enter/click-
+anywhere; death: Enter/Space picks revive-if-offered-else-end, Escape ends;
+run-end: Enter/Space picks "again", Escape picks "title"). `showTitle`'s
+portraits come from `assetUrl('assets/sprites/portrait-<name>.webp')` for
+the four names actually shipped in `manifest.json`'s `sprites.portraits`
+(`patapim`, `tungtung`, `bombardiro`, `tralalero`).
+
+`Game.resume()` (the `visibilitychange` pause/resume pair, unrelated to any
+screen) now checks `!screens.isOpen` before unfreezing input, so a
+backgrounded-then-restored tab never fights a currently-open screen's own
+freeze — `screens.hide()` remains the only thing that actually unfreezes
+once a screen's outcome has been acted on.
+
+### `platform/storage.js`
+
+```js
+/** @type {import('../core/types.js').SaveIO} */
+const storageIO = { get(key) {}, set(key, value) {} };
+```
+
+`localStorage`-backed, with a write-probe (`setItem`+`removeItem` a scratch
+key) before every access and an in-memory `Map` fallback latched on for the
+rest of the session the first time a real write throws (Safari private
+mode, quota exceeded, a cross-origin iframe policy) — ports the `raw()`
+idea from `ninja-flow/src/core/Storage.ts`. Every `set()` updates the
+in-memory copy first regardless of whether the real write below it
+succeeds, so a save made mid-session is never lost even if `localStorage`
+itself has already gone bad. `key` is whatever `core/storage.js#loadSave`/
+`saveSave` pass through (`CONFIG.save.key`) — this file never parses or
+sanitizes, that stays `core/storage.js`'s job.
+
+### `Hud` additions
+
+```js
+class Hud {
+  /** @param {number} coins Running total for the current run (`economy.bankedCoins + economy.pendingCoins`) — synced every fixed step by `Game#_syncHud`, same as `setHp`/`setEnergy`. */
+  setCoins(coins) {}
+}
+```
+
+`setCombo(kills, fraction)`'s existing signature is unchanged, but its
+text now also shows the coins the current tier would pay
+(`x{kills} +{coins}` via `core/combo.js`'s new standalone `tierFor`, or
+just `x{kills}` below the first tier) — still hidden while `kills <= 0`.
+
+### Removed
+
+The `title-panel*`/`placeholder-title` CSS (P2's placeholder title, now
+`ui/Screens.js`'s `showTitle`) and `src/main.js`'s `installTitlePanel`
+function are gone. `Game.js`'s old `RUN_END_DISPLAY_S`-timed
+toast-and-return-to-title for `death`/`waveClear -> runEnd` is replaced by
+the flow above; nothing on the frozen P2/P3/P4 API list (`registerSystem`,
+`world` shape, `getSnapshot`, state enter/exit hooks, `game.economy`) was
+removed or reshaped — `game.combo`/`game.save`/`game.hooks` and the
+`screens` constructor dependency are additive.
