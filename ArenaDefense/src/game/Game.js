@@ -44,6 +44,13 @@ const DEBUG_REFRESH_S = 0.5;
 const HIT_PARTICLE_COLOR = 0xffdd88;
 const HIT_PARTICLE_COUNT = 6;
 
+// Reused across every shot (`_handleFiring`) instead of a fresh
+// `THREE.Vector3` per shot — `Effects#tracer` copies both endpoints into its
+// own pooled `Tracer` immediately (`t.a.copy(a); t.b.copy(b);`), so handing
+// it a shared scratch vector is safe (see `docs/INTERFACES.md`'s Effects
+// section) and this file never needs to allocate one at fire time.
+const _tracerEnd = new THREE.Vector3();
+
 // See `_pushEnemiesFromPlayer`: `Enemies` (P3, frozen contract — see
 // `docs/INTERFACES.md`) exposes no way to move an enemy's position from
 // outside, only `applySlow(idx, factor, durS)`. A revive's "push enemies
@@ -64,8 +71,16 @@ export class Game {
    * @param {import('../platform/audio.js').Audio} deps.audio
    * @param {import('../core/types.js').GameConfig} deps.config
    * @param {import('../ui/Screens.js').Screens} deps.screens P6 addition — see "P6 additions" in docs/INTERFACES.md.
+   * @param {Partial<Game['hooks']>} [deps.hooks] P7 addition — real
+   *   implementations for some/all of `hooks`, applied over the no-ads
+   *   defaults below BEFORE this constructor's own dev-shortcut/title-screen
+   *   dispatch runs at the bottom. Passed in here (rather than assigned onto
+   *   `game.hooks` after construction, the pattern every other consumer of
+   *   this seam uses) specifically so the `?wave=N` dev shortcut — which can
+   *   call `hooks.onRunStart` synchronously from inside this very
+   *   constructor — sees the real implementation too, not the default no-op.
    */
-  constructor({ renderer, scene, camera, assets, input, hud, audio, config, screens }) {
+  constructor({ renderer, scene, camera, assets, input, hud, audio, config, screens, hooks }) {
     this._renderer = renderer;
     this._scene = scene;
     this._camera = camera;
@@ -93,6 +108,17 @@ export class Game {
       onRunStart: null,
       /** @type {(() => void)|null} Called synchronously the moment gameplay stops for good this run (entering `death`, or clearing the final wave) — pairs with Poki's `gameplayStop()`. */
       onRunStop: null,
+      /**
+       * P7 additions: the manual pause toggle (`togglePause()`, wired to
+       * `InputFrame`-adjacent Escape / the touch HUD's pause button — see
+       * `_setManualPause`) calls these instead of touching any platform
+       * module directly, mirroring `onRunStart`/`onRunStop`'s seam.
+       * @type {(() => void)|null} Called synchronously on entering the manual pause.
+       */
+      onPause: null,
+      /** @type {(() => void)|null} Called synchronously on leaving the manual pause. */
+      onResume: null,
+      ...hooks,
     };
 
     const player = new Player(camera, assets, config);
@@ -152,11 +178,31 @@ export class Game {
     this._accumulator = 0;
     this._rafId = null;
 
+    // Manual pause (Escape / the touch HUD's pause button — see
+    // `togglePause`). Deliberately independent of `_paused` (which also
+    // covers the ad-break and tab-hidden pauses): a raw `keydown` listener,
+    // not `InputFrame.pause`, because `Input.frame()` zeroes every field
+    // (`pause` included) while input is frozen — which `pause()` itself
+    // does — so the fixed-step loop could never observe an "unpause" key
+    // through the normal frame pipeline once paused (the loop is also not
+    // ticking at all while `_paused`). Mirrors `ui/Screens.js`'s own
+    // pattern of a dedicated `window` `keydown` listener for exactly this
+    // reason.
+    this._manualPaused = false;
+    this._onEscapeKey = (e) => {
+      if (e.key !== 'Escape') return;
+      this._togglePauseGuarded();
+    };
+    window.addEventListener('keydown', this._onEscapeKey);
+
     this._tick = this._tick.bind(this);
     this._onResize = this._resize.bind(this);
     this._onVisibility = () => {
       if (document.hidden) this.pause();
-      else this.resume();
+      // A backgrounded-then-restored tab must not silently cancel a manual
+      // pause the player set before backgrounding — `togglePause()`/Escape
+      // remains the only way out of that one.
+      else if (!this._manualPaused) this.resume();
     };
     window.addEventListener('resize', this._onResize);
     document.addEventListener('visibilitychange', this._onVisibility);
@@ -287,8 +333,57 @@ export class Game {
     if (this._rafId !== null) cancelAnimationFrame(this._rafId);
     window.removeEventListener('resize', this._onResize);
     document.removeEventListener('visibilitychange', this._onVisibility);
+    window.removeEventListener('keydown', this._onEscapeKey);
     this.world.arena.dispose();
     this.world.effects.dispose();
+  }
+
+  /**
+   * Toggles the manual pause — Escape, or the touch HUD's pause button (see
+   * `ui/Hud.js#onPauseTap`). A no-op while a screen is open, mid-ad, or
+   * outside `build`/`wave` (nothing meaningful to pause).
+   */
+  togglePause() {
+    this._togglePauseGuarded();
+  }
+
+  /**
+   * Shared by `togglePause()` and the raw Escape listener. Unpausing is
+   * always allowed once `_manualPaused` is actually true; entering it
+   * additionally requires `!this._paused` — **not** already paused for some
+   * other reason (an ad, a backgrounded tab) — on top of being open while a
+   * screen is up or outside `build`/`wave`. Without the `!this._paused`
+   * check, pressing Escape *during* an ad (the raw listener bypasses
+   * `Input.freeze()`, unlike `InputFrame.pause` — see the constructor's
+   * comment on `_onEscapeKey`) could set `_manualPaused = true` while
+   * `game.pause()` was already active for the ad; the ad's own `resume()`
+   * would then clear `_paused` without ever knowing to clear
+   * `_manualPaused` too, leaving the "PAUSED" panel stuck up and the two
+   * flags desynced.
+   */
+  _togglePauseGuarded() {
+    if (this._screens.isOpen) return;
+    if (this._manualPaused) {
+      this._setManualPause(false);
+    } else if (!this._paused && (this.state.state === 'build' || this.state.state === 'wave')) {
+      this._setManualPause(true);
+    }
+  }
+
+  /**
+   * @param {boolean} paused
+   */
+  _setManualPause(paused) {
+    if (paused === this._manualPaused) return;
+    this._manualPaused = paused;
+    this._hud.setPaused(paused);
+    if (paused) {
+      this.pause();
+      this.hooks.onPause?.();
+    } else {
+      this.resume();
+      this.hooks.onResume?.();
+    }
   }
 
   _setupDebug() {
@@ -657,15 +752,31 @@ export class Game {
     if (!shot) return;
 
     const gun = this._config.player.gun;
-    const hit = this.world.enemies?.raycast?.(shot.origin, shot.dir, gun.range) ?? null;
+    const enemyHit = this.world.enemies?.raycast?.(shot.origin, shot.dir, gun.range) ?? null;
+    // The boss renders through `Billboards`, not `Enemies`' pool, so it needs
+    // its own cylinder test alongside the enemy raycast — see `Boss#hitTest`
+    // and `docs/INTERFACES.md`'s P5 "Player firing" compromise note this
+    // fixes. Only the NEARER of the two hits takes damage: a shot can never
+    // hit both an enemy and the boss standing behind (or in front of) it.
+    const bossHit = this.world.boss?.alive ? this.world.boss.hitTest(shot.origin, shot.dir, gun.range) : null;
+
+    let hitPoint = null;
+    if (bossHit && (!enemyHit || bossHit.dist < enemyHit.dist)) {
+      this.world.boss.damage(gun.dmg, 'player');
+      hitPoint = bossHit.point;
+    } else if (enemyHit) {
+      this.world.enemies.damageAt(enemyHit.idx, gun.dmg, 'player');
+      hitPoint = enemyHit.point;
+    }
 
     let tracerEnd;
-    if (hit) {
-      this.world.enemies.damageAt(hit.idx, gun.dmg, 'player');
-      tracerEnd = new THREE.Vector3(hit.point.x, hit.point.y, hit.point.z);
-      this.world.effects.burst(hit.point.x, hit.point.y, hit.point.z, HIT_PARTICLE_COLOR, HIT_PARTICLE_COUNT);
+    if (hitPoint) {
+      _tracerEnd.set(hitPoint.x, hitPoint.y, hitPoint.z);
+      tracerEnd = _tracerEnd;
+      this.world.effects.burst(hitPoint.x, hitPoint.y, hitPoint.z, HIT_PARTICLE_COLOR, HIT_PARTICLE_COUNT);
     } else {
-      tracerEnd = shot.origin.clone().addScaledVector(shot.dir, gun.range);
+      _tracerEnd.copy(shot.origin).addScaledVector(shot.dir, gun.range);
+      tracerEnd = _tracerEnd;
     }
 
     this.world.effects.tracer(shot.origin, tracerEnd);

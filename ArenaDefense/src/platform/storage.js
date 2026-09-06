@@ -9,6 +9,12 @@
 // storage.js`'s job.
 const PROBE_KEY = '__arenadefense_probe__';
 
+/** Deliberately its own key, NOT part of `core/storage.js`'s
+ *  `{coins, bestWave, unlocks}` save shape (that set is test-enforced — see
+ *  `test/storage.test.js`) — mute is a device/session preference, not run
+ *  progress. */
+const MUTE_KEY = 'arenadefense.muted';
+
 let storageOk = true;
 /** @type {Map<string, string>} Always kept in sync with every `set()` call,
  *  regardless of whether `localStorage` itself is reachable, so a mid-
@@ -66,3 +72,13 @@ export const storageIO = {
     }
   },
 };
+
+/** @returns {boolean} Persisted mute preference; `false` (unmuted) if never set or storage is unavailable. */
+export function loadMuted() {
+  return storageIO.get(MUTE_KEY) === '1';
+}
+
+/** @param {boolean} muted */
+export function saveMuted(muted) {
+  storageIO.set(MUTE_KEY, muted ? '1' : '0');
+}

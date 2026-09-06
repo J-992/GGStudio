@@ -9,6 +9,8 @@ import { loadAll } from './game/assets.js';
 import { Hud } from './ui/Hud.js';
 import { Screens } from './ui/Screens.js';
 import { Audio } from './platform/audio.js';
+import { Platform } from './platform/poki.js';
+import { loadMuted, saveMuted } from './platform/storage.js';
 import { Game } from './game/Game.js';
 import { Turrets } from './game/Turrets.js';
 import { BuildOverlay } from './ui/BuildOverlay.js';
@@ -16,20 +18,16 @@ import { installBuildPhase } from './game/buildPhase.js';
 import { Boss } from './game/Boss.js';
 import { installBoss } from './game/bossPhase.js';
 
-// Installed first so a `?poki=mock` run captures every call from here on,
-// including the very next line's `gameLoadingStart`.
-if (location.search.includes('poki=mock')) {
-  installPokiMock();
-}
+// `platform/poki.js` is the only module allowed to touch `window.PokiSDK`
+// (see `AGENTS.md`) — constructing it also installs the `?poki=mock`
+// recorder, if requested, before anything else runs.
+const platform = new Platform(CONFIG);
 
 // Must run before anything else: a slow-loading bundle should still count
-// its loading time from as early as possible, and this can never throw even
-// if the SDK script failed to load or doesn't exist (plain, non-Poki build).
-try {
-  window.PokiSDK?.gameLoadingStart?.();
-} catch {
-  // Keep the game playable even if the SDK is unavailable.
-}
+// its loading time from as early as possible. `Platform#gameLoadingStart`
+// never throws, even if the SDK script failed to load or doesn't exist
+// (plain, non-Poki build).
+platform.gameLoadingStart();
 
 boot();
 
@@ -44,9 +42,14 @@ async function boot() {
   // silent input-swap are live the instant the page paints.
   const input = new Input(canvas, CONFIG);
 
-  const assets = await loadAll((progress) => {
-    if (loadingStatus) loadingStatus.textContent = `Loading… ${Math.round(progress * 100)}%`;
-  });
+  // Runs alongside the asset load rather than blocking it — a slow/absent
+  // SDK must never delay first paint. `Platform#init()` never rejects.
+  const [assets] = await Promise.all([
+    loadAll((progress) => {
+      if (loadingStatus) loadingStatus.textContent = `Loading… ${Math.round(progress * 100)}%`;
+    }),
+    platform.init(),
+  ]);
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   const scene = new THREE.Scene();
@@ -60,12 +63,77 @@ async function boot() {
 
   const hud = new Hud(CONFIG);
   const audio = new Audio(assets);
+  // Restore the player's saved mute preference before anything plays a
+  // sound. Stored under its own localStorage key (`arenadefense.muted`, via
+  // `platform/storage.js`) — deliberately NOT part of `core/storage.js`'s
+  // `{coins, bestWave, unlocks}` save shape.
+  const initialMuted = loadMuted();
+  audio.setMuted(initialMuted);
+  hud.setMuted(initialMuted);
+  hud.onMuteTap((muted) => {
+    audio.setMuted(muted);
+    saveMuted(muted);
+  });
+
   // Title/death/run-end screens (P6) — constructed before `Game` since its
   // constructor drives the title screen synchronously; see
-  // docs/INTERFACES.md's "P6 additions".
-  const screens = new Screens(CONFIG, input, audio);
+  // docs/INTERFACES.md's "P6 additions". `platform` lets Screens hide the
+  // revive/doubler buttons when there's no ad to show (see P7 additions).
+  const screens = new Screens(CONFIG, input, audio, platform);
 
-  const game = new Game({ renderer, scene, camera, assets, input, hud, audio, config: CONFIG, screens });
+  // P7's seam into every ad-gated decision and the two Poki lifecycle call
+  // points `Game.js` couldn't itself make real (see docs/INTERFACES.md's P6
+  // additions for the defaults these replace). Built as a plain object and
+  // passed into the constructor below — rather than assigned onto
+  // `game.hooks` afterward — so the `?wave=N` dev shortcut (which can call
+  // `hooks.onRunStart` synchronously from inside the constructor itself) also
+  // gets the real implementation, not the default no-op. `onResume`/
+  // `onPause` close over `game`, declared but not yet assigned here — by the
+  // time either callback actually runs, `game` has always been assigned
+  // (both only ever fire well after construction completes).
+  let game;
+  const hooks = {
+    onRunStart: () => platform.commercialBreak().then(() => platform.gameplayStart()),
+    onRunStop: () => platform.gameplayStop(),
+    // `requestDoubler` never restarts gameplay — the doubler is offered on
+    // the run-end screen, while gameplay is already stopped for the run and
+    // stays stopped regardless of the outcome. `requestRevive` is the one
+    // rewarded break that DOES resume gameplay on a grant — chained here
+    // rather than relying on the generic `onAdState('none')` re-issue below,
+    // since at the instant that fires the game is still in `death` (state
+    // only flips to `wave` a tick later, in `Game.js#_doRevive`) — see the
+    // P7 report's adversarial re-read for the full trace.
+    requestRevive: async () => {
+      const granted = await platform.rewardedBreak();
+      if (granted) platform.gameplayStart();
+      return granted;
+    },
+    requestDoubler: () => platform.rewardedBreak(),
+    // Manual pause (Escape / the touch pause button) — see `Game#togglePause`.
+    onPause: () => platform.gameplayStop(),
+    onResume: () => {
+      if (game.state.state === 'build' || game.state.state === 'wave') platform.gameplayStart();
+    },
+  };
+
+  game = new Game({ renderer, scene, camera, assets, input, hud, audio, config: CONFIG, screens, hooks });
+
+  // `game.pause()`/`game.resume()` already freeze input and suspend/resume
+  // audio (and `resume()` already refuses to unfreeze input while a screen
+  // is open — see its doc comment in Game.js) — reused here rather than
+  // duplicating that logic. The `gameplayStart` re-issue is a defensive
+  // backstop for any future ad trigger point: today's two ad call sites
+  // (`onRunStart`'s own `.then()`, `requestRevive`'s wrapper above) already
+  // arrange their own gameplayStart, and `AdGuard#start()` is idempotent, so
+  // this can never produce a second real SDK call.
+  platform.onAdState((state) => {
+    if (state === 'playing') {
+      game.pause();
+    } else {
+      game.resume();
+      if (game.state.state === 'build' || game.state.state === 'wave') platform.gameplayStart();
+    }
+  });
 
   // Turrets + the top-down build overlay (P4) attach through one call so
   // Game.js never has to know about them; see docs/INTERFACES.md.
@@ -77,13 +145,11 @@ async function boot() {
   const boss = new Boss(scene, assets, CONFIG, game.bus, game.world.billboards, game.world.effects, audio);
   installBoss(game, { boss, hud, audio, cfg: CONFIG });
 
+  hud.onPauseTap(() => game.togglePause());
+
   if (loading) loading.hidden = true;
 
-  try {
-    window.PokiSDK?.gameLoadingFinished?.();
-  } catch {
-    // Keep the game playable even if the SDK is unavailable.
-  }
+  platform.loadingFinished();
 
   game.start();
 }
@@ -108,42 +174,4 @@ function loadDisplayFont() {
   } catch {
     // FontFace unsupported or __ASSET_BASE__ missing; fall back silently.
   }
-}
-
-/**
- * Installs a mock `window.PokiSDK` that records every call into
- * `window.__POKI_EVENTS__`, so `?poki=mock` runs can be asserted against
- * without the real SDK script. Shape copied from `run/src/platform/Poki.ts`'s
- * `installMock`.
- */
-function installPokiMock() {
-  const events = [];
-  window.__POKI_EVENTS__ = events;
-  window.PokiSDK = {
-    init: async () => {
-      events.push('init');
-    },
-    gameLoadingStart: () => {
-      events.push('loadingStart');
-    },
-    gameLoadingFinished: () => {
-      events.push('loadingFinished');
-    },
-    gameplayStart: () => {
-      events.push('gameplayStart');
-    },
-    gameplayStop: () => {
-      events.push('gameplayStop');
-    },
-    commercialBreak: async () => {
-      events.push('commercialBreak');
-    },
-    rewardedBreak: async () => {
-      events.push('rewardedBreak');
-      return true;
-    },
-    measure: (category, value, action) => {
-      events.push(`measure:${category}:${value}:${action}`);
-    },
-  };
 }

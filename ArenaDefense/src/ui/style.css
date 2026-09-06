@@ -322,6 +322,70 @@ body.touch .hud-hint--keyboard {
   transform: translateX(-50%) translateY(0);
 }
 
+.hud-paused {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(26px, 6vw, 46px);
+  letter-spacing: 0.1em;
+  padding: 10px 26px;
+  background: rgba(10, 6, 4, 0.6);
+  border-radius: 8px;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.hud-paused[hidden] {
+  display: none;
+}
+
+/* P7 additions: mute (both input modes) + pause (touch only). Appended
+   directly to `#ui` (see the doc comment in `Hud.js`'s constructor) rather
+   than nested inside `.hud`, specifically so `z-index` here is compared
+   against `.touch-layer` (8) and its `.touch-zone--move`/`--look` children
+   (9/10) at their SHARED parent (`#ui`) — a z-index set on a `.hud`
+   descendant is capped inside `.hud`'s own (lower, 5) stacking context and
+   could never win that comparison no matter how high it were set. */
+.hud-controls {
+  position: absolute;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 12;
+}
+
+.hud-icon-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 14, 10, 0.55);
+  color: #f6eedd;
+  cursor: pointer;
+}
+
+.hud-icon-btn .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.hud-icon-btn.is-muted {
+  color: #ff4b3e;
+}
+
+/* Keyboard sessions already have Escape — the touch layer is the one that
+   needs an on-screen pause affordance. */
+body.keyboard .hud-pause-btn {
+  display: none;
+}
+
 /* ================================================================
    TOUCH CONTROLS (src/ui/TouchControls.js)
 ================================================================ */

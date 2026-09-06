@@ -30,6 +30,10 @@ instead of in a playtest.
 - `pickActiveGates`/wave spawn timing draw from a seeded `core/rng.js`
   stream so the same seed reproduces the same run; cosmetic-only randomness
   (if any is ever added) must not share that stream.
+- The mute preference (`arenadefense.muted`) is stored under its own
+  `platform/storage.js` key, deliberately NOT part of `core/storage.js`'s
+  `{coins, bestWave, unlocks}` save shape (test-enforced) — it's a device
+  preference, not run progress.
 
 ## Licence rules
 
@@ -50,4 +54,9 @@ do.
 `platform/poki.js` is the only module allowed to touch `window.PokiSDK`.
 **`gameplayStop()` must be called unconditionally before every ad** (inside
 the `commercialBreak()`/`rewardedBreak()` wrapper, not left to each call
-site) — Poki's own rule, and the thing their review checks first.
+site) — Poki's own rule, and the thing their review checks first. The
+sequencing itself (idempotent start/stop, no start during an ad, the
+unconditional pre-ad stop, a watchdog against a hung ad promise) lives in
+`src/core/adGuard.js` — pure and `node --test`-covered like everything else
+in `core/` — so `platform/poki.js` only ever asks it "is this legal right
+now" rather than re-deriving the rules.

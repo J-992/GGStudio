@@ -189,18 +189,25 @@ export class Turrets {
 
   /**
    * @param {number} dt
-   * @param {{ time: number, enemies: null | { positions(): {x:number,y:number,z:number,radius?:number}[], damageAt(idx:number, dmg:number, source:string): void, damageRadius(x:number, z:number, radius:number, dmg:number, source:string): void, applySlow(idx:number, amount:number, durationS:number): void } }} world
+   * @param {{ time: number, enemies: null | { positions(): {x:number,y:number,z:number,radius?:number}[], damageAt(idx:number, dmg:number, source:string): void, damageRadius(x:number, z:number, radius:number, dmg:number, source:string): void, applySlow(idx:number, amount:number, durationS:number): void }, boss: null | { alive: boolean, positions(): {idx:number,x:number,y:number,z:number,radius:number}[], damage(n:number, source:string): void } }} world
    */
   update(dt, world) {
     const enemies = world.enemies?.positions?.() ?? [];
+    // The boss renders through `Billboards`, not `Enemies`' pool, so it never
+    // shows up in `world.enemies.positions()` — `Boss#positions()` mirrors
+    // that shape with a sentinel `idx:-1` (see `docs/INTERFACES.md`'s P5
+    // "Turret targeting" note) so it can simply be concatenated in as one
+    // more candidate. `_fire` below resolves `idx:-1` back to
+    // `world.boss.damage(...)` instead of `Enemies#damageAt`.
+    const candidates = world.boss?.alive ? enemies.concat(world.boss.positions()) : enemies;
     for (const rec of this._records.values()) {
       if (!rec.alive) continue;
       const stats = statsFor(rec.type, rec.level, this._cfg);
-      const idx = pickTarget(rec, enemies, stats);
-      this._faceTarget(rec, idx, enemies);
+      const idx = pickTarget(rec, candidates, stats);
+      this._faceTarget(rec, idx, candidates);
       if (idx < 0) continue;
       if (!fireReady(rec, dt, stats)) continue;
-      this._fire(rec, stats, idx, enemies, world);
+      this._fire(rec, stats, idx, candidates, world);
     }
   }
 
@@ -408,38 +415,53 @@ export class Turrets {
   /**
    * @param {import('../core/types.js').TurretRecord} rec
    * @param {{dmg:number, rate:number, range:number, splash?:number, slow?:number, slowDurS?:number}} stats
-   * @param {number} idx Position within `enemies` (as returned by `pickTarget`) — NOT the enemy's own pool index; see `target.idx` below.
-   * @param {{idx:number,x:number,y?:number,z:number}[]} enemies `world.enemies.positions()`'s return, each entry carrying the enemy's real pool index as `.idx`.
-   * @param {{ time:number, enemies: any }} world
+   * @param {number} idx Position within `candidates` (as returned by `pickTarget`) — NOT the target's own pool index; see `target.idx` below.
+   * @param {{idx:number,x:number,y?:number,z:number}[]} candidates `world.enemies.positions()` concatenated with `world.boss.positions()` when the boss is alive — each entry carries its own pool index as `.idx` (`-1` is the boss sentinel, never a real `Enemies` pool slot).
+   * @param {{ time:number, enemies: any, boss: any }} world
    */
-  _fire(rec, stats, idx, enemies, world) {
-    const target = enemies[idx];
+  _fire(rec, stats, idx, candidates, world) {
+    const target = candidates[idx];
     if (!target) return;
-    // `idx` is only a position within this call's `enemies` array (which
+    // `idx` is only a position within this call's `candidates` array (which
     // omits dead enemies, so it drifts from the pool's own indexing the
     // moment anything has died); `target.idx` is the actual pool index
-    // `Enemies#damageAt/applySlow` expect.
+    // `Enemies#damageAt/applySlow` expect — except `-1`, the boss sentinel,
+    // which routes to `world.boss.damage` instead (the boss has no pool
+    // slot at all — see `docs/INTERFACES.md`'s P5 "Turret targeting" note).
     const poolIdx = target.idx;
+    const isBoss = poolIdx === -1;
     const visual = this._visuals.get(rec.slotId);
     visual?.headPivot.getWorldPosition(_origin);
     const targetY = target.y ?? 1;
 
     if (rec.type === 'gun') {
-      world.enemies?.damageAt?.(poolIdx, stats.dmg, 'turret');
-      this._effects.tracer(_origin.clone(), new THREE.Vector3(target.x, targetY, target.z));
+      if (isBoss) world.boss?.damage?.(stats.dmg, 'turret');
+      else world.enemies?.damageAt?.(poolIdx, stats.dmg, 'turret');
+      _target.set(target.x, targetY, target.z);
+      this._effects.tracer(_origin, _target);
       this._playSound(world, 'turret-shot-1');
     } else if (rec.type === 'cannon') {
-      world.enemies?.damageRadius?.(target.x, target.z, stats.splash ?? 0, stats.dmg, 'turret');
+      // Splash is an area effect against `Enemies`' own pool; the boss (a
+      // single large hitbox, not a position in that pool) just takes a
+      // direct hit for the same damage instead of a radius query.
+      if (isBoss) world.boss?.damage?.(stats.dmg, 'turret');
+      else world.enemies?.damageRadius?.(target.x, target.z, stats.splash ?? 0, stats.dmg, 'turret');
       this._effects.burst(target.x, targetY, target.z, this._cfg.turrets.types.cannon.color, 14);
       this._playSound(world, 'explosion-metal');
     } else if (rec.type === 'tesla') {
-      world.enemies?.damageAt?.(poolIdx, stats.dmg, 'turret');
-      // `cfg.turrets.types.tesla.slow` is a *strength* (bigger = more slow,
-      // increasing with level — see `turretLogic.statsFor`'s monotonic
-      // contract), but `Enemies#applySlow`'s `factor` is a *speed
-      // multiplier* (bigger = less slow, 1 = unaffected) — invert here at
-      // the one seam between the two conventions.
-      if (stats.slow !== undefined) world.enemies?.applySlow?.(poolIdx, 1 - stats.slow, stats.slowDurS ?? 0);
+      if (isBoss) {
+        world.boss?.damage?.(stats.dmg, 'turret');
+        // No speed-multiplier hook exists on `Boss` (unlike `Enemies#applySlow`)
+        // — the slow effect simply doesn't apply to the boss.
+      } else {
+        world.enemies?.damageAt?.(poolIdx, stats.dmg, 'turret');
+        // `cfg.turrets.types.tesla.slow` is a *strength* (bigger = more slow,
+        // increasing with level — see `turretLogic.statsFor`'s monotonic
+        // contract), but `Enemies#applySlow`'s `factor` is a *speed
+        // multiplier* (bigger = less slow, 1 = unaffected) — invert here at
+        // the one seam between the two conventions.
+        if (stats.slow !== undefined) world.enemies?.applySlow?.(poolIdx, 1 - stats.slow, stats.slowDurS ?? 0);
+      }
       this._flashTeslaTip(rec.slotId);
       // The manifest ships no dedicated electric sound; fall back to
       // `mechanical-clunk` per the brief, using it whenever an

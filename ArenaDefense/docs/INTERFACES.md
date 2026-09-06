@@ -1117,6 +1117,233 @@ backgrounded-then-restored tab never fights a currently-open screen's own
 freeze — `screens.hide()` remains the only thing that actually unfreezes
 once a screen's outcome has been acted on.
 
+## P7 additions (final)
+
+Everything below lives in `src/core/adGuard.js`, `src/platform/poki.js`,
+`src/main.js`, `src/game/{Game,Turrets,bossPhase}.js`, `src/ui/{Screens,
+Hud}.js`, and `src/platform/storage.js`.
+
+### `core/adGuard.js` (pure)
+
+```js
+class AdGuard {
+  get started() {}     // bool: gameplayStart fired without a matching stop.
+  get adPlaying() {}    // bool.
+  canStart() {}         // bool: legal to call gameplayStart right now.
+  canStop() {}          // bool: would gameplayStop actually do anything right now.
+  start() {}            // bool: whether this call actually transitioned stopped -> started.
+  stop() {}             // bool: whether this call actually transitioned started -> stopped.
+  beginAd() {}          // bool `wasStarted`: unconditionally sets started=false, adPlaying=true.
+  endAd() {}            // adPlaying=false. Does NOT resume gameplay itself.
+}
+
+/** Resolves with `factory()`'s result, or `fallback` if `ms` elapses first — a hung ad promise can never freeze the caller. */
+function withWatchdog(factory, ms, fallback) {}
+```
+
+This is the single source of truth `platform/poki.js` drives every real SDK
+call from — no sequencing logic is duplicated there. `test/adGuard.test.js`
+asserts the four invariants the P7 brief called out by name: `start()`/
+`stop()` are idempotent, `beginAd()` always reports and forces `started`
+false regardless of prior state, `canStart()` refuses for as long as an ad
+plays, and `withWatchdog` releases with the fallback on a promise that never
+settles (as well as on a synchronous throw or a rejection).
+
+### `platform/poki.js`
+
+```js
+class Platform {
+  constructor(cfg) {}
+  get hasAds() {}                    // ACTIVE && cfg.platform.adsEnabled.
+  onAdState(fn) {}                   // fn('playing'|'none'); returns an unsubscribe.
+  async init() {}                    // never rejects.
+  gameLoadingStart() {}              // safe to call before init() resolves.
+  loadingFinished() {}
+  gameplayStart() {}                 // no-op during an ad or if already started.
+  gameplayStop() {}                  // idempotent.
+  async commercialBreak() {}         // Promise<void>.
+  async rewardedBreak() {}           // Promise<boolean>, true only on a genuine SDK `true`.
+}
+```
+
+The only module allowed to touch `window.PokiSDK` (unchanged rule from
+`AGENTS.md`). `HAS_POKI` (`typeof __POKI__ !== 'undefined' && __POKI__` —
+`__POKI__` is `vite.config.js`'s build-time `define`, true only for
+`vite build --mode poki`) and `IS_DEV` (`import.meta.env.DEV`, true only
+under the Vite dev server, false for *any* `vite build`) combine into
+`ACTIVE = HAS_POKI || IS_DEV`. Every SDK-touching branch in this file is
+gated behind `ACTIVE`/`HAS_POKI`, both statically known at build time, so in
+the plain `vite build` (the one distribution where neither is true) the
+whole body folds to dead code and is stripped by minification — this is
+what makes `grep -c PokiSDK dist/assets/*.js` read `0` after `npm run build`
+and `>0` after `npm run build:poki` (see the README's verify list). `IS_DEV`
+specifically (not `HAS_POKI` alone) is what lets `?poki=mock` work under
+`npm run dev`, where `__POKI__` is false (no `--mode poki` there).
+
+`?poki=mock` installs a mock SDK (idempotent — a module-level side effect
+that runs once, the first time this file is imported, gated behind `ACTIVE`
+and the query param) recording every call into `window.__POKI_EVENTS__`:
+`init`, `gameLoadingStart`, `gameLoadingFinished`, `gameplayStart`,
+`gameplayStop`, `commercialBreak`, `rewardedBreak:true|false`. The mock ad
+"plays" for 2 s (both `commercialBreak` and `rewardedBreak`); `?poki=mock&
+reward=0` makes every `rewardedBreak` resolve `false`.
+
+**The central invariant**: `commercialBreak()`/`rewardedBreak()` both call
+`AdGuard#beginAd()` before ever touching the SDK — architecturally, no call
+site anywhere is responsible for stopping gameplay before requesting an ad,
+the wrapper always does it. The real SDK's `gameplayStop()` is only actually
+invoked when `beginAd()` reports gameplay genuinely was running
+(`wasStarted`) — every real call site in this game already stops gameplay
+before ever reaching an ad (see below), so in normal play this is a
+defensive no-op that only fires if some future call site ever raced ahead of
+that. Both break methods are watchdog-guarded at 60 s (`AD_WATCHDOG_MS`),
+notify `onAdState('playing')` before the SDK call and `onAdState('none')`
+after (in a `finally`, so a rejected/hung promise still releases the
+listeners), and every SDK call is wrapped in try/catch.
+
+### `Game` additions
+
+```js
+class Game {
+  /** @param {object} deps ...as before, plus:
+   *  @param {Partial<Game['hooks']>} [deps.hooks] Real hook implementations, applied over the no-ads defaults BEFORE this constructor's own `?wave=N`/title dispatch runs. */
+  constructor(deps) {}
+
+  /** Toggles the manual pause (Escape / the touch HUD's pause button). No-op with a screen open, mid-ad, or outside build/wave. */
+  togglePause() {}
+
+  /** @type {{ ...as before, onPause: (() => void)|null, onResume: (() => void)|null }} */
+  hooks;
+}
+```
+
+`hooks` gained `onPause`/`onResume` (both default `null`), called
+synchronously by the new manual-pause toggle — mirrors `onRunStart`/
+`onRunStop`'s existing seam rather than introducing a different pattern.
+`hooks` is now also accepted as a constructor param (`deps.hooks`, merged
+over the defaults via `{...defaults, ...hooks}`) instead of only being
+assignable after construction — the `?wave=N` dev shortcut can call
+`hooks.onRunStart` synchronously from inside the constructor itself (before
+`main.js` would otherwise get a chance to assign `game.hooks.onRunStart =
+...` on the returned instance), so the real implementation has to already be
+in place by then.
+
+**Manual pause**: a `window` `keydown` listener for `Escape` (deliberately
+NOT routed through `InputFrame.pause` — see the code comment on
+`_onEscapeKey` for why: `Input.frame()` zeroes every field, `pause` included,
+while input is frozen, which `pause()` itself does, so the fixed-step loop
+could never observe an "unpause" key through the normal frame pipeline once
+paused — mirrors `ui/Screens.js`'s own pattern of a dedicated raw listener).
+Toggling calls `pause()`/`resume()` (reusing their existing input-freeze/
+audio-suspend/`screens.isOpen`-guard behaviour) plus `hud.setPaused(bool)`
+and `hooks.onPause`/`onResume`. Guarded so it only engages during `build`/
+`wave` and never while a screen is open. `visibilitychange`'s own
+`resume()` call now also checks `!this._manualPaused` first, so a
+backgrounded-then-restored tab can't silently cancel a pause the player set
+before backgrounding.
+
+**Boss hitscan fix**: `_handleFiring` now tests `world.boss?.hitTest(...)`
+alongside `world.enemies.raycast(...)` and damages only the **nearer** of
+the two hits (comparing `.dist`) — replacing P5's documented v1 compromise
+(a second, independent `player:fired` listener in `bossPhase.js` that could
+double-hit both an enemy and the boss standing behind it on the same shot).
+`bossPhase.js` no longer listens to `player:fired` at all.
+
+### `Turrets` additions
+
+`update(dt, world)` now concatenates `world.boss?.positions() ?? []` onto
+`world.enemies.positions()` as one more candidate list whenever the boss is
+alive (its sentinel `idx:-1` — see P5's "Turret targeting" note — was always
+shaped for exactly this). `_fire` resolves `idx === -1` back to
+`world.boss.damage(stats.dmg, 'turret')` for every turret type instead of
+`Enemies#damageAt`; cannon splash becomes a direct hit against the boss (no
+radius query — the boss isn't a position in `Enemies`' pool to splash
+around), and tesla's slow effect simply doesn't apply to the boss (no
+speed-multiplier hook exists on `Boss`, unlike `Enemies#applySlow`).
+
+### `ui/Screens.js` additions
+
+```js
+class Screens {
+  constructor(cfg, input, audio, platform = { hasAds: true }) {}
+}
+```
+
+`showDeath`/`showRunEnd` now hide the Revive/Double Coins button — and treat
+Enter/Space as if it were never offered — whenever `!platform.hasAds`, on
+top of the existing `canRevive`/`canDouble` checks. The default parameter
+(`{ hasAds: true }`) keeps any caller that doesn't pass one behaving exactly
+as before P7.
+
+### `ui/Hud.js` additions
+
+```js
+class Hud {
+  setPaused(paused) {}     // shows/hides a centred "PAUSED" panel over the (still-visible) HUD.
+  onPauseTap(fn) {}        // touch-only pause button (hidden via CSS under body.keyboard).
+  onMuteTap(fn) {}         // fn(newMutedState) — caller applies it (audio.setMuted, storage).
+  setMuted(muted) {}       // visual-only; does not fire onMuteTap's callback.
+}
+```
+
+Both buttons are appended directly to `#ui` (a `.hud-controls` div, sibling
+of `.hud`/`.touch-layer`) rather than nested inside `.hud` — `.touch-layer`'s
+`.touch-zone--move`/`--look` children cover the *entire* left/right halves
+of the screen at their own z-index, scoped within `.touch-layer`'s own
+(higher) stacking context; a z-index set on a `.hud` descendant is capped
+inside `.hud`'s own (lower) stacking context and could never win that
+comparison no matter how high it were set. Only a sibling of `.touch-layer`
+at the shared `#ui` parent level, given its own higher z-index, actually
+receives taps over that area.
+
+### `platform/storage.js` additions
+
+```js
+function loadMuted() {}      // @returns {boolean} — false if never set or storage unavailable.
+function saveMuted(muted) {} // @param {boolean} muted
+```
+
+Persisted under its own key (`arenadefense.muted`), deliberately NOT part of
+`core/storage.js`'s `{coins, bestWave, unlocks}` save shape (that set is
+test-enforced) — mute is a device/session preference, not run progress.
+
+### Wiring (`src/main.js`)
+
+```
+game.hooks.onRunStart = () => platform.commercialBreak().then(() => platform.gameplayStart());
+game.hooks.onRunStop  = () => platform.gameplayStop();
+game.hooks.requestRevive = async () => {
+  const granted = await platform.rewardedBreak();
+  if (granted) platform.gameplayStart();   // the one rewardedBreak that DOES resume gameplay.
+  return granted;
+};
+game.hooks.requestDoubler = () => platform.rewardedBreak();   // never restarts gameplay.
+game.hooks.onPause  = () => platform.gameplayStop();
+game.hooks.onResume = () => { if (state is build/wave) platform.gameplayStart(); };
+platform.onAdState((state) => {
+  if (state === 'playing') game.pause();
+  else { game.resume(); if (state is build/wave) platform.gameplayStart(); }
+});
+```
+
+`requestRevive` is deliberately NOT a bare `() => platform.rewardedBreak()`
+passthrough (unlike `requestDoubler`, which is): at the instant
+`onAdState('none')` fires inside `rewardedBreak()`, the game is still in
+`death` (state only flips to `wave` a tick later, in `Game.js#_doRevive`,
+once `_runDeathFlow`'s `await hooks.requestRevive()` actually returns) — so
+the generic `onAdState`-driven `gameplayStart` re-issue can never catch the
+revive case. Chaining it explicitly here is both simpler and matches the
+state-machine doc's `death -> wave: rewardedBreak() true: gameplayStart()`
+bullet directly. Every other combination (`onRunStart`'s own `.then()`, the
+generic `onAdState('none')` re-issue) can safely overlap with this without
+producing a duplicate real SDK call — `AdGuard#start()` is idempotent.
+
+Full mock event order for one revive-then-death run: `gameLoadingStart` /
+`init` (order not significant) → `gameLoadingFinished` → `commercialBreak` →
+`gameplayStart` → *(wave play)* → `gameplayStop` → `rewardedBreak:true` →
+`gameplayStart` → *(wave play)* → `gameplayStop`. Traced end-to-end against
+this exact implementation in the P7 report's adversarial re-read.
+
 ### `platform/storage.js`
 
 ```js

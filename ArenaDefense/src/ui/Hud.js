@@ -102,11 +102,43 @@ export class Hud {
     this._toast = document.createElement('div');
     this._toast.className = 'hud-toast';
 
+    this._pausedPanel = document.createElement('div');
+    this._pausedPanel.className = 'hud-paused';
+    this._pausedPanel.textContent = 'PAUSED';
+    this._pausedPanel.hidden = true;
+
     this._root.append(
       this._statsBox, this._buildCountdown, this._bossBar, this._comboBar, this._reticle,
-      keyboardHint, touchHint, this._toast,
+      keyboardHint, touchHint, this._toast, this._pausedPanel,
     );
     ui.appendChild(this._root);
+
+    // P7 additions: mute (both input modes) and pause (touch only — keyboard
+    // already has Escape). Deliberately appended directly to `#ui`, as a
+    // sibling of `.hud`/`.touch-layer` rather than nested inside `.hud` —
+    // `.touch-layer`'s own `.touch-zone--move`/`--look` children cover the
+    // *entire* left/right halves of the screen at their own higher z-index,
+    // and a z-index set on a descendant of `.hud` can never escape `.hud`'s
+    // own (lower) stacking context to beat that. Only a sibling with its own
+    // higher z-index at the shared `#ui` parent level actually receives taps
+    // over that area — see the CSS comment beside `.hud-controls`.
+    this._controls = document.createElement('div');
+    this._controls.className = 'hud-controls';
+
+    this._muteBtn = document.createElement('button');
+    this._muteBtn.type = 'button';
+    this._muteBtn.className = 'hud-icon-btn hud-mute-btn';
+    this._muteBtn.setAttribute('aria-label', 'Mute');
+    this._muteBtn.appendChild(svgIcon('icon-sound'));
+
+    this._pauseBtn = document.createElement('button');
+    this._pauseBtn.type = 'button';
+    this._pauseBtn.className = 'hud-icon-btn hud-pause-btn';
+    this._pauseBtn.setAttribute('aria-label', 'Pause');
+    this._pauseBtn.appendChild(svgIcon('icon-pause'));
+
+    this._controls.append(this._muteBtn, this._pauseBtn);
+    ui.appendChild(this._controls);
 
     this.setHp(config.player.hp, config.player.hp);
     this.setEnergy(0);
@@ -216,5 +248,51 @@ export class Hud {
    */
   show(visible) {
     this._root.hidden = !visible;
+    // `.hud-controls` (mute/pause) is a separate `#ui` child, not a
+    // descendant of `.hud` — see the constructor's doc comment on why — so
+    // it needs its own visibility toggle here to actually hide alongside the
+    // rest of the HUD during a title/death/run-end screen (pausing makes no
+    // sense there anyway; `Game#togglePause()` already no-ops while a screen
+    // is open, this just keeps the button from floating uselessly on top).
+    this._controls.hidden = !visible;
+  }
+
+  /**
+   * A simple centred "PAUSED" panel, shown over the (still-visible) HUD
+   * while `Game`'s manual pause (Escape / the touch pause button) is active.
+   * @param {boolean} paused
+   */
+  setPaused(paused) {
+    this._pausedPanel.hidden = !paused;
+  }
+
+  /**
+   * @param {() => void} fn Called when the touch-only pause button is tapped.
+   */
+  onPauseTap(fn) {
+    this._pauseBtn.addEventListener('click', fn);
+  }
+
+  /**
+   * @param {(muted: boolean) => void} fn Called with the NEW muted state
+   *   every time the mute button is tapped — the caller applies it (e.g.
+   *   `audio.setMuted`, `platform/storage.js#saveMuted`).
+   */
+  onMuteTap(fn) {
+    this._muteBtn.addEventListener('click', () => {
+      const muted = !this._muteBtn.classList.contains('is-muted');
+      this.setMuted(muted);
+      fn(muted);
+    });
+  }
+
+  /**
+   * Sets the mute button's visual state without firing its own tap callback
+   * — used to reflect a saved preference at boot.
+   * @param {boolean} muted
+   */
+  setMuted(muted) {
+    this._muteBtn.classList.toggle('is-muted', !!muted);
+    this._muteBtn.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
   }
 }

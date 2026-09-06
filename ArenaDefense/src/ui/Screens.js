@@ -36,11 +36,16 @@ export class Screens {
    * @param {import('../core/types.js').GameConfig} cfg
    * @param {import('./input.js').Input} input
    * @param {import('../platform/audio.js').Audio} audio
+   * @param {{ hasAds: boolean }} [platform] P7 addition — governs whether the
+   *   revive/doubler buttons below show at all. Defaults to `{ hasAds: true }`
+   *   (both buttons show, matching pre-P7 behaviour) so any caller that
+   *   doesn't pass one — a future standalone use, a test — sees no change.
    */
-  constructor(cfg, input, audio) {
+  constructor(cfg, input, audio, platform = { hasAds: true }) {
     this._cfg = cfg;
     this._input = input;
     this._audio = audio;
+    this._platform = platform;
     /** @type {HTMLElement|null} Currently mounted screen root, if any. */
     this._root = null;
   }
@@ -192,8 +197,14 @@ export class Screens {
       sub.className = 'screen-sub';
       sub.textContent = `Fell on wave ${wave}`;
 
+      // `canRevive` alone says the run hasn't used its once-per-run revive
+      // yet; whether there's actually an ad to show it also needs
+      // `platform.hasAds` — with `cfg.platform.adsEnabled: false` (or no SDK
+      // active at all) the button vanishes entirely rather than offering an
+      // ad that can never play (see `AGENTS.md`'s ad economy note).
+      const canReviveNow = canRevive && this._platform.hasAds;
       const reviveBtn = this._makeButton('REVIVE (AD)', 'screen-btn--primary');
-      reviveBtn.hidden = !canRevive;
+      reviveBtn.hidden = !canReviveNow;
       const endBtn = this._makeButton('END RUN');
 
       root.append(heading, sub, reviveBtn, endBtn);
@@ -204,7 +215,7 @@ export class Screens {
         resolve(choice);
       };
       const onKeydown = (e) => {
-        if (e.key === 'Enter' || e.key === ' ') finish(canRevive ? 'revive' : 'end');
+        if (e.key === 'Enter' || e.key === ' ') finish(canReviveNow ? 'revive' : 'end');
         else if (e.key === 'Escape') finish('end');
       };
       const cleanup = () => window.removeEventListener('keydown', onKeydown);
@@ -235,8 +246,10 @@ export class Screens {
       coinsRow.className = 'screen-stat screen-stat--earned';
       coinsRow.append(svgIcon('icon-coin'), document.createTextNode(` +${coinsEarned}  (total ${coinsTotal})`));
 
+      // Same `hasAds` gate as `showDeath`'s revive button above.
+      const canDoubleNow = canDouble && this._platform.hasAds;
       const doubleBtn = this._makeButton('DOUBLE COINS (AD)', 'screen-btn--primary');
-      doubleBtn.hidden = !canDouble;
+      doubleBtn.hidden = !canDoubleNow;
       const againBtn = this._makeButton('PLAY AGAIN', 'screen-btn--primary');
       const titleBtn = this._makeButton('TITLE');
 
