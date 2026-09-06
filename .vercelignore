@@ -1,5 +1,6 @@
 # The deploy builds one game. Everything below is another project in this
 # monorepo, or weight the build never reads.
+ArenaDefense/         # ships via the Poki deploy workflow, not Vercel
 comfy-zoo/
 glb-pipeline/
 glb-rigger/

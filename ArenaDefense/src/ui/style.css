@@ -1,0 +1,107 @@
+/* Minimal shell styling — P2 (`ui/{Hud,BuildOverlay,Screens}.js`) owns the
+   real HUD/overlay layout. This file only has to stop the canvas scrolling
+   and give the placeholder boot screen somewhere to sit.
+
+   Font: `Lilita One` (`public/assets/fonts/LilitaOne-Regular.ttf`) is loaded
+   at boot via `new FontFace('Lilita One', 'url(' + window.__ASSET_BASE__ +
+   'assets/fonts/LilitaOne-Regular.ttf)')`, NOT a `@font-face` rule here —
+   a CSS `url()` is resolved against the stylesheet's own location, which is
+   exactly the relative-path problem `window.__ASSET_BASE__` exists to avoid
+   (see the comment in `index.html`). Loading it from JS lets it use the same
+   asset-base global as every other runtime fetch. */
+
+:root {
+  color-scheme: dark;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1b1310;
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  outline: none;
+}
+
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  color: #f6eedd;
+}
+
+#ui > * {
+  pointer-events: auto;
+}
+
+.placeholder-title {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  font-size: clamp(28px, 6vw, 56px);
+  letter-spacing: 0.08em;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 6, 4, 0.55);
+}
+
+#overlay[hidden] {
+  display: none;
+}
+
+#loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #1b1310;
+  color: #f6eedd;
+}
+
+#loading[hidden] {
+  display: none;
+}
+
+.loading-title {
+  margin: 0;
+  font-size: clamp(24px, 5vw, 40px);
+  letter-spacing: 0.08em;
+}
+
+.loading-status {
+  margin: 0;
+  opacity: 0.7;
+  font-size: 14px;
+}
+
+.icon {
+  width: 1em;
+  height: 1em;
+  fill: currentColor;
+  display: inline-block;
+  vertical-align: middle;
+}

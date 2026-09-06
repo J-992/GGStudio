@@ -12,7 +12,7 @@
     "build": "vite build",
     "build:poki": "vite build --mode poki",
     "preview": "vite preview",
-    "test": "node --test test/",
+    "test": "node --test test/*.test.js",
     "assets:fetch": "node scripts/fetch-sources.mjs",
     "assets:build": "node scripts/build-assets.mjs",
     "budget": "node scripts/budget.mjs",
