@@ -135,16 +135,39 @@ function replaceMaterials(root) {
  */
 
 /**
- * @param {THREE.Object3D} sceneRoot
+ * Keyed by the mesh name as authored in the glTF, which is NOT always the
+ * name three.js ends up putting on the `Mesh` object.
+ *
+ * GLTFLoader runs every name it creates through `createUniqueName`, so a node
+ * whose name is already taken elsewhere in the same file gets `_1` appended.
+ * `zed_1.glb` holds one node called `zed_1` inside a scene *also* called
+ * `zed_1`, so the scene claims the name first and the mesh arrives as
+ * `zed_1_1` — `instanceSource('zed_1')` then threw and the game died at boot.
+ * `props.glb` never hit this only because its scene is called `props`.
+ *
+ * `parser.associations` is the loader's own map from the objects it built back
+ * to the glTF indices they came from, so it recovers the authored name whether
+ * or not it was renamed. The object's own name is registered too when it
+ * differs, so either spelling resolves.
+ *
+ * @param {import('three/examples/jsm/loaders/GLTFLoader.js').GLTF} gltf
  * @returns {Map<string, InstanceSource>}
  */
-function collectInstanceSources(sceneRoot) {
+function collectInstanceSources(gltf) {
+  const sceneRoot = gltf.scene;
   sceneRoot.updateMatrixWorld(true);
+  const inverseRoot = sceneRoot.matrixWorld.clone().invert();
+  const meshes = gltf.parser?.json?.meshes ?? [];
+  const associations = gltf.parser?.associations;
   const out = new Map();
   sceneRoot.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
-    const localMatrix = sceneRoot.matrixWorld.clone().invert().multiply(child.matrixWorld);
-    out.set(child.name, { geometry: child.geometry, material: child.material, localMatrix });
+    const localMatrix = inverseRoot.clone().multiply(child.matrixWorld);
+    const source = { geometry: child.geometry, material: child.material, localMatrix };
+    const association = associations?.get(child);
+    const authored = association?.meshes !== undefined ? meshes[association.meshes]?.name : undefined;
+    if (authored) out.set(authored, source);
+    if (child.name && child.name !== authored) out.set(child.name, source);
   });
   return out;
 }
@@ -225,7 +248,7 @@ export async function loadAll(onProgress) {
   const modelLoads = MODEL_FILES.map(async (file) => {
     const gltf = await withRetries(() => gltfLoader.loadAsync(assetUrl(`assets/models/${file}`)));
     replaceMaterials(gltf.scene);
-    for (const [name, source] of collectInstanceSources(gltf.scene)) {
+    for (const [name, source] of collectInstanceSources(gltf)) {
       assets._instanceSources.set(name, source);
     }
     tick();

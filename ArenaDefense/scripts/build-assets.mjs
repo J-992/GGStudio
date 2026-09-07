@@ -243,7 +243,12 @@ async function optimizeAndWrite(document, outPath) {
 function newDocument(sceneName) {
   const document = new Document();
   document.createBuffer();
-  const scene = document.createScene(sceneName);
+  // Suffixed so the scene can never collide with a node inside it. three.js's
+  // GLTFLoader passes every name through `createUniqueName`, so a node sharing
+  // the scene's name loads as `<name>_1` and a lookup by the authored name
+  // misses — which is exactly how `zed_1.glb` (one node `zed_1` in a scene
+  // `zed_1`) shipped a mesh three.js called `zed_1_1`.
+  const scene = document.createScene(`${sceneName}_scene`);
   return { document, scene };
 }
 

@@ -178,11 +178,11 @@
     ]
   },
   "files": {
-    "models/zed_1.glb": 16944,
-    "models/zed_3.glb": 19592,
-    "models/dressing.glb": 21776,
-    "models/rocks.glb": 18076,
-    "models/props.glb": 166600,
+    "models/zed_1.glb": 16952,
+    "models/zed_3.glb": 19600,
+    "models/dressing.glb": 21784,
+    "models/rocks.glb": 18080,
+    "models/props.glb": 166604,
     "sprites/brainrot.webp": 117212,
     "sprites/brainrot.json": 1525,
     "sprites/portrait-patapim.webp": 6130,
