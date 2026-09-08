@@ -173,6 +173,11 @@ export class Game {
     this._combo = new ComboTracker(config);
     this._wave = 1;
     this._buildTimer = 0;
+    /** Set by `requestReady()` (the build overlay's READY button / Space) and
+     *  consumed by `_advanceStateMachine`'s build branch. A latch rather than a
+     *  direct transition so there is exactly ONE path out of `build` — see
+     *  `requestReady`. */
+    this._readyRequested = false;
     this._prevGatePair = null;
     this._gateRng = makeRng((Date.now() ^ 0x9e3779b9) >>> 0);
 
@@ -335,6 +340,26 @@ export class Game {
       && !this._screens.isOpen
       && (this.state.state === 'wave' || this.state.state === 'waveClear');
     this._input.setPointerLockWanted?.(playing);
+  }
+
+  /**
+   * Asks for the build phase to end early — the build overlay's READY button
+   * and its Space/Enter shortcut both come through here.
+   *
+   * It sets a latch rather than driving the transition itself, and that is the
+   * whole point. `game/buildPhase.js` used to call `state.go('wave')` directly,
+   * which looked equivalent but skipped `_startWave()` — so the scheduler was
+   * never rebuilt, the previous wave's (already `done`) one was still in place,
+   * and the wave cleared instantly having spawned nothing. Every wave started
+   * with READY was empty, and wave 5's boss never appeared with it. Routing
+   * through the latch leaves exactly one path out of `build`, so no caller can
+   * enter `wave` half-initialised again.
+   *
+   * Ignored outside `build`, so a stray call cannot arm the next build phase.
+   */
+  requestReady() {
+    if (this.state.state !== 'build') return;
+    this._readyRequested = true;
   }
 
   /** @returns {import('../core/economy.js').Economy} Read-only usage by P4/P5/P6 — only `Game` replaces the instance (new run). */
@@ -557,9 +582,13 @@ export class Game {
       this._hud.setBuildCountdown(Math.ceil(secondsLeft));
       this.bus.emit('build:tick', { secondsLeft });
 
-      if (this._buildTimer <= 0 || frame.ready) {
+      if (this._buildTimer <= 0 || frame.ready || this._readyRequested) {
+        this._readyRequested = false;
         const refund = this._economy.readyRefund(secondsLeft, this._config);
         this._economy.addEnergy(refund);
+        // Owned here rather than in `buildPhase.js` so the refund is applied
+        // exactly once no matter which of the three paths ended the phase.
+        if (refund > 0) this._hud.toast(`+${refund} energy`);
         this._hud.setBuildCountdown(null);
         this.state.go('wave');
         this.bus.emit('state:changed', { state: 'wave' });
@@ -578,6 +607,7 @@ export class Game {
       if (this._waveClearTimer <= 0) {
         this._wave += 1;
         this._buildTimer = this._config.build.durationS;
+    this._readyRequested = false;
         this._pickGates();
         this._hud.setWave(this._wave, this._config.run.finalWave);
         this.state.go('build');
@@ -628,7 +658,10 @@ export class Game {
     // Boss support lands in P5; until `world.boss` exists this is always
     // true, so a boss wave with no `spawns` (wave 5 today) clears instantly.
     const bossAlive = this.world.boss?.alive ?? false;
-    if (this._scheduler?.done && this.world.enemies.alive === 0 && !bossAlive) {
+    // `this._scheduler &&` rather than `?.`: a null scheduler means the wave was
+    // never started, and `undefined && ...` left the run stuck in an empty
+    // `wave` forever rather than clearing it.
+    if (this._scheduler && this._scheduler.done && this.world.enemies.alive === 0 && !bossAlive) {
       this._onWaveClear();
     }
   }
@@ -909,6 +942,7 @@ export class Game {
     this._scheduler = null;
     this._currentWaveDef = null;
     this._buildTimer = this._config.build.durationS;
+    this._readyRequested = false;
     this._pickGates();
     this._hud.setWave(this._wave, this._config.run.finalWave);
     this._hud.setCombo(0, 0);
