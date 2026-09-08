@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CONFIG } from '../src/config.js';
-import { gatePositions, slotPositions, worldToMap, mapToWorld, clampToArena } from '../src/core/arenaGeometry.js';
+import { gatePositions, slotPositions, worldToMap, mapToWorld, clampToArena, rayArenaHit } from '../src/core/arenaGeometry.js';
 
 /** Smallest angular distance between two angles in degrees, 0..180. */
 function angleDist(a, b) {
@@ -68,4 +68,53 @@ test('clampToArena projects exterior points onto the circle boundary', () => {
   assert.ok(Math.abs(p.x - 10) < 1e-9);
   assert.ok(Math.abs(p.z) < 1e-9);
   assert.ok(Math.abs(Math.hypot(p.x, p.z) - 10) < 1e-9);
+});
+
+const EYE = { x: 0, y: CONFIG.player.eyeHeight, z: 0 };
+const FAR = CONFIG.arena.radius * 4;
+
+test('rayArenaHit: a shot straight down lands on the floor under the shooter', () => {
+  const hit = rayArenaHit(EYE, { x: 0, y: -1, z: 0 }, FAR, CONFIG);
+  assert.equal(hit.surface, 'ground');
+  assert.equal(hit.y, 0);
+  assert.ok(Math.abs(hit.x) < 1e-9 && Math.abs(hit.z) < 1e-9);
+  assert.ok(Math.abs(hit.dist - CONFIG.player.eyeHeight) < 1e-9);
+});
+
+test('rayArenaHit: a level shot lands on the wall at the arena radius', () => {
+  for (const dir of [{ x: 1, y: 0, z: 0 }, { x: 0, y: 0, z: -1 }, { x: -0.6, y: 0, z: 0.8 }]) {
+    const hit = rayArenaHit(EYE, dir, FAR, CONFIG);
+    assert.equal(hit.surface, 'wall');
+    assert.ok(Math.abs(Math.hypot(hit.x, hit.z) - CONFIG.arena.radius) < 1e-9);
+    assert.ok(Math.abs(hit.y - CONFIG.player.eyeHeight) < 1e-9);
+  }
+});
+
+test('rayArenaHit: a shot angled over the wall top hits nothing', () => {
+  assert.equal(rayArenaHit(EYE, { x: 0, y: 1, z: 0 }, FAR, CONFIG), null);
+  // Rises past `wallHeight` before reaching the wall, so neither surface is hit.
+  assert.equal(rayArenaHit(EYE, { x: 0.2, y: 1, z: 0 }, FAR, CONFIG), null);
+});
+
+test('rayArenaHit: hits beyond maxDist are discarded', () => {
+  const near = CONFIG.player.eyeHeight * 0.5;
+  assert.equal(rayArenaHit(EYE, { x: 0, y: -1, z: 0 }, near, CONFIG), null);
+  assert.equal(rayArenaHit(EYE, { x: 1, y: 0, z: 0 }, CONFIG.arena.radius - 1, CONFIG), null);
+});
+
+test('rayArenaHit: the nearer of floor and wall wins', () => {
+  // Steeply down and outward from near the wall: the floor comes first.
+  const origin = { x: CONFIG.arena.radius - 2, y: CONFIG.player.eyeHeight, z: 0 };
+  const hit = rayArenaHit(origin, { x: 1, y: -4, z: 0 }, FAR, CONFIG);
+  assert.equal(hit.surface, 'ground');
+  assert.ok(Math.hypot(hit.x, hit.z) <= CONFIG.arena.radius);
+});
+
+test('rayArenaHit: every shot from inside the arena that is not angled upward lands somewhere', () => {
+  for (let i = 0; i < 64; i++) {
+    const a = (i / 64) * Math.PI * 2;
+    const hit = rayArenaHit(EYE, { x: Math.sin(a), y: -0.2, z: Math.cos(a) }, FAR, CONFIG);
+    assert.ok(hit, `no hit at angle ${a}`);
+    assert.ok(hit.dist > 0);
+  }
 });

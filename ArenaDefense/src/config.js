@@ -190,6 +190,14 @@ export const CONFIG = Object.freeze(deepFreeze({
 
   sprites: { bobHz: 2.2, bobAmp: 0.08, squash: 0.06, flashS: 0.12, shadowOpacity: 0.35 },
 
+  // Shot feedback. `impact` is what a shot that hits no enemy leaves behind on
+  // the arena floor or wall — without it a miss produces no visible result at
+  // all and reads as though the gun never fired.
+  effects: {
+    muzzleFlash: true,
+    impact: { groundColor: 0x9b8b7a, wallColor: 0x8f8a92, count: 5 },
+  },
+
   timing: { fixedStep: 1 / 60, maxFrameDt: 0.1, waveClearDelayS: 1.5, deathScreenDelayS: 1.0 },
 
   platform: { pokiInitTimeoutMs: 4000, adsEnabled: true },

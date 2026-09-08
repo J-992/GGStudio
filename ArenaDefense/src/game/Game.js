@@ -28,7 +28,7 @@ import { ComboTracker } from '../core/combo.js';
 import { makeRng } from '../core/rng.js';
 import { pickActiveGates, waveDef, flattenSpawns } from '../core/waves.js';
 import { SpawnScheduler } from '../core/spawner.js';
-import { slotPositions } from '../core/arenaGeometry.js';
+import { slotPositions, rayArenaHit } from '../core/arenaGeometry.js';
 import { loadSave, saveSave } from '../core/storage.js';
 import { coinsForRun, applyDoubler, bestWaveAfter } from '../core/runFlow.js';
 import { storageIO } from '../platform/storage.js';
@@ -751,7 +751,10 @@ export class Game {
     const shot = this.world.player.fire();
     if (!shot) return;
 
-    const gun = this._config.player.gun;
+    // The player's own weapon, not `config.player.gun` — the two are the same
+    // object until a weapon is selected, and reading through the player is
+    // what lets a swapped weapon's stats actually take effect.
+    const gun = this.world.player.gun;
     const enemyHit = this.world.enemies?.raycast?.(shot.origin, shot.dir, gun.range) ?? null;
     // The boss renders through `Billboards`, not `Enemies`' pool, so it needs
     // its own cylinder test alongside the enemy raycast — see `Boss#hitTest`
@@ -775,11 +778,28 @@ export class Game {
       tracerEnd = _tracerEnd;
       this.world.effects.burst(hitPoint.x, hitPoint.y, hitPoint.z, HIT_PARTICLE_COLOR, HIT_PARTICLE_COUNT);
     } else {
-      _tracerEnd.copy(shot.origin).addScaledVector(shot.dir, gun.range);
+      // Missed every enemy: land the shot on the arena floor or wall so it
+      // still reads as a shot. Without this the tracer runs off to `range`
+      // into empty space and nothing happens.
+      const impact = rayArenaHit(shot.origin, shot.dir, gun.range, this._config);
+      const fx = this._config.effects.impact;
+      if (impact) {
+        _tracerEnd.set(impact.x, impact.y, impact.z);
+        this.world.effects.burst(
+          impact.x, impact.y, impact.z,
+          impact.surface === 'wall' ? fx.wallColor : fx.groundColor,
+          fx.count,
+        );
+      } else {
+        _tracerEnd.copy(shot.origin).addScaledVector(shot.dir, gun.range);
+      }
       tracerEnd = _tracerEnd;
     }
 
     this.world.effects.tracer(shot.origin, tracerEnd);
+    if (this._config.effects.muzzleFlash) {
+      this.world.effects.flash(shot.origin.x, shot.origin.y, shot.origin.z);
+    }
     this._audio.play('pistol-shot-1');
     this.bus.emit('player:fired', { origin: shot.origin, dir: shot.dir });
   }
