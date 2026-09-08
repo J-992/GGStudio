@@ -269,8 +269,8 @@ export class Billboards {
     this._writeScale(id, 0, 0);
     _matrix.identity();
     this._mesh.setMatrixAt(id, _matrix);
-    this._shadowMatrix.makeScale(0, 0, 0);
-    this._shadowMesh.setMatrixAt(id, this._shadowMatrix);
+    _shadowMatrix.makeScale(0, 0, 0);
+    this._shadowMesh.setMatrixAt(id, _shadowMatrix);
     this._matrixDirty = true;
     this._shadowDirty = true;
   }
