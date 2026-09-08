@@ -34,6 +34,15 @@ html, body {
   outline: none;
 }
 
+/* `Input#setPointerLockWanted` sets this class while gameplay owns the
+   pointer (see `game/Game.js#_syncPointerLock`). Pointer lock already hides
+   the cursor when the browser grants it; this covers the drag-to-look
+   fallback and the gap before a lock arrives. Scoped to the canvas on
+   purpose — the mute/pause buttons layered above it keep a normal cursor. */
+body.hide-cursor #scene {
+  cursor: none;
+}
+
 #ui {
   position: fixed;
   inset: 0;

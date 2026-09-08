@@ -217,6 +217,11 @@ export class Game {
       if (e.boss) this._economy.addCoins(e.coins);
     });
 
+    // Cursor/pointer-lock policy follows the state machine — see
+    // `_syncPointerLock`. Subscribed (rather than called from each of the
+    // eight `state:changed` emit sites) so no future transition can forget.
+    this.bus.on('state:changed', () => this._syncPointerLock());
+
     this._setupDebug();
 
     const devWave = this._parseDevWaveParam();
@@ -265,6 +270,7 @@ export class Game {
     this._paused = true;
     this._input.freeze(true);
     this._audio.suspend();
+    this._syncPointerLock();
   }
 
   /**
@@ -279,6 +285,28 @@ export class Game {
     this._paused = false;
     if (!this._screens.isOpen) this._input.freeze(false);
     this._audio.resume();
+    this._syncPointerLock();
+  }
+
+  /**
+   * Hands the pointer to gameplay, or gives it back. Playing a wave means
+   * pointer lock on desktop (no system cursor, unclamped mouse look); the
+   * build overlay, the pause panel and every `ui/Screens.js` screen are
+   * pointed-and-clicked, so they need the cursor back. `Input` decides what
+   * that means per scheme — touch has neither cursor nor lock.
+   *
+   * Called from every path that can change the answer: `state:changed` (via
+   * the constructor's subscription), and `pause()`/`resume()`, which also
+   * covers ad breaks, a backgrounded tab and the manual pause. A browser is
+   * free to refuse the lock (it carries no user gesture outside the Ready
+   * button's own click); `KeyboardMouse`'s click path is the backstop and
+   * the `hide-cursor` class hides the cursor over the canvas either way.
+   */
+  _syncPointerLock() {
+    const playing = !this._paused
+      && !this._screens.isOpen
+      && (this.state.state === 'wave' || this.state.state === 'waveClear');
+    this._input.setPointerLockWanted?.(playing);
   }
 
   /** @returns {import('../core/economy.js').Economy} Read-only usage by P4/P5/P6 — only `Game` replaces the instance (new run). */

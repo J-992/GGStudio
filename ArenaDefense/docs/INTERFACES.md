@@ -29,8 +29,25 @@ underlying scheme resets its own edge/delta accumulators on read, so calling
 
 `Input` also exposes: `input.mode`, `input.freeze(bool)` (zeroes and ignores
 all input — used for ad breaks/tab-hidden), `input.onModeChange(fn)`
-(subscribes to silent scheme swaps, e.g. a mouse docked to a tablet), and
-`input.dispose()`.
+(subscribes to silent scheme swaps, e.g. a mouse docked to a tablet),
+`input.setPointerLockWanted(bool)` (below), and `input.dispose()`.
+
+**Cursor policy.** `Game#_syncPointerLock` is the single place that decides
+whether gameplay owns the pointer: true only while the state is `wave` or
+`waveClear`, nothing is paused, and no `ui/Screens.js` screen is open — the
+build overlay, the pause panel and every screen are pointed-and-clicked. It
+runs on every `state:changed` (subscribed once, not called per emit site) and
+from `pause()`/`resume()`, and calls `Input#setPointerLockWanted`, which asks
+`KeyboardMouse#setLockWanted` for pointer lock and toggles the `hide-cursor`
+body class (`body.hide-cursor #scene { cursor: none }`). Touch has neither a
+cursor nor the scheme method; the optional call no-ops.
+
+That automatic request carries no user gesture, so a browser may refuse it —
+which is why failure there does NOT latch the drag-to-look fallback the way a
+failure after a canvas click does (`_requestLock(canFallback)`); the click
+path stays able to earn the lock afterwards, and `hide-cursor` hides the
+cursor over the canvas either way. In practice the `wave` entry that matters
+(the overlay's Ready button) happens inside that button's own click.
 
 ## `Assets` (`src/game/assets.js`)
 
