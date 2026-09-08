@@ -2,7 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CONFIG } from '../src/config.js';
-import { gatePositions, slotPositions, worldToMap, mapToWorld, clampToArena } from '../src/core/arenaGeometry.js';
+import {
+  gatePositions, slotPositions, slotMapPositions, worldToMap, mapToWorld, clampToArena,
+} from '../src/core/arenaGeometry.js';
+
+// `ui/BuildOverlay.js`'s `SLOT_VISUAL_R` — mirrored here because that module
+// touches the DOM and can't be imported under `node --test`.
+const SLOT_VISUAL_R = 6;
 
 /** Smallest angular distance between two angles in degrees, 0..180. */
 function angleDist(a, b) {
@@ -68,4 +74,30 @@ test('clampToArena projects exterior points onto the circle boundary', () => {
   assert.ok(Math.abs(p.x - 10) < 1e-9);
   assert.ok(Math.abs(p.z) < 1e-9);
   assert.ok(Math.abs(Math.hypot(p.x, p.z) - 10) < 1e-9);
+});
+
+test('slotMapPositions puts every slot at the map-unit slot radius', () => {
+  const expected = (90 * CONFIG.arena.slotRadius) / CONFIG.arena.radius;
+  for (const slot of slotMapPositions(CONFIG)) {
+    const r = Math.hypot(slot.x, slot.z);
+    assert.ok(Math.abs(r - expected) < 1e-9, `slot ${slot.id} map radius ${r}, expected ${expected}`);
+  }
+});
+
+test('slot markers never overlap on the build map', () => {
+  // The build overlay draws each slot as a circle of `SLOT_VISUAL_R` map
+  // units, so two slot centres closer together than one diameter would draw
+  // markers on top of each other. Feeding raw world metres into the map's
+  // viewBox (the bug this guards) collapses the 3 slots of a gate to ~5.6
+  // units apart, well inside that.
+  const slots = slotMapPositions(CONFIG);
+  for (let i = 0; i < slots.length; i++) {
+    for (let j = i + 1; j < slots.length; j++) {
+      const d = Math.hypot(slots[i].x - slots[j].x, slots[i].z - slots[j].z);
+      assert.ok(
+        d > 2 * SLOT_VISUAL_R,
+        `slots ${slots[i].id} and ${slots[j].id} are only ${d.toFixed(2)} map units apart`,
+      );
+    }
+  }
 });

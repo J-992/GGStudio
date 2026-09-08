@@ -113,6 +113,13 @@ export const CONFIG = Object.freeze(deepFreeze({
 
   turrets: {
     hp: 200,
+    // A turret shot never removes more than this fraction of a target's *max*
+    // HP, so every enemy takes at least three turret hits to go down — not
+    // even a maxed cannon's 85 splash deletes a 30hp shambler. Turrets soften
+    // and stagger; the kill is meant to stay the player's. Enforced by
+    // `core/turretLogic.js`'s `turretHitDamage`, which `game/Enemies.js`
+    // applies to every `source: 'turret'` hit (direct and splash alike).
+    maxDamageFracPerHit: 1 / 3,
     repair: { costPerHpMissing: 0.15, minCost: 5 },
     order: ['gun', 'tesla', 'cannon'],
     types: {

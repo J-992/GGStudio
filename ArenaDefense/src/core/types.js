@@ -198,6 +198,7 @@
  * @property {number} wave Current wave number, 1-based.
  * @property {number[]} activeGates The current wave's lit gate id pair.
  * @property {number} energy
+ * @property {number} coins Run total: banked + pending, matching `Hud#setCoins`.
  * @property {{x:number, z:number, yaw:number}} player
  * @property {TurretRecord[]} turrets Every tracked turret record, alive and destroyed alike.
  * @property {ReturnType<import('./arenaGeometry.js').slotPositions>} slots

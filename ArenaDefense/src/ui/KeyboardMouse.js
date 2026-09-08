@@ -1,6 +1,7 @@
-// Desktop input scheme: WASD/arrows to move, mouse to look (pointer-lock on
-// canvas click, drag-to-look fallback if that's rejected), left button to
-// fire, 1/2/3 to pick a turret type, Space/Enter for Ready, Escape to pause.
+// Desktop input scheme: WASD/arrows to move, mouse to look (pointer-lock the
+// moment gameplay starts — see `setLockWanted` — or on canvas click, with a
+// drag-to-look fallback if both are rejected), left button to fire, 1/2/3 to
+// pick a turret type, Space/Enter for Ready, Escape to pause.
 //
 // Implements the `sample()/freeze()/dispose()` contract `ui/input.js` expects
 // from any input scheme: `sample()` returns this frame's reading and resets
@@ -31,6 +32,11 @@ export class KeyboardMouse {
     this._pendingReady = false;
     this._pendingPause = false;
     this._lockTimeout = null;
+    this._lockWanted = false;
+    // Whether the lock request currently in flight was user-gesture-backed,
+    // and so whether its failure is real evidence that pointer lock is
+    // unavailable here — see `_requestLock`.
+    this._lockCanFallback = false;
 
     /** Public: false once pointer lock has been rejected/timed out and the
      * scheme has fallen back to drag-to-look. Mirrors the plan's
@@ -65,6 +71,23 @@ export class KeyboardMouse {
       this._keys.clear();
       this._mouseDown = false;
       this._dragging = false;
+    }
+  }
+
+  /**
+   * Pointer-lock policy from outside the scheme: `Game` turns this on while
+   * gameplay is running and off for the build overlay, the pause panel and
+   * every screen — so the desktop cursor disappears on its own when a wave
+   * starts instead of the player having to click the canvas for it.
+   *
+   * @param {boolean} wanted
+   */
+  setLockWanted(wanted) {
+    this._lockWanted = wanted;
+    if (wanted) {
+      this._requestLock(false);
+    } else if (document.pointerLockElement === this._canvas) {
+      try { document.exitPointerLock(); } catch { /* already unlocked */ }
     }
   }
 
@@ -175,13 +198,34 @@ export class KeyboardMouse {
   }
 
   _onClick() {
+    // A click is a real user gesture, so a lock that doesn't arrive after one
+    // is genuine evidence the browser won't grant it here.
+    this._requestLock(true);
+  }
+
+  /**
+   * @param {boolean} canFallback Whether failure should latch drag-to-look.
+   *   True only for gesture-backed requests: `setLockWanted`'s automatic one
+   *   carries no transient activation, so browsers that require a gesture
+   *   refuse it as a matter of course — latching the fallback on that would
+   *   permanently downgrade look control (and block `_onClick` from ever
+   *   earning the lock) on a browser that was going to grant it on the very
+   *   next click.
+   */
+  _requestLock(canFallback) {
     if (this._frozen || this._fallbackMode || this._locked) return;
+    this._lockCanFallback = canFallback;
+    let result;
     try {
-      this._canvas.requestPointerLock();
+      result = this._canvas.requestPointerLock();
     } catch {
-      this._enableFallback();
+      if (canFallback) this._enableFallback();
       return;
     }
+    // Newer browsers return a promise here; an unhandled rejection is a
+    // console error, and a refused automatic request is expected, not news.
+    if (result && typeof result.catch === 'function') result.catch(() => {});
+    if (!canFallback) return;
     if (this._lockTimeout !== null) clearTimeout(this._lockTimeout);
     this._lockTimeout = setTimeout(() => {
       if (!this._locked) this._enableFallback();
@@ -207,7 +251,9 @@ export class KeyboardMouse {
       clearTimeout(this._lockTimeout);
       this._lockTimeout = null;
     }
-    this._enableFallback();
+    // Only a gesture-backed request failing means pointer lock is unavailable
+    // — see `_requestLock`.
+    if (this._lockCanFallback) this._enableFallback();
   }
 
   _enableFallback() {
