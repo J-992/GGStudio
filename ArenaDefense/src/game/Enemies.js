@@ -24,6 +24,7 @@ import { turretHitDamage } from '../core/turretLogic.js';
 
 const HP_DEATH_EPS = 1e-3;
 
+const X_AXIS = new THREE.Vector3(1, 0, 0);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const ZERO_SCALE = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -32,8 +33,6 @@ const PROJECTILE_CAP = 64;
 const PROJECTILE_HIT_RADIUS = 0.5;
 const SPAWN_SPREAD = 1.4;
 const LUNGE_SWING_S = 0.15;
-const VOXEL_BOB_AMP = 0.05;
-const VOXEL_LEAN_RAD = 0.09;
 const MELEE_SOUND_MIN_INTERVAL_S = 0.12;
 const IMPACT_SOUND_MIN_INTERVAL_S = 0.15;
 const DEATH_SOUND_MIN_INTERVAL_S = 0.05;
@@ -48,6 +47,7 @@ const _place = new THREE.Matrix4();
 const _quat = new THREE.Quaternion();
 const _quatYaw = new THREE.Quaternion();
 const _quatLean = new THREE.Quaternion();
+const _quatPitch = new THREE.Quaternion();
 const _quatKick = new THREE.Quaternion();
 const _kickAxis = new THREE.Vector3();
 const _pos = new THREE.Vector3();
@@ -146,6 +146,11 @@ export class Enemies {
     this._kickVX = new Float32Array(cap);
     this._kickVZ = new Float32Array(cap);
     this._walkPhase = new Float32Array(cap);
+    /** Gait phase in STRIDES, advanced by `speed * stepsPerMetre * dt`. Kept
+     *  separate from `_walkPhase` (raw seconds) because `spriteAnim.js#bob`
+     *  applies speed itself — handing it a pre-scaled phase would scale it
+     *  twice. */
+    this._gaitPhase = new Float32Array(cap);
     this._gate = new Int32Array(cap).fill(-1);
     /** @type {(('voxel'|'sprite')|null)[]} */
     this._renderKind = new Array(cap).fill(null);
@@ -343,6 +348,10 @@ export class Enemies {
     this._kickVX[idx] = 0;
     this._kickVZ[idx] = 0;
     this._walkPhase[idx] = 0;
+    // Deliberately random, and deliberately NOT from the seeded stream: this
+    // is cosmetic. Starting every enemy at 0 put the whole crowd in lockstep,
+    // which reads as one sliding object rather than thirty-five walkers.
+    this._gaitPhase[idx] = Math.random();
     this._gate[idx] = gateId;
     this._renderKind[idx] = typeDef.render;
     this._slotId[idx] = -1;
@@ -431,6 +440,10 @@ export class Enemies {
         // increasing clockwise, i.e. forward = (sin(yaw), 0, -cos(yaw)).
         this._yaw[i] = Math.atan2(vx, -vz);
         this._walkPhase[i] += dt;
+        // Cadence follows how fast this thing is really travelling, so a
+        // sprinting spitter visibly out-steps a shambler. The old flat
+        // `+= dt` gave every enemy the same 1 Hz regardless of speed.
+        this._gaitPhase[i] += Math.hypot(vx, vz) * this._cfg.enemies.gait.stepsPerMetre * dt;
       }
 
       this._cooldown[i] = tickCooldown({ cooldown: this._cooldown[i] }, dt);
@@ -474,9 +487,19 @@ export class Enemies {
     const slot = this._slotId[i];
     if (slot < 0) return;
 
-    const phase = this._walkPhase[i] * 2 * Math.PI;
-    const bobY = moving ? Math.sin(phase) * VOXEL_BOB_AMP : 0;
-    const lean = moving ? Math.sin(phase) * VOXEL_LEAN_RAD : 0;
+    // One stride is two footfalls, so the vertical bob and the heel-strike
+    // compression run at TWICE the stride frequency while the roll and the
+    // lateral sway run once per stride. Getting those two rates different is
+    // most of what separates a walk from a hum: matched rates read as a body
+    // vibrating, mismatched rates read as weight moving foot to foot.
+    const gait = this._cfg.enemies.gait;
+    const stride = this._gaitPhase[i] * 2 * Math.PI;
+    const step = stride * 2;
+    const bobY = moving ? Math.sin(step) * gait.bobAmp : 0;
+    const roll = moving ? Math.sin(stride) * gait.rollRad : 0;
+    const sway = moving ? Math.cos(stride) * gait.swayM : 0;
+    // Compression on the way down only — a heel taking weight, not a bounce.
+    const heel = moving ? Math.max(0, -Math.sin(step)) * gait.squashAmp : 0;
 
     const kickX = this._kickVX[i];
     const kickZ = this._kickVZ[i];
@@ -484,10 +507,22 @@ export class Enemies {
     const hit = kickSpeed > 0 ? knockbackIntensity(kickSpeed, typeDef, this._cfg) : 0;
     const squash = hit > 0 ? hitSquash(hit, this._cfg) : null;
 
-    _pos.set(this._x[i], bobY, this._z[i]);
-    _quatYaw.setFromAxisAngle(Y_AXIS, this._yaw[i] + FACING_FIX);
-    _quatLean.setFromAxisAngle(Z_AXIS, lean);
-    _quat.copy(_quatYaw).multiply(_quatLean);
+    // Sway is lateral, so it goes along the body's right axis rather than a
+    // world one — otherwise a zombie walking north and one walking east would
+    // shift in the same direction.
+    const yaw = this._yaw[i];
+    _pos.set(
+      this._x[i] + Math.cos(yaw) * sway,
+      bobY,
+      this._z[i] + Math.sin(yaw) * sway,
+    );
+    _quatYaw.setFromAxisAngle(Y_AXIS, yaw + FACING_FIX);
+    _quatLean.setFromAxisAngle(Z_AXIS, roll);
+    // A constant forward lean while moving: a walker leads with its chest.
+    // Applied in the body's own frame, after yaw, so it leans along the
+    // direction of travel whichever way that points.
+    _quatPitch.setFromAxisAngle(X_AXIS, moving ? -gait.leanFwdRad : 0);
+    _quat.copy(_quatYaw).multiply(_quatLean).multiply(_quatPitch);
 
     if (hit > 0) {
       // Tilt the body's top *towards* the push, around the world axis
@@ -504,6 +539,14 @@ export class Enemies {
     // that gets composed now, never the old shared `_scaleOne` constant.
     if (squash) _scale.set(squash.sx, squash.sy, squash.sx);
     else _scale.set(1, 1, 1);
+    // Heel strike: a brief vertical compression, widening slightly as it
+    // squats so the volume reads as roughly conserved. Multiplied into
+    // whatever the hit-squash left, since a body can be shoved mid-step.
+    if (heel > 0) {
+      _scale.y *= 1 - heel;
+      _scale.x *= 1 + heel * 0.5;
+      _scale.z *= 1 + heel * 0.5;
+    }
     _scale.multiplyScalar(this._sizeMul[i]);
     _place.compose(_pos, _quat, _scale);
     _matrix.multiplyMatrices(_place, pool.localMatrix);

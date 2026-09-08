@@ -162,6 +162,24 @@ export const CONFIG = Object.freeze(deepFreeze({
     // not. `tungtung`'s `lunge` closing burst is a fixed distance and does NOT
     // scale with speed, so it grew proportionally more dangerous here.
     cap: 35,
+
+    // Walk cycle for the voxel enemies. `phase` is measured in STRIDES and
+    // accumulates as `speed * stepsPerMetre * dt`, so cadence rises with how
+    // fast a thing is actually moving — it used to advance at a flat 1 Hz
+    // regardless of speed, which is a large part of why they read as sliding.
+    //
+    // A stride is two footfalls, so the vertical bob runs at twice the stride
+    // frequency while the roll and sway run at once per stride. That mismatch
+    // is what makes a gait read as weight shifting from foot to foot rather
+    // than as a body vibrating.
+    gait: {
+      stepsPerMetre: 0.55, // ~1.9 strides/s at a 3.4 m/s shambler
+      bobAmp: 0.06,        // metres, twice per stride
+      rollRad: 0.10,       // side-to-side roll, once per stride
+      leanFwdRad: 0.13,    // constant forward lean while moving
+      swayM: 0.05,         // lateral weight shift, once per stride
+      squashAmp: 0.05,     // heel-strike compression, twice per stride
+    },
     separationRadius: 1.2,
     separationForce: 3,
     // Hit reaction: every point of damage shoves the body back along the
