@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { CONFIG } from '../src/config.js';
-import { sanitizePrefs, effectiveSens, DEFAULT_PREFS, SENS_MIN, SENS_MAX } from '../src/core/prefs.js';
+import { sanitizePrefs, DEFAULT_PREFS, SENS_MIN, SENS_MAX } from '../src/core/prefs.js';
 
 test('sanitizePrefs returns the defaults for anything unusable', () => {
   for (const raw of [null, undefined, 0, '', 'nonsense', [], NaN, true]) {
@@ -55,11 +54,4 @@ test('sanitizePrefs output round-trips through itself unchanged', () => {
 test('sanitizePrefs never leaks unknown keys through', () => {
   const p = sanitizePrefs({ evil: 1, __proto__: { x: 2 } });
   assert.deepEqual(Object.keys(p).sort(), Object.keys(DEFAULT_PREFS).sort());
-});
-
-test('effectiveSens falls back to the configured base when unset', () => {
-  const base = CONFIG.player.lookSensMouse;
-  assert.equal(effectiveSens(null, base), base);
-  assert.equal(effectiveSens(2, base), base * 2);
-  assert.equal(effectiveSens(0.5, base), base * 0.5);
 });

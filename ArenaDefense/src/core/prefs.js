@@ -68,14 +68,3 @@ export function sanitizePrefs(raw) {
     weapon: typeof src.weapon === 'string' && src.weapon !== '' ? src.weapon : null,
   };
 }
-
-/**
- * Resolves a stored sensitivity multiplier against the configured base.
- *
- * @param {number|null} multiplier
- * @param {number} base `config.player.lookSensMouse` or `lookSensTouch`.
- * @returns {number}
- */
-export function effectiveSens(multiplier, base) {
-  return multiplier === null ? base : base * multiplier;
-}

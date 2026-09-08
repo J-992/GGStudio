@@ -30,7 +30,6 @@ import { pickActiveGates, waveDef, flattenSpawns } from '../core/waves.js';
 import { SpawnScheduler } from '../core/spawner.js';
 import { slotPositions, rayArenaHit } from '../core/arenaGeometry.js';
 import { spreadDirs, weaponIds, resolveWeapon, coerceWeaponId } from '../core/weapons.js';
-import { effectiveSens } from '../core/prefs.js';
 import { loadSave, saveSave } from '../core/storage.js';
 import { coinsForRun, applyDoubler, bestWaveAfter } from '../core/runFlow.js';
 import { storageIO, loadPrefs, savePrefs, saveMuted } from '../platform/storage.js';
@@ -402,9 +401,12 @@ export class Game {
   _setManualPause(paused) {
     if (paused === this._manualPaused) return;
     this._manualPaused = paused;
-    // The bare "PAUSED" panel is for pauses the player did not ask for (an
-    // ad, a backgrounded tab). A deliberate pause gets the real menu instead,
-    // opened by `_togglePauseGuarded`.
+    // The real pause menu (`Screens#showPause`, opened by
+    // `_togglePauseGuarded`) has replaced the HUD's bare "PAUSED" text panel,
+    // so clear it rather than stacking the two. Nothing sets it any more:
+    // an involuntary pause is either behind Poki's full-screen ad iframe or
+    // in a tab nobody is looking at, so it has no panel to show. `Hud`'s
+    // `setPaused` is left in place but is now only this reset.
     this._hud.setPaused(false);
     if (paused) {
       this.pause();
@@ -703,9 +705,10 @@ export class Game {
 
   /** Pushes the current preferences into the systems that read them. */
   _applyPrefs() {
+    // `null` in stored prefs means "as configured", which is a multiplier of 1.
     this._input.setLookSensitivity({
-      mouse: effectiveSens(this._prefs.sensMouse, this._config.player.lookSensMouse),
-      touch: effectiveSens(this._prefs.sensTouch, this._config.player.lookSensTouch),
+      mouse: this._prefs.sensMouse ?? 1,
+      touch: this._prefs.sensTouch ?? 1,
       invertY: this._prefs.invertY,
     });
     this._hud.setFpsVisible(this._prefs.showFps);

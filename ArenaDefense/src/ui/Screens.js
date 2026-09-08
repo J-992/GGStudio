@@ -355,9 +355,10 @@ export class Screens {
   }
 
   /**
-   * The manual pause menu. `Hud#setPaused`'s bare "PAUSED" panel still covers
-   * the pauses the player did not ask for (an ad, a backgrounded tab) — this
-   * is only for the deliberate one.
+   * The manual pause menu — Escape, or the touch HUD's pause button. It
+   * replaces the HUD's old bare "PAUSED" text panel outright. An involuntary
+   * pause (an ad, a backgrounded tab) shows nothing at all, because something
+   * else is already covering the screen in both cases.
    *
    * @returns {Promise<'resume'|'settings'|'title'>}
    */
