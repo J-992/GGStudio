@@ -703,10 +703,12 @@ Shows the run's coin total (`setCoins`, fed by `BuildSnapshot.coins` on every
 `refresh`) as well as energy: `buildPhase.js` calls `hud.show(false)` for the
 whole build phase, so without it the player has no coin readout on the one
 screen where they are deciding what to spend. It also carries the game's only
-statement of what this screen's controls are — a `.bo-hint--touch` /
-`.bo-hint--keyboard` pair, shown by the same `body.touch`/`body.keyboard`
-switch `Hud`'s hints use — since nothing else tells a player that a dashed
-ring is tappable.
+statement of what this screen's controls are: a `.bo-help` legend of key
+badges (`<kbd>`) paired with miniatures of the map's own slot markers —
+dashed ring = build, filled = upgrade/repair — built once per input mode
+(`.bo-help--touch` / `.bo-help--keyboard`) and shown by the same
+`body.touch`/`body.keyboard` switch `Hud`'s hints use, since nothing else
+tells a player that a dashed ring is tappable.
 
 `InputFrame.select`/`.ready` have no touch equivalent in P2/P3 (documented
 on `InputFrame` above), so this file attaches its own `window` `keydown`

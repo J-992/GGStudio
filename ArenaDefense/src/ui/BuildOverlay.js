@@ -55,6 +55,46 @@ function htmlEl(tag, className) {
 }
 
 /**
+ * A miniature of what the map draws at a slot, so a legend row points at a
+ * recognisable shape instead of naming one. `null` renders nothing (for rows
+ * about a button rather than a slot).
+ *
+ * @param {'empty'|'built'|null} kind
+ * @returns {SVGElement|null}
+ */
+function slotGlyph(kind) {
+  if (kind === null) return null;
+  const svg = svgEl('svg', { class: 'bo-help__glyph', viewBox: '-10 -10 20 20', 'aria-hidden': 'true' });
+  svg.appendChild(svgEl('circle', { r: '7.5', class: `bo-help__glyph-ring is-${kind}` }));
+  if (kind === 'built') svg.appendChild(svgEl('circle', { r: '4.8', class: 'bo-help__glyph-fill' }));
+  return svg;
+}
+
+/**
+ * One legend row: the key(s) that trigger the action, the map glyph it acts
+ * on (optional), and the action's name.
+ *
+ * @param {string[]} keys
+ * @param {'empty'|'built'|null} glyph
+ * @param {string} label
+ * @returns {HTMLElement}
+ */
+function helpRow(keys, glyph, label) {
+  const row = htmlEl('div', 'bo-help__row');
+  for (const key of keys) {
+    const kbd = htmlEl('kbd', 'bo-help__key');
+    kbd.textContent = key;
+    row.appendChild(kbd);
+  }
+  const shape = slotGlyph(glyph);
+  if (shape) row.appendChild(shape);
+  const name = htmlEl('span', 'bo-help__label');
+  name.textContent = label;
+  row.appendChild(name);
+  return row;
+}
+
+/**
  * World-convention angle (`arenaGeometry`'s "0deg = -z/north, clockwise") to
  * a point already in map units — equivalent to computing the world point
  * and running it through `worldToMap`, just without allocating twice; the
@@ -195,7 +235,7 @@ export class BuildOverlay {
     this._buildEnergy();
     this._buildCoins();
     this._buildMap();
-    this._buildHint();
+    this._buildHelp();
     this._buildChips();
     this._buildReady();
     this._buildSheet();
@@ -304,23 +344,31 @@ export class BuildOverlay {
   }
 
   /**
-   * The build map is the one screen with no tutorial anywhere else in the
-   * game — nothing on it says a dashed ring is tappable — so it states the
-   * three actions outright. Touch and keyboard wordings are both built and
-   * `style.css` shows whichever matches `body.touch`/`body.keyboard`, the
+   * Control legend for the map — the build map is the one screen with no
+   * tutorial anywhere else in the game, and nothing on it says a dashed ring
+   * is tappable. Built as key badges + the map's own slot glyphs rather than
+   * a sentence, so it reads as a game's control list and ties each action to
+   * the thing on the map it acts on. Touch and keyboard rows are both built
+   * and `style.css` shows whichever matches `body.touch`/`body.keyboard`, the
    * same switch `Hud`'s own hints use (`ui/input.js` sets the class).
    */
-  _buildHint() {
-    const box = htmlEl('div', 'bo-hints');
+  _buildHelp() {
+    const touch = htmlEl('div', 'bo-help bo-help--touch');
+    touch.append(
+      helpRow(['Tap'], 'empty', 'Build'),
+      helpRow(['Tap'], 'built', 'Upgrade / Repair'),
+      helpRow(['Ready'], null, 'Start wave'),
+    );
 
-    const touch = htmlEl('p', 'bo-hint bo-hint--touch');
-    touch.textContent = 'Tap a ring to build · tap a turret to upgrade or repair · READY starts the wave';
+    const keyboard = htmlEl('div', 'bo-help bo-help--keyboard');
+    keyboard.append(
+      helpRow(['1', '2', '3'], null, 'Select'),
+      helpRow(['Click'], 'empty', 'Build'),
+      helpRow(['Click'], 'built', 'Upgrade / Repair'),
+      helpRow(['Space'], null, 'Start wave'),
+    );
 
-    const keyboard = htmlEl('p', 'bo-hint bo-hint--keyboard');
-    keyboard.textContent = '1/2/3 pick a turret · click a ring to build · click a turret to upgrade or repair · Space starts the wave';
-
-    box.append(touch, keyboard);
-    this._wrap.appendChild(box);
+    this._wrap.append(touch, keyboard);
   }
 
   _buildChips() {
