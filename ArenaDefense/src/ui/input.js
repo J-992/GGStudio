@@ -31,6 +31,7 @@ export class Input {
     this._config = config;
     this._override = readOverride();
     this._frozen = false;
+    this._lockWanted = false;
     /** @type {Set<(mode: 'touch'|'keyboard') => void>} */
     this._modeListeners = new Set();
 
@@ -73,6 +74,7 @@ export class Input {
     document.body.classList.add(this.mode);
     this._scheme = this._createScheme(this.mode);
     if (this._frozen) this._scheme.freeze(true);
+    if (this._lockWanted) this._scheme.setLockWanted?.(true);
     for (const fn of this._modeListeners) fn(this.mode);
   }
 
@@ -132,6 +134,21 @@ export class Input {
   }
 
   /**
+   * Whether gameplay currently owns the pointer. On desktop this asks
+   * `KeyboardMouse` for pointer lock (which hides the system cursor); the
+   * `hide-cursor` body class hides it over the canvas either way, covering
+   * both the drag-to-look fallback and the moment before a lock is granted.
+   * Touch has no cursor and no scheme method — the optional call no-ops.
+   *
+   * @param {boolean} wanted
+   */
+  setPointerLockWanted(wanted) {
+    this._lockWanted = wanted;
+    document.body.classList.toggle('hide-cursor', wanted);
+    this._scheme.setLockWanted?.(wanted);
+  }
+
+  /**
    * @returns {import('../core/types.js').InputFrame}
    */
   frame() {
@@ -154,6 +171,7 @@ export class Input {
 
   dispose() {
     this._media.removeEventListener('change', this._handleMediaChange);
+    document.body.classList.remove('hide-cursor');
     this._scheme.dispose();
   }
 }

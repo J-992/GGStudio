@@ -20,6 +20,9 @@ import {
   knockbackSpeed, decayKnockback, staggerFactor, knockbackTilt, knockbackIntensity,
 } from '../core/enemyBrain.js';
 import { bob, hitFlash, hitSquash } from '../core/spriteAnim.js';
+import { turretHitDamage } from '../core/turretLogic.js';
+
+const HP_DEATH_EPS = 1e-3;
 
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
@@ -549,16 +552,21 @@ export class Enemies {
   /**
    * @param {number} idx
    * @param {number} dmg
-   * @param {string} source Free-form origin tag (`'player'`, a turret type name, ...).
+   * @param {string} source Free-form origin tag (`'player'`, a turret type name, ...). `'turret'` is the one tag with a rule attached: the hit is capped by `turretHitDamage` so turrets never one-shot (knockback included — a capped hit shoves proportionally less).
    * @param {{x:number, z:number}} [dir] Push direction (need not be normalized). Omitted/zero pushes the enemy straight backwards from its own facing.
    * @returns {boolean} Whether this hit killed the enemy.
    */
   damageAt(idx, dmg, source, dir) {
     if (idx < 0 || !this._alive[idx]) return false;
-    this._hp[idx] -= dmg;
+    const applied = source === 'turret' ? turretHitDamage(dmg, this._hpMax[idx], this._cfg) : dmg;
+    this._hp[idx] -= applied;
     this._hitAt[idx] = this._time;
-    this._applyKnockback(idx, dmg, dir);
-    if (this._hp[idx] <= 0) {
+    this._applyKnockback(idx, applied, dir);
+    // `_hp` is a Float32Array, so a capped turret hit — exactly half of a
+    // wave-scaled `hpMax` like 33.0 — can leave a ~1e-6 sliver behind on the
+    // shot that should have finished the job. Anything under this threshold
+    // is dead, not a third-shot enemy.
+    if (this._hp[idx] <= HP_DEATH_EPS) {
       this._kill(idx, source);
       return true;
     }

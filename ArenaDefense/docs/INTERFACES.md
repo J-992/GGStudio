@@ -29,8 +29,25 @@ underlying scheme resets its own edge/delta accumulators on read, so calling
 
 `Input` also exposes: `input.mode`, `input.freeze(bool)` (zeroes and ignores
 all input — used for ad breaks/tab-hidden), `input.onModeChange(fn)`
-(subscribes to silent scheme swaps, e.g. a mouse docked to a tablet), and
-`input.dispose()`.
+(subscribes to silent scheme swaps, e.g. a mouse docked to a tablet),
+`input.setPointerLockWanted(bool)` (below), and `input.dispose()`.
+
+**Cursor policy.** `Game#_syncPointerLock` is the single place that decides
+whether gameplay owns the pointer: true only while the state is `wave` or
+`waveClear`, nothing is paused, and no `ui/Screens.js` screen is open — the
+build overlay, the pause panel and every screen are pointed-and-clicked. It
+runs on every `state:changed` (subscribed once, not called per emit site) and
+from `pause()`/`resume()`, and calls `Input#setPointerLockWanted`, which asks
+`KeyboardMouse#setLockWanted` for pointer lock and toggles the `hide-cursor`
+body class (`body.hide-cursor #scene { cursor: none }`). Touch has neither a
+cursor nor the scheme method; the optional call no-ops.
+
+That automatic request carries no user gesture, so a browser may refuse it —
+which is why failure there does NOT latch the drag-to-look fallback the way a
+failure after a canvas click does (`_requestLock(canFallback)`); the click
+path stays able to earn the lock afterwards, and `hide-cursor` hides the
+cursor over the canvas either way. In practice the `wave` entry that matters
+(the overlay's Ready button) happens inside that button's own click.
 
 ## `Assets` (`src/game/assets.js`)
 
@@ -376,6 +393,7 @@ class Enemies {
    * @param {number} idx
    * @param {number} dmg
    * @param {string} source Free-form origin tag: `'player'`, `'turret'`, ...
+   *   `'turret'` is the one tag with a rule attached — see the cap below.
    * @param {{x:number,z:number}} [dir] Hit-reaction push direction (need not be
    *   normalized) — the bullet's direction, or turret→enemy. Omitted or zero
    *   shoves the enemy straight backwards from its own facing.
@@ -431,6 +449,17 @@ class Enemies {
   clear() {}
 }
 ```
+
+**Turrets never one-shot.** A hit tagged `source: 'turret'` (direct or
+splash — `damageRadius` funnels through `damageAt`) is clamped by
+`turretLogic.turretHitDamage` to `cfg.turrets.maxDamageFracPerHit` of the
+target's *max* HP — 1/3, so every enemy takes at least three turret hits and
+even a maxed cannon's 85 splash needs three shots on a 30hp shambler. The cap
+is relative to max HP, so it never blocks the last of those shots from
+killing, and it leaves damage untouched against anything big enough not to be
+capped anyway (`tungtung`, the boss — `Boss#damage` isn't capped at all).
+Knockback scales off the *applied* (post-cap) damage. Turrets soften and
+stagger; the kill stays the player's.
 
 Rendering: two `InstancedMesh`es (one per voxel model, `zed_1`/shambler and
 `zed_3`/spitter, each sized `cfg.enemies.cap`) built from
@@ -534,7 +563,9 @@ class Game {
 ```
 
 `getSnapshot()` additionally carries `economy` and `scheduler` (the raw
-instances, alongside the pre-existing `energy`/`wave`/`activeGates` fields).
+instances, alongside the pre-existing `energy`/`wave`/`activeGates` fields)
+and `coins`, the banked+pending run total `_syncHud` shows — `BuildOverlay`
+reads it because the HUD is hidden while the build overlay is up.
 
 Player firing (`_handleFiring`) now does a real hitscan: `world.enemies
 .raycast(shot.origin, shot.dir, gun.range)`, and on a hit,
@@ -678,6 +709,7 @@ class BuildOverlay {
   close() {}
   setCountdown(secondsLeft) {}
   setEnergy(n) {}
+  setCoins(n) {}
   setSelectedType(type) {}
   refresh(snapshot) {}
   /** @type {boolean} */
@@ -693,7 +725,11 @@ class BuildOverlay {
 ```
 
 Renders into the `#overlay` node `index.html` already reserves (never
-recreates it). `worldToMap`/`arenaGeometry`'s "+z world = down on screen"
+recreates it). Slot markers come from `arenaGeometry.slotMapPositions(cfg)`,
+**not** `slotPositions(cfg)`: everything drawn here is in the map units of
+`viewBox="-100 -100 200 200"` (arena wall at 90), and raw world metres put
+all 9 slots inside the middle ~16 units, where the 3 markers of a gate draw
+on top of each other. `worldToMap`/`arenaGeometry`'s "+z world = down on screen"
 convention needs no flip anywhere in this file — SVG's own y-axis already
 increases downward, and `worldToMap` is a uniform scale. Does its own
 affordability pre-check (shake + `ui-deny`) against its last-known energy
@@ -701,6 +737,17 @@ number before calling `onPlace`/`onUpgrade`/`onRepair` at all, purely for
 snappy feedback tied to the tapped element — `buildPhase.js` re-checks
 affordability itself before spending regardless, since the overlay's cached
 energy can be up to 250ms stale (see `refresh`'s polling interval below).
+
+Shows the run's coin total (`setCoins`, fed by `BuildSnapshot.coins` on every
+`refresh`) as well as energy: `buildPhase.js` calls `hud.show(false)` for the
+whole build phase, so without it the player has no coin readout on the one
+screen where they are deciding what to spend. It also carries the game's only
+statement of what this screen's controls are: a `.bo-help` legend of key
+badges (`<kbd>`) paired with miniatures of the map's own slot markers —
+dashed ring = build, filled = upgrade/repair — built once per input mode
+(`.bo-help--touch` / `.bo-help--keyboard`) and shown by the same
+`body.touch`/`body.keyboard` switch `Hud`'s hints use, since nothing else
+tells a player that a dashed ring is tappable.
 
 `InputFrame.select`/`.ready` have no touch equivalent in P2/P3 (documented
 on `InputFrame` above), so this file attaches its own `window` `keydown`

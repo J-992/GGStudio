@@ -146,3 +146,21 @@ export function rayArenaHit(origin, dir, maxDist, cfg) {
 
   return best;
 }
+
+/**
+ * {@link slotPositions} with every position already converted to build-overlay
+ * map units by {@link worldToMap} — the form `ui/BuildOverlay.js` needs, since
+ * its `viewBox` is in map units (arena wall at 90), not world metres. Placing
+ * raw world coordinates into that viewBox squeezes all 9 slots into the middle
+ * ~16 units of the map, where the markers of the 3 slots sharing a gate
+ * overlap each other completely.
+ *
+ * @param {import('./types.js').GameConfig} cfg
+ * @returns {{ id: number, gateId: number, angleDeg: number, x: number, z: number }[]}
+ */
+export function slotMapPositions(cfg) {
+  return slotPositions(cfg).map((slot) => {
+    const { x, z } = worldToMap(slot.x, slot.z, cfg);
+    return { ...slot, x, z };
+  });
+}

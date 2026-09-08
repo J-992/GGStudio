@@ -8,10 +8,10 @@
 // Constructed once (`new BuildOverlay(cfg, audio)`) and driven from outside
 // by `game/buildPhase.js`, which sets
 // `onPlace/onUpgrade/onRepair/onReady/onSelectWeapon` after construction and
-// calls `open/close/setCountdown/setEnergy/refresh` — see this file's "P4
-// additions" entry in `docs/INTERFACES.md` for the full callback/method
-// contract.
-import { slotPositions, worldToMap } from '../core/arenaGeometry.js';
+// calls `open/close/setCountdown/setEnergy/setSelectedWeapon/refresh` — see
+// this file's "P4 additions" entry in `docs/INTERFACES.md` for the full
+// callback/method contract.
+import { slotMapPositions, worldToMap } from '../core/arenaGeometry.js';
 import { upgradeCost, repairCost } from '../core/turretLogic.js';
 import { resolveWeapon } from '../core/weapons.js';
 
@@ -54,6 +54,46 @@ function htmlEl(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
+}
+
+/**
+ * A miniature of what the map draws at a slot, so a legend row points at a
+ * recognisable shape instead of naming one. `null` renders nothing (for rows
+ * about a button rather than a slot).
+ *
+ * @param {'empty'|'built'|null} kind
+ * @returns {SVGElement|null}
+ */
+function slotGlyph(kind) {
+  if (kind === null) return null;
+  const svg = svgEl('svg', { class: 'bo-help__glyph', viewBox: '-10 -10 20 20', 'aria-hidden': 'true' });
+  svg.appendChild(svgEl('circle', { r: '7.5', class: `bo-help__glyph-ring is-${kind}` }));
+  if (kind === 'built') svg.appendChild(svgEl('circle', { r: '4.8', class: 'bo-help__glyph-fill' }));
+  return svg;
+}
+
+/**
+ * One legend row: the key(s) that trigger the action, the map glyph it acts
+ * on (optional), and the action's name.
+ *
+ * @param {string[]} keys
+ * @param {'empty'|'built'|null} glyph
+ * @param {string} label
+ * @returns {HTMLElement}
+ */
+function helpRow(keys, glyph, label) {
+  const row = htmlEl('div', 'bo-help__row');
+  for (const key of keys) {
+    const kbd = htmlEl('kbd', 'bo-help__key');
+    kbd.textContent = key;
+    row.appendChild(kbd);
+  }
+  const shape = slotGlyph(glyph);
+  if (shape) row.appendChild(shape);
+  const name = htmlEl('span', 'bo-help__label');
+  name.textContent = label;
+  row.appendChild(name);
+  return row;
 }
 
 /**
@@ -108,7 +148,9 @@ export class BuildOverlay {
     /** @type {((e:KeyboardEvent) => void)|null} */
     this._keydownHandler = null;
 
-    this._slots = slotPositions(cfg);
+    // Map units, not world metres: everything in `_buildMap` below writes
+    // straight into the `viewBox="-100 -100 200 200"` coordinate system.
+    this._slots = slotMapPositions(cfg);
 
     this._root = document.getElementById('overlay');
     this._buildDom();
@@ -151,6 +193,17 @@ export class BuildOverlay {
   }
 
   /**
+   * Run total (banked + pending), matching `Hud#setCoins` — the HUD is hidden
+   * for the whole build phase (`buildPhase.js` calls `hud.show(false)`), so
+   * without this the player's coin count simply disappears while they are
+   * deciding what to spend on.
+   * @param {number} coins
+   */
+  setCoins(coins) {
+    this._coinsValue.textContent = `${Math.floor(coins)}`;
+  }
+
+  /**
    * @param {string} type
    */
   setSelectedType(type) {
@@ -184,6 +237,7 @@ export class BuildOverlay {
     this._renderSlots();
     this._renderPlayer(snapshot.player);
     this.setEnergy(snapshot.energy);
+    this.setCoins(snapshot.coins ?? 0);
 
     if (this._sheetSlotId !== null) {
       const rec = this._turretsById.get(this._sheetSlotId);
@@ -198,8 +252,10 @@ export class BuildOverlay {
     this._wrap = htmlEl('div', 'bo');
     this._root.appendChild(this._wrap);
 
-    this._buildMap();
     this._buildEnergy();
+    this._buildCoins();
+    this._buildMap();
+    this._buildHelp();
     this._buildChips();
     this._buildWeaponChips();
     this._buildReady();
@@ -294,6 +350,46 @@ export class BuildOverlay {
     this._energyValue = htmlEl('span', 'bo-energy__value');
     box.append(icon, this._energyValue);
     this._wrap.appendChild(box);
+  }
+
+  _buildCoins() {
+    const box = htmlEl('div', 'bo-coins');
+    const icon = svgEl('svg', { class: 'icon bo-coins__icon' });
+    const use = document.createElementNS(SVG_NS, 'use');
+    use.setAttribute('href', '#icon-coin');
+    icon.appendChild(use);
+    this._coinsValue = htmlEl('span', 'bo-coins__value');
+    this._coinsValue.textContent = '0';
+    box.append(icon, this._coinsValue);
+    this._wrap.appendChild(box);
+  }
+
+  /**
+   * Control legend for the map — the build map is the one screen with no
+   * tutorial anywhere else in the game, and nothing on it says a dashed ring
+   * is tappable. Built as key badges + the map's own slot glyphs rather than
+   * a sentence, so it reads as a game's control list and ties each action to
+   * the thing on the map it acts on. Touch and keyboard rows are both built
+   * and `style.css` shows whichever matches `body.touch`/`body.keyboard`, the
+   * same switch `Hud`'s own hints use (`ui/input.js` sets the class).
+   */
+  _buildHelp() {
+    const touch = htmlEl('div', 'bo-help bo-help--touch');
+    touch.append(
+      helpRow(['Tap'], 'empty', 'Build'),
+      helpRow(['Tap'], 'built', 'Upgrade / Repair'),
+      helpRow(['Ready'], null, 'Start wave'),
+    );
+
+    const keyboard = htmlEl('div', 'bo-help bo-help--keyboard');
+    keyboard.append(
+      helpRow(['1', '2', '3'], null, 'Select'),
+      helpRow(['Click'], 'empty', 'Build'),
+      helpRow(['Click'], 'built', 'Upgrade / Repair'),
+      helpRow(['Space'], null, 'Start wave'),
+    );
+
+    this._wrap.append(touch, keyboard);
   }
 
   _buildChips() {
