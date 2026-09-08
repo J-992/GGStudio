@@ -109,6 +109,20 @@ Yaw/pitch convention: yaw `0` looks toward `-z` (matching
 Pitch is positive looking up, clamped to `±pitchLimitDeg`. Camera uses Euler
 order `'YXZ'`, `rotation.y = -yaw`, `rotation.x = pitch`.
 
+**Recoil is a rendering offset, not aim.** `update()` writes
+`rotation.x = clamp(pitch + kick * camPitchDeg)` where `kick` is the
+`core/recoil.js` spring value; `this.pitch`/`this.yaw` themselves are never
+written by recoil, so the punch fully self-recovers and nothing outside
+`Player` should try to compensate for it. Because the rendered camera
+carries that offset, `fire()` and `aimTarget()` derive their direction from
+`yaw`/`pitch` analytically (`_aimDirection`) instead of reading
+`camera.getWorldDirection()` — otherwise every shot after the first in a
+burst would drift high and the effective `coneDegTouch` for touch auto-fire
+would shrink. The shot origin still comes from `camera.getWorldPosition()`,
+which the kick does not touch (it offsets rotation only). Net contract: the
+gun and the view kick, but a shot always goes exactly where the player is
+aiming.
+
 **Clock**: `invulnUntil` and `fire()`'s cooldown compare against the
 player's own fixed-step clock (`_time`, accumulated one `dt` per
 `update()` call). This is numerically identical to `Game`'s `world.time`
@@ -127,7 +141,7 @@ class Player {
   /** @param {number} n Ignored while dead or `world.time < invulnUntil`. */
   takeDamage(n) {}
 
-  /** Resets position/orientation/health for a new run (camera/viewmodel objects persist). */
+  /** Resets position/orientation/health for a new run (camera/viewmodel objects persist), and returns the recoil spring to exact rest — value *and* velocity, so no leftover kick bleeds into the first frame. */
   reset() {}
 
   /**
@@ -1386,3 +1400,64 @@ the flow above; nothing on the frozen P2/P3/P4 API list (`registerSystem`,
 `world` shape, `getSnapshot`, state enter/exit hooks, `game.economy`) was
 removed or reshaped — `game.combo`/`game.save`/`game.hooks` and the
 `screens` constructor dependency are additive.
+
+## Weapon recoil
+
+### `core/recoil.js` (pure)
+
+```js
+/** @typedef {{ value: number, velocity: number }} RecoilSpring */
+
+/** @returns {RecoilSpring} At rest. */
+export function createRecoilSpring() {}
+
+/** Returns the spring to exact rest (value *and* velocity). @param {RecoilSpring} spring */
+export function resetRecoilSpring(spring) {}
+
+/** Adds one shot's signed velocity impulse; repeated kicks stack. @param {RecoilSpring} spring @param {number} impulse */
+export function kickRecoilSpring(spring, impulse) {}
+
+/** Semi-implicit Euler step of `x'' = -stiffness*x - damping*x'`. @param {RecoilSpring} spring @param {number} dt @param {GameConfig} cfg */
+export function stepRecoilSpring(spring, dt, cfg) {}
+```
+
+One normalized scalar, no three.js/DOM and no `core/rng.js` — fully
+deterministic, which is what lets `test/recoil.test.js` pin its properties.
+
+A shot adds a **velocity** impulse rather than stepping the value, so the
+kick ramps in over ~4 frames and eases back out: a punch, not a pop.
+`CONFIG.player.gun.recoil.impulse` is normalized so a single shot peaks
+`value` at ~1.0, which makes every amplitude in that block readable as
+"per shot". `damping` is exactly `2*sqrt(stiffness)` (critically damped), so
+the value never overshoots below rest — the property that makes it safe to
+drive the camera pitch with, since an undershoot would swing the view *below*
+the player's aim. Sustained fire at `gun.rate` overlaps on the tail and
+plateaus around 1.3x a single shot; `maxValue` bounds that stack.
+
+The step sub-divides `dt` to ~1/480s (capped at 8 sub-steps). This is for
+**accuracy, not stability**: at the raw 1/60 fixed step the explicit damping
+term eats most of a fresh impulse in the first step and the kick peaks at
+about half its analytic height. Sub-stepping also makes the felt response
+independent of `timing.fixedStep`. The `maxValue` clamp doubles as the
+divergence guard for a pathological `dt` — the spring saturates and then
+recovers rather than blowing up.
+
+`game/Player.js` owns all the three.js: it multiplies the one spring value by
+the four amplitudes in `CONFIG.player.gun.recoil` — `viewBackM` (viewmodel
+slides toward the eye), `viewUpM` (and up — the pre-recoil code slid it
+*down*, which read as a dip), `viewPitchDeg` (muzzle-up tilt, the channel
+that carries the read), and `camPitchDeg` (the view punch). The viewmodel
+tilt is applied as `rotation.x = baseRot.x + kick * viewPitchDeg`, an offset
+from the orientation `assets.propMesh` bakes in from the model, never a bare
+`rotation.set`.
+
+Pause/resume needs no handling: `Game#pause()` stops the fixed-step loop, so
+the spring simply freezes mid-kick and continues on resume.
+
+### `CONFIG.player.gun` reshape
+
+`recoilKick` is **removed**, replaced by a `recoil` sub-object
+(`stiffness`, `damping`, `impulse`, `maxValue`, `viewBackM`, `viewUpM`,
+`viewPitchDeg`, `camPitchDeg`). `Player.js`'s hardcoded
+`RECOIL_DECAY_PER_S` is gone with it, per `AGENTS.md`'s "every tunable
+number lives in `config.js`".

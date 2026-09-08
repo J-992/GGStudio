@@ -42,7 +42,24 @@ export const CONFIG = Object.freeze(deepFreeze({
     lookSensMouse: 0.0022,
     lookSensTouch: 0.006,
     pitchLimitDeg: 75,
-    gun: { dmg: 12, rate: 6, range: 45, coneDegTouch: 7, recoilKick: 0.04 },
+    gun: {
+      dmg: 12, rate: 6, range: 45, coneDegTouch: 7,
+      // Recoil punch. `core/recoil.js` turns these into one normalized
+      // spring value; `game/Player.js` multiplies that value by the
+      // amplitudes below. `impulse` is normalized so a single shot peaks the
+      // value at ~1.0, which makes every amplitude readable as "per shot".
+      // Sustained fire at `rate` overlaps on the tail and plateaus at ~1.3x.
+      recoil: {
+        stiffness: 256,       // omega0 = 16 rad/s -> peaks ~4 frames after the shot
+        damping: 32,          // exactly 2*omega0: critically damped, never overshoots
+        impulse: 46.5,        // normalizes a single shot's peak to ~1.0
+        maxValue: 1.8,        // ceiling over the ~1.3 sustained plateau
+        viewBackM: 0.085,     // viewmodel slides toward the eye (base standoff 0.55)
+        viewUpM: 0.022,       // and *up* -- the old code slid it down, reading as a dip
+        viewPitchDeg: 7,      // muzzle-up tilt; the channel that actually sells the kick
+        camPitchDeg: 1.0,     // view punch, fully self-recovering; never touches `pitch`
+      },
+    },
     invulnAfterReviveS: 3,
     revivePushRadius: 8,
   },
