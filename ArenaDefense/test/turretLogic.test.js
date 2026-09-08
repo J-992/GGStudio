@@ -6,6 +6,7 @@ import {
   statsFor, upgradeCost, repairCost, pickTarget, fireReady, turretHitDamage,
 } from '../src/core/turretLogic.js';
 import { hpFor } from '../src/core/enemyBrain.js';
+import { waveDef } from '../src/core/waves.js';
 
 const TYPES = CONFIG.turrets.order;
 
@@ -179,7 +180,10 @@ test('fireReady: does not fire again before its cooldown elapses', () => {
 });
 
 test('no turret type, at any level, one-shots any enemy on any wave', () => {
-  const hpMuls = CONFIG.waves.map((w) => w.hpMul);
+  const hpMuls = Array.from(
+    { length: CONFIG.run.finalWave },
+    (_, i) => waveDef(CONFIG, i + 1).hpMul,
+  );
   for (const type of TYPES) {
     const levels = CONFIG.turrets.types[type].levels.length;
     for (let level = 0; level < levels; level++) {

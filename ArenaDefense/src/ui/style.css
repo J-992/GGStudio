@@ -1240,12 +1240,12 @@ body.touch .bo-help--keyboard {
   }
 }
 
+/* Deliberately just a block, NOT the flex column — see `.weapon-card-inner`
+   below for why. `overflow: hidden` is a backstop, not the fix: it keeps any
+   future content mistake from painting over the card in the next grid row
+   the way the old aspect-ratio-driven overflow did, but it isn't what makes
+   the card the right height in the first place. */
 .weapon-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  min-height: 48px;
   padding: 12px;
   border: 2px solid rgba(246, 238, 221, 0.25);
   border-radius: 12px;
@@ -1255,7 +1255,26 @@ body.touch .bo-help--keyboard {
   text-align: left;
   cursor: pointer;
   touch-action: manipulation;
+  overflow: hidden;
   transition: background 120ms ease-out, border-color 120ms ease-out;
+}
+
+/* The actual flex column (`Screens.js#showWeaponSelect`'s `.weapon-card-inner`
+   wrapper). It does NOT live on `.weapon-card` itself: a <button> is an
+   unreliable flex container — its own computed height doesn't reliably
+   track flex children the way a <div>'s does, and a child sized by
+   `aspect-ratio` (the old `.weapon-card-art`) was the trigger that made it
+   visible here — the button's height came out shorter than its content, so
+   RATE/RANGE rendered past its bottom edge and over the next row's cards.
+   A plain <div> tracks its flex children correctly, so the column layout
+   moved in here and `.weapon-card` stays a plain block. Don't move
+   `display: flex` back onto `.weapon-card` to "simplify" this. */
+.weapon-card-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 48px;
 }
 
 .weapon-card:hover {
@@ -1283,12 +1302,17 @@ body.touch .bo-help--keyboard {
 
 /* Card art: a render of the weapon, produced at runtime by `game/WeaponIcons.js`
    and handed in as a data URL. Absent when no WebGL context was spare, so the
-   card must still look deliberate with no image at all — hence the fixed
-   aspect box rather than letting the image dictate the card's height. */
+   card must still look deliberate with no image at all — hence a fixed box
+   rather than letting the image dictate the card's height. A definite
+   `height` (not `aspect-ratio`) on purpose: aspect-ratio's resolved height
+   depends on the resolved width, computed as part of the same layout pass
+   that decides the card's own height — one more thing that has to resolve
+   in the right order for `.weapon-card-inner` to size correctly. A fixed
+   height is settled before anything else runs. */
 .weapon-card-art {
   display: block;
   width: 100%;
-  aspect-ratio: 2 / 1;
+  height: clamp(90px, 20vw, 150px);
   object-fit: contain;
   margin-bottom: 4px;
   /* Purely decorative: the name below it is the accessible label. */
@@ -1319,7 +1343,12 @@ body.touch .bo-help--keyboard {
   flex-direction: column;
   gap: 5px;
   width: 100%;
-  margin-top: auto; /* pins stats to the card's bottom edge regardless of blurb length */
+  /* No `margin-top: auto` here — that only pins content to a container's
+     bottom when the container has a definite height taller than its
+     content, and `.weapon-card-inner` (unlike the old flex-column button)
+     has no such height: it wraps its content exactly, so the stats simply
+     follow the blurb. `.weapon-card-blurb`'s 2-line clamp already keeps
+     that gap small and consistent across a row. */
 }
 
 .weapon-stat {

@@ -13,12 +13,12 @@ import { SENS_MIN, SENS_MAX } from '../core/prefs.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// The four brainrot portraits actually shipped in `public/assets/sprites/`
-// (see `manifest.json`'s `sprites.portraits` — bombardiro/tralalero are
-// stub bosses in `cfg.bosses` but still get a portrait so the title screen
-// can tease them; assassino/lirili have sprite atlas cells but no portrait
-// crop yet).
-const TITLE_PORTRAITS = ['patapim', 'tungtung', 'bombardiro', 'tralalero'];
+// The five bosses, in the order `cfg.run.bossOrder` fights them — so the
+// title screen reads left-to-right as the run does. Every one is a real
+// fight now; `tungtung` used to sit in this row under a "BOSSES" caption
+// despite being an ordinary enemy, and its portrait is no longer shipped.
+// See `manifest.json`'s `sprites.portraits`.
+const TITLE_PORTRAITS = ['patapim', 'lirili', 'bombardiro', 'tralalero', 'assassino'];
 
 /**
  * @param {string} id Icon symbol id (from `index.html`'s inline sprite sheet), without the leading `#`.
@@ -282,10 +282,6 @@ export class Screens {
       heading.className = 'screen-heading';
       heading.textContent = 'CHOOSE YOUR WEAPON';
 
-      const sub = document.createElement('p');
-      sub.className = 'screen-sub';
-      sub.textContent = 'All six are unlocked. None is strictly best.';
-
       let selected = weapons.some((w) => w.id === current) ? current : weapons[0].id;
 
       const list = document.createElement('div');
@@ -298,6 +294,16 @@ export class Screens {
         card.type = 'button';
         card.className = 'weapon-card';
         card.dataset.weapon = id;
+
+        // The flex column lives in this inner wrapper, not on `card` itself —
+        // a <button> is an unreliable flex container (its own computed height
+        // doesn't track flex children the way a <div>'s does), and this is
+        // the sizing that broke: the stat bars rendered past the button's
+        // bottom edge and painted over the card below. See the matching
+        // `.weapon-card-inner` comment in style.css before "simplifying" this
+        // back onto `card`.
+        const inner = document.createElement('div');
+        inner.className = 'weapon-card-inner';
 
         // A render of the weapon itself, produced by `Game` (this file has no
         // renderer and stays DOM-only). Absent when no WebGL context was
@@ -327,7 +333,8 @@ export class Screens {
           statBar('RANGE', def.range, 80),
         );
 
-        card.append(...(img ? [img] : []), name, blurb, statsEl);
+        inner.append(...(img ? [img] : []), name, blurb, statsEl);
+        card.append(inner);
         card.addEventListener('click', () => {
           this._audio.play('ui-click');
           select(id);
@@ -337,7 +344,7 @@ export class Screens {
       }
 
       const confirmBtn = this._makeButton(confirmLabel, 'screen-btn--primary');
-      root.append(heading, sub, list, confirmBtn);
+      root.append(heading, list, confirmBtn);
 
       const select = (id) => {
         selected = id;

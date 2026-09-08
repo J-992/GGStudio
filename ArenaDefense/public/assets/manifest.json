@@ -148,9 +148,10 @@
     },
     "portraits": [
       "sprites/portrait-patapim.webp",
-      "sprites/portrait-tungtung.webp",
+      "sprites/portrait-lirili.webp",
       "sprites/portrait-bombardiro.webp",
-      "sprites/portrait-tralalero.webp"
+      "sprites/portrait-tralalero.webp",
+      "sprites/portrait-assassino.webp"
     ]
   },
   "fonts": [
@@ -190,9 +191,10 @@
     "sprites/brainrot.webp": 117212,
     "sprites/brainrot.json": 1525,
     "sprites/portrait-patapim.webp": 6130,
-    "sprites/portrait-tungtung.webp": 4800,
+    "sprites/portrait-lirili.webp": 7424,
     "sprites/portrait-bombardiro.webp": 9018,
     "sprites/portrait-tralalero.webp": 7928,
+    "sprites/portrait-assassino.webp": 9144,
     "fonts/LilitaOne-Regular.ttf": 26828,
     "fonts/OFL.txt": 4486,
     "audio/ui-click.ogg": 7854,

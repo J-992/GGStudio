@@ -1,0 +1,228 @@
+{
+  "name": "zed_1",
+  "note": [
+    "ArenaDefense voxel zombie, built by build-assets.mjs from Zed_1.obj",
+    "(Shared/voxel/characters/Package/OBJ) at ArenaDefense/public/assets/models/zed_1.glb.",
+    "Height 1.8 m grounded at y=0, EXT_meshopt_compression + KHR_mesh_quantization,",
+    "single mesh, single material, no skeleton -- rig.mjs ingests it directly",
+    "(registers MeshoptDecoder and dequantizes on write), no separate uncompressed",
+    "source is needed.",
+    "IMPORTANT: the root node carries translation [0,0.9,0] and uniform scale 0.9",
+    "(the KHR_mesh_quantization dequantization node), and mergeGeometry reads",
+    "POSITION straight off the primitive without applying it. So every coordinate",
+    "below is mesh-local = (world - [0,0.9,0]) / 0.9, not the 1.8 m world height",
+    "you would read off a screenshot. World-space joint heights were measured by",
+    "slicing the point cloud into 0.02-0.05 m horizontal slabs (see",
+    "glb-rigger/verify/_slice_probe.mjs, _hist_probe.mjs, _armcentroid_probe.mjs,",
+    "_yrange_probe.mjs) and converted with that formula.",
+    "Pose: arms hang straight at the sides (not a T-pose), legs separate with a",
+    "real gap. The leg gap in the point cloud closes between world y=0.55 and",
+    "y=0.60 -- crotch measured at y=0.59, i.e. 32.8% of height, matching the",
+    "~34% estimate from the OBJ source. Shoulder (where the wide arm+torso",
+    "silhouette narrows) sits at y=1.40 (77.8%). Each arm hangs essentially",
+    "straight down at x=+/-0.18..0.21, z=-0.04, from shoulder y=1.40 to hand",
+    "y=0.62 (elbow split at the midpoint, y=1.01 -- the arm shows no visible",
+    "bend in the point cloud, so the elbow split is a straight-line guess).",
+    "Character faces +Z; right hand is on -X (matches the shared convention).",
+    "No overrides: at 15x64x9 voxels there is no prop or geometry that reads",
+    "nearer the wrong bone by distance alone."
+  ],
+  "joints": [
+    {
+      "name": "hips",
+      "parent": null,
+      "pos": [
+        0,
+        -0.4444,
+        -0.0444
+      ],
+      "tip": [
+        0,
+        -0.2222,
+        -0.0333
+      ],
+      "radius": 1.1
+    },
+    {
+      "comment": "Runs from the crotch (world y=0.60) to the shoulder line (world y=1.40). Greedy so the torso stays whole against the legs and arms.",
+      "name": "torso",
+      "parent": "hips",
+      "pos": [
+        0,
+        -0.2222,
+        -0.0333
+      ],
+      "tip": [
+        0,
+        0.5556,
+        -0.0333
+      ],
+      "radius": 1.55
+    },
+    {
+      "name": "head",
+      "parent": "torso",
+      "pos": [
+        0,
+        0.5556,
+        -0.0333
+      ],
+      "tip": [
+        0,
+        1,
+        0
+      ],
+      "radius": 1.3
+    },
+    {
+      "name": "armR_upper",
+      "parent": "torso",
+      "pos": [
+        -0.2111,
+        0.5556,
+        -0.0444
+      ],
+      "tip": [
+        -0.2,
+        0.1222,
+        -0.0444
+      ],
+      "radius": 0.85
+    },
+    {
+      "name": "armR_fore",
+      "parent": "armR_upper",
+      "pos": [
+        -0.2,
+        0.1222,
+        -0.0444
+      ],
+      "tip": [
+        -0.2,
+        -0.3111,
+        -0.0444
+      ],
+      "radius": 0.95
+    },
+    {
+      "name": "armL_upper",
+      "parent": "torso",
+      "pos": [
+        0.2111,
+        0.5556,
+        -0.0444
+      ],
+      "tip": [
+        0.2,
+        0.1222,
+        -0.0444
+      ],
+      "radius": 0.85
+    },
+    {
+      "name": "armL_fore",
+      "parent": "armL_upper",
+      "pos": [
+        0.2,
+        0.1222,
+        -0.0444
+      ],
+      "tip": [
+        0.2,
+        -0.3111,
+        -0.0444
+      ],
+      "radius": 0.95
+    },
+    {
+      "name": "legR_thigh",
+      "parent": "hips",
+      "pos": [
+        -0.1111,
+        -0.3333,
+        -0.0556
+      ],
+      "tip": [
+        -0.1111,
+        -0.6667,
+        -0.0556
+      ],
+      "radius": 0.8
+    },
+    {
+      "name": "legR_shin",
+      "parent": "legR_thigh",
+      "pos": [
+        -0.1111,
+        -0.6667,
+        -0.0556
+      ],
+      "tip": [
+        -0.1111,
+        -0.9444,
+        -0.0667
+      ],
+      "radius": 0.9
+    },
+    {
+      "name": "footR",
+      "parent": "legR_shin",
+      "pos": [
+        -0.1111,
+        -0.9444,
+        -0.0667
+      ],
+      "tip": [
+        -0.1111,
+        -1,
+        0.0222
+      ],
+      "radius": 1.0
+    },
+    {
+      "name": "legL_thigh",
+      "parent": "hips",
+      "pos": [
+        0.1111,
+        -0.3333,
+        -0.0556
+      ],
+      "tip": [
+        0.1111,
+        -0.6667,
+        -0.0556
+      ],
+      "radius": 0.8
+    },
+    {
+      "name": "legL_shin",
+      "parent": "legL_thigh",
+      "pos": [
+        0.1111,
+        -0.6667,
+        -0.0556
+      ],
+      "tip": [
+        0.1111,
+        -0.9444,
+        -0.0667
+      ],
+      "radius": 0.9
+    },
+    {
+      "name": "footL",
+      "parent": "legL_shin",
+      "pos": [
+        0.1111,
+        -0.9444,
+        -0.0667
+      ],
+      "tip": [
+        0.1111,
+        -1,
+        0.0222
+      ],
+      "radius": 1.0
+    }
+  ]
+}

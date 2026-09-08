@@ -1,0 +1,222 @@
+{
+  "name": "zed_3",
+  "note": [
+    "Same voxel-smalls family as zed_1.rig.json -- read that file's note for the",
+    "mesh-local-vs-world coordinate conversion (root node translation [0,0.9,0],",
+    "scale 0.9) and the measurement method. zed_3 is built from Zed_3.obj and",
+    "shares zed_1's torso/head/leg proportions almost exactly: crotch at world",
+    "y=0.59 (leg gap closes 0.55->0.60), shoulder line at y=1.40, top of head",
+    "at y=1.80. legR/legL and torso/head/hips joints below are copied unchanged",
+    "from zed_1.rig.json.",
+    "DIFFERENCE: zed_3's left arm hangs straight like zed_1's (shoulder y=1.40",
+    "to hand y=0.62), but its RIGHT arm is a different, shorter pose -- the far-x",
+    "point cloud (x<-0.15) only spans world y=0.98..1.40, about half the left",
+    "arm's length, with no x/z drift suggesting a visible elbow kink (checked",
+    "with _armcentroid_probe.mjs at 0.03 m resolution). Read as a raised/bent",
+    "right arm (hand near the sternum, forearm not visibly separable from the",
+    "torso silhouette at this resolution) rather than a hanging arm. armR_upper",
+    "and armR_fore below are shortened to that measured span; the elbow split",
+    "(y=1.19) is a straight-line guess between the two measured endpoints, same",
+    "caveat as zed_1's elbow. This is the joint most likely to need a tuning",
+    "pass -- verify with --debug-colors before trusting it.",
+    "No overrides: nothing else in the point cloud reads nearer the wrong bone."
+  ],
+  "joints": [
+    {
+      "name": "hips",
+      "parent": null,
+      "pos": [
+        0,
+        -0.4444,
+        -0.0444
+      ],
+      "tip": [
+        0,
+        -0.2222,
+        -0.0333
+      ],
+      "radius": 1.1
+    },
+    {
+      "name": "torso",
+      "parent": "hips",
+      "pos": [
+        0,
+        -0.2222,
+        -0.0333
+      ],
+      "tip": [
+        0,
+        0.5556,
+        -0.0333
+      ],
+      "radius": 1.55
+    },
+    {
+      "name": "head",
+      "parent": "torso",
+      "pos": [
+        0,
+        0.5556,
+        -0.0333
+      ],
+      "tip": [
+        0,
+        1,
+        0
+      ],
+      "radius": 1.3
+    },
+    {
+      "comment": "Shortened vs zed_1: measured far-x span is world y=0.98..1.40, roughly half the hanging arm's length -- read as raised/bent, not hanging.",
+      "name": "armR_upper",
+      "parent": "torso",
+      "pos": [
+        -0.2111,
+        0.5556,
+        -0.0444
+      ],
+      "tip": [
+        -0.2,
+        0.3222,
+        -0.0444
+      ],
+      "radius": 0.85
+    },
+    {
+      "name": "armR_fore",
+      "parent": "armR_upper",
+      "pos": [
+        -0.2,
+        0.3222,
+        -0.0444
+      ],
+      "tip": [
+        -0.2,
+        0.0889,
+        -0.0444
+      ],
+      "radius": 0.95
+    },
+    {
+      "name": "armL_upper",
+      "parent": "torso",
+      "pos": [
+        0.2111,
+        0.5556,
+        -0.0444
+      ],
+      "tip": [
+        0.2,
+        0.1222,
+        -0.0444
+      ],
+      "radius": 0.85
+    },
+    {
+      "name": "armL_fore",
+      "parent": "armL_upper",
+      "pos": [
+        0.2,
+        0.1222,
+        -0.0444
+      ],
+      "tip": [
+        0.2,
+        -0.3111,
+        -0.0444
+      ],
+      "radius": 0.95
+    },
+    {
+      "name": "legR_thigh",
+      "parent": "hips",
+      "pos": [
+        -0.1111,
+        -0.3333,
+        -0.0556
+      ],
+      "tip": [
+        -0.1111,
+        -0.6667,
+        -0.0556
+      ],
+      "radius": 0.8
+    },
+    {
+      "name": "legR_shin",
+      "parent": "legR_thigh",
+      "pos": [
+        -0.1111,
+        -0.6667,
+        -0.0556
+      ],
+      "tip": [
+        -0.1111,
+        -0.9444,
+        -0.0667
+      ],
+      "radius": 0.9
+    },
+    {
+      "name": "footR",
+      "parent": "legR_shin",
+      "pos": [
+        -0.1111,
+        -0.9444,
+        -0.0667
+      ],
+      "tip": [
+        -0.1111,
+        -1,
+        0.0222
+      ],
+      "radius": 1.0
+    },
+    {
+      "name": "legL_thigh",
+      "parent": "hips",
+      "pos": [
+        0.1111,
+        -0.3333,
+        -0.0556
+      ],
+      "tip": [
+        0.1111,
+        -0.6667,
+        -0.0556
+      ],
+      "radius": 0.8
+    },
+    {
+      "name": "legL_shin",
+      "parent": "legL_thigh",
+      "pos": [
+        0.1111,
+        -0.6667,
+        -0.0556
+      ],
+      "tip": [
+        0.1111,
+        -0.9444,
+        -0.0667
+      ],
+      "radius": 0.9
+    },
+    {
+      "name": "footL",
+      "parent": "legL_shin",
+      "pos": [
+        0.1111,
+        -0.9444,
+        -0.0667
+      ],
+      "tip": [
+        0.1111,
+        -1,
+        0.0222
+      ],
+      "radius": 1.0
+    }
+  ]
+}

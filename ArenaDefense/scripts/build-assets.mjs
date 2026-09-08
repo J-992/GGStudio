@@ -431,7 +431,7 @@ async function buildProps() {
 // ---------------------------------------------------------------------------
 
 const BRAINROT_NAMES = ['patapim', 'tungtung', 'bombardiro', 'tralalero', 'assassino', 'lirili'];
-const PORTRAIT_NAMES = ['patapim', 'tungtung', 'bombardiro', 'tralalero'];
+const PORTRAIT_NAMES = ['patapim', 'lirili', 'bombardiro', 'tralalero', 'assassino'];
 const ATLAS_SIZE = 1024;
 const CELL = 256;
 const PORTRAIT_SIZE = 128;

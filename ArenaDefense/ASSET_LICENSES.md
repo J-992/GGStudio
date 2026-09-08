@@ -58,7 +58,7 @@ This whole `Shared/voxel/env/Buildings` FBX pack (guns, turret bases, barricades
 | Shipped file | Source path | Author | Licence | Processing |
 | --- | --- | --- | --- | --- |
 | `sprites/brainrot.webp` (cells `patapim`, `tungtung`, `bombardiro`, `tralalero`, `assassino`, `lirili`) | `Steal-A-Brainrot/assets/sprites/cr_{patapim,tungtung,bombardiro,tralalero,assassino,lirili}.png` | Unrecorded — came into Steal-A-Brainrot as "character artwork" in `art/source`, no licence row was ever kept for it | **UNKNOWN — needs confirmation before release** | Each source PNG alpha-cropped to its opaque content, scaled to fit a 256×256 cell by its longer side, and bottom-aligned (feet on the cell floor) — mirrors `Steal-A-Brainrot/tools/import-images.py`'s crop+fit+ground logic, reimplemented in `sharp` since no Blender is available here. Packed into a 4×4 1024×1024 WebP atlas (lossless, or quality 95 if that would exceed a size cap) with `sprites/brainrot.json` recording each cell's pixel rect, normalized UV rect, and cropped-art aspect ratio. |
-| `sprites/portrait-{patapim,tungtung,bombardiro,tralalero}.webp` | Same four source PNGs | Unrecorded | **UNKNOWN — needs confirmation before release** | Same alpha-crop, fit to 128×128 by the longer side, centred (not bottom-aligned — these are headshots for title/credits use), WebP quality 90. |
+| `sprites/portrait-{patapim,lirili,bombardiro,tralalero,assassino}.webp` | Same source PNGs — one per boss in `cfg.run.bossOrder` | Unrecorded | **UNKNOWN — needs confirmation before release** | Same alpha-crop, fit to 128×128 by the longer side, centred (not bottom-aligned — these are headshots for title/credits use), WebP quality 90. The `lirili` and `assassino` crops were derived from the shipped `brainrot.webp` cell rather than from `cr_*.png`, because those sources are Git LFS pointers in this checkout and git-lfs is not installed here — one extra resample; `npm run build:assets` regenerates them from source wherever LFS content is present. `portrait-tungtung.webp` was dropped: tungtung is an ordinary enemy and the title row it sat in is captioned BOSSES. |
 
 The characters themselves are AI-generated internet meme figures ("Italian brainrot"); the illustrated artwork depicting them has no recorded licence or artist credit. This is the same exposure the already-shipped Steal-A-Brainrot game carries for the same files.
 
@@ -109,3 +109,28 @@ CC0 requires no attribution.
 2. **`Shared/voxel/env/Buildings` FBX pack** (guns, turret bases, barricade, barbed wire, both `Props_*_diffuse.png` atlases, `VoxelApocalypse_Character.png`) — no identified vendor or licence. Fallback: procedural geometry behind a config flag.
 3. **CC BY-ND** on the Zed characters and graveyard dressing — format conversion of unmodified geometry, attribution required and carried through `credits` + this file.
 4. `Gun_02`'s own texture reference (`VoxelApocalypseZombie_Export-78-Weapon_Gun-2.png`) does not exist anywhere in this monorepo checkout, so that mesh ships untextured (flat colour) rather than blocking the build.
+5. **Rigging the Zed characters is a derivative, and CC BY-ND forbids derivatives.**
+   Recorded here rather than left implicit, because it is the one item on this
+   list that a Poki submission review could reasonably stop on.
+   - `glb-rigger/zed_1.rig.json`, `zed_3.rig.json` and the `glb-rigger/out/*.rigged.glb`
+     they produce split each Zed into a 13-bone rigid hierarchy. That is a
+     modification of the geometry's structure, not a format conversion.
+   - **Nothing rigged ships today.** Those files live outside this game's
+     `public/` tree and no build step reads them; the walking enemies in the
+     shipped build use the procedural gait in `src/game/Enemies.js`, which
+     touches no asset bytes. This item is a gate on integrating the rig, not a
+     description of what is currently in `dist/`.
+   - **The two games in this monorepo contradict each other on item 3 above.**
+     `zombie-motorworks/ASSET_LICENSES.md` carries a section headed
+     *"Blocking issue: CC BY-ND forbids what this game does to these models"*
+     about these same models and this same tool, and holds that even the
+     quantise + meshopt step is a derivative — which, if correct, means the
+     Zed `.glb` files ArenaDefense already ships are derivatives too, and item
+     3's "format conversion of unmodified geometry" reading is wrong. That
+     game resolved it by rigging only its own generated characters and leaving
+     the Zeds bob-only.
+   - Ways to clear it, cheapest first: keep the procedural gait and never
+     integrate the rig; email Max Parata (the models are donation-ware and the
+     listing invites contact) for written permission, which would settle both
+     games at once; or replace the Zeds with a CC0 character that permits
+     derivatives.

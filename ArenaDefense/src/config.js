@@ -162,6 +162,54 @@ export const CONFIG = Object.freeze(deepFreeze({
     // not. `tungtung`'s `lunge` closing burst is a fixed distance and does NOT
     // scale with speed, so it grew proportionally more dangerous here.
     cap: 35,
+
+    // Walk cycle for the voxel enemies. `phase` is measured in STRIDES and
+    // accumulates as `speed * stepsPerMetre * dt`, so cadence rises with how
+    // fast a thing is actually moving — it used to advance at a flat 1 Hz
+    // regardless of speed, which is a large part of why they read as sliding.
+    //
+    // A stride is two footfalls, so the vertical bob runs at twice the stride
+    // frequency while the roll and sway run at once per stride. That mismatch
+    // is what makes a gait read as weight shifting from foot to foot rather
+    // than as a body vibrating.
+    // Weapons the enemies carry. A tier is chosen by wave, so later waves are
+    // genuinely more dangerous rather than just differently dressed — this is
+    // damage scaling on top of `waveCurve.hpMulPerWave`, not instead of it.
+    //
+    // `armedShare` is the fraction of SHAMBLERS that spawn as gunmen. It ramps
+    // slowly and caps well below half on purpose: shamblers are the pressure
+    // that makes the player move, and replacing too many of them with
+    // stationary shooters removes exactly that. This is the number to turn if
+    // late waves start feeling like a shooting gallery.
+    //
+    // `tungtung` is a flat sprite billboard, not a mesh, so it can hold
+    // nothing and stays melee.
+    weapons: {
+      // Chosen by the highest `from` that is <= the wave number.
+      tiers: [
+        // `scrap` deliberately reproduces the spitter's own type-def stats
+        // exactly (dmg 6 / cooldown 1.8 / projSpeed 14 / range 12). Ranged
+        // types resolve a tier unconditionally, so anything else here would be
+        // a silent balance change to early spitters rather than an upgrade
+        // path. The tiers above it are the upgrades.
+        { id: 'scrap', from: 1, dmg: 6, cooldown: 1.8, projSpeed: 14, range: 12, color: 0x8a8a8a },
+        { id: 'pistol', from: 6, dmg: 9, cooldown: 1.6, projSpeed: 18, range: 15, color: 0xcfd4dc },
+        { id: 'smg', from: 12, dmg: 11, cooldown: 1.1, projSpeed: 22, range: 17, color: 0x4a4f57 },
+        { id: 'rifle', from: 19, dmg: 14, cooldown: 0.9, projSpeed: 26, range: 20, color: 0x6d7b52 },
+      ],
+      armedShare: { from: 7, start: 0.15, perWave: 0.02, max: 0.40 },
+      // Where the gun sits relative to the body, and how big it draws.
+      hold: { forward: 0.35, side: 0.28, height: 0.55, scale: 0.85 },
+    },
+
+    gait: {
+      stepsPerMetre: 0.55, // ~1.9 strides/s at a 3.4 m/s shambler
+      bobAmp: 0.06,        // metres, twice per stride
+      rollRad: 0.10,       // side-to-side roll, once per stride
+      leanFwdRad: 0.13,    // constant forward lean while moving
+      swayM: 0.05,         // lateral weight shift, once per stride
+      squashAmp: 0.05,     // heel-strike compression, twice per stride
+    },
     separationRadius: 1.2,
     separationForce: 3,
     // Hit reaction: every point of damage shoves the body back along the
@@ -223,11 +271,62 @@ export const CONFIG = Object.freeze(deepFreeze({
       addType: 'tungtung', addEveryS: 5, maxAdds: 6, castDurationS: 1.2,
       energy: 120, coins: 25, radius: 1.4, hitHeight: 5.5,
     },
-    // stubs, data only:
-    bombardiro: { stub: true, sprite: 'bombardiro', kind: 'ranged', groundDenial: true },
-    tralalero: { stub: true, sprite: 'tralalero', kind: 'dash' },
-    assassino: { stub: true, sprite: 'assassino', kind: 'phases' },
-    lirili: { stub: true, sprite: 'lirili', kind: 'melee', adds: true },
+    // One boss per `run.bossEvery` waves, in `run.bossOrder`. HP roughly
+    // doubles across the run while the player's DPS does not, so the later
+    // fights are long enough for their mechanic to matter rather than being
+    // burst down before it fires.
+    //
+    // Every boss shares the melee/ranged core Patapim established; the field
+    // that makes each one different is its `mechanic` block, which
+    // `core/bossBrain.js` reads. A boss with no `mechanic` is a plain brawler.
+    lirili: {
+      render: 'sprite', sprite: 'lirili', height: 5.0, hp: 1400, speed: 2.5,
+      kind: 'melee', dmg: 22, range: 2.6, cooldown: 1.6,
+      // Swarms rather than Patapim's heavies: more, weaker, faster.
+      addType: 'shambler', addEveryS: 3.0, maxAdds: 10, castDurationS: 0.9,
+      energy: 150, coins: 35, radius: 1.3, hitHeight: 5.0,
+    },
+    bombardiro: {
+      render: 'sprite', sprite: 'bombardiro', height: 5.8, hp: 2000, speed: 1.9,
+      kind: 'ranged', dmg: 20, range: 20, keepDistance: 12, cooldown: 1.5,
+      projSpeed: 16,
+      energy: 190, coins: 45, radius: 1.5, hitHeight: 5.8,
+      // Ground denial: pools that punish standing still, so the fight is
+      // about being pushed off the ground you want rather than about dps.
+      mechanic: {
+        kind: 'groundDenial',
+        everyS: 4.0, radius: 3.2, durationS: 6.0, dmgPerS: 14, maxZones: 4,
+      },
+    },
+    tralalero: {
+      render: 'sprite', sprite: 'tralalero', height: 5.2, hp: 2800, speed: 2.2,
+      kind: 'melee', dmg: 30, range: 3.0, cooldown: 1.8,
+      energy: 240, coins: 55, radius: 1.4, hitHeight: 5.2,
+      // Charges: a telegraphed wind-up, then a fast straight-line dash. The
+      // wind-up is the whole fight — it is the window to get out of the lane.
+      mechanic: {
+        kind: 'dash',
+        everyS: 5.0, windupS: 0.9, speed: 14, durationS: 0.7,
+        dmg: 45, minRange: 6,
+      },
+    },
+    assassino: {
+      render: 'sprite', sprite: 'assassino', height: 5.4, hp: 3800, speed: 2.4,
+      kind: 'melee', dmg: 26, range: 2.8, cooldown: 1.4,
+      addType: 'tungtung', addEveryS: 6, maxAdds: 5, castDurationS: 1.0,
+      energy: 320, coins: 80, radius: 1.4, hitHeight: 5.4,
+      // The finale: each phase turns on another boss's trick, so the last
+      // fight tests everything the run taught. Thresholds are fractions of
+      // max HP, applied in order as it drops.
+      mechanic: {
+        kind: 'phases',
+        phases: [
+          { belowHpFrac: 1.00, speedMul: 1.0, cooldownMul: 1.0 },
+          { belowHpFrac: 0.66, speedMul: 1.25, cooldownMul: 0.8, adds: true },
+          { belowHpFrac: 0.33, speedMul: 1.5, cooldownMul: 0.6, adds: true, enrage: true },
+        ],
+      },
+    },
   },
 
   turrets: {
@@ -275,77 +374,67 @@ export const CONFIG = Object.freeze(deepFreeze({
     ],
   },
 
-  // Wave LENGTH is set by the spawn counts; `maxAlive` is a concurrency
-  // throttle, not a total. `SpawnScheduler` holds entries back when the cap is
-  // reached and retries them, so raising `n` while leaving `maxAlive` alone
-  // makes a wave run longer rather than get denser — and keeps every wave
-  // inside `enemies.cap`, which `test/waves.test.js` enforces.
+  // The wave table is GENERATED, not authored — see `core/waves.js#waveDef`.
+  // Twenty-five hand-written entries would be unmaintainable, and retuning
+  // difficulty would mean editing every one of them; this way the whole curve
+  // is a handful of numbers.
   //
-  // Wave 1 is deliberately untouched: its total energy is pinned to the gun
-  // turret's cost (5 kills x 10 = 50) by that same test, so the player can
-  // always afford exactly one turret after it.
-  waves: [
-    { n: 1, hpMul: 1.0, maxAlive: 8, spawns: [{ enemy: 'shambler', n: 5, everyS: 1.5 }] }, // 5 kills x 10 energy = 50 = gun cost (test-enforced)
-    { n: 2, hpMul: 1.0, maxAlive: 10, spawns: [{ enemy: 'shambler', n: 13, everyS: 1.2 }] },
-    {
-      n: 3, hpMul: 1.0, maxAlive: 12,
-      spawns: [
-        { enemy: 'shambler', n: 13, everyS: 1.2 },
-        { enemy: 'spitter', n: 5, everyS: 3, startS: 4 },
-      ],
-    },
-    {
-      n: 4, hpMul: 1.1, maxAlive: 14,
-      spawns: [
-        { enemy: 'shambler', n: 16, everyS: 1.0 },
-        { enemy: 'spitter', n: 7, everyS: 2.5, startS: 3 },
-        { enemy: 'tungtung', n: 2, everyS: 6, startS: 12 },
-      ],
-    },
-    { n: 5, hpMul: 1.0, maxAlive: 8, boss: 'patapim', spawns: [] },
-    {
-      n: 6, hpMul: 1.15, maxAlive: 16,
-      spawns: [
-        { enemy: 'shambler', n: 16, everyS: 1.0 },
-        { enemy: 'spitter', n: 8, everyS: 2.2, startS: 2 },
-        { enemy: 'tungtung', n: 3, everyS: 6, startS: 8 },
-      ],
-    },
-    {
-      n: 7, hpMul: 1.2, maxAlive: 18,
-      spawns: [
-        { enemy: 'shambler', n: 19, everyS: 0.9 },
-        { enemy: 'spitter', n: 10, everyS: 2.0, startS: 2 },
-        { enemy: 'tungtung', n: 5, everyS: 5, startS: 6 },
-      ],
-    },
-    {
-      n: 8, hpMul: 1.3, maxAlive: 22,
-      spawns: [
-        { enemy: 'shambler', n: 13, everyS: 1.0 },
-        { enemy: 'spitter', n: 13, everyS: 1.6, startS: 1 },
-        { enemy: 'tungtung', n: 6, everyS: 4, startS: 5 },
-      ],
-    },
-    {
-      n: 9, hpMul: 1.4, maxAlive: 26,
-      spawns: [
-        { enemy: 'shambler', n: 22, everyS: 0.8 },
-        { enemy: 'spitter', n: 13, everyS: 1.5, startS: 2 },
-        { enemy: 'tungtung', n: 8, everyS: 4, startS: 4 },
-      ],
-    },
-    {
-      n: 10, hpMul: 1.5, maxAlive: 30,
-      spawns: [
-        { enemy: 'shambler', n: 19, everyS: 0.8 },
-        { enemy: 'spitter', n: 16, everyS: 1.3, startS: 1 },
-        { enemy: 'tungtung', n: 11, everyS: 3.5, startS: 3 },
-      ],
-    },
-  ],
+  // Two constraints the generator must satisfy, both test-enforced:
+  //
+  //   * Wave 1 is exactly `baseCount` shamblers and nothing else, because
+  //     `test/waves.test.js` pins wave 1's total energy to the gun turret's
+  //     cost (5 kills x 10 energy = 50). That guarantees the player can afford
+  //     exactly one turret after their first wave.
+  //   * Every wave's `maxAlive` is clamped to `enemies.cap`. Exceeding the
+  //     pool makes `Enemies#spawn` return -1 and the enemy is silently lost
+  //     while the scheduler still counts it as emitted.
+  //
+  // `maxAlive` is a concurrency throttle, not a total: the scheduler holds
+  // entries back at the cap and retries them. So `count` sets how LONG a wave
+  // runs and `maxAlive` sets how DENSE it is, and they tune independently.
+  waveCurve: {
+    baseCount: 5,        // wave 1 total; pinned by the economy test above
+    countGrowth: 1.17,   // geometric, so wave 25 is a long haul without a cliff
+    countMax: 90,        // sanity ceiling on a single wave's length
 
-  run: { finalWave: 10, bossEvery: 5, activeGates: 2, reviveOncePerRun: true },
+    maxAliveBase: 8,
+    maxAliveGrowth: 1.075,
+
+    hpMulBase: 1.0,
+    hpMulPerWave: 0.035, // +3.5%/wave -> ~1.84x by wave 25
+
+    // Spawn interval tightens as the run goes on, floored so late waves stay
+    // readable rather than becoming a wall.
+    everyS: { base: 1.5, perWave: -0.035, min: 0.55 },
+
+    // The mix. `from` is the first wave a type appears; `weight` is its share
+    // of the roster once it has. Shamblers stay the backbone — they are the
+    // pressure that makes the player move, and a wave that is mostly ranged
+    // enemies turns the game into a shooting gallery.
+    //
+    // `everySMul` scales `everyS` for that type alone. The hand-written table
+    // this generator replaced gave each type its own interval — at wave 10 a
+    // shambler every 0.8s but a tungtung every 3.5s — and a single shared
+    // interval would have quietly quadrupled the rate the heavy arrives at.
+    // The multipliers below reproduce the old table's ratios.
+    mix: [
+      { enemy: 'shambler', from: 1, weight: 1.00, everySMul: 1.0 },
+      { enemy: 'spitter', from: 3, weight: 0.42, everySMul: 1.6 },
+      { enemy: 'tungtung', from: 4, weight: 0.20, everySMul: 4.4 },
+    ],
+  },
+
+  run: {
+    finalWave: 25,
+    // `bossEvery` finally does something: it was dead config that nothing
+    // read, because boss waves were hand-marked in the old literal table.
+    // `core/waves.js` now derives them, so waves 5/10/15/20/25 each take the
+    // next entry in `bossOrder`.
+    bossEvery: 5,
+    bossOrder: ['patapim', 'lirili', 'bombardiro', 'tralalero', 'assassino'],
+    activeGates: 2,
+    reviveOncePerRun: true,
+  },
 
   save: { key: 'arenadefense.v1', maxCoins: 1e9 },
 
