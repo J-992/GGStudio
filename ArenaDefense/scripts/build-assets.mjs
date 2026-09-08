@@ -587,6 +587,11 @@ const COMBAT_SFX = [
   'explosion-metal.ogg',
   'mechanical-clunk.ogg',
   'upgrade-confirm.ogg',
+  // Per-weapon shot sounds (see `config.player.weapons`).
+  'pistol-shot-2.ogg',
+  'gunfire.ogg',
+  'cannon-shot-1.ogg',
+  'sniper-shot-1.ogg',
 ];
 
 function buildAudio() {

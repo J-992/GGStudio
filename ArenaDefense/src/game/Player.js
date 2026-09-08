@@ -17,6 +17,7 @@
 // frame 0, so any caller wanting to grant invulnerability can just write
 // `player.invulnUntil = world.time + seconds`.
 import * as THREE from 'three';
+import { coerceWeaponId, resolveWeapon } from '../core/weapons.js';
 import { clampToArena } from '../core/arenaGeometry.js';
 
 const DEG2RAD = Math.PI / 180;
@@ -46,7 +47,9 @@ export class Player {
     this.speed = p.speed;
     this.radius = p.radius;
     this.eyeHeight = p.eyeHeight;
-    this.gun = p.gun;
+    /** @type {object} The current weapon's def from `config.player.weapons.types`. Swap with `setWeapon`. */
+    this.gun = resolveWeapon(p.defaultWeapon, config);
+    this.weaponId = p.defaultWeapon;
 
     this._time = 0;
     this._lastDamageT = -Infinity;
@@ -62,10 +65,53 @@ export class Player {
 
     camera.rotation.order = 'YXZ';
 
-    this._viewmodel = assets.propMesh('Gun_03');
+    this._assets = assets;
     this._viewmodelBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
-    this._viewmodel.position.copy(this._viewmodelBasePos);
-    camera.add(this._viewmodel);
+    /** @type {THREE.Mesh|null} Rebuilt by `setWeapon`; see `_buildViewmodel`. */
+    this._viewmodel = null;
+    this._buildViewmodel();
+  }
+
+  /**
+   * Points the player at a different weapon and rebuilds the viewmodel.
+   * Unknown ids fall back to `config.player.defaultWeapon` rather than
+   * throwing, so a stale id in saved preferences can't break a boot.
+   *
+   * @param {string} id
+   * @returns {string} The id actually equipped.
+   */
+  setWeapon(id) {
+    const resolved = coerceWeaponId(id, this._config);
+    if (resolved === this.weaponId && this._viewmodel) return resolved;
+    this.weaponId = resolved;
+    this.gun = resolveWeapon(resolved, this._config);
+    this._buildViewmodel();
+    // Don't let a swap hand out a free shot: the new weapon starts on its own
+    // cooldown rather than inheriting however long the old one had been idle.
+    this._lastFireT = this._time;
+    return resolved;
+  }
+
+  /**
+   * Only two gun meshes exist in `props.glb`, so weapons are told apart by
+   * tint and scale — the same approach `Turrets#_buildHead` takes for turret
+   * heads. `propMesh` hands back its own material clone, so tinting one
+   * weapon never touches another.
+   */
+  _buildViewmodel() {
+    if (this._viewmodel) {
+      this._camera.remove(this._viewmodel);
+      // Only the material: `propMesh` clones that per call, but SHARES
+      // geometry with every other instance of the same mesh name — and
+      // `Gun_02` is also the gun turret's barrel (`Turrets#_buildHead`).
+      this._viewmodel.material?.dispose?.();
+    }
+    const mesh = this._assets.propMesh(this.gun.model);
+    mesh.scale.multiplyScalar(this.gun.scale ?? 1);
+    if (mesh.material?.color) mesh.material.color.setHex(this.gun.color);
+    mesh.position.copy(this._viewmodelBasePos);
+    this._camera.add(mesh);
+    this._viewmodel = mesh;
   }
 
   /** Resets position/orientation/health for a fresh run; keeps the camera/viewmodel objects. */
@@ -139,7 +185,9 @@ export class Player {
 
     this._camera.getWorldPosition(this._fireOrigin);
     this._camera.getWorldDirection(this._fireDir);
-    return { origin: this._fireOrigin.clone(), dir: this._fireDir.clone() };
+    // Scratch vectors, not clones: `Game#_handleFiring` consumes both within
+    // the same fixed step and `Effects#tracer` copies what it is given.
+    return { origin: this._fireOrigin, dir: this._fireDir };
   }
 
   /**
@@ -168,7 +216,7 @@ export class Player {
     if (candidates.length === 0) return -1;
     this._camera.getWorldPosition(this._fireOrigin);
     this._camera.getWorldDirection(this._fireDir);
-    const cosLimit = Math.cos(this._config.player.gun.coneDegTouch * DEG2RAD);
+    const cosLimit = Math.cos(this.gun.coneDegTouch * DEG2RAD);
 
     let best = -1;
     let bestDist = Infinity;

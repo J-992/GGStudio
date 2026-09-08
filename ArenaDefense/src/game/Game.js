@@ -29,6 +29,7 @@ import { makeRng } from '../core/rng.js';
 import { pickActiveGates, waveDef, flattenSpawns } from '../core/waves.js';
 import { SpawnScheduler } from '../core/spawner.js';
 import { slotPositions, rayArenaHit } from '../core/arenaGeometry.js';
+import { spreadDirs } from '../core/weapons.js';
 import { loadSave, saveSave } from '../core/storage.js';
 import { coinsForRun, applyDoubler, bestWaveAfter } from '../core/runFlow.js';
 import { storageIO } from '../platform/storage.js';
@@ -44,12 +45,23 @@ const DEBUG_REFRESH_S = 0.5;
 const HIT_PARTICLE_COLOR = 0xffdd88;
 const HIT_PARTICLE_COUNT = 6;
 
+// Played when a weapon's own sound is not in the shipped audio set — the same
+// graceful degradation `Turrets#_fire` uses for `electric-pulse`.
+const FALLBACK_SHOT_SOUND = 'pistol-shot-1';
+const SHOT_SOUND_MIN_INTERVAL_S = 0.07;
+
 // Reused across every shot (`_handleFiring`) instead of a fresh
 // `THREE.Vector3` per shot — `Effects#tracer` copies both endpoints into its
 // own pooled `Tracer` immediately (`t.a.copy(a); t.b.copy(b);`), so handing
 // it a shared scratch vector is safe (see `docs/INTERFACES.md`'s Effects
 // section) and this file never needs to allocate one at fire time.
 const _tracerEnd = new THREE.Vector3();
+
+// Also per-shot scratch (see `_tracerEnd`): the touch aim-assist direction,
+// and the direction of the pellet currently being resolved. A nine-pellet
+// shotgun resolves nine of these per shot, in the hottest path in the game.
+const _assistDir = new THREE.Vector3();
+const _pelletDir = new THREE.Vector3();
 
 // See `_pushEnemiesFromPlayer`: `Enemies` (P3, frozen contract — see
 // `docs/INTERFACES.md`) exposes no way to move an enemy's position from
@@ -174,6 +186,7 @@ export class Game {
 
     this._paused = false;
     this._lastHp = undefined;
+    this._lastShotSoundT = -Infinity;
     this._lastMs = null;
     this._accumulator = 0;
     this._rafId = null;
@@ -745,63 +758,124 @@ export class Game {
     const targetIndex = this.world.player.aimTarget(targets);
     this._hud.setReticle(targetIndex >= 0);
 
-    const shouldFire = frame.mode === 'touch' ? targetIndex >= 0 : frame.fire;
-    if (!shouldFire) return;
+    if (!frame.fire) return;
 
     const shot = this.world.player.fire();
     if (!shot) return;
 
-    // The player's own weapon, not `config.player.gun` — the two are the same
-    // object until a weapon is selected, and reading through the player is
-    // what lets a swapped weapon's stats actually take effect.
+    // The player's own weapon, not `config.player.gun` — reading through the
+    // player is what lets a swapped weapon's stats actually take effect.
     const gun = this.world.player.gun;
-    const enemyHit = this.world.enemies?.raycast?.(shot.origin, shot.dir, gun.range) ?? null;
-    // The boss renders through `Billboards`, not `Enemies`' pool, so it needs
-    // its own cylinder test alongside the enemy raycast — see `Boss#hitTest`
-    // and `docs/INTERFACES.md`'s P5 "Player firing" compromise note this
-    // fixes. Only the NEARER of the two hits takes damage: a shot can never
-    // hit both an enemy and the boss standing behind (or in front of) it.
-    const bossHit = this.world.boss?.alive ? this.world.boss.hitTest(shot.origin, shot.dir, gun.range) : null;
 
-    let hitPoint = null;
-    if (bossHit && (!enemyHit || bossHit.dist < enemyHit.dist)) {
-      this.world.boss.damage(gun.dmg, 'player');
-      hitPoint = bossHit.point;
-    } else if (enemyHit) {
-      this.world.enemies.damageAt(enemyHit.idx, gun.dmg, 'player');
-      hitPoint = enemyHit.point;
+    // Touch keeps its aim assist now that the touch layer has a real fire
+    // button: the player pulls the trigger, but a shot taken with an enemy
+    // inside the weapon's cone still bends onto it. Pixel-accurate aim on a
+    // touchscreen is not a fair ask, and this is the same cone
+    // (`gun.coneDegTouch`) that used to drive auto-fire outright.
+    if (frame.mode === 'touch' && targetIndex >= 0) {
+      const t = targets[targetIndex];
+      _assistDir.set(t.x - shot.origin.x, t.y - shot.origin.y, t.z - shot.origin.z);
+      if (_assistDir.lengthSq() > 1e-8) shot.dir.copy(_assistDir.normalize());
     }
 
-    let tracerEnd;
-    if (hitPoint) {
-      _tracerEnd.set(hitPoint.x, hitPoint.y, hitPoint.z);
-      tracerEnd = _tracerEnd;
-      this.world.effects.burst(hitPoint.x, hitPoint.y, hitPoint.z, HIT_PARTICLE_COLOR, HIT_PARTICLE_COUNT);
+    if (gun.projSpeed) {
+      // Travelling weapon: damage resolves on impact, in `Projectiles`.
+      this.world.projectiles?.launch(shot.origin, shot.dir, gun);
     } else {
-      // Missed every enemy: land the shot on the arena floor or wall so it
-      // still reads as a shot. Without this the tracer runs off to `range`
-      // into empty space and nothing happens.
-      const impact = rayArenaHit(shot.origin, shot.dir, gun.range, this._config);
-      const fx = this._config.effects.impact;
-      if (impact) {
-        _tracerEnd.set(impact.x, impact.y, impact.z);
-        this.world.effects.burst(
-          impact.x, impact.y, impact.z,
-          impact.surface === 'wall' ? fx.wallColor : fx.groundColor,
-          fx.count,
-        );
-      } else {
-        _tracerEnd.copy(shot.origin).addScaledVector(shot.dir, gun.range);
+      const dirs = spreadDirs(shot.dir, gun.spreadDeg, gun.pellets, Math.random);
+      for (const d of dirs) {
+        _pelletDir.set(d.x, d.y, d.z);
+        this._resolvePellet(shot.origin, _pelletDir, gun);
       }
-      tracerEnd = _tracerEnd;
     }
 
-    this.world.effects.tracer(shot.origin, tracerEnd);
     if (this._config.effects.muzzleFlash) {
       this.world.effects.flash(shot.origin.x, shot.origin.y, shot.origin.z);
     }
-    this._audio.play('pistol-shot-1');
+    this._playShotSound(gun);
     this.bus.emit('player:fired', { origin: shot.origin, dir: shot.dir });
+  }
+
+  /**
+   * One hitscan pellet: damage the nearest enemy or boss it meets, and leave a
+   * mark wherever it stops — on a body, or failing that on the arena itself.
+   * A weapon with `pierce` carries on through each enemy it kills or wounds,
+   * up to that many bodies.
+   *
+   * @param {THREE.Vector3} origin
+   * @param {THREE.Vector3} dir Normalized.
+   * @param {object} gun
+   */
+  _resolvePellet(origin, dir, gun) {
+    const pierce = Math.max(1, gun.pierce ?? 1);
+    let pierced = null;
+    let lastPoint = null;
+
+    for (let i = 0; i < pierce; i++) {
+      const enemyHit = this.world.enemies?.raycast?.(origin, dir, gun.range, pierced) ?? null;
+      // The boss renders through `Billboards`, not `Enemies`' pool, so it
+      // needs its own cylinder test alongside the enemy raycast — see
+      // `Boss#hitTest`. Only the NEARER of the two takes damage: a shot can
+      // never hit both an enemy and the boss standing behind it. The boss
+      // also stops a piercing shot, rather than being hit once per pellet
+      // pass.
+      const bossHit = this.world.boss?.alive ? this.world.boss.hitTest(origin, dir, gun.range) : null;
+
+      if (bossHit && (!enemyHit || bossHit.dist < enemyHit.dist)) {
+        this.world.boss.damage(gun.dmg, 'player');
+        lastPoint = bossHit.point;
+        break;
+      }
+      if (!enemyHit) break;
+
+      this.world.enemies.damageAt(enemyHit.idx, gun.dmg, 'player');
+      lastPoint = enemyHit.point;
+      this.world.effects.burst(
+        enemyHit.point.x, enemyHit.point.y, enemyHit.point.z,
+        HIT_PARTICLE_COLOR, HIT_PARTICLE_COUNT,
+      );
+      if (pierce === 1) break;
+      (pierced ??= new Set()).add(enemyHit.idx);
+    }
+
+    if (lastPoint) {
+      _tracerEnd.set(lastPoint.x, lastPoint.y, lastPoint.z);
+      this.world.effects.tracer(origin, _tracerEnd);
+      return;
+    }
+
+    // Hit nobody: land it on the arena floor or wall so it still reads as a
+    // shot. Without this the tracer runs out to `range` into empty space and
+    // nothing happens at all.
+    const impact = rayArenaHit(origin, dir, gun.range, this._config);
+    const fx = this._config.effects.impact;
+    if (impact) {
+      _tracerEnd.set(impact.x, impact.y, impact.z);
+      this.world.effects.burst(
+        impact.x, impact.y, impact.z,
+        impact.surface === 'wall' ? fx.wallColor : fx.groundColor,
+        fx.count,
+      );
+    } else {
+      _tracerEnd.copy(origin).addScaledVector(dir, gun.range);
+    }
+    this.world.effects.tracer(origin, _tracerEnd);
+  }
+
+  /**
+   * The player's shot sound was unthrottled when there was one 6/s pistol. The
+   * fast weapons would otherwise stack eleven overlapping voices a second, so
+   * it now uses the same floor `Enemies`/`Turrets` apply to theirs.
+   *
+   * @param {object} gun
+   */
+  _playShotSound(gun) {
+    const name = gun.sound;
+    const has = this._assets.audioBuffers?.has?.(name);
+    const toPlay = has ? name : FALLBACK_SHOT_SOUND;
+    if (this.world.time - this._lastShotSoundT < SHOT_SOUND_MIN_INTERVAL_S) return;
+    this._lastShotSoundT = this.world.time;
+    this._audio.play(toPlay);
   }
 
   _checkPlayerDamageAndDeath() {

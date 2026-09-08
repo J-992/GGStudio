@@ -42,9 +42,68 @@ export const CONFIG = Object.freeze(deepFreeze({
     lookSensMouse: 0.0022,
     lookSensTouch: 0.006,
     pitchLimitDeg: 75,
-    gun: { dmg: 12, rate: 6, range: 45, coneDegTouch: 7, recoilKick: 0.04 },
     invulnAfterReviveS: 3,
     revivePushRadius: 8,
+
+    // The weapon a player starts a run with when they have never picked one.
+    defaultWeapon: 'pistol',
+
+    // Shaped like `turrets` above — an `order` array driving display/selection
+    // and a `types` record of defs — so `core/weapons.js` and the select UI can
+    // reuse the same "iterate order, resolve by id" pattern the turret chips
+    // already use.
+    //
+    // Every weapon is unlocked from wave 1, so these are deliberately
+    // SIDEGRADES, not a power ladder: each lands in a 70-110 effective-DPS band
+    // and is separated by range, spread and burst shape instead. A strictly
+    // better weapon would flatten the whole run. Balance anchors, for tuning:
+    // shambler 30 hp, spitter 24, tungtung 110, Patapim 900, `hpMul` to 1.5.
+    //
+    // `model` is a mesh from `props.glb` (only two guns exist — weapons are
+    // told apart by `color`/`scale`, the same way turret heads are);
+    // `sound` is a name from `AUDIO_NAMES` in `game/assets.js`.
+    weapons: {
+      order: ['pistol', 'ak47', 'm4a1', 'spas12', 'm82', 'rpg7'],
+      types: {
+        pistol: {
+          name: 'M9', blurb: 'Sidearm. Accurate, endless reach, unspectacular.',
+          dmg: 12, rate: 6, range: 45, spreadDeg: 0.6, pellets: 1,
+          recoilKick: 0.04, coneDegTouch: 7,
+          model: 'Gun_03', color: 0xcfd4dc, scale: 1.0, sound: 'pistol-shot-1',
+        },
+        ak47: {
+          name: 'AK-47', blurb: 'Hits hard, wanders wide. Punishing past mid range.',
+          dmg: 13, rate: 8, range: 40, spreadDeg: 3.0, pellets: 1,
+          recoilKick: 0.075, coneDegTouch: 7,
+          model: 'Gun_02', color: 0x8a5a2b, scale: 1.15, sound: 'gunfire',
+        },
+        m4a1: {
+          name: 'M4A1', blurb: 'Faster and tighter than the AK, less per shot.',
+          dmg: 10, rate: 11, range: 45, spreadDeg: 1.8, pellets: 1,
+          recoilKick: 0.05, coneDegTouch: 7,
+          model: 'Gun_02', color: 0x4a4f57, scale: 1.05, sound: 'pistol-shot-2',
+        },
+        spas12: {
+          name: 'SPAS-12', blurb: 'Nine pellets. Devastating close, useless far.',
+          dmg: 7, rate: 1.5, range: 16, spreadDeg: 9, pellets: 9,
+          recoilKick: 0.16, coneDegTouch: 12,
+          model: 'Gun_02', color: 0x2f3540, scale: 1.25, sound: 'cannon-shot-1',
+        },
+        m82: {
+          name: 'M82', blurb: 'One shot, one kill, straight through the queue.',
+          dmg: 110, rate: 0.8, range: 80, spreadDeg: 0, pellets: 1, pierce: 3,
+          recoilKick: 0.22, coneDegTouch: 4,
+          model: 'Gun_02', color: 0x6d7b52, scale: 1.4, sound: 'sniper-shot-1',
+        },
+        rpg7: {
+          name: 'RPG-7', blurb: 'Travels, then removes the crowd around it.',
+          dmg: 60, rate: 0.45, range: 60, spreadDeg: 1.0, pellets: 1,
+          recoilKick: 0.3, coneDegTouch: 7,
+          projSpeed: 30, splash: 4.5, splashDmg: 45,
+          model: 'Gun_02', color: 0x3d5a3d, scale: 1.5, sound: 'explosion-metal',
+        },
+      },
+    },
   },
 
   enemies: {
