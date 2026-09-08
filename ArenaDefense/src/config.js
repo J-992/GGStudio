@@ -54,10 +54,20 @@ export const CONFIG = Object.freeze(deepFreeze({
     // already use.
     //
     // Every weapon is unlocked from wave 1, so these are deliberately
-    // SIDEGRADES, not a power ladder: each lands in a 70-110 effective-DPS band
-    // and is separated by range, spread and burst shape instead. A strictly
-    // better weapon would flatten the whole run. Balance anchors, for tuning:
-    // shambler 30 hp, spitter 24, tungtung 110, Patapim 900, `hpMul` to 1.5.
+    // SIDEGRADES, not a power ladder: each lands in an 84-110 effective-DPS
+    // band and is separated by spread, reach and burst shape instead. A
+    // strictly better weapon would flatten the whole run. Balance anchors, for
+    // tuning: shambler 30 hp, spitter 24, tungtung 110, Patapim 900, `hpMul`
+    // to 1.5.
+    //
+    // SPREAD, not `range`, is what separates the automatics. The arena is 26 m
+    // in radius, so anything past ~52 m of range already reaches everywhere and
+    // more buys nothing — but at 20 m a 2.4-degree cone is about +/-0.85 m
+    // against a 0.5 m enemy radius, so the fast weapons genuinely miss at
+    // distance and the pinpoint ones genuinely don't. That is also why the M9
+    // is worth picking at all next to the M4A1: less DPS, but it hits what the
+    // crosshair is on. The RPG-7's 27 single-target DPS looks far off the band
+    // on purpose — its damage is the splash, over a 4.5 m radius.
     //
     // `model` is a mesh from `props.glb` (only two guns exist — weapons are
     // told apart by `color`/`scale`, the same way turret heads are);
@@ -67,19 +77,19 @@ export const CONFIG = Object.freeze(deepFreeze({
       types: {
         pistol: {
           name: 'M9', blurb: 'Sidearm. Accurate, endless reach, unspectacular.',
-          dmg: 12, rate: 6, range: 45, spreadDeg: 0.6, pellets: 1,
+          dmg: 14, rate: 6, range: 45, spreadDeg: 0.35, pellets: 1,
           recoilKick: 0.04, coneDegTouch: 7,
           model: 'Gun_03', color: 0xcfd4dc, scale: 1.0, sound: 'pistol-shot-1',
         },
         ak47: {
           name: 'AK-47', blurb: 'Hits hard, wanders wide. Punishing past mid range.',
-          dmg: 13, rate: 8, range: 40, spreadDeg: 3.0, pellets: 1,
+          dmg: 13, rate: 8, range: 40, spreadDeg: 3.5, pellets: 1,
           recoilKick: 0.075, coneDegTouch: 7,
           model: 'Gun_02', color: 0x8a5a2b, scale: 1.15, sound: 'gunfire',
         },
         m4a1: {
           name: 'M4A1', blurb: 'Faster and tighter than the AK, less per shot.',
-          dmg: 10, rate: 11, range: 45, spreadDeg: 1.8, pellets: 1,
+          dmg: 10, rate: 11, range: 45, spreadDeg: 2.4, pellets: 1,
           recoilKick: 0.05, coneDegTouch: 7,
           model: 'Gun_02', color: 0x4a4f57, scale: 1.05, sound: 'pistol-shot-2',
         },
