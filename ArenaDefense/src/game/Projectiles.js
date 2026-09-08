@@ -139,7 +139,7 @@ export class Projectiles {
    * @param {object} world See `docs/INTERFACES.md`'s `Game.world` shape.
    */
   update(dt, world) {
-    for (let i = 0; i < cap; i++) {
+    for (let i = 0; i < this._active.length; i++) {
       if (!this._active[i]) continue;
 
       const step = this._speed[i] * dt;
