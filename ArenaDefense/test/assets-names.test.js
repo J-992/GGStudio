@@ -68,9 +68,8 @@ test('every model the config asks for exists in the shipped GLBs', () => {
     assert.ok(available.has(def.base), `turret "${name}" wants base mesh "${def.base}", which no GLB provides`);
   }
 
-  for (const [name, def] of Object.entries(CONFIG.player.weapons.types)) {
-    assert.ok(available.has(def.model), `weapon "${name}" wants mesh "${def.model}", which no GLB provides`);
-  }
+  // Weapons deliberately have no `model`: `game/weaponMesh.js` builds them
+  // from primitives, so there is no mesh name to check.
 });
 
 test('every weapon sound is shipped, and registered for loading', () => {

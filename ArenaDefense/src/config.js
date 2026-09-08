@@ -91,10 +91,20 @@ export const CONFIG = Object.freeze(deepFreeze({
     // SPAS-12 and M82 kick two to three times as hard, which is most of what
     // makes a slow, heavy weapon feel slow and heavy.
     //
-    // `model` is a mesh from `props.glb` (only two guns exist — weapons are
-    // told apart by `color`/`scale`, the same way turret heads are);
+    // Weapons carry no `model`: `game/weaponMesh.js` builds each silhouette
+    // from primitives, so the roster no longer depends on `props.glb` — which
+    // also retires the UNKNOWN-provenance row `ASSET_LICENSES.md` carries for
+    // `Gun_02`/`Gun_03`. `color` and `scale` still drive the build, and
     // `sound` is a name from `AUDIO_NAMES` in `game/assets.js`.
     weapons: {
+      // One multiplier over every viewmodel, on top of each weapon's own
+      // `scale`. The builders in `game/weaponMesh.js` work in roughly real
+      // proportions — an M82 really is six times an M9 — and real proportions
+      // are wrong for a gun held 0.55 m from the camera, where the big ones
+      // would fill the screen. This is the knob to turn if the weapons look
+      // too large or too small in the hand; it changes nothing about how they
+      // shoot.
+      viewmodelScale: 0.5,
       order: ['pistol', 'ak47', 'm4a1', 'spas12', 'm82', 'rpg7'],
       types: {
         pistol: {
@@ -102,35 +112,35 @@ export const CONFIG = Object.freeze(deepFreeze({
           dmg: 14, rate: 6, range: 45, spreadDeg: 0.35, pellets: 1,
           coneDegTouch: 7,
           recoil: { impulse: 46.5, viewBackM: 0.085, viewUpM: 0.022, viewPitchDeg: 7.0, camPitchDeg: 1.0 },
-          model: 'Gun_03', color: 0xcfd4dc, scale: 1.0, sound: 'pistol-shot-1',
+          color: 0xcfd4dc, scale: 1.0, sound: 'pistol-shot-1',
         },
         ak47: {
           name: 'AK-47', blurb: 'Hits hard, wanders wide. Punishing past mid range.',
           dmg: 13, rate: 8, range: 40, spreadDeg: 3.5, pellets: 1,
           coneDegTouch: 7,
           recoil: { impulse: 46.5, viewBackM: 0.1148, viewUpM: 0.0297, viewPitchDeg: 9.45, camPitchDeg: 1.12 },
-          model: 'Gun_02', color: 0x8a5a2b, scale: 1.15, sound: 'gunfire',
+          color: 0x8a5a2b, scale: 1.15, sound: 'gunfire',
         },
         m4a1: {
           name: 'M4A1', blurb: 'The easiest to land, and the slowest to kill.',
           dmg: 8, rate: 10, range: 38, spreadDeg: 2.8, pellets: 1,
           coneDegTouch: 7,
           recoil: { impulse: 46.5, viewBackM: 0.068, viewUpM: 0.0176, viewPitchDeg: 5.6, camPitchDeg: 0.93 },
-          model: 'Gun_02', color: 0x4a4f57, scale: 1.05, sound: 'pistol-shot-2',
+          color: 0x4a4f57, scale: 1.05, sound: 'pistol-shot-2',
         },
         spas12: {
           name: 'SPAS-12', blurb: 'Nine pellets. Devastating close, useless far.',
           dmg: 7, rate: 1.5, range: 16, spreadDeg: 9, pellets: 9,
           coneDegTouch: 12,
           recoil: { impulse: 46.5, viewBackM: 0.221, viewUpM: 0.0572, viewPitchDeg: 18.2, camPitchDeg: 1.56 },
-          model: 'Gun_02', color: 0x2f3540, scale: 1.25, sound: 'cannon-shot-1',
+          color: 0x2f3540, scale: 1.25, sound: 'cannon-shot-1',
         },
         m82: {
           name: 'M82', blurb: 'One shot, one kill, straight through the queue.',
           dmg: 110, rate: 0.8, range: 80, spreadDeg: 0, pellets: 1, pierce: 3,
           coneDegTouch: 4,
           recoil: { impulse: 46.5, viewBackM: 0.272, viewUpM: 0.0704, viewPitchDeg: 22.4, camPitchDeg: 1.77 },
-          model: 'Gun_02', color: 0x6d7b52, scale: 1.4, sound: 'sniper-shot-1',
+          color: 0x6d7b52, scale: 1.4, sound: 'sniper-shot-1',
         },
         rpg7: {
           name: 'RPG-7', blurb: 'Travels, then removes the crowd around it.',
@@ -138,7 +148,7 @@ export const CONFIG = Object.freeze(deepFreeze({
           coneDegTouch: 7,
           recoil: { impulse: 46.5, viewBackM: 0.306, viewUpM: 0.0792, viewPitchDeg: 25.2, camPitchDeg: 1.91 },
           projSpeed: 30, splash: 4.5, splashDmg: 45,
-          model: 'Gun_02', color: 0x3d5a3d, scale: 1.5, sound: 'explosion-metal',
+          color: 0x3d5a3d, scale: 1.5, sound: 'explosion-metal',
         },
       },
     },

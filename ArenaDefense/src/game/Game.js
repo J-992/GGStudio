@@ -39,6 +39,8 @@ import { Effects } from './Effects.js';
 import { Enemies } from './Enemies.js';
 import { Billboards } from './Billboards.js';
 import { Projectiles } from './Projectiles.js';
+import { WeaponIcons } from './WeaponIcons.js';
+import { buildWeaponMesh } from './weaponMesh.js';
 
 const FIXED_STEP_SAFETY_MAX_ITERATIONS = 8;
 const DEBUG_REFRESH_S = 0.5;
@@ -134,7 +136,7 @@ export class Game {
       ...hooks,
     };
 
-    const player = new Player(camera, assets, config);
+    const player = new Player(camera, config);
     const arena = new Arena(scene, assets, config);
     const effects = new Effects(scene);
     // +1 reserves a slot for a boss billboard (P5's `Boss.js`, not yet
@@ -144,6 +146,10 @@ export class Game {
     // The player's rocket: the one weapon that travels rather than resolving
     // on the frame it is fired (see `_handleFiring`'s `gun.projSpeed` branch).
     const projectiles = new Projectiles(scene, config, audio);
+    // Renders weapon-select card art offscreen. One renderer for all six
+    // cards, not one per card: a browser gives a page around sixteen WebGL
+    // contexts and the arena already holds one.
+    this._weaponIcons = new WeaponIcons();
 
     /**
      * The one bag every system reads/writes. `turrets`/`boss` are `null`
@@ -427,6 +433,7 @@ export class Game {
   }
 
   dispose() {
+    this._weaponIcons.dispose();
     if (this._rafId !== null) cancelAnimationFrame(this._rafId);
     window.removeEventListener('resize', this._onResize);
     document.removeEventListener('visibilitychange', this._onVisibility);
@@ -744,7 +751,15 @@ export class Game {
    */
   async _runWeaponSelectFlow(confirmLabel = null) {
     const chosen = await this._screens.showWeaponSelect({
-      weapons: weaponIds(this._config).map((id) => ({ id, def: resolveWeapon(id, this._config) })),
+      // The card art is a render of the weapon the player will actually hold,
+      // from the same builder the viewmodel uses, so a card can never go stale.
+      // `Screens` stays DOM-only — the renderer lives here, where three.js is
+      // allowed. `icon` is null if no WebGL context was spare; the card then
+      // falls back to text, which is what it was before.
+      weapons: weaponIds(this._config).map((id) => {
+        const def = resolveWeapon(id, this._config);
+        return { id, def, icon: this._weaponIcons.iconFor(id, () => buildWeaponMesh(id, def, [], [])) };
+      }),
       current: this.world.player.weaponId,
       confirmLabel: confirmLabel ?? 'EQUIP',
     });

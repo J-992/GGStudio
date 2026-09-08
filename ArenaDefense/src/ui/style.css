@@ -1281,6 +1281,21 @@ body.touch .bo-help--keyboard {
   opacity: 0.4;
 }
 
+/* Card art: a render of the weapon, produced at runtime by `game/WeaponIcons.js`
+   and handed in as a data URL. Absent when no WebGL context was spare, so the
+   card must still look deliberate with no image at all — hence the fixed
+   aspect box rather than letting the image dictate the card's height. */
+.weapon-card-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  object-fit: contain;
+  margin-bottom: 4px;
+  /* Purely decorative: the name below it is the accessible label. */
+  pointer-events: none;
+}
+
+
 .weapon-card-name {
   font-size: 17px;
   letter-spacing: 0.04em;
