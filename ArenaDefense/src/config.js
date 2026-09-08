@@ -45,26 +45,37 @@ export const CONFIG = Object.freeze(deepFreeze({
     gun: { dmg: 12, rate: 6, range: 45, coneDegTouch: 7, recoilKick: 0.04 },
     invulnAfterReviveS: 3,
     revivePushRadius: 8,
+    revivePushSpeed: 8, // m/s impulse the revive shove lands on each enemy in range.
   },
 
   enemies: {
     cap: 35,
     separationRadius: 1.2,
     separationForce: 3,
+    // Hit reaction: every point of damage shoves the body back along the
+    // shot direction, staggers its advance and tilts it away from the hit.
+    // `speed` is the impulse a `refDmg` hit lands (one pistol shot), scaled
+    // per type by `knockbackScale` below.
+    knockback: {
+      speed: 3.0, refDmg: 12, maxSpeed: 8, decayS: 0.1, stopSpeed: 0.2,
+      tiltRad: 0.55, squash: 0.16, staggerDamp: 0.6,
+    },
     types: {
       shambler: {
         render: 'voxel', model: 'zed_1', hp: 30, speed: 4.2, kind: 'melee',
         dmg: 8, range: 1.6, cooldown: 1.0, energy: 10, radius: 0.5, hitHeight: 1.8,
+        knockbackScale: 1,
       },
       spitter: {
         render: 'voxel', model: 'zed_3', hp: 24, speed: 4.3, kind: 'ranged',
         dmg: 6, range: 12, keepDistance: 9, preferPlayerRange: 16, cooldown: 1.8,
         projSpeed: 14, energy: 14, radius: 0.5, hitHeight: 1.8,
+        knockbackScale: 1.15,
       },
       tungtung: {
         render: 'sprite', sprite: 'tungtung', height: 2.2, hp: 110, speed: 4.1,
         kind: 'melee', dmg: 18, range: 2.0, cooldown: 1.4, lunge: 3.0, energy: 30,
-        radius: 0.6, hitHeight: 2.2,
+        radius: 0.6, hitHeight: 2.2, knockbackScale: 0.45,
       },
     },
   },

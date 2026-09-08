@@ -27,6 +27,7 @@
  * @property {number} energy
  * @property {number} radius
  * @property {number} hitHeight
+ * @property {number} [knockbackScale] Multiplier on this type's hit-reaction knockback (and on its cap); 1 = the `cfg.enemies.knockback` defaults, lower = heavier body.
  */
 
 /**

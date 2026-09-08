@@ -344,12 +344,24 @@ class Enemies {
    * @param {number} idx
    * @param {number} dmg
    * @param {string} source Free-form origin tag: `'player'`, `'turret'`, ...
+   * @param {{x:number,z:number}} [dir] Hit-reaction push direction (need not be
+   *   normalized) — the bullet's direction, or turret→enemy. Omitted or zero
+   *   shoves the enemy straight backwards from its own facing.
    * @returns {boolean} Whether this hit killed the enemy.
    */
-  damageAt(idx, dmg, source) {}
+  damageAt(idx, dmg, source, dir) {}
 
-  /** Splash damage; returns the number of kills it caused. @returns {number} */
+  /** Splash damage; returns the number of kills it caused. Each body is thrown radially outwards from `(x, z)`. @returns {number} */
   damageRadius(x, z, r, dmg, source) {}
+
+  /**
+   * Damage-free hit reaction — the revive push uses it. See "Hit reaction
+   * (knockback)" below.
+   * @param {number} idx
+   * @param {{x:number,z:number}} dir Radial push direction; zero shoves the enemy backwards from its own facing.
+   * @param {number} speed Impulse in m/s, scaled by the type's `knockbackScale`.
+   */
+  knockback(idx, dir, speed) {}
 
   /**
    * @param {number} idx
@@ -490,8 +502,30 @@ instances, alongside the pre-existing `energy`/`wave`/`activeGates` fields).
 
 Player firing (`_handleFiring`) now does a real hitscan: `world.enemies
 .raycast(shot.origin, shot.dir, gun.range)`, and on a hit,
-`damageAt(hit.idx, gun.dmg, 'player')`, a tracer to the hit point (instead of
-the max-range point), and a small `effects.burst` at the hit point.
+`damageAt(hit.idx, gun.dmg, 'player', { x: shot.dir.x, z: shot.dir.z })`, a
+tracer to the hit point (instead of the max-range point), and a small
+`effects.burst` at the hit point.
+
+## Hit reaction (knockback)
+
+Every hit on a pool enemy shoves its body: `damageAt`'s optional `dir` is
+turned into a knockback velocity (`core/enemyBrain.knockbackSpeed`, scaled by
+damage and the type's `knockbackScale`, capped and stackable) held in
+`Enemies`' `_kickVX/_kickVZ` arrays. Per fixed step that velocity is added to
+the enemy's own steering, which is itself damped by
+`staggerFactor` while the kick lasts, then decayed by `decayKnockback` (it
+snaps to zero below `stopSpeed`, so a hit never leaves a permanent drift).
+Every tunable lives in `cfg.enemies.knockback`.
+
+The same impulse drives the visuals, via
+`knockbackIntensity` (0..1): voxel enemies tilt `knockbackTilt` radians about
+the world axis perpendicular to the push (pre-multiplied onto the yaw/walk
+rotation, pivoting at the feet) and play `spriteAnim.hitSquash`; sprite
+enemies, which carry no rotation, play the knockback slide plus that squash
+on top of their walk `bob`, alongside the pre-existing `hitFlash`. Direction
+per source: the player's bullet direction, turret→enemy for gun/tesla, and
+radially outwards from the blast centre for cannon splash. The boss has no
+knockback — it keeps its `hitFlash` only.
 
 `?wave=N` (1..`run.finalWave`) skips the title screen and starts the run
 directly at wave N's build phase — used for owner verification (P5's boss at
@@ -1040,20 +1074,16 @@ then full hp, `alive = true`, `invulnUntil = world.time +
 invulnAfterReviveS`, `_pushEnemiesFromPlayer()` (below), `hud.show(true)`,
 `state.go('wave')`.
 
-**Deviation — "push enemies away" is a stun, not a reposition.** The plan
-brief calls for pushing nearby enemies outward on revive. `Enemies.js`'s
-frozen public contract (P3's "P3 additions" section above) exposes exactly
-one per-enemy mutator besides damage: `applySlow(idx, factor, durS)` — no
-`setPosition`/knockback of any kind, and P6 is not in a position to add one
-(out of this package's owned-files list, same reasoning P5 gave for not
-adding an add-spawn-position setter). `_pushEnemiesFromPlayer` instead
-calls `world.enemies.positions()`, finds every entry within
-`revivePushRadius` of the player, and `applySlow(idx, 0.05,
-invulnAfterReviveS)`s each one — a near-stun for exactly the same window
-the player is invulnerable for. Enemies don't visually leap backward, but
-the player gets equivalent practical breathing room. Flagged here for
-whichever package next touches `Enemies.js`, same spirit as P5's add-spawn
-flag above.
+**"Push enemies away" is a real shove plus a stun.** The plan brief calls
+for pushing nearby enemies outward on revive. This was originally a stun
+only — `Enemies.js` exposed no positional mutator besides damage — and is
+now both, since the hit-reaction work added one:
+`_pushEnemiesFromPlayer` calls `world.enemies.positions()`, and for every
+entry within `revivePushRadius` of the player fires
+`knockback(idx, {x: dx, z: dz}, player.revivePushSpeed)` (radially outwards
+— bodies lean and stagger back exactly as they do off a bullet) followed by
+`applySlow(idx, 0.05, invulnAfterReviveS)`, a near-stun for exactly the same
+window the player is invulnerable for.
 
 ### Run-end flow
 

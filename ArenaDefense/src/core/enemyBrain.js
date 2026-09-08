@@ -177,3 +177,87 @@ export function tickCooldown(enemy, dt) {
 export function hpFor(typeDef, hpMul) {
   return typeDef.hp * hpMul;
 }
+
+/**
+ * Knockback impulse speed for one hit, in m/s. Scales with damage relative
+ * to `cfg.enemies.knockback.refDmg` and with the type's own
+ * `knockbackScale` (heavier enemies barely budge), clamped so a cannon
+ * shell can't launch a shambler across the arena.
+ *
+ * @param {number} dmg
+ * @param {import('./types.js').EnemyTypeDef} typeDef
+ * @param {import('./types.js').GameConfig} cfg
+ * @returns {number} >= 0.
+ */
+export function knockbackSpeed(dmg, typeDef, cfg) {
+  const k = cfg.enemies.knockback;
+  const scale = typeDef?.knockbackScale ?? 1;
+  if (scale <= 0 || k.refDmg <= 0) return 0;
+  const raw = k.speed * (Math.max(0, dmg) / k.refDmg) * scale;
+  return clamp(raw, 0, k.maxSpeed * scale);
+}
+
+/**
+ * Exponential decay of an in-flight knockback velocity, snapping to a dead
+ * stop below `stopSpeed` so an enemy never creeps on a hit long past.
+ *
+ * @param {number} vx
+ * @param {number} vz
+ * @param {number} dt
+ * @param {import('./types.js').GameConfig} cfg
+ * @returns {{vx:number, vz:number}}
+ */
+export function decayKnockback(vx, vz, dt, cfg) {
+  const k = cfg.enemies.knockback;
+  const factor = k.decayS > 0 ? Math.exp(-Math.max(0, dt) / k.decayS) : 0;
+  const nx = vx * factor;
+  const nz = vz * factor;
+  if (Math.hypot(nx, nz) < k.stopSpeed) return { vx: 0, vz: 0 };
+  return { vx: nx, vz: nz };
+}
+
+/**
+ * How much of its own steering an enemy keeps while being knocked back: 1
+ * when untouched, falling towards `1 - staggerDamp` at full knockback. This
+ * is the "stagger" — a hit visibly interrupts the advance instead of just
+ * sliding the enemy sideways while it keeps walking.
+ *
+ * @param {number} kickSpeed Current knockback speed (m/s).
+ * @param {import('./types.js').EnemyTypeDef} typeDef
+ * @param {import('./types.js').GameConfig} cfg
+ * @returns {number} In `[1 - staggerDamp, 1]`.
+ */
+export function staggerFactor(kickSpeed, typeDef, cfg) {
+  return 1 - cfg.enemies.knockback.staggerDamp * knockbackIntensity(kickSpeed, typeDef, cfg);
+}
+
+/**
+ * How hard an enemy is currently being knocked back, normalized against the
+ * hardest hit its type can take: 0 when untouched, 1 at a full-strength
+ * impulse. The one place the "how hurt does this look" ramp is defined —
+ * tilt, stagger and flinch-squash all read from it.
+ *
+ * @param {number} kickSpeed Current knockback speed (m/s).
+ * @param {import('./types.js').EnemyTypeDef} typeDef
+ * @param {import('./types.js').GameConfig} cfg
+ * @returns {number} 0..1.
+ */
+export function knockbackIntensity(kickSpeed, typeDef, cfg) {
+  const max = cfg.enemies.knockback.maxSpeed * (typeDef?.knockbackScale ?? 1);
+  if (max <= 0) return 0;
+  return clamp(Math.max(0, kickSpeed) / max, 0, 1);
+}
+
+/**
+ * Lean-back angle (radians) for a body taking a hit, proportional to how
+ * hard it is currently being pushed. `game/Enemies.js` tilts the voxel
+ * instance around the axis perpendicular to the knockback direction.
+ *
+ * @param {number} kickSpeed
+ * @param {import('./types.js').EnemyTypeDef} typeDef
+ * @param {import('./types.js').GameConfig} cfg
+ * @returns {number} In `[0, cfg.enemies.knockback.tiltRad]`.
+ */
+export function knockbackTilt(kickSpeed, typeDef, cfg) {
+  return cfg.enemies.knockback.tiltRad * knockbackIntensity(kickSpeed, typeDef, cfg);
+}
