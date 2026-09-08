@@ -81,17 +81,6 @@ export function installBuildPhase(game, { turrets, overlay, audio, hud, cfg }) {
     }
   }
 
-  /** Ends the build phase through the exact transition `Game`'s own
-   * countdown-expiry path uses, so the overlay's Ready button (which touch
-   * players must use — `InputFrame.ready` is keyboard-only in P2/P3) and a
-   * keyboard player's own Space/Enter both land in the same place. */
-  function endBuildPhase() {
-    if (game.state.state !== 'build') return;
-    hud.setBuildCountdown(null);
-    game.state.go('wave');
-    game.bus.emit('state:changed', { state: 'wave' });
-  }
-
   function deny() {
     audio.play('ui-deny');
   }
@@ -166,13 +155,16 @@ export function installBuildPhase(game, { turrets, overlay, audio, hud, cfg }) {
     audio.play('ui-place');
   };
 
+  // Hands off to `Game`, which owns the only path out of `build`.
+  //
+  // This used to end the phase itself with `state.go('wave')` plus the energy
+  // refund, mirroring what `Game#_advanceStateMachine` does. It looked
+  // equivalent and was not: it skipped `_startWave()`, so the scheduler was
+  // never rebuilt and every wave started with READY spawned nothing at all
+  // (and wave 5's boss never appeared). The refund moved to `Game` with the
+  // rest of it, so there is one owner and no chance of applying it twice.
   overlay.onReady = () => {
-    if (game.state.state !== 'build') return;
-    const refund = economy().readyRefund(latestSecondsLeft, cfg);
-    economy().addEnergy(refund);
-    hud.setEnergy(economy().energy);
-    if (refund > 0) hud.toast(`+${refund} energy`);
-    endBuildPhase();
+    game.requestReady();
   };
 
   // Covers `installBuildPhase` running after the game has already entered

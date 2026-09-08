@@ -29,6 +29,7 @@
 // `player.invulnUntil = world.time + seconds`.
 import * as THREE from 'three';
 import { coerceWeaponId, resolveWeapon } from '../core/weapons.js';
+import { buildWeaponMesh } from './weaponMesh.js';
 import { clampToArena } from '../core/arenaGeometry.js';
 import {
   createRecoilSpring,
@@ -44,11 +45,13 @@ const WALK_SWAY_AMOUNT = 0.01;
 
 export class Player {
   /**
+   * No `assets` dependency: the viewmodel is built from primitives by
+   * `game/weaponMesh.js` rather than loaded from `props.glb`.
+   *
    * @param {THREE.PerspectiveCamera} camera
-   * @param {import('./assets.js').Assets} assets
    * @param {import('../core/types.js').GameConfig} config
    */
-  constructor(camera, assets, config) {
+  constructor(camera, config) {
     this._camera = camera;
     this._config = config;
 
@@ -82,7 +85,6 @@ export class Player {
 
     camera.rotation.order = 'YXZ';
 
-    this._assets = assets;
     this._viewmodelBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
     /** @type {THREE.Mesh|null} Rebuilt by `setWeapon`; see `_buildViewmodel`. */
     this._viewmodel = null;
@@ -110,33 +112,51 @@ export class Player {
   }
 
   /**
-   * Only two gun meshes exist in `props.glb`, so weapons are told apart by
-   * tint and scale — the same approach `Turrets#_buildHead` takes for turret
-   * heads. `propMesh` hands back its own material clone, so tinting one
-   * weapon never touches another.
+   * Builds the held weapon from primitives (`game/weaponMesh.js`) rather than
+   * from an authored mesh.
+   *
+   * All six weapons used to be `Gun_02`/`Gun_03` recoloured and rescaled, so
+   * they were indistinguishable in the hand. They are also the two meshes
+   * `ASSET_LICENSES.md` records as UNKNOWN provenance — and that file names
+   * "procedural gun/turret-base geometry" as its own remedy. So this both
+   * makes the weapons readable and retires a licensing risk, at zero
+   * download bytes against a hard budget.
    */
   _buildViewmodel() {
-    if (this._viewmodel) {
-      this._camera.remove(this._viewmodel);
-      // Only the material: `propMesh` clones that per call, but SHARES
-      // geometry with every other instance of the same mesh name — and
-      // `Gun_02` is also the gun turret's barrel (`Turrets#_buildHead`).
-      this._viewmodel.material?.dispose?.();
-    }
-    const mesh = this._assets.propMesh(this.gun.model);
-    mesh.scale.multiplyScalar(this.gun.scale ?? 1);
-    if (mesh.material?.color) mesh.material.color.setHex(this.gun.color);
+    this._disposeViewmodel();
+
+    /** @type {THREE.BufferGeometry[]} */
+    this._ownedGeometries = [];
+    /** @type {THREE.Material[]} */
+    this._ownedMaterials = [];
+    const mesh = buildWeaponMesh(this.weaponId, this.gun, this._ownedGeometries, this._ownedMaterials);
+    // The builders work in near-real proportions; this brings the whole set
+    // down to viewmodel size. See `config.player.weapons.viewmodelScale`.
+    mesh.scale.multiplyScalar(this._config.player.weapons.viewmodelScale ?? 1);
     mesh.position.copy(this._viewmodelBasePos);
-    // `assets.propMesh` bakes the model's own orientation into the mesh, so
-    // the recoil tilt has to be an *offset* from it rather than a bare
-    // `rotation.set`. Euler order here is the default 'XYZ' (R = Rx*Ry*Rz),
-    // so adding to `.x` is equivalent to left-multiplying an extra Rx — a
-    // muzzle-up tilt in the camera's frame whatever the baked yaw/roll is.
-    // Recaptured per mesh, since a weapon swap builds a new one with its own
-    // baked orientation.
+    // The recoil tilt is an *offset* from whatever orientation the builder
+    // left, rather than a bare `rotation.set`. Euler order is the default
+    // 'XYZ' (R = Rx*Ry*Rz), so adding to `.x` left-multiplies an extra Rx — a
+    // muzzle-up tilt in the camera's frame regardless of the base rotation.
+    // Recaptured per build, since each weapon has its own.
     this._viewmodelBaseRot = mesh.rotation.clone();
     this._camera.add(mesh);
     this._viewmodel = mesh;
+  }
+
+  /**
+   * Releases the current viewmodel. Everything the builder allocated is in the
+   * two owned arrays and is ours to free — nothing here is shared with the
+   * scene, unlike the `propMesh` geometry this used to borrow.
+   */
+  _disposeViewmodel() {
+    if (!this._viewmodel) return;
+    this._camera.remove(this._viewmodel);
+    for (const geom of this._ownedGeometries ?? []) geom.dispose();
+    for (const mat of this._ownedMaterials ?? []) mat.dispose();
+    this._ownedGeometries = [];
+    this._ownedMaterials = [];
+    this._viewmodel = null;
   }
 
   /** Resets position/orientation/health for a fresh run; keeps the camera/viewmodel objects. */

@@ -256,6 +256,52 @@ body.hide-cursor #scene {
   transition: width 150ms ease-out;
 }
 
+/* Wave progress bar (`Hud.js`'s `setWaveProgress`, driven by `Game#_syncHud`
+   with `killsThisWave / totalForWave`; hidden outside `wave` and on boss
+   waves). Same centred-strip shape as `.hud-boss` directly above, deliberately
+   placed 18px higher (`max(28px, …)` vs. `.hud-boss`'s `max(46px, …)`) rather
+   than the two ever trading places:
+     - This bar's own box is 10px tall plus a 2px border top and bottom
+       (`.hud-bar`'s pattern, reused here) = 14px total, so it always clears
+       28 + 14 = 42px — 4px of breathing room before `.hud-boss` starts at 46.
+     - `.hud-boss` only shows on a boss wave, which is also the one case where
+       `setWaveProgress` goes back to `null` (`Game#_syncHud` — no
+       kills-this-wave fraction during a boss fight) and this bar hides. So
+       the two are never actually both visible at 28px/46px at once *and*
+       stacked on the same wave; the 18px gap is a guard for whenever that
+       changes, not a gap this file relies on today.
+   `.hud-build-countdown` sits higher still, at `max(10px, …)`, and its own
+   band (roughly 10-36px given its font-size/padding) does overlap this bar's
+   28px start on paper — but `setBuildCountdown` only shows during `build` and
+   `setWaveProgress` only shows during `wave`, so the two are never visible at
+   the same time either; nothing here needs to dodge it vertically.
+   Fill colour is deliberately not `.hud-boss__fill`'s red (`#b3263d`) — the
+   one wave the two bars *can* coexist on (wave 5, mid-transition) must not
+   read as "two copies of the same bar". */
+.hud-wave-bar {
+  position: absolute;
+  top: max(28px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(60vw, 420px);
+  height: 10px;
+  border: 2px solid #0c0806;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.hud-wave-bar[hidden] {
+  display: none;
+}
+
+.hud-wave-bar__fill {
+  height: 100%;
+  width: 100%;
+  background: #4fa3ff;
+  transition: width 150ms ease-out;
+}
+
 .hud-combo {
   position: absolute;
   top: max(10px, env(safe-area-inset-top));
@@ -1234,6 +1280,21 @@ body.touch .bo-help--keyboard {
 .weapon-card:disabled {
   opacity: 0.4;
 }
+
+/* Card art: a render of the weapon, produced at runtime by `game/WeaponIcons.js`
+   and handed in as a data URL. Absent when no WebGL context was spare, so the
+   card must still look deliberate with no image at all — hence the fixed
+   aspect box rather than letting the image dictate the card's height. */
+.weapon-card-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  object-fit: contain;
+  margin-bottom: 4px;
+  /* Purely decorative: the name below it is the accessible label. */
+  pointer-events: none;
+}
+
 
 .weapon-card-name {
   font-size: 17px;

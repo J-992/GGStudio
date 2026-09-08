@@ -25,7 +25,7 @@ test('every weapon in `order` has a def with the keys the firing path reads', ()
   for (const id of ids) {
     const w = resolveWeapon(id, CONFIG);
     assert.ok(w, `${id} is in order but has no def`);
-    for (const key of ['name', 'dmg', 'rate', 'range', 'spreadDeg', 'pellets', 'coneDegTouch', 'model', 'color', 'sound', 'recoil']) {
+    for (const key of ['name', 'dmg', 'rate', 'range', 'spreadDeg', 'pellets', 'coneDegTouch', 'color', 'sound', 'recoil']) {
       assert.ok(w[key] !== undefined, `${id} is missing ${key}`);
     }
     for (const key of ['impulse', 'viewBackM', 'viewUpM', 'viewPitchDeg', 'camPitchDeg']) {

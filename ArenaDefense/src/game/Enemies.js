@@ -52,7 +52,6 @@ const _quatKick = new THREE.Quaternion();
 const _kickAxis = new THREE.Vector3();
 const _pos = new THREE.Vector3();
 const _scale = new THREE.Vector3();
-const _scaleOne = new THREE.Vector3(1, 1, 1);
 
 /**
  * Axis-aligned (Y) swept-cylinder ray test, radius `radius`, extending from
@@ -151,6 +150,25 @@ export class Enemies {
     /** @type {(('voxel'|'sprite')|null)[]} */
     this._renderKind = new Array(cap).fill(null);
     this._slotId = new Int32Array(cap).fill(-1);
+    // Size variant (small/normal/large, or whatever `cfg.enemies.variants`
+    // defines): `_sizeMul` drives everything geometric — voxel/sprite render
+    // scale and the hitbox (`_radiusOf`/`_hitHeightOf` below) — and is read
+    // straight off `cfg.enemies.variants.types[variant].size` at spawn time.
+    // `_variant` is kept alongside it only as the cache key into
+    // `_variantDefCache` (see `_resolveTypeDef`); the two must always be set
+    // together in `spawn()`.
+    this._sizeMul = new Float32Array(cap).fill(1);
+    /** @type {string[]} */
+    this._variant = new Array(cap).fill('normal');
+
+    // (type, variant) -> frozen EnemyTypeDef with hp/speed/knockbackScale
+    // pre-multiplied by that variant's config. Built lazily, at most
+    // `types x variants` entries (e.g. 3x3=9) for the life of this pool, so
+    // that `update()`'s per-enemy per-fixed-step hot loop can index into it
+    // instead of allocating a scaled copy of `typeDef` every tick — see
+    // `_resolveTypeDef`.
+    /** @type {Map<string, import('../core/types.js').EnemyTypeDef>} */
+    this._variantDefCache = new Map();
 
     /** @type {number[]} Free-list of pool indices. */
     this._free = [];
@@ -224,16 +242,83 @@ export class Enemies {
   }
 
   /**
+   * Resolves the `EnemyTypeDef` a given (type, variant) pair should use for
+   * everything EXCEPT the hitbox/visual scale: `hp`, `speed` and
+   * `knockbackScale` pre-multiplied by `cfg.enemies.variants.types[variant]`,
+   * every other field inherited untouched from `cfg.enemies.types[typeName]`
+   * (in particular `energy`, which must stay variant-invariant — see
+   * `AGENTS.md`/`test/waves.test.js`'s wave-1 energy pin). Deliberately does
+   * NOT touch `radius`/`hitHeight`: those scale per INSTANCE via `_sizeMul`
+   * (`_radiusOf`/`_hitHeightOf` below), not per (type, variant), so they stay
+   * off this object and are read straight from the base def there.
+   *
+   * Cached (frozen, built once per key) rather than computed per call: this
+   * backs `_typeDefAt`, which `update()` calls once per alive enemy per fixed
+   * step — allocating a scaled clone there would be 35-70 throwaway objects
+   * a tick in the hottest loop in the game.
+   *
+   * @param {string} typeName
+   * @param {string} variant
+   * @returns {import('../core/types.js').EnemyTypeDef}
+   */
+  _resolveTypeDef(typeName, variant) {
+    const key = `${typeName} ${variant}`;
+    let def = this._variantDefCache.get(key);
+    if (def) return def;
+
+    const base = this._cfg.enemies.types[typeName];
+    // No variants block configured yet, or an unrecognized variant key:
+    // fall back to the base def unscaled rather than throwing, so this
+    // mechanism is safe to land before the config/caller side exists.
+    const variantCfg = this._cfg.enemies.variants?.types?.[variant];
+    def = variantCfg
+      ? Object.freeze({
+          ...base,
+          hp: base.hp * (variantCfg.hp ?? 1),
+          speed: base.speed * (variantCfg.speed ?? 1),
+          knockbackScale: (base.knockbackScale ?? 1) * (variantCfg.knockback ?? 1),
+        })
+      : base;
+    this._variantDefCache.set(key, def);
+    return def;
+  }
+
+  /**
+   * @param {number} i Pool index.
+   * @returns {import('../core/types.js').EnemyTypeDef} This enemy's
+   *   variant-adjusted type def — see `_resolveTypeDef`.
+   */
+  _typeDefAt(i) {
+    return this._resolveTypeDef(this._type[i], this._variant[i]);
+  }
+
+  /** @param {number} i Pool index. @returns {number} Hitbox/arena-clamp radius, scaled by this enemy's size variant. */
+  _radiusOf(i) {
+    return this._typeDefAt(i).radius * this._sizeMul[i];
+  }
+
+  /** @param {number} i Pool index. @returns {number} Hitbox height, scaled by this enemy's size variant. */
+  _hitHeightOf(i) {
+    return this._typeDefAt(i).hitHeight * this._sizeMul[i];
+  }
+
+  /**
    * @param {string} typeName Key into `cfg.enemies.types`.
    * @param {number} gateId Arena gate id (already resolved from the wave's active-gate pair — see `Game.js`).
    * @param {number} hpMul
+   * @param {string} [variant] Key into `cfg.enemies.variants.types` (e.g.
+   *   'small'/'normal'/'large'); defaults to 'normal'. The roll is gameplay,
+   *   not cosmetic, so — unlike the position jitter below — it is NOT decided
+   *   in here with `Math.random()`: the caller passes it in, already drawn
+   *   from the seeded `core/rng.js` stream, so a seed still reproduces a run.
    * @returns {number} Pool index, or -1 when at cap.
    */
-  spawn(typeName, gateId, hpMul = 1) {
+  spawn(typeName, gateId, hpMul = 1, variant = 'normal') {
     const idx = this._free.pop();
     if (idx === undefined) return -1;
 
-    const typeDef = this._cfg.enemies.types[typeName];
+    const typeDef = this._resolveTypeDef(typeName, variant);
+    const sizeMul = this._cfg.enemies.variants?.types?.[variant]?.size ?? 1;
     const gate = this._gates.find((g) => g.id === gateId) ?? this._gates[gateId % this._gates.length];
     // Cosmetic-only spawn jitter — per AGENTS.md this must not share the
     // seeded gameplay rng stream, so plain Math.random() is correct here.
@@ -241,6 +326,8 @@ export class Enemies {
     const z = gate.z + (Math.random() - 0.5) * SPAWN_SPREAD;
 
     this._type[idx] = typeName;
+    this._variant[idx] = variant;
+    this._sizeMul[idx] = sizeMul;
     this._x[idx] = x;
     this._z[idx] = z;
     this._yaw[idx] = 0;
@@ -265,7 +352,10 @@ export class Enemies {
       const slot = pool.free.pop();
       this._slotId[idx] = slot === undefined ? -1 : slot;
     } else if (typeDef.render === 'sprite') {
-      this._slotId[idx] = this._billboards.alloc(typeDef.sprite, typeDef.height);
+      // Billboards stores height per SLOT, not per type (see the module
+      // header note), so a bigger/smaller variant is just a scaled height
+      // argument here — the sprite and its blob shadow both follow.
+      this._slotId[idx] = this._billboards.alloc(typeDef.sprite, typeDef.height * sizeMul);
     }
 
     this._aliveCount++;
@@ -296,7 +386,10 @@ export class Enemies {
     for (let i = 0; i < this._cap; i++) {
       if (!this._alive[i]) continue;
       const typeName = this._type[i];
-      const typeDef = cfg.enemies.types[typeName];
+      // Variant-adjusted (hp/speed/knockbackScale) — see `_resolveTypeDef`.
+      // `radius`/`hitHeight` are NOT on this object; use `_radiusOf`/
+      // `_hitHeightOf` for those.
+      const typeDef = this._typeDefAt(i);
 
       const enemySnapshot = { x: this._x[i], z: this._z[i], type: typeName, cooldown: this._cooldown[i] };
       const target = chooseTarget(enemySnapshot, { x: player.x, z: player.z }, turretList, cfg);
@@ -323,7 +416,7 @@ export class Enemies {
 
       const nx = this._x[i] + (vx * speedMul * stagger + this._kickVX[i]) * dt;
       const nz = this._z[i] + (vz * speedMul * stagger + this._kickVZ[i]) * dt;
-      const clamped = clampToArena(nx, nz, cfg.arena.radius - typeDef.radius);
+      const clamped = clampToArena(nx, nz, cfg.arena.radius - this._radiusOf(i));
       this._x[i] = clamped.x;
       this._z[i] = clamped.z;
 
@@ -406,8 +499,13 @@ export class Enemies {
       _quat.premultiply(_quatKick);
     }
 
+    // Size variant folded straight into the render scale (squashed or not)
+    // rather than kept as a separate branch — `_scale` is always the matrix
+    // that gets composed now, never the old shared `_scaleOne` constant.
     if (squash) _scale.set(squash.sx, squash.sy, squash.sx);
-    _place.compose(_pos, _quat, squash ? _scale : _scaleOne);
+    else _scale.set(1, 1, 1);
+    _scale.multiplyScalar(this._sizeMul[i]);
+    _place.compose(_pos, _quat, _scale);
     _matrix.multiplyMatrices(_place, pool.localMatrix);
     pool.mesh.setMatrixAt(slot, _matrix);
     pool.dirty = true;
@@ -454,7 +552,7 @@ export class Enemies {
         const dz = target.z - this._z[i];
         const d = Math.hypot(dx, dz);
         if (d > 1e-4) {
-          const step = Math.min(typeDef.lunge * LUNGE_SWING_S, Math.max(0, d - typeDef.radius));
+          const step = Math.min(typeDef.lunge * LUNGE_SWING_S, Math.max(0, d - this._radiusOf(i)));
           this._x[i] += (dx / d) * step;
           this._z[i] += (dz / d) * step;
         }
@@ -478,7 +576,7 @@ export class Enemies {
     const d = Math.hypot(dx, dz) || 1;
 
     this._projX[idx] = this._x[i];
-    this._projY[idx] = typeDef.hitHeight * 0.5;
+    this._projY[idx] = this._hitHeightOf(i) * 0.5;
     this._projZ[idx] = this._z[i];
     this._projVX[idx] = (dx / d) * typeDef.projSpeed;
     this._projVZ[idx] = (dz / d) * typeDef.projSpeed;
@@ -617,7 +715,10 @@ export class Enemies {
    * @param {boolean} [rawSpeed] Treat `amount` as a speed rather than damage.
    */
   _applyKnockback(idx, amount, dir, rawSpeed = false) {
-    const typeDef = this._cfg.enemies.types[this._type[idx]];
+    // Variant-adjusted `knockbackScale` (see `_resolveTypeDef`): a big/tanky
+    // variant is configured with a lower `knockback` multiplier so it isn't
+    // flung across the arena by a hit sized for the normal variant.
+    const typeDef = this._typeDefAt(idx);
     const impulse = rawSpeed
       ? Math.max(0, amount) * (typeDef.knockbackScale ?? 1)
       : knockbackSpeed(amount, typeDef, this._cfg);
@@ -661,10 +762,10 @@ export class Enemies {
    */
   _kill(idx, source) {
     const typeName = this._type[idx];
-    const typeDef = this._cfg.enemies.types[typeName];
+    const typeDef = this._typeDefAt(idx);
     const x = this._x[idx];
     const z = this._z[idx];
-    const y = typeDef.hitHeight * 0.5;
+    const y = this._hitHeightOf(idx) * 0.5;
 
     this._alive[idx] = 0;
     this._aliveCount--;
@@ -702,8 +803,10 @@ export class Enemies {
   }
 
   /**
-   * Cylinder hit test (`typeDef.radius`, `typeDef.hitHeight`) per alive
-   * enemy, nearest hit wins.
+   * Cylinder hit test (`_radiusOf`/`_hitHeightOf` — the type's base
+   * `radius`/`hitHeight` scaled by that enemy's size variant) per alive
+   * enemy, nearest hit wins. This is the player's hitbox against enemies, so
+   * a large variant is deliberately easier to hit and a small one harder.
    * @param {THREE.Vector3} origin
    * @param {THREE.Vector3} dir Normalized.
    * @param {number} maxDist
@@ -717,8 +820,7 @@ export class Enemies {
     for (let i = 0; i < this._cap; i++) {
       if (!this._alive[i]) continue;
       if (skip?.has(i)) continue;
-      const typeDef = this._cfg.enemies.types[this._type[i]];
-      const hit = cylinderHit(origin, dir, this._x[i], this._z[i], typeDef.radius, typeDef.hitHeight, bestDist);
+      const hit = cylinderHit(origin, dir, this._x[i], this._z[i], this._radiusOf(i), this._hitHeightOf(i), bestDist);
       if (hit && hit.dist < bestDist) {
         bestDist = hit.dist;
         best = { idx: i, point: hit.point, dist: hit.dist };
@@ -734,8 +836,7 @@ export class Enemies {
     const out = [];
     for (let i = 0; i < this._cap; i++) {
       if (!this._alive[i]) continue;
-      const typeDef = this._cfg.enemies.types[this._type[i]];
-      out.push({ x: this._x[i], y: typeDef.hitHeight * 0.5, z: this._z[i], radius: typeDef.radius });
+      out.push({ x: this._x[i], y: this._hitHeightOf(i) * 0.5, z: this._z[i], radius: this._radiusOf(i) });
     }
     return out;
   }
@@ -747,8 +848,7 @@ export class Enemies {
     const out = [];
     for (let i = 0; i < this._cap; i++) {
       if (!this._alive[i]) continue;
-      const typeDef = this._cfg.enemies.types[this._type[i]];
-      out.push({ idx: i, x: this._x[i], y: typeDef.hitHeight * 0.5, z: this._z[i], radius: typeDef.radius });
+      out.push({ idx: i, x: this._x[i], y: this._hitHeightOf(i) * 0.5, z: this._z[i], radius: this._radiusOf(i) });
     }
     return out;
   }

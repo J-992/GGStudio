@@ -271,7 +271,7 @@ export class Screens {
    * action equips it, so the player can read what each one does before
    * committing (the see-before-you-commit idea behind any decent weapon menu).
    *
-   * @param {{weapons: {id:string, def:object}[], current:string, confirmLabel?:string}} opts
+   * @param {{weapons: {id:string, def:object, icon?:string|null}[], current:string, confirmLabel?:string}} opts
    * @returns {Promise<string>} The chosen weapon id; the current one if cancelled.
    */
   showWeaponSelect({ weapons, current, confirmLabel = 'START' }) {
@@ -293,11 +293,23 @@ export class Screens {
       /** @type {Map<string, HTMLButtonElement>} */
       const cards = new Map();
 
-      for (const { id, def } of weapons) {
+      for (const { id, def, icon } of weapons) {
         const card = document.createElement('button');
         card.type = 'button';
         card.className = 'weapon-card';
         card.dataset.weapon = id;
+
+        // A render of the weapon itself, produced by `Game` (this file has no
+        // renderer and stays DOM-only). Absent when no WebGL context was
+        // spare, in which case the card is text, exactly as it used to be.
+        let img = null;
+        if (icon) {
+          img = document.createElement('img');
+          img.className = 'weapon-card-art';
+          img.src = icon;
+          img.alt = '';
+          img.draggable = false;
+        }
 
         const name = document.createElement('span');
         name.className = 'weapon-card-name';
@@ -315,7 +327,7 @@ export class Screens {
           statBar('RANGE', def.range, 80),
         );
 
-        card.append(name, blurb, statsEl);
+        card.append(...(img ? [img] : []), name, blurb, statsEl);
         card.addEventListener('click', () => {
           this._audio.play('ui-click');
           select(id);

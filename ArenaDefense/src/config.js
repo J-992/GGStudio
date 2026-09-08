@@ -91,10 +91,20 @@ export const CONFIG = Object.freeze(deepFreeze({
     // SPAS-12 and M82 kick two to three times as hard, which is most of what
     // makes a slow, heavy weapon feel slow and heavy.
     //
-    // `model` is a mesh from `props.glb` (only two guns exist — weapons are
-    // told apart by `color`/`scale`, the same way turret heads are);
+    // Weapons carry no `model`: `game/weaponMesh.js` builds each silhouette
+    // from primitives, so the roster no longer depends on `props.glb` — which
+    // also retires the UNKNOWN-provenance row `ASSET_LICENSES.md` carries for
+    // `Gun_02`/`Gun_03`. `color` and `scale` still drive the build, and
     // `sound` is a name from `AUDIO_NAMES` in `game/assets.js`.
     weapons: {
+      // One multiplier over every viewmodel, on top of each weapon's own
+      // `scale`. The builders in `game/weaponMesh.js` work in roughly real
+      // proportions — an M82 really is six times an M9 — and real proportions
+      // are wrong for a gun held 0.55 m from the camera, where the big ones
+      // would fill the screen. This is the knob to turn if the weapons look
+      // too large or too small in the hand; it changes nothing about how they
+      // shoot.
+      viewmodelScale: 0.5,
       order: ['pistol', 'ak47', 'm4a1', 'spas12', 'm82', 'rpg7'],
       types: {
         pistol: {
@@ -102,35 +112,35 @@ export const CONFIG = Object.freeze(deepFreeze({
           dmg: 14, rate: 6, range: 45, spreadDeg: 0.35, pellets: 1,
           coneDegTouch: 7,
           recoil: { impulse: 46.5, viewBackM: 0.085, viewUpM: 0.022, viewPitchDeg: 7.0, camPitchDeg: 1.0 },
-          model: 'Gun_03', color: 0xcfd4dc, scale: 1.0, sound: 'pistol-shot-1',
+          color: 0xcfd4dc, scale: 1.0, sound: 'pistol-shot-1',
         },
         ak47: {
           name: 'AK-47', blurb: 'Hits hard, wanders wide. Punishing past mid range.',
           dmg: 13, rate: 8, range: 40, spreadDeg: 3.5, pellets: 1,
           coneDegTouch: 7,
           recoil: { impulse: 46.5, viewBackM: 0.1148, viewUpM: 0.0297, viewPitchDeg: 9.45, camPitchDeg: 1.12 },
-          model: 'Gun_02', color: 0x8a5a2b, scale: 1.15, sound: 'gunfire',
+          color: 0x8a5a2b, scale: 1.15, sound: 'gunfire',
         },
         m4a1: {
-          name: 'M4A1', blurb: 'Faster and tighter than the AK, less per shot.',
-          dmg: 10, rate: 11, range: 45, spreadDeg: 2.4, pellets: 1,
+          name: 'M4A1', blurb: 'The easiest to land, and the slowest to kill.',
+          dmg: 8, rate: 10, range: 38, spreadDeg: 2.8, pellets: 1,
           coneDegTouch: 7,
           recoil: { impulse: 46.5, viewBackM: 0.068, viewUpM: 0.0176, viewPitchDeg: 5.6, camPitchDeg: 0.93 },
-          model: 'Gun_02', color: 0x4a4f57, scale: 1.05, sound: 'pistol-shot-2',
+          color: 0x4a4f57, scale: 1.05, sound: 'pistol-shot-2',
         },
         spas12: {
           name: 'SPAS-12', blurb: 'Nine pellets. Devastating close, useless far.',
           dmg: 7, rate: 1.5, range: 16, spreadDeg: 9, pellets: 9,
           coneDegTouch: 12,
           recoil: { impulse: 46.5, viewBackM: 0.221, viewUpM: 0.0572, viewPitchDeg: 18.2, camPitchDeg: 1.56 },
-          model: 'Gun_02', color: 0x2f3540, scale: 1.25, sound: 'cannon-shot-1',
+          color: 0x2f3540, scale: 1.25, sound: 'cannon-shot-1',
         },
         m82: {
           name: 'M82', blurb: 'One shot, one kill, straight through the queue.',
           dmg: 110, rate: 0.8, range: 80, spreadDeg: 0, pellets: 1, pierce: 3,
           coneDegTouch: 4,
           recoil: { impulse: 46.5, viewBackM: 0.272, viewUpM: 0.0704, viewPitchDeg: 22.4, camPitchDeg: 1.77 },
-          model: 'Gun_02', color: 0x6d7b52, scale: 1.4, sound: 'sniper-shot-1',
+          color: 0x6d7b52, scale: 1.4, sound: 'sniper-shot-1',
         },
         rpg7: {
           name: 'RPG-7', blurb: 'Travels, then removes the crowd around it.',
@@ -138,13 +148,19 @@ export const CONFIG = Object.freeze(deepFreeze({
           coneDegTouch: 7,
           recoil: { impulse: 46.5, viewBackM: 0.306, viewUpM: 0.0792, viewPitchDeg: 25.2, camPitchDeg: 1.91 },
           projSpeed: 30, splash: 4.5, splashDmg: 45,
-          model: 'Gun_02', color: 0x3d5a3d, scale: 1.5, sound: 'explosion-metal',
+          color: 0x3d5a3d, scale: 1.5, sound: 'explosion-metal',
         },
       },
     },
   },
 
   enemies: {
+    // Speeds sit BELOW `player.speed` (4.0) on purpose. They used to be 4.1-4.3,
+    // so every enemy outran the player with no sprint to escape with — you
+    // could never break contact, which is what made a wave feel frantic rather
+    // than tense. The margin is small: backing off works, standing still does
+    // not. `tungtung`'s `lunge` closing burst is a fixed distance and does NOT
+    // scale with speed, so it grew proportionally more dangerous here.
     cap: 35,
     separationRadius: 1.2,
     separationForce: 3,
@@ -158,20 +174,44 @@ export const CONFIG = Object.freeze(deepFreeze({
     },
     types: {
       shambler: {
-        render: 'voxel', model: 'zed_1', hp: 30, speed: 4.2, kind: 'melee',
+        render: 'voxel', model: 'zed_1', hp: 30, speed: 3.4, kind: 'melee',
         dmg: 8, range: 1.6, cooldown: 1.0, energy: 10, radius: 0.5, hitHeight: 1.8,
         knockbackScale: 1,
       },
       spitter: {
-        render: 'voxel', model: 'zed_3', hp: 24, speed: 4.3, kind: 'ranged',
+        render: 'voxel', model: 'zed_3', hp: 24, speed: 3.5, kind: 'ranged',
         dmg: 6, range: 12, keepDistance: 9, preferPlayerRange: 16, cooldown: 1.8,
         projSpeed: 14, energy: 14, radius: 0.5, hitHeight: 1.8,
         knockbackScale: 1.15,
       },
       tungtung: {
-        render: 'sprite', sprite: 'tungtung', height: 2.2, hp: 110, speed: 4.1,
+        render: 'sprite', sprite: 'tungtung', height: 2.2, hp: 110, speed: 3.3,
         kind: 'melee', dmg: 18, range: 2.0, cooldown: 1.4, lunge: 3.0, energy: 30,
         radius: 0.6, hitHeight: 2.2, knockbackScale: 0.45,
+      },
+    },
+
+    // Size variants. Every spawn rolls one of these, so a wave mixes darting
+    // runts with slow heavies instead of a row of identical bodies. `size`
+    // scales the model AND the hitbox together — a large one really is a bigger
+    // target — while `knockback` moves opposite to it so a heavy is not flung
+    // across the arena by a shotgun.
+    //
+    // `energy` is deliberately NOT scaled: `core/waves.js#waveEnergyTotal`
+    // multiplies `spawn.n * type.energy` knowing nothing about variants, and
+    // `test/waves.test.js` pins wave 1's total to the gun turret's cost. Paying
+    // variable energy per kill would quietly break that whole economy anchor.
+    //
+    // `weights` drives the roll and must be same-length as `order`. The roll is
+    // gameplay, not cosmetics, so it draws from the seeded `core/rng.js` stream
+    // (see `Game#_rollVariant`) — the same seed still reproduces a run.
+    variants: {
+      order: ['small', 'normal', 'large'],
+      weights: [0.25, 0.55, 0.2],
+      types: {
+        small: { size: 0.7, hp: 0.5, speed: 1.15, knockback: 1.4 },
+        normal: { size: 1, hp: 1, speed: 1, knockback: 1 },
+        large: { size: 1.4, hp: 2.5, speed: 0.85, knockback: 0.5 },
       },
     },
   },
@@ -235,63 +275,72 @@ export const CONFIG = Object.freeze(deepFreeze({
     ],
   },
 
+  // Wave LENGTH is set by the spawn counts; `maxAlive` is a concurrency
+  // throttle, not a total. `SpawnScheduler` holds entries back when the cap is
+  // reached and retries them, so raising `n` while leaving `maxAlive` alone
+  // makes a wave run longer rather than get denser — and keeps every wave
+  // inside `enemies.cap`, which `test/waves.test.js` enforces.
+  //
+  // Wave 1 is deliberately untouched: its total energy is pinned to the gun
+  // turret's cost (5 kills x 10 = 50) by that same test, so the player can
+  // always afford exactly one turret after it.
   waves: [
     { n: 1, hpMul: 1.0, maxAlive: 8, spawns: [{ enemy: 'shambler', n: 5, everyS: 1.5 }] }, // 5 kills x 10 energy = 50 = gun cost (test-enforced)
-    { n: 2, hpMul: 1.0, maxAlive: 10, spawns: [{ enemy: 'shambler', n: 8, everyS: 1.2 }] },
+    { n: 2, hpMul: 1.0, maxAlive: 10, spawns: [{ enemy: 'shambler', n: 13, everyS: 1.2 }] },
     {
       n: 3, hpMul: 1.0, maxAlive: 12,
       spawns: [
-        { enemy: 'shambler', n: 8, everyS: 1.2 },
-        { enemy: 'spitter', n: 3, everyS: 3, startS: 4 },
+        { enemy: 'shambler', n: 13, everyS: 1.2 },
+        { enemy: 'spitter', n: 5, everyS: 3, startS: 4 },
       ],
     },
     {
       n: 4, hpMul: 1.1, maxAlive: 14,
       spawns: [
-        { enemy: 'shambler', n: 10, everyS: 1.0 },
-        { enemy: 'spitter', n: 4, everyS: 2.5, startS: 3 },
-        { enemy: 'tungtung', n: 1, everyS: 1, startS: 12 },
+        { enemy: 'shambler', n: 16, everyS: 1.0 },
+        { enemy: 'spitter', n: 7, everyS: 2.5, startS: 3 },
+        { enemy: 'tungtung', n: 2, everyS: 6, startS: 12 },
       ],
     },
     { n: 5, hpMul: 1.0, maxAlive: 8, boss: 'patapim', spawns: [] },
     {
       n: 6, hpMul: 1.15, maxAlive: 16,
       spawns: [
-        { enemy: 'shambler', n: 10, everyS: 1.0 },
-        { enemy: 'spitter', n: 5, everyS: 2.2, startS: 2 },
-        { enemy: 'tungtung', n: 2, everyS: 6, startS: 8 },
+        { enemy: 'shambler', n: 16, everyS: 1.0 },
+        { enemy: 'spitter', n: 8, everyS: 2.2, startS: 2 },
+        { enemy: 'tungtung', n: 3, everyS: 6, startS: 8 },
       ],
     },
     {
       n: 7, hpMul: 1.2, maxAlive: 18,
       spawns: [
-        { enemy: 'shambler', n: 12, everyS: 0.9 },
-        { enemy: 'spitter', n: 6, everyS: 2.0, startS: 2 },
-        { enemy: 'tungtung', n: 3, everyS: 5, startS: 6 },
+        { enemy: 'shambler', n: 19, everyS: 0.9 },
+        { enemy: 'spitter', n: 10, everyS: 2.0, startS: 2 },
+        { enemy: 'tungtung', n: 5, everyS: 5, startS: 6 },
       ],
     },
     {
       n: 8, hpMul: 1.3, maxAlive: 22,
       spawns: [
-        { enemy: 'shambler', n: 8, everyS: 1.0 },
-        { enemy: 'spitter', n: 8, everyS: 1.6, startS: 1 },
-        { enemy: 'tungtung', n: 4, everyS: 4, startS: 5 },
+        { enemy: 'shambler', n: 13, everyS: 1.0 },
+        { enemy: 'spitter', n: 13, everyS: 1.6, startS: 1 },
+        { enemy: 'tungtung', n: 6, everyS: 4, startS: 5 },
       ],
     },
     {
       n: 9, hpMul: 1.4, maxAlive: 26,
       spawns: [
-        { enemy: 'shambler', n: 14, everyS: 0.8 },
-        { enemy: 'spitter', n: 8, everyS: 1.5, startS: 2 },
-        { enemy: 'tungtung', n: 5, everyS: 4, startS: 4 },
+        { enemy: 'shambler', n: 22, everyS: 0.8 },
+        { enemy: 'spitter', n: 13, everyS: 1.5, startS: 2 },
+        { enemy: 'tungtung', n: 8, everyS: 4, startS: 4 },
       ],
     },
     {
       n: 10, hpMul: 1.5, maxAlive: 30,
       spawns: [
-        { enemy: 'shambler', n: 12, everyS: 0.8 },
-        { enemy: 'spitter', n: 10, everyS: 1.3, startS: 1 },
-        { enemy: 'tungtung', n: 7, everyS: 3.5, startS: 3 },
+        { enemy: 'shambler', n: 19, everyS: 0.8 },
+        { enemy: 'spitter', n: 16, everyS: 1.3, startS: 1 },
+        { enemy: 'tungtung', n: 11, everyS: 3.5, startS: 3 },
       ],
     },
   ],

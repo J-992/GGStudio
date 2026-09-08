@@ -1,7 +1,7 @@
-// In-gameplay HUD: hp/energy/coins/wave readouts, the reticle, and the combo
-// and boss bars (driven with real numbers by P6/P5 respectively). Every
-// element is built in the constructor and appended to `#ui` — nothing here
-// runs at module import time.
+// In-gameplay HUD: hp/energy/coins/wave readouts, the reticle, and the combo,
+// boss and wave-progress bars (driven with real numbers by P6/P5/`Game.js`
+// respectively). Every element is built in the constructor and appended to
+// `#ui` — nothing here runs at module import time.
 import { tierFor } from '../core/combo.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -88,6 +88,17 @@ export class Hud {
     this._bossFill.className = 'hud-boss__fill';
     this._bossBar.appendChild(this._bossFill);
 
+    // Wave progress bar — same shape as `.hud-boss` above (built once, hidden
+    // by default, a `__fill` whose width is a clamped percentage), sitting in
+    // its own band just above it. See the layout comment on `.hud-wave-bar`
+    // in style.css for why the two never overlap on a boss wave.
+    this._waveBar = document.createElement('div');
+    this._waveBar.className = 'hud-wave-bar';
+    this._waveBar.hidden = true;
+    this._waveBarFill = document.createElement('div');
+    this._waveBarFill.className = 'hud-wave-bar__fill';
+    this._waveBar.appendChild(this._waveBarFill);
+
     this._comboBar = document.createElement('div');
     this._comboBar.className = 'hud-combo';
     this._comboBar.hidden = true;
@@ -122,8 +133,8 @@ export class Hud {
     this._pausedPanel.hidden = true;
 
     this._root.append(
-      this._statsBox, this._buildCountdown, this._fpsReadout, this._bossBar, this._comboBar, this._reticle,
-      keyboardHint, touchHint, this._toast, this._pausedPanel,
+      this._statsBox, this._buildCountdown, this._fpsReadout, this._waveBar, this._bossBar, this._comboBar,
+      this._reticle, keyboardHint, touchHint, this._toast, this._pausedPanel,
     );
     ui.appendChild(this._root);
 
@@ -159,6 +170,7 @@ export class Hud {
     this.setCoins(0);
     this.setWave(1, config.run.finalWave);
     this.setBossHp(null);
+    this.setWaveProgress(null);
     this.setCombo(0, 0);
     this.setReticle(false);
   }
@@ -261,6 +273,22 @@ export class Hud {
     }
     this._bossBar.hidden = false;
     this._bossFill.style.width = `${Math.max(0, Math.min(1, frac)) * 100}%`;
+  }
+
+  /**
+   * Wave progress readout — `Game#_syncHud` calls this every fixed step with
+   * `killsThisWave / totalForWave`, or `null` on boss waves and outside
+   * `wave` (see the layout comment on `.hud-wave-bar` in style.css for why it
+   * coexists with `.hud-boss` on wave 5 without overlapping it).
+   * @param {number|null} frac 0..1, or `null` to hide the bar.
+   */
+  setWaveProgress(frac) {
+    if (frac === null || frac === undefined) {
+      this._waveBar.hidden = true;
+      return;
+    }
+    this._waveBar.hidden = false;
+    this._waveBarFill.style.width = `${Math.max(0, Math.min(1, frac)) * 100}%`;
   }
 
   /**

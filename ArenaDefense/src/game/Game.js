@@ -39,6 +39,8 @@ import { Effects } from './Effects.js';
 import { Enemies } from './Enemies.js';
 import { Billboards } from './Billboards.js';
 import { Projectiles } from './Projectiles.js';
+import { WeaponIcons } from './WeaponIcons.js';
+import { buildWeaponMesh } from './weaponMesh.js';
 
 const FIXED_STEP_SAFETY_MAX_ITERATIONS = 8;
 const DEBUG_REFRESH_S = 0.5;
@@ -134,7 +136,7 @@ export class Game {
       ...hooks,
     };
 
-    const player = new Player(camera, assets, config);
+    const player = new Player(camera, config);
     const arena = new Arena(scene, assets, config);
     const effects = new Effects(scene);
     // +1 reserves a slot for a boss billboard (P5's `Boss.js`, not yet
@@ -144,6 +146,10 @@ export class Game {
     // The player's rocket: the one weapon that travels rather than resolving
     // on the frame it is fired (see `_handleFiring`'s `gun.projSpeed` branch).
     const projectiles = new Projectiles(scene, config, audio);
+    // Renders weapon-select card art offscreen. One renderer for all six
+    // cards, not one per card: a browser gives a page around sixteen WebGL
+    // contexts and the arena already holds one.
+    this._weaponIcons = new WeaponIcons();
 
     /**
      * The one bag every system reads/writes. `turrets`/`boss` are `null`
@@ -173,8 +179,23 @@ export class Game {
     this._combo = new ComboTracker(config);
     this._wave = 1;
     this._buildTimer = 0;
+    /** Set by `requestReady()` (the build overlay's READY button / Space) and
+     *  consumed by `_advanceStateMachine`'s build branch. A latch rather than a
+     *  direct transition so there is exactly ONE path out of `build` — see
+     *  `requestReady`. */
+    this._readyRequested = false;
+    /** Kills so far this wave, and the wave's total spawn count — the numerator
+     *  and denominator of the HUD progress bar. Killed-of-total rather than
+     *  spawned-of-total: the latter reads as 100% while a dozen enemies are
+     *  still alive. */
+    this._waveKills = 0;
+    this._waveTotal = 0;
     this._prevGatePair = null;
     this._gateRng = makeRng((Date.now() ^ 0x9e3779b9) >>> 0);
+    // A separate stream from `_gateRng` on purpose: drawing both from one
+    // would make the gate a wave picks depend on how many enemies happened to
+    // spawn before it, coupling two unrelated systems through the sequence.
+    this._variantRng = makeRng((Date.now() ^ 0x85ebca6b) >>> 0);
 
     // Persisted save data, loaded once at boot; `saveSave` merges+persists a
     // patch and returns the sanitized whole, which is what we keep as the
@@ -232,6 +253,9 @@ export class Game {
     this.bus.on('enemy:killed', (e) => {
       this._economy.addEnergy(e.energy);
       this._combo.onKill(this.world.time);
+      // Only ordinary enemies count toward wave progress: the boss is not part
+      // of the wave's spawn list, so counting it would push the bar past full.
+      if (!e.boss) this._waveKills++;
       // P5's `Boss.js` tags a boss kill's payload with `boss:true` and
       // `coins` (see docs/INTERFACES.md's P5 additions) — energy is added
       // above unconditionally like any other kill (it's already on every
@@ -337,6 +361,26 @@ export class Game {
     this._input.setPointerLockWanted?.(playing);
   }
 
+  /**
+   * Asks for the build phase to end early — the build overlay's READY button
+   * and its Space/Enter shortcut both come through here.
+   *
+   * It sets a latch rather than driving the transition itself, and that is the
+   * whole point. `game/buildPhase.js` used to call `state.go('wave')` directly,
+   * which looked equivalent but skipped `_startWave()` — so the scheduler was
+   * never rebuilt, the previous wave's (already `done`) one was still in place,
+   * and the wave cleared instantly having spawned nothing. Every wave started
+   * with READY was empty, and wave 5's boss never appeared with it. Routing
+   * through the latch leaves exactly one path out of `build`, so no caller can
+   * enter `wave` half-initialised again.
+   *
+   * Ignored outside `build`, so a stray call cannot arm the next build phase.
+   */
+  requestReady() {
+    if (this.state.state !== 'build') return;
+    this._readyRequested = true;
+  }
+
   /** @returns {import('../core/economy.js').Economy} Read-only usage by P4/P5/P6 — only `Game` replaces the instance (new run). */
   get economy() {
     return this._economy;
@@ -389,6 +433,7 @@ export class Game {
   }
 
   dispose() {
+    this._weaponIcons.dispose();
     if (this._rafId !== null) cancelAnimationFrame(this._rafId);
     window.removeEventListener('resize', this._onResize);
     document.removeEventListener('visibilitychange', this._onVisibility);
@@ -557,9 +602,13 @@ export class Game {
       this._hud.setBuildCountdown(Math.ceil(secondsLeft));
       this.bus.emit('build:tick', { secondsLeft });
 
-      if (this._buildTimer <= 0 || frame.ready) {
+      if (this._buildTimer <= 0 || frame.ready || this._readyRequested) {
+        this._readyRequested = false;
         const refund = this._economy.readyRefund(secondsLeft, this._config);
         this._economy.addEnergy(refund);
+        // Owned here rather than in `buildPhase.js` so the refund is applied
+        // exactly once no matter which of the three paths ended the phase.
+        if (refund > 0) this._hud.toast(`+${refund} energy`);
         this._hud.setBuildCountdown(null);
         this.state.go('wave');
         this.bus.emit('state:changed', { state: 'wave' });
@@ -578,6 +627,7 @@ export class Game {
       if (this._waveClearTimer <= 0) {
         this._wave += 1;
         this._buildTimer = this._config.build.durationS;
+        this._readyRequested = false;
         this._pickGates();
         this._hud.setWave(this._wave, this._config.run.finalWave);
         this.state.go('build');
@@ -607,6 +657,12 @@ export class Game {
   _startWave() {
     const def = waveDef(this._config, this._wave);
     this._currentWaveDef = def;
+    // Progress bar numerator and denominator, from THIS wave's def — read
+    // after the assignment above, not before it. Boss waves carry no ordinary
+    // spawns, so the total is 0 and `_waveProgress` hides the bar rather than
+    // dividing by it.
+    this._waveKills = 0;
+    this._waveTotal = def.spawns.reduce((sum, g) => sum + g.n, 0);
     const cap = Math.min(def.maxAlive, this._config.enemies.cap);
     this._scheduler = new SpawnScheduler(flattenSpawns(def), cap);
     this._audio.play('wave-start');
@@ -621,14 +677,17 @@ export class Game {
       const due = this._scheduler.update(dt, this.world.enemies.alive);
       for (const entry of due) {
         const gateId = this.world.activeGates[entry.gateId];
-        this.world.enemies.spawn(entry.enemy, gateId, this._currentWaveDef.hpMul);
+        this.world.enemies.spawn(entry.enemy, gateId, this._currentWaveDef.hpMul, this._rollVariant());
       }
     }
 
     // Boss support lands in P5; until `world.boss` exists this is always
     // true, so a boss wave with no `spawns` (wave 5 today) clears instantly.
     const bossAlive = this.world.boss?.alive ?? false;
-    if (this._scheduler?.done && this.world.enemies.alive === 0 && !bossAlive) {
+    // `this._scheduler &&` rather than `?.`: a null scheduler means the wave was
+    // never started, and `undefined && ...` left the run stuck in an empty
+    // `wave` forever rather than clearing it.
+    if (this._scheduler && this._scheduler.done && this.world.enemies.alive === 0 && !bossAlive) {
       this._onWaveClear();
     }
   }
@@ -692,7 +751,15 @@ export class Game {
    */
   async _runWeaponSelectFlow(confirmLabel = null) {
     const chosen = await this._screens.showWeaponSelect({
-      weapons: weaponIds(this._config).map((id) => ({ id, def: resolveWeapon(id, this._config) })),
+      // The card art is a render of the weapon the player will actually hold,
+      // from the same builder the viewmodel uses, so a card can never go stale.
+      // `Screens` stays DOM-only — the renderer lives here, where three.js is
+      // allowed. `icon` is null if no WebGL context was spare; the card then
+      // falls back to text, which is what it was before.
+      weapons: weaponIds(this._config).map((id) => {
+        const def = resolveWeapon(id, this._config);
+        return { id, def, icon: this._weaponIcons.iconFor(id, () => buildWeaponMesh(id, def, [], [])) };
+      }),
       current: this.world.player.weaponId,
       confirmLabel: confirmLabel ?? 'EQUIP',
     });
@@ -909,6 +976,7 @@ export class Game {
     this._scheduler = null;
     this._currentWaveDef = null;
     this._buildTimer = this._config.build.durationS;
+    this._readyRequested = false;
     this._pickGates();
     this._hud.setWave(this._wave, this._config.run.finalWave);
     this._hud.setCombo(0, 0);
@@ -1094,5 +1162,43 @@ export class Game {
     this._hud.setHp(this.world.player.hp, this._config.player.hp);
     this._hud.setEnergy(this._economy.energy);
     this._hud.setCoins(this._economy.bankedCoins + this._economy.pendingCoins);
+    this._hud.setWaveProgress(this._waveProgress());
+  }
+
+  /**
+   * Picks a size variant for one spawn.
+   *
+   * Drawn from the seeded stream, not `Math.random()`: this changes how hard a
+   * wave hits, so it is gameplay, and `core/rng.js` exists precisely so the
+   * same seed reproduces a run. (`Enemies#spawn`'s position jitter stays on
+   * `Math.random()` — that one really is cosmetic.)
+   *
+   * @returns {string} A key of `cfg.enemies.variants.types`.
+   */
+  _rollVariant() {
+    const { order, weights } = this._config.enemies.variants;
+    let roll = this._variantRng();
+    for (let i = 0; i < order.length; i++) {
+      roll -= weights[i];
+      if (roll <= 0) return order[i];
+    }
+    // Float drift, or weights summing under 1: fall back to the last entry
+    // rather than returning undefined and silently unscaling the enemy.
+    return order[order.length - 1];
+  }
+
+  /**
+   * Wave progress as 0..1, or `null` when there is nothing meaningful to show:
+   * outside the wave itself, and on a boss wave — which has no ordinary spawns,
+   * so its denominator is 0 and the boss's own health bar is the readout that
+   * matters there.
+   *
+   * @returns {number|null}
+   */
+  _waveProgress() {
+    const state = this.state.state;
+    if (state !== 'wave' && state !== 'waveClear') return null;
+    if (this._waveTotal <= 0) return null;
+    return Math.min(1, this._waveKills / this._waveTotal);
   }
 }
