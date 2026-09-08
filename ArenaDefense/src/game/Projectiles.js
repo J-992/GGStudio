@@ -7,7 +7,7 @@
 // fixed steps it takes to reach something, then detonates with splash
 // damage.
 //
-// Structure mirrors `Enemies.js`'s own projectile pool (`PROJECTILE_CAP`
+// Structure mirrors `Enemies.js`'s own projectile pool (fixed-capacity
 // SoA typed arrays + free-list, one `InstancedMesh` for all live shots,
 // hidden slots zero-scaled — same idiom as `Effects.js`'s particle pool)
 // almost exactly, but cannot reuse it: that pool is private to `Enemies`,
@@ -33,39 +33,10 @@
 import * as THREE from 'three';
 import { rayArenaHit } from '../core/arenaGeometry.js';
 
-// --- Module-level tunables new to this file (not sourced from `cfg`) ---
-// Every other number this file uses (`gun.projSpeed`, `.splash`,
-// `.splashDmg`, `.dmg`, `.range`, `.sound`, `.color`) comes straight from
-// `cfg.player.weapons.types.rpg7` per AGENTS.md — these are the ones that
-// don't have a config home yet; see the caller's report for whether any of
-// these should move into `src/config.js`.
-
-/** Max rockets in flight at once. `rpg7.rate` is 0.45 shots/s and its
- *  `range`/`projSpeed` give at most ~2s of flight time, so one shot in
- *  flight is the common case — this gives generous headroom for a player
- *  who switches weapons and back, or fires at the very end of a rocket's
- *  life, without ever feeling the cap. */
-const PROJECTILE_CAP = 16;
-/** Cone geometry radius (metres) — purely cosmetic. */
-const ROCKET_RADIUS = 0.12;
-/** Cone geometry length (metres) — purely cosmetic. */
-const ROCKET_LENGTH = 0.55;
-/** Particle color for a rocket's detonation burst (a hot orange, distinct
- *  from the red hit-particle color used elsewhere for plain hitscan hits). */
-const EXPLOSION_COLOR = 0xffa347;
-/** Particle count for a detonation burst — bigger than a regular hitscan
- *  hit (10) or even the boss's own death burst (24), since a splash
- *  explosion is the biggest single visual moment this weapon produces. */
-const EXPLOSION_PARTICLE_COUNT = 28;
-/** Minimum gap between detonation-sound plays, so a rocket that splashes
- *  several enemies and the boss at once doesn't stack overlapping voices —
- *  same throttling idiom as `Enemies.js#_playThrottled`. */
-const EXPLOSION_SOUND_MIN_INTERVAL_S = 0.08;
-/** Fallback sound if `gun.sound` is ever unset — this class has no `assets`
- *  reference (only `audio`, per its constructor contract) to check a buffer
- *  actually exists the way `Turrets#_fire`/`Game#_playShotSound` do, so this
- *  is a plain truthiness fallback onto a name confirmed present in
- *  `public/assets/manifest.json` rather than a verified-present one. */
+/** Fallback sound if `gun.sound` is ever unset. This class takes `audio` but
+ *  not `assets` (see the constructor), so unlike `Turrets#_fire` and
+ *  `Game#_playShotSound` it cannot check that a buffer is actually present —
+ *  this is a plain truthiness fallback onto a name that ships. */
 const FALLBACK_SOUND = 'explosion-metal';
 
 const ZERO_SCALE = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -92,38 +63,38 @@ export class Projectiles {
 
     // Cosmetic only: the rpg7's own configured color, so the rocket reads as
     // "the same weapon" rather than an arbitrary new hardcoded hue.
-    const rpgColor = cfg.player?.weapons?.types?.rpg7?.color ?? 0x3d5a3d;
-    const geometry = new THREE.ConeGeometry(ROCKET_RADIUS, ROCKET_LENGTH, 8);
-    const material = new THREE.MeshBasicMaterial({ color: rpgColor });
-    const mesh = new THREE.InstancedMesh(geometry, material, PROJECTILE_CAP);
+    const cap = cfg.projectiles.cap;
+    const geometry = new THREE.ConeGeometry(cfg.projectiles.radius, cfg.projectiles.length, 8);
+    const material = new THREE.MeshBasicMaterial({ color: cfg.player.weapons.types.rpg7.color });
+    const mesh = new THREE.InstancedMesh(geometry, material, cap);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.frustumCulled = false;
-    mesh.count = PROJECTILE_CAP;
+    mesh.count = cap;
     mesh.name = 'player-projectiles';
     scene.add(mesh);
     this._mesh = mesh;
 
-    this._x = new Float32Array(PROJECTILE_CAP);
-    this._y = new Float32Array(PROJECTILE_CAP);
-    this._z = new Float32Array(PROJECTILE_CAP);
+    this._x = new Float32Array(cap);
+    this._y = new Float32Array(cap);
+    this._z = new Float32Array(cap);
     // Unit direction of travel, fixed for the projectile's whole life (no
     // gravity/homing) — kept separate from speed so the per-frame segment
     // length can change if `dt` varies without re-normalizing anything.
-    this._dirX = new Float32Array(PROJECTILE_CAP);
-    this._dirY = new Float32Array(PROJECTILE_CAP);
-    this._dirZ = new Float32Array(PROJECTILE_CAP);
-    this._speed = new Float32Array(PROJECTILE_CAP);
-    this._dmg = new Float32Array(PROJECTILE_CAP);
-    this._splash = new Float32Array(PROJECTILE_CAP);
-    this._splashDmg = new Float32Array(PROJECTILE_CAP);
-    this._maxDist = new Float32Array(PROJECTILE_CAP);
-    this._traveled = new Float32Array(PROJECTILE_CAP);
-    this._sound = new Array(PROJECTILE_CAP).fill(FALLBACK_SOUND);
-    this._active = new Uint8Array(PROJECTILE_CAP);
+    this._dirX = new Float32Array(cap);
+    this._dirY = new Float32Array(cap);
+    this._dirZ = new Float32Array(cap);
+    this._speed = new Float32Array(cap);
+    this._dmg = new Float32Array(cap);
+    this._splash = new Float32Array(cap);
+    this._splashDmg = new Float32Array(cap);
+    this._maxDist = new Float32Array(cap);
+    this._traveled = new Float32Array(cap);
+    this._sound = new Array(cap).fill(FALLBACK_SOUND);
+    this._active = new Uint8Array(cap);
 
     /** @type {number[]} Free-list of pool indices. */
     this._free = [];
-    for (let i = PROJECTILE_CAP - 1; i >= 0; i--) {
+    for (let i = cap - 1; i >= 0; i--) {
       this._free.push(i);
       mesh.setMatrixAt(i, ZERO_SCALE);
     }
@@ -168,7 +139,7 @@ export class Projectiles {
    * @param {object} world See `docs/INTERFACES.md`'s `Game.world` shape.
    */
   update(dt, world) {
-    for (let i = 0; i < PROJECTILE_CAP; i++) {
+    for (let i = 0; i < cap; i++) {
       if (!this._active[i]) continue;
 
       const step = this._speed[i] * dt;
@@ -266,7 +237,8 @@ export class Projectiles {
       }
     }
 
-    world.effects?.burst?.(point.x, point.y, point.z, EXPLOSION_COLOR, EXPLOSION_PARTICLE_COUNT);
+    const fx = this._cfg.effects.explosion;
+    world.effects?.burst?.(point.x, point.y, point.z, fx.color, fx.count);
     this._playThrottled(sound, world.time);
   }
 
@@ -276,7 +248,7 @@ export class Projectiles {
    */
   _playThrottled(name, time) {
     const last = this._lastSoundAt[name] ?? -Infinity;
-    if (time - last < EXPLOSION_SOUND_MIN_INTERVAL_S) return;
+    if (time - last < this._cfg.effects.explosion.soundMinIntervalS) return;
     this._lastSoundAt[name] = time;
     this._audio.play(name);
   }
@@ -289,6 +261,17 @@ export class Projectiles {
     this._free.push(i);
     this._mesh.setMatrixAt(i, ZERO_SCALE);
     this._dirty = true;
+  }
+
+  /**
+   * Drops every projectile still in flight. Called on a fresh run alongside
+   * `enemies.clear()` — without it, a rocket launched in the dying seconds of
+   * one run would arrive and explode in the next.
+   */
+  clear() {
+    for (let i = 0; i < this._active.length; i++) {
+      if (this._active[i]) this._freeProjectile(i);
+    }
   }
 
   dispose() {

@@ -38,6 +38,7 @@ import { Arena } from './Arena.js';
 import { Effects } from './Effects.js';
 import { Enemies } from './Enemies.js';
 import { Billboards } from './Billboards.js';
+import { Projectiles } from './Projectiles.js';
 
 const FIXED_STEP_SAFETY_MAX_ITERATIONS = 8;
 const DEBUG_REFRESH_S = 0.5;
@@ -140,6 +141,9 @@ export class Game {
     // registered) on top of every enemy-cap-sized `tungtung`.
     const billboards = new Billboards(scene, assets, config, config.enemies.cap + 1);
     const enemies = new Enemies(scene, assets, config, this.bus, billboards, audio);
+    // The player's rocket: the one weapon that travels rather than resolving
+    // on the frame it is fired (see `_handleFiring`'s `gun.projSpeed` branch).
+    const projectiles = new Projectiles(scene, config, audio);
 
     /**
      * The one bag every system reads/writes. `turrets`/`boss` are `null`
@@ -153,6 +157,7 @@ export class Game {
       turrets: null,
       boss: null,
       billboards,
+      projectiles,
       effects,
       bus: this.bus,
       time: 0,
@@ -162,6 +167,7 @@ export class Game {
     /** @type {{ name: string, system: { update(dt: number, world: object): void } }[]} */
     this._systems = [];
     this.registerSystem('enemies', enemies);
+    this.registerSystem('projectiles', projectiles);
 
     this._economy = new Economy(config);
     this._combo = new ComboTracker(config);
@@ -865,6 +871,7 @@ export class Game {
     this.state.go('build');
     this.world.player.reset();
     this.world.enemies?.clear();
+    this.world.projectiles?.clear();
     this._wave = startWave;
     this._economy = new Economy(this._config);
     this._combo = new ComboTracker(this._config);

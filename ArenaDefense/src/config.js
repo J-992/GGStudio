@@ -255,7 +255,13 @@ export const CONFIG = Object.freeze(deepFreeze({
   effects: {
     muzzleFlash: true,
     impact: { groundColor: 0x9b8b7a, wallColor: 0x8f8a92, count: 5 },
+    explosion: { color: 0xffa347, count: 28, soundMinIntervalS: 0.08 },
   },
+
+  // The player's rocket, the one weapon that travels instead of hitting
+  // instantly. `cap` is generous: the RPG-7 fires at 0.45/s with under two
+  // seconds of flight, so one in the air is typical.
+  projectiles: { cap: 16, radius: 0.12, length: 0.55 },
 
   timing: { fixedStep: 1 / 60, maxFrameDt: 0.1, waveClearDelayS: 1.5, deathScreenDelayS: 1.0 },
 
