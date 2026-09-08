@@ -936,6 +936,10 @@ export class Game {
       this.world.effects.flash(shot.origin.x, shot.origin.y, shot.origin.z);
     }
     this._playShotSound(gun);
+    // NOTE: these are `Player`'s scratch vectors, not fresh clones — a
+    // listener that wants either past this fixed step must copy it. Nothing
+    // subscribes today (`bossPhase.js` deliberately dropped its listener to
+    // avoid double-damaging the boss).
     this.bus.emit('player:fired', { origin: shot.origin, dir: shot.dir });
   }
 

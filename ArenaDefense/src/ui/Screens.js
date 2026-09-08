@@ -1,12 +1,13 @@
-// Title / death / run-end screens: full-viewport panels mounted into `#ui`.
+// Menu / weapon-select / pause / settings / death / run-end screens:
+// full-viewport panels mounted into `#ui`.
 // Each `show*` call freezes input and releases pointer lock for as long as
 // the screen is up; `hide()` (called automatically at the start of the next
 // `show*`, and by `Game.js` once a screen's outcome has been acted on)
-// reverses both. `showTitle` takes a callback (`onPlay`) since the title
-// stays up indefinitely until the player acts; `showDeath`/`showRunEnd`
-// return a Promise that resolves once a button (or Enter/Space/Escape) picks
-// an outcome, since `Game.js` needs to `await` the choice before deciding
-// what happens next (revive vs. run-end, play-again vs. title).
+// reverses both. `showMenu` takes callbacks since the menu stays up
+// indefinitely until the player acts; every other screen returns a Promise
+// that resolves once a button (or a key) picks an outcome, since `Game.js`
+// needs to `await` the choice before deciding what happens next (which
+// weapon to equip, revive vs. run-end, play-again vs. title).
 import { assetUrl } from '../game/assets.js';
 import { SENS_MIN, SENS_MAX } from '../core/prefs.js';
 

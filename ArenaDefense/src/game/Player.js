@@ -1,6 +1,10 @@
-// First-person player controller: movement, look, the held gun (fire +
-// recoil + walk sway), health/regen/invulnerability, and touch auto-fire's
-// `aimTarget` cone test.
+// First-person player controller: movement, look, the equipped weapon (fire +
+// recoil + walk sway + the viewmodel), health/regen/invulnerability, and the
+// `aimTarget` cone test that touch aim-assist uses.
+//
+// The weapon is swappable (`setWeapon`) — `this.gun` points at an entry in
+// `config.player.weapons.types`, chosen on the weapon-select screen and again
+// in any build phase.
 //
 // Yaw/pitch convention: yaw 0 looks toward -z (matching `core/arenaGeometry`'s
 // "gate angle 0 points north/-z"), and increases clockwise — turning the
@@ -174,7 +178,11 @@ export class Player {
   }
 
   /**
-   * @returns {{ origin: THREE.Vector3, dir: THREE.Vector3 } | null} `null` while on cooldown or dead.
+   * @returns {{ origin: THREE.Vector3, dir: THREE.Vector3 } | null} `null`
+   *   while on cooldown or dead. Both vectors are SCRATCH — they are reused
+   *   by the next `fire()` call, so a caller that needs to keep either past
+   *   the current fixed step must copy it. `Game#_handleFiring` consumes
+   *   both within the step, and `Effects#tracer` copies what it is given.
    */
   fire() {
     if (!this.alive) return null;
@@ -206,7 +214,9 @@ export class Player {
 
   /**
    * Nearest candidate within `gun.coneDegTouch` of the current view direction
-   * — used by touch auto-fire. `candidate.radius` is accepted for a future
+   * — used by touch aim-assist (it used to drive auto-fire outright, before
+   * the touch layer had a fire button; `Game#_handleFiring` now bends a
+   * deliberately-fired touch shot onto this target instead). `candidate.radius` is accepted for a future
    * radius-aware cone/occlusion test but unused in v1.
    *
    * @param {{x:number,y:number,z:number,radius:number}[]} candidates

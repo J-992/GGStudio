@@ -476,6 +476,57 @@ body.keyboard .touch-layer {
   transition: none;
 }
 
+/* Fire button (`TouchControls.js`'s `_fireBtn`) — last child of
+   `.touch-layer`, sibling to `.touch-zone--move/--look` and `.touch-stick`,
+   NOT nested under `.hud` (see the long comment beside that field's JS and
+   the matching one on `.hud-controls` above): `.touch-zone--look` covers
+   the entire right half of the screen inside `.touch-layer`'s own stacking
+   context, so only a sibling *inside that same context* can ever paint
+   above it or receive the tap — nothing outside `.touch-layer` could win
+   that hit-test no matter its z-index.
+   Two things have to both be true for this to actually fire on tap:
+   1. `.touch-layer` is `pointer-events: none` at the layer level (so taps
+      fall through to the canvas everywhere the layer has no visible
+      control); `.touch-zone` opts back in with its own `pointer-events:
+      auto`. `.touch-fire` isn't a `.touch-zone`, so it needs that same
+      opt-in declared directly here — without it this button would
+      silently inherit `none` and eat taps for nothing.
+   2. It overlaps `.touch-zone--look` (z-index 9) in that same stacking
+      context, and DOM order alone (last child) is not a reliable enough
+      win against a sibling that sets its own z-index — so this sets a
+      z-index higher than both the look zone and the stick (10) to make
+      the win explicit rather than incidental.
+   `body.keyboard .touch-layer { display: none; }` above already hides this
+   along with the rest of the layer on non-touch input, so no separate
+   "touch only" rule is needed here. */
+.touch-fire {
+  position: absolute;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  width: 84px;
+  height: 84px;
+  min-width: 64px;
+  min-height: 64px;
+  border-radius: 50%;
+  border: 3px solid #f6eedd;
+  background: rgba(224, 82, 63, 0.55);
+  box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.15), 0 2px 6px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 11;
+  transition: background 80ms ease-out, transform 80ms ease-out;
+}
+
+/* Held/pressed state — this is hold-to-fire at up to 11 shots/sec, so the
+   player needs an unmistakable "the trigger is down" cue at a glance, not
+   just on release. Brighter fill + a visible press-in makes that obvious
+   even at a glance while thumbing the look zone with the other hand. */
+.touch-fire.is-active {
+  background: rgba(255, 75, 62, 0.85);
+  border-color: #ffd76b;
+  transform: scale(0.92);
+}
+
 /* ================================================================
    DEBUG STATS (src/game/Game.js, ?debug=1)
 ================================================================ */
@@ -1267,7 +1318,96 @@ body.keyboard .touch-layer {
 @media (prefers-reduced-motion: reduce) {
   .weapon-card,
   .settings-toggle,
-  .settings-toggle::before {
+  .settings-toggle::before,
+  .touch-fire {
     transition: none;
   }
+}
+
+/* ----------------------------------------------------------------
+   BUILD OVERLAY — weapon row (`.bo-weapons`/`.bo-weapon-chip`,
+   `BuildOverlay#_buildWeaponChips`)
+   Six weapon chips do not fit one phone-width row the way the (typically
+   fewer) turret chips above them do. Wrapping to a second row was the other
+   option, but this overlay is already vertically tight — `.bo-mapwrap` alone
+   claims up to 480px, and a wrapped second chip row would be exactly the
+   kind of extra height that pushes `.bo-ready` off a short viewport. A
+   single-row horizontal scroller keeps this row's height fixed regardless
+   of chip count, so it can only ever compete for width, and it's capped to
+   the map's own width so it never grows wide enough to overlap anything
+   beside it either.
+---------------------------------------------------------------- */
+.bo-weapons {
+  display: flex;
+  gap: 8px;
+  max-width: min(92vmin, 480px); /* mirrors `.bo-mapwrap`'s own cap */
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scrollbar-width: none; /* Firefox */
+}
+
+.bo-weapons::-webkit-scrollbar {
+  display: none;
+}
+
+.bo-weapon-chip {
+  /* One notch over `.bo-chip`'s own 44px — the file-wide >=48px tap-target
+     convention used everywhere else in this pass. */
+  min-height: 48px;
+  flex: none; /* keep each chip's natural width in the scrolling row instead of shrinking to fit */
+  /* Gold tint (echoes `.screen-stat--earned`'s #ffd76b) instead of
+     `.bo-chip`'s neutral resting border — the only visual cue that tells a
+     weapon chip apart from a turret chip at rest, since both otherwise
+     share the same base look on purpose. */
+  border-color: rgba(255, 215, 107, 0.35);
+  /* Turret chips start dim (`.bo-chip`'s base 0.55 opacity) until
+     `.is-affordable` lands. Weapons are free and all unlocked from the
+     start, so no such class is ever applied here — without this override a
+     weapon chip would just sit dimmed forever, waiting on a class that will
+     never arrive. `.bo-chip.is-selected`'s existing rule has higher
+     specificity than this single-class selector, so it still wins
+     unchanged: a selected weapon chip gets the same red-accent treatment as
+     a selected turret chip. */
+  opacity: 1;
+}
+
+/* ----------------------------------------------------------------
+   HUD — FPS readout (`.hud-fps`, `Hud.js`, toggled by `setFpsVisible`)
+   Every screen corner is already claimed by another HUD element (stats
+   top-left, combo top-right, controls bottom-right, the touch stick
+   bottom-left in touch mode) and the top-center strip holds the build
+   countdown/boss bar, so this sits in the band just below all of that
+   instead. `.hud-stats` starts at `max(10px, safe-area-inset-top)` and, at
+   4 stacked rows, runs roughly 90px tall; combo/countdown/boss are all
+   shorter and finish well before that. Clearing 90px past wherever
+   `.hud-stats` starts guarantees no vertical overlap with any of them
+   regardless of viewport width — including narrow phones, where
+   `.hud-stats`'s fixed-width bar can reach close to horizontal center, so
+   horizontal centering here would otherwise risk overlapping it on exactly
+   those screens if the two occupied the same vertical band.
+   No `pointer-events` rule is needed: this is a plain read-only child of
+   `.hud`, `#ui > .hud` (near the top of this file) is already
+   `pointer-events: none`, and nothing here sets it back to `auto` — unlike
+   `.hud-controls`' buttons, which deliberately escape `.hud` to stay
+   tappable (see that rule's comment), this has no reason to.
+---------------------------------------------------------------- */
+.hud-fps {
+  position: absolute;
+  top: max(100px, calc(env(safe-area-inset-top) + 90px));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.hud-fps[hidden] {
+  display: none;
 }
