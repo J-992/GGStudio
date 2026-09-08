@@ -189,7 +189,7 @@ export class Turrets {
 
   /**
    * @param {number} dt
-   * @param {{ time: number, enemies: null | { positions(): {x:number,y:number,z:number,radius?:number}[], damageAt(idx:number, dmg:number, source:string): void, damageRadius(x:number, z:number, radius:number, dmg:number, source:string): void, applySlow(idx:number, amount:number, durationS:number): void }, boss: null | { alive: boolean, positions(): {idx:number,x:number,y:number,z:number,radius:number}[], damage(n:number, source:string): void } }} world
+   * @param {{ time: number, enemies: null | { positions(): {x:number,y:number,z:number,radius?:number}[], damageAt(idx:number, dmg:number, source:string, dir?:{x:number,z:number}): void, damageRadius(x:number, z:number, radius:number, dmg:number, source:string): void, applySlow(idx:number, amount:number, durationS:number): void }, boss: null | { alive: boolean, positions(): {idx:number,x:number,y:number,z:number,radius:number}[], damage(n:number, source:string): void } }} world
    */
   update(dt, world) {
     const enemies = world.enemies?.positions?.() ?? [];
@@ -433,10 +433,13 @@ export class Turrets {
     const visual = this._visuals.get(rec.slotId);
     visual?.headPivot.getWorldPosition(_origin);
     const targetY = target.y ?? 1;
+    // Knockback direction: away from the turret that fired, so a hit shoves
+    // the enemy back down its own approach line.
+    const push = { x: target.x - rec.x, z: target.z - rec.z };
 
     if (rec.type === 'gun') {
       if (isBoss) world.boss?.damage?.(stats.dmg, 'turret');
-      else world.enemies?.damageAt?.(poolIdx, stats.dmg, 'turret');
+      else world.enemies?.damageAt?.(poolIdx, stats.dmg, 'turret', push);
       _target.set(target.x, targetY, target.z);
       this._effects.tracer(_origin, _target);
       this._playSound(world, 'turret-shot-1');
@@ -454,7 +457,7 @@ export class Turrets {
         // No speed-multiplier hook exists on `Boss` (unlike `Enemies#applySlow`)
         // — the slow effect simply doesn't apply to the boss.
       } else {
-        world.enemies?.damageAt?.(poolIdx, stats.dmg, 'turret');
+        world.enemies?.damageAt?.(poolIdx, stats.dmg, 'turret', push);
         // `cfg.turrets.types.tesla.slow` is a *strength* (bigger = more slow,
         // increasing with level — see `turretLogic.statsFor`'s monotonic
         // contract), but `Enemies#applySlow`'s `factor` is a *speed
