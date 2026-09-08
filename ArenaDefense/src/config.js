@@ -180,6 +180,30 @@ export const CONFIG = Object.freeze(deepFreeze({
         radius: 0.6, hitHeight: 2.2, knockbackScale: 0.45,
       },
     },
+
+    // Size variants. Every spawn rolls one of these, so a wave mixes darting
+    // runts with slow heavies instead of a row of identical bodies. `size`
+    // scales the model AND the hitbox together — a large one really is a bigger
+    // target — while `knockback` moves opposite to it so a heavy is not flung
+    // across the arena by a shotgun.
+    //
+    // `energy` is deliberately NOT scaled: `core/waves.js#waveEnergyTotal`
+    // multiplies `spawn.n * type.energy` knowing nothing about variants, and
+    // `test/waves.test.js` pins wave 1's total to the gun turret's cost. Paying
+    // variable energy per kill would quietly break that whole economy anchor.
+    //
+    // `weights` drives the roll and must be same-length as `order`. The roll is
+    // gameplay, not cosmetics, so it draws from the seeded `core/rng.js` stream
+    // (see `Game#_rollVariant`) — the same seed still reproduces a run.
+    variants: {
+      order: ['small', 'normal', 'large'],
+      weights: [0.25, 0.55, 0.2],
+      types: {
+        small: { size: 0.7, hp: 0.5, speed: 1.15, knockback: 1.4 },
+        normal: { size: 1, hp: 1, speed: 1, knockback: 1 },
+        large: { size: 1.4, hp: 2.5, speed: 0.85, knockback: 0.5 },
+      },
+    },
   },
 
   bosses: {

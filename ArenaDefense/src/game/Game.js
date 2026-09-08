@@ -186,6 +186,10 @@ export class Game {
     this._waveTotal = 0;
     this._prevGatePair = null;
     this._gateRng = makeRng((Date.now() ^ 0x9e3779b9) >>> 0);
+    // A separate stream from `_gateRng` on purpose: drawing both from one
+    // would make the gate a wave picks depend on how many enemies happened to
+    // spawn before it, coupling two unrelated systems through the sequence.
+    this._variantRng = makeRng((Date.now() ^ 0x85ebca6b) >>> 0);
 
     // Persisted save data, loaded once at boot; `saveSave` merges+persists a
     // patch and returns the sanitized whole, which is what we keep as the
@@ -666,7 +670,7 @@ export class Game {
       const due = this._scheduler.update(dt, this.world.enemies.alive);
       for (const entry of due) {
         const gateId = this.world.activeGates[entry.gateId];
-        this.world.enemies.spawn(entry.enemy, gateId, this._currentWaveDef.hpMul);
+        this.world.enemies.spawn(entry.enemy, gateId, this._currentWaveDef.hpMul, this._rollVariant());
       }
     }
 
@@ -1144,6 +1148,28 @@ export class Game {
     this._hud.setEnergy(this._economy.energy);
     this._hud.setCoins(this._economy.bankedCoins + this._economy.pendingCoins);
     this._hud.setWaveProgress(this._waveProgress());
+  }
+
+  /**
+   * Picks a size variant for one spawn.
+   *
+   * Drawn from the seeded stream, not `Math.random()`: this changes how hard a
+   * wave hits, so it is gameplay, and `core/rng.js` exists precisely so the
+   * same seed reproduces a run. (`Enemies#spawn`'s position jitter stays on
+   * `Math.random()` — that one really is cosmetic.)
+   *
+   * @returns {string} A key of `cfg.enemies.variants.types`.
+   */
+  _rollVariant() {
+    const { order, weights } = this._config.enemies.variants;
+    let roll = this._variantRng();
+    for (let i = 0; i < order.length; i++) {
+      roll -= weights[i];
+      if (roll <= 0) return order[i];
+    }
+    // Float drift, or weights summing under 1: fall back to the last entry
+    // rather than returning undefined and silently unscaling the enemy.
+    return order[order.length - 1];
   }
 
   /**
