@@ -28,15 +28,17 @@ import { ComboTracker } from '../core/combo.js';
 import { makeRng } from '../core/rng.js';
 import { pickActiveGates, waveDef, flattenSpawns } from '../core/waves.js';
 import { SpawnScheduler } from '../core/spawner.js';
-import { slotPositions } from '../core/arenaGeometry.js';
+import { slotPositions, rayArenaHit } from '../core/arenaGeometry.js';
+import { spreadDirs, weaponIds, resolveWeapon, coerceWeaponId } from '../core/weapons.js';
 import { loadSave, saveSave } from '../core/storage.js';
 import { coinsForRun, applyDoubler, bestWaveAfter } from '../core/runFlow.js';
-import { storageIO } from '../platform/storage.js';
+import { storageIO, loadPrefs, savePrefs, saveMuted } from '../platform/storage.js';
 import { Player } from './Player.js';
 import { Arena } from './Arena.js';
 import { Effects } from './Effects.js';
 import { Enemies } from './Enemies.js';
 import { Billboards } from './Billboards.js';
+import { Projectiles } from './Projectiles.js';
 
 const FIXED_STEP_SAFETY_MAX_ITERATIONS = 8;
 const DEBUG_REFRESH_S = 0.5;
@@ -44,12 +46,23 @@ const DEBUG_REFRESH_S = 0.5;
 const HIT_PARTICLE_COLOR = 0xffdd88;
 const HIT_PARTICLE_COUNT = 6;
 
+// Played when a weapon's own sound is not in the shipped audio set — the same
+// graceful degradation `Turrets#_fire` uses for `electric-pulse`.
+const FALLBACK_SHOT_SOUND = 'pistol-shot-1';
+const SHOT_SOUND_MIN_INTERVAL_S = 0.07;
+
 // Reused across every shot (`_handleFiring`) instead of a fresh
 // `THREE.Vector3` per shot — `Effects#tracer` copies both endpoints into its
 // own pooled `Tracer` immediately (`t.a.copy(a); t.b.copy(b);`), so handing
 // it a shared scratch vector is safe (see `docs/INTERFACES.md`'s Effects
 // section) and this file never needs to allocate one at fire time.
 const _tracerEnd = new THREE.Vector3();
+
+// Also per-shot scratch (see `_tracerEnd`): the touch aim-assist direction,
+// and the direction of the pellet currently being resolved. A nine-pellet
+// shotgun resolves nine of these per shot, in the hottest path in the game.
+const _assistDir = new THREE.Vector3();
+const _pelletDir = new THREE.Vector3();
 
 // See `_pushEnemiesFromPlayer`: `Enemies` (P3, frozen contract — see
 // `docs/INTERFACES.md`) exposes no way to move an enemy's position from
@@ -128,6 +141,9 @@ export class Game {
     // registered) on top of every enemy-cap-sized `tungtung`.
     const billboards = new Billboards(scene, assets, config, config.enemies.cap + 1);
     const enemies = new Enemies(scene, assets, config, this.bus, billboards, audio);
+    // The player's rocket: the one weapon that travels rather than resolving
+    // on the frame it is fired (see `_handleFiring`'s `gun.projSpeed` branch).
+    const projectiles = new Projectiles(scene, config, audio);
 
     /**
      * The one bag every system reads/writes. `turrets`/`boss` are `null`
@@ -141,6 +157,7 @@ export class Game {
       turrets: null,
       boss: null,
       billboards,
+      projectiles,
       effects,
       bus: this.bus,
       time: 0,
@@ -150,6 +167,7 @@ export class Game {
     /** @type {{ name: string, system: { update(dt: number, world: object): void } }[]} */
     this._systems = [];
     this.registerSystem('enemies', enemies);
+    this.registerSystem('projectiles', projectiles);
 
     this._economy = new Economy(config);
     this._combo = new ComboTracker(config);
@@ -174,6 +192,10 @@ export class Game {
 
     this._paused = false;
     this._lastHp = undefined;
+    this._lastShotSoundT = -Infinity;
+    /** Device preferences (sensitivity, invert-look, FPS, last weapon). Kept
+     *  out of `core/storage.js`'s run-progress save shape — see `core/prefs.js`. */
+    this._prefs = loadPrefs();
     this._lastMs = null;
     this._accumulator = 0;
     this._rafId = null;
@@ -223,6 +245,12 @@ export class Game {
     this.bus.on('state:changed', () => this._syncPointerLock());
 
     this._setupDebug();
+
+    // Equip the weapon the player last chose and apply their settings before
+    // anything is shown. `coerceWeaponId` absorbs a stale id from an older
+    // roster, so a saved preference can never stop the game booting.
+    this.world.player.setWeapon(coerceWeaponId(this._prefs.weapon, config));
+    this._applyPrefs();
 
     const devWave = this._parseDevWaveParam();
     this.state.go('title');
@@ -393,11 +421,14 @@ export class Game {
    * flags desynced.
    */
   _togglePauseGuarded() {
+    // While the pause menu itself is up, Escape belongs to that screen (it
+    // resolves 'resume'), not to this listener.
     if (this._screens.isOpen) return;
     if (this._manualPaused) {
       this._setManualPause(false);
     } else if (!this._paused && (this.state.state === 'build' || this.state.state === 'wave')) {
       this._setManualPause(true);
+      void this._runPauseFlow();
     }
   }
 
@@ -407,7 +438,13 @@ export class Game {
   _setManualPause(paused) {
     if (paused === this._manualPaused) return;
     this._manualPaused = paused;
-    this._hud.setPaused(paused);
+    // The real pause menu (`Screens#showPause`, opened by
+    // `_togglePauseGuarded`) has replaced the HUD's bare "PAUSED" text panel,
+    // so clear it rather than stacking the two. Nothing sets it any more:
+    // an involuntary pause is either behind Poki's full-screen ad iframe or
+    // in a tab nobody is looking at, so it has no panel to show. `Hud`'s
+    // `setPaused` is left in place but is now only this reset.
+    this._hud.setPaused(false);
     if (paused) {
       this.pause();
       this.hooks.onPause?.();
@@ -430,15 +467,19 @@ export class Game {
    * @param {number} frameDt
    */
   _debugTick(frameDt) {
-    if (!this._debugEl) return;
     this._debugFrames++;
     this._debugAccum += frameDt;
     if (this._debugAccum < DEBUG_REFRESH_S) return;
     const fps = Math.round(this._debugFrames / this._debugAccum);
-    const calls = this._renderer.info.render.calls;
-    const alive = this.world.enemies?.alive ?? 0;
-    const cap = this._config.enemies.cap;
-    this._debugEl.textContent = `${fps} fps · ${calls} draws · ${alive}/${cap} alive`;
+    // The HUD readout is a player-facing setting ("SHOW FPS"), so it is fed
+    // regardless of whether the `?debug` overlay element exists.
+    this._hud.setFps(fps);
+    if (this._debugEl) {
+      const calls = this._renderer.info.render.calls;
+      const alive = this.world.enemies?.alive ?? 0;
+      const cap = this._config.enemies.cap;
+      this._debugEl.textContent = `${fps} fps · ${calls} draws · ${alive}/${cap} alive`;
+    }
     this._debugAccum = 0;
     this._debugFrames = 0;
   }
@@ -614,15 +655,128 @@ export class Game {
     this._waveClearTimer = this._config.timing.waveClearDelayS;
   }
 
-  /** Shows the title screen (boot, and after a run ends and the player picks "title"). */
+  /** Shows the main menu (boot, and after a run ends and the player picks "title"). */
   _showTitleScreen() {
     this._hud.show(false);
-    this._screens.showTitle({
+    this._screens.showMenu({
       bestWave: this._save.bestWave,
       coins: this._save.coins,
       credits: this._config.credits,
-      onPlay: () => this._startRun(),
+      weaponName: this.world.player.gun.name,
+      onPlay: () => { void this._playFromMenu(); },
+      onWeapons: () => { void this._runWeaponSelectFlow(); },
+      onSettings: () => { void this._runSettingsFlow(() => this._showTitleScreen()); },
     });
+  }
+
+  /**
+   * Menu Play: pick a weapon, then start the run.
+   *
+   * The select screen deliberately resolves BEFORE `_startRun`, because
+   * `_startRun`'s first act is `hooks.onRunStart()` -> `commercialBreak()`.
+   * A DOM screen sitting under a Poki ad iframe is exactly the thing Poki's
+   * review flags, so the order is menu -> select -> ad -> build.
+   */
+  async _playFromMenu() {
+    await this._runWeaponSelectFlow('START');
+    this._startRun();
+  }
+
+  /**
+   * Shows weapon select, equips the result, and persists it. Returns to the
+   * menu afterwards unless a caller is going to mount something else.
+   *
+   * @param {string|null} [confirmLabel] `null` re-shows the menu when done
+   *   (the menu's own WEAPON button); a label means the caller takes over.
+   * @returns {Promise<string>} The equipped weapon id.
+   */
+  async _runWeaponSelectFlow(confirmLabel = null) {
+    const chosen = await this._screens.showWeaponSelect({
+      weapons: weaponIds(this._config).map((id) => ({ id, def: resolveWeapon(id, this._config) })),
+      current: this.world.player.weaponId,
+      confirmLabel: confirmLabel ?? 'EQUIP',
+    });
+    this.equipWeapon(chosen);
+    if (confirmLabel === null) this._showTitleScreen();
+    return chosen;
+  }
+
+  /**
+   * Equips a weapon and remembers the choice. Public because the build-phase
+   * overlay's weapon row goes through `game/buildPhase.js`, which is wired
+   * from outside this class.
+   *
+   * @param {string} id
+   */
+  equipWeapon(id) {
+    const equipped = this.world.player.setWeapon(id);
+    this._prefs = savePrefs({ weapon: equipped });
+  }
+
+  /**
+   * Settings, then whatever the caller wants shown next — the panel is
+   * reachable from both the menu and the pause menu, and has to return to
+   * whichever one opened it.
+   *
+   * @param {() => void} onDone
+   */
+  async _runSettingsFlow(onDone) {
+    const next = await this._screens.showSettings({
+      prefs: this._prefs,
+      touch: this._input.mode === 'touch',
+      muted: this._audio.muted,
+    });
+    this._prefs = savePrefs({
+      sensMouse: next.sensMouse,
+      sensTouch: next.sensTouch,
+      invertY: next.invertY,
+      showFps: next.showFps,
+    });
+    this._applyPrefs();
+    this._audio.setMuted(next.muted);
+    this._hud.setMuted(next.muted);
+    saveMuted(next.muted);
+    onDone();
+  }
+
+  /** Pushes the current preferences into the systems that read them. */
+  _applyPrefs() {
+    // `null` in stored prefs means "as configured", which is a multiplier of 1.
+    this._input.setLookSensitivity({
+      mouse: this._prefs.sensMouse ?? 1,
+      touch: this._prefs.sensTouch ?? 1,
+      invertY: this._prefs.invertY,
+    });
+    this._hud.setFpsVisible(this._prefs.showFps);
+  }
+
+  /**
+   * The manual pause menu, run to a conclusion. Kept out of `_setManualPause`
+   * so that path stays synchronous for its callers.
+   */
+  async _runPauseFlow() {
+    for (;;) {
+      const choice = await this._screens.showPause();
+      if (choice === 'settings') {
+        // Await the panel, then loop back to the pause menu behind it.
+        await new Promise((done) => { void this._runSettingsFlow(done); });
+        continue;
+      }
+      if (choice === 'title') {
+        // Abandoning a run still ends it through `runEnd`, so the coins
+        // earned so far are banked the same as any other ending.
+        this._screens.hide();
+        this._setManualPause(false);
+        this.hooks.onRunStop?.();
+        this.state.go('runEnd');
+        this.bus.emit('state:changed', { state: 'runEnd' });
+        void this._runRunEndFlow(false);
+        return;
+      }
+      this._screens.hide();
+      this._setManualPause(false);
+      return;
+    }
   }
 
   /**
@@ -746,6 +900,7 @@ export class Game {
     this.state.go('build');
     this.world.player.reset();
     this.world.enemies?.clear();
+    this.world.projectiles?.clear();
     this._wave = startWave;
     this._economy = new Economy(this._config);
     this._combo = new ComboTracker(this._config);
@@ -775,45 +930,131 @@ export class Game {
     const targetIndex = this.world.player.aimTarget(targets);
     this._hud.setReticle(targetIndex >= 0);
 
-    const shouldFire = frame.mode === 'touch' ? targetIndex >= 0 : frame.fire;
-    if (!shouldFire) return;
+    if (!frame.fire) return;
 
     const shot = this.world.player.fire();
     if (!shot) return;
 
-    const gun = this._config.player.gun;
-    const enemyHit = this.world.enemies?.raycast?.(shot.origin, shot.dir, gun.range) ?? null;
-    // The boss renders through `Billboards`, not `Enemies`' pool, so it needs
-    // its own cylinder test alongside the enemy raycast — see `Boss#hitTest`
-    // and `docs/INTERFACES.md`'s P5 "Player firing" compromise note this
-    // fixes. Only the NEARER of the two hits takes damage: a shot can never
-    // hit both an enemy and the boss standing behind (or in front of) it.
-    const bossHit = this.world.boss?.alive ? this.world.boss.hitTest(shot.origin, shot.dir, gun.range) : null;
+    // The player's own weapon, not `config.player.gun` — reading through the
+    // player is what lets a swapped weapon's stats actually take effect.
+    const gun = this.world.player.gun;
 
-    let hitPoint = null;
-    if (bossHit && (!enemyHit || bossHit.dist < enemyHit.dist)) {
-      this.world.boss.damage(gun.dmg, 'player');
-      hitPoint = bossHit.point;
-    } else if (enemyHit) {
-      // Knockback follows the shot: the body is shoved along the bullet's
-      // horizontal direction, so it reads as reacting to *this* hit.
-      this.world.enemies.damageAt(enemyHit.idx, gun.dmg, 'player', { x: shot.dir.x, z: shot.dir.z });
-      hitPoint = enemyHit.point;
+    // Touch keeps its aim assist now that the touch layer has a real fire
+    // button: the player pulls the trigger, but a shot taken with an enemy
+    // inside the weapon's cone still bends onto it. Pixel-accurate aim on a
+    // touchscreen is not a fair ask, and this is the same cone
+    // (`gun.coneDegTouch`) that used to drive auto-fire outright.
+    if (frame.mode === 'touch' && targetIndex >= 0) {
+      const t = targets[targetIndex];
+      _assistDir.set(t.x - shot.origin.x, t.y - shot.origin.y, t.z - shot.origin.z);
+      if (_assistDir.lengthSq() > 1e-8) shot.dir.copy(_assistDir.normalize());
     }
 
-    let tracerEnd;
-    if (hitPoint) {
-      _tracerEnd.set(hitPoint.x, hitPoint.y, hitPoint.z);
-      tracerEnd = _tracerEnd;
-      this.world.effects.burst(hitPoint.x, hitPoint.y, hitPoint.z, HIT_PARTICLE_COLOR, HIT_PARTICLE_COUNT);
+    if (gun.projSpeed) {
+      // Travelling weapon: damage resolves on impact, in `Projectiles`.
+      this.world.projectiles?.launch(shot.origin, shot.dir, gun);
     } else {
-      _tracerEnd.copy(shot.origin).addScaledVector(shot.dir, gun.range);
-      tracerEnd = _tracerEnd;
+      const dirs = spreadDirs(shot.dir, gun.spreadDeg, gun.pellets, Math.random);
+      for (const d of dirs) {
+        _pelletDir.set(d.x, d.y, d.z);
+        this._resolvePellet(shot.origin, _pelletDir, gun);
+      }
     }
 
-    this.world.effects.tracer(shot.origin, tracerEnd);
-    this._audio.play('pistol-shot-1');
+    if (this._config.effects.muzzleFlash) {
+      this.world.effects.flash(shot.origin.x, shot.origin.y, shot.origin.z);
+    }
+    this._playShotSound(gun);
+    // NOTE: these are `Player`'s scratch vectors, not fresh clones — a
+    // listener that wants either past this fixed step must copy it. Nothing
+    // subscribes today (`bossPhase.js` deliberately dropped its listener to
+    // avoid double-damaging the boss).
     this.bus.emit('player:fired', { origin: shot.origin, dir: shot.dir });
+  }
+
+  /**
+   * One hitscan pellet: damage the nearest enemy or boss it meets, and leave a
+   * mark wherever it stops — on a body, or failing that on the arena itself.
+   * A weapon with `pierce` carries on through each enemy it kills or wounds,
+   * up to that many bodies.
+   *
+   * @param {THREE.Vector3} origin
+   * @param {THREE.Vector3} dir Normalized.
+   * @param {object} gun
+   */
+  _resolvePellet(origin, dir, gun) {
+    const pierce = Math.max(1, gun.pierce ?? 1);
+    let pierced = null;
+    let lastPoint = null;
+
+    for (let i = 0; i < pierce; i++) {
+      const enemyHit = this.world.enemies?.raycast?.(origin, dir, gun.range, pierced) ?? null;
+      // The boss renders through `Billboards`, not `Enemies`' pool, so it
+      // needs its own cylinder test alongside the enemy raycast — see
+      // `Boss#hitTest`. Only the NEARER of the two takes damage: a shot can
+      // never hit both an enemy and the boss standing behind it. The boss
+      // also stops a piercing shot, rather than being hit once per pellet
+      // pass.
+      const bossHit = this.world.boss?.alive ? this.world.boss.hitTest(origin, dir, gun.range) : null;
+
+      if (bossHit && (!enemyHit || bossHit.dist < enemyHit.dist)) {
+        this.world.boss.damage(gun.dmg, 'player');
+        lastPoint = bossHit.point;
+        break;
+      }
+      if (!enemyHit) break;
+
+      // Knockback follows the shot: the body is shoved along the pellet's own
+      // horizontal direction, so it reads as reacting to *this* hit — and for
+      // a shotgun each pellet shoves along its own spread direction.
+      this.world.enemies.damageAt(enemyHit.idx, gun.dmg, 'player', { x: dir.x, z: dir.z });
+      lastPoint = enemyHit.point;
+      this.world.effects.burst(
+        enemyHit.point.x, enemyHit.point.y, enemyHit.point.z,
+        HIT_PARTICLE_COLOR, HIT_PARTICLE_COUNT,
+      );
+      if (pierce === 1) break;
+      (pierced ??= new Set()).add(enemyHit.idx);
+    }
+
+    if (lastPoint) {
+      _tracerEnd.set(lastPoint.x, lastPoint.y, lastPoint.z);
+      this.world.effects.tracer(origin, _tracerEnd);
+      return;
+    }
+
+    // Hit nobody: land it on the arena floor or wall so it still reads as a
+    // shot. Without this the tracer runs out to `range` into empty space and
+    // nothing happens at all.
+    const impact = rayArenaHit(origin, dir, gun.range, this._config);
+    const fx = this._config.effects.impact;
+    if (impact) {
+      _tracerEnd.set(impact.x, impact.y, impact.z);
+      this.world.effects.burst(
+        impact.x, impact.y, impact.z,
+        impact.surface === 'wall' ? fx.wallColor : fx.groundColor,
+        fx.count,
+      );
+    } else {
+      _tracerEnd.copy(origin).addScaledVector(dir, gun.range);
+    }
+    this.world.effects.tracer(origin, _tracerEnd);
+  }
+
+  /**
+   * The player's shot sound was unthrottled when there was one 6/s pistol. The
+   * fast weapons would otherwise stack eleven overlapping voices a second, so
+   * it now uses the same floor `Enemies`/`Turrets` apply to theirs.
+   *
+   * @param {object} gun
+   */
+  _playShotSound(gun) {
+    const name = gun.sound;
+    const has = this._assets.audioBuffers?.has?.(name);
+    const toPlay = has ? name : FALLBACK_SHOT_SOUND;
+    if (this.world.time - this._lastShotSoundT < SHOT_SOUND_MIN_INTERVAL_S) return;
+    this._lastShotSoundT = this.world.time;
+    this._audio.play(toPlay);
   }
 
   _checkPlayerDamageAndDeath() {

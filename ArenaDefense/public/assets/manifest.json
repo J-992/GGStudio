@@ -174,7 +174,11 @@
       "audio/zombie-attack-1.ogg",
       "audio/explosion-metal.ogg",
       "audio/mechanical-clunk.ogg",
-      "audio/upgrade-confirm.ogg"
+      "audio/upgrade-confirm.ogg",
+      "audio/pistol-shot-2.ogg",
+      "audio/gunfire.ogg",
+      "audio/cannon-shot-1.ogg",
+      "audio/sniper-shot-1.ogg"
     ]
   },
   "files": {
@@ -204,6 +208,10 @@
     "audio/zombie-attack-1.ogg": 5980,
     "audio/explosion-metal.ogg": 15929,
     "audio/mechanical-clunk.ogg": 4436,
-    "audio/upgrade-confirm.ogg": 7322
+    "audio/upgrade-confirm.ogg": 7322,
+    "audio/pistol-shot-2.ogg": 28074,
+    "audio/gunfire.ogg": 23679,
+    "audio/cannon-shot-1.ogg": 29913,
+    "audio/sniper-shot-1.ogg": 26059
   }
 }

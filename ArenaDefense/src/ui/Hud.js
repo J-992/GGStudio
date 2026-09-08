@@ -65,6 +65,20 @@ export class Hud {
     this._buildCountdown.className = 'hud-build-countdown';
     this._buildCountdown.hidden = true;
 
+    // FPS readout, toggled by a settings-screen preference (`Game.js`'s
+    // `_applyPrefs` calls `setFpsVisible`; its `_debugTick` calls `setFps`
+    // roughly every `DEBUG_REFRESH_S`, same cadence as the `?debug=1`
+    // overlay). Unlike `.hud-controls` (mute/pause, see that block's long
+    // comment below on why THOSE are a sibling of `.hud`), this is a plain
+    // read-only text node — it never needs to receive a tap, so it has no
+    // reason to escape `.hud`'s stacking context to beat `.touch-layer`'s
+    // zones the way a button does. It lives inside `.hud` as an ordinary
+    // child instead, right alongside `.hud-build-countdown` above, which is
+    // the same "hidden by default, toggled independently" shape.
+    this._fpsReadout = document.createElement('div');
+    this._fpsReadout.className = 'hud-fps';
+    this._fpsReadout.hidden = true;
+
     this._statsBox.append(hpRow, energyRow, coinsRow, this._waveLabel);
 
     this._bossBar = document.createElement('div');
@@ -108,7 +122,7 @@ export class Hud {
     this._pausedPanel.hidden = true;
 
     this._root.append(
-      this._statsBox, this._buildCountdown, this._bossBar, this._comboBar, this._reticle,
+      this._statsBox, this._buildCountdown, this._fpsReadout, this._bossBar, this._comboBar, this._reticle,
       keyboardHint, touchHint, this._toast, this._pausedPanel,
     );
     ui.appendChild(this._root);
@@ -197,6 +211,22 @@ export class Hud {
     }
     this._buildCountdown.hidden = false;
     this._buildCountdown.textContent = `BUILD ${Math.max(0, Math.ceil(secondsLeft))}s`;
+  }
+
+  /**
+   * Shows or hides the FPS readout — driven by a settings-screen preference
+   * (`Game.js`'s `_applyPrefs`). Hidden by default until this is called.
+   * @param {boolean} visible
+   */
+  setFpsVisible(visible) {
+    this._fpsReadout.hidden = !visible;
+  }
+
+  /**
+   * @param {number} fps
+   */
+  setFps(fps) {
+    this._fpsReadout.textContent = `${Math.round(fps)} FPS`;
   }
 
   /**

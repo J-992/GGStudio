@@ -99,6 +99,55 @@ export function clampToArena(x, z, radius) {
 }
 
 /**
+ * Nearest hit of a ray against the arena's two solid surfaces: the floor
+ * (the plane `y = 0`, only where it lies inside the wall) and the wall (a
+ * vertical cylinder of `arena.radius`, capped at `arena.wallHeight`).
+ *
+ * This is what gives a shot that misses every enemy somewhere to land — the
+ * player is always inside the cylinder, so a level or downward shot always
+ * hits one of the two. A shot angled over the wall top hits neither and
+ * returns `null`.
+ *
+ * @param {{x:number, y:number, z:number}} origin
+ * @param {{x:number, y:number, z:number}} dir Need not be normalised; `dist` is in units of `dir`'s length.
+ * @param {number} maxDist Hits beyond this are discarded (the weapon's range).
+ * @param {import('./types.js').GameConfig} cfg
+ * @returns {{x:number, y:number, z:number, dist:number, surface:'ground'|'wall'} | null}
+ */
+export function rayArenaHit(origin, dir, maxDist, cfg) {
+  const { radius, wallHeight } = cfg.arena;
+  let best = null;
+
+  // Floor: y = 0. Only counts inside the wall — outside it the ray has
+  // already left the arena over the top, and there is no floor to hit.
+  if (dir.y < 0) {
+    const t = -origin.y / dir.y;
+    if (t > 0 && t <= maxDist) {
+      const x = origin.x + dir.x * t;
+      const z = origin.z + dir.z * t;
+      if (Math.hypot(x, z) <= radius) best = { x, y: 0, z, dist: t, surface: 'ground' };
+    }
+  }
+
+  // Wall: the outward intersection with the cylinder, if it is below the top.
+  const a = dir.x * dir.x + dir.z * dir.z;
+  if (a > 0) {
+    const b = 2 * (origin.x * dir.x + origin.z * dir.z);
+    const c = origin.x * origin.x + origin.z * origin.z - radius * radius;
+    const disc = b * b - 4 * a * c;
+    if (disc >= 0) {
+      const t = (-b + Math.sqrt(disc)) / (2 * a);
+      const y = origin.y + dir.y * t;
+      if (t > 0 && t <= maxDist && y >= 0 && y <= wallHeight && (!best || t < best.dist)) {
+        best = { x: origin.x + dir.x * t, y, z: origin.z + dir.z * t, dist: t, surface: 'wall' };
+      }
+    }
+  }
+
+  return best;
+}
+
+/**
  * {@link slotPositions} with every position already converted to build-overlay
  * map units by {@link worldToMap} — the form `ui/BuildOverlay.js` needs, since
  * its `viewBox` is in map units (arena wall at 90), not world metres. Placing

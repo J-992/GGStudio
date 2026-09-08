@@ -1,13 +1,15 @@
-// Title / death / run-end screens: full-viewport panels mounted into `#ui`.
+// Menu / weapon-select / pause / settings / death / run-end screens:
+// full-viewport panels mounted into `#ui`.
 // Each `show*` call freezes input and releases pointer lock for as long as
 // the screen is up; `hide()` (called automatically at the start of the next
 // `show*`, and by `Game.js` once a screen's outcome has been acted on)
-// reverses both. `showTitle` takes a callback (`onPlay`) since the title
-// stays up indefinitely until the player acts; `showDeath`/`showRunEnd`
-// return a Promise that resolves once a button (or Enter/Space/Escape) picks
-// an outcome, since `Game.js` needs to `await` the choice before deciding
-// what happens next (revive vs. run-end, play-again vs. title).
+// reverses both. `showMenu` takes callbacks since the menu stays up
+// indefinitely until the player acts; every other screen returns a Promise
+// that resolves once a button (or a key) picks an outcome, since `Game.js`
+// needs to `await` the choice before deciding what happens next (which
+// weapon to equip, revive vs. run-end, play-again vs. title).
 import { assetUrl } from '../game/assets.js';
+import { SENS_MIN, SENS_MAX } from '../core/prefs.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -29,6 +31,84 @@ function svgIcon(id) {
   use.setAttribute('href', `#${id}`);
   svg.appendChild(use);
   return svg;
+}
+
+/**
+ * A labelled 0..1 bar, used to compare weapons at a glance.
+ *
+ * @param {string} label
+ * @param {number} value
+ * @param {number} max Value that fills the bar; larger values simply cap it.
+ * @returns {HTMLElement}
+ */
+function statBar(label, value, max) {
+  const row = document.createElement('span');
+  row.className = 'weapon-stat';
+  const name = document.createElement('span');
+  name.className = 'weapon-stat-label';
+  name.textContent = label;
+  const track = document.createElement('span');
+  track.className = 'weapon-stat-track';
+  const fill = document.createElement('span');
+  fill.className = 'weapon-stat-fill';
+  fill.style.width = `${Math.round(Math.min(1, value / max) * 100)}%`;
+  track.appendChild(fill);
+  row.append(name, track);
+  return row;
+}
+
+/**
+ * @param {string} label
+ * @param {number} value Multiplier, in `core/prefs.js`'s [SENS_MIN, SENS_MAX].
+ * @param {(v: number) => void} onChange
+ * @returns {HTMLElement}
+ */
+function slider(label, value, onChange) {
+  const row = document.createElement('label');
+  row.className = 'settings-row';
+  const name = document.createElement('span');
+  name.className = 'settings-label';
+  name.textContent = label;
+  const readout = document.createElement('span');
+  readout.className = 'settings-value';
+  readout.textContent = `${value.toFixed(2)}x`;
+
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.className = 'settings-slider';
+  input.min = String(SENS_MIN);
+  input.max = String(SENS_MAX);
+  input.step = '0.05';
+  input.value = String(value);
+  input.addEventListener('input', () => {
+    const v = Number(input.value);
+    readout.textContent = `${v.toFixed(2)}x`;
+    onChange(v);
+  });
+
+  row.append(name, input, readout);
+  return row;
+}
+
+/**
+ * @param {string} label
+ * @param {boolean} on
+ * @param {(on: boolean) => void} onChange
+ * @returns {HTMLElement}
+ */
+function toggle(label, on, onChange) {
+  const row = document.createElement('label');
+  row.className = 'settings-row';
+  const name = document.createElement('span');
+  name.className = 'settings-label';
+  name.textContent = label;
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'settings-toggle';
+  input.checked = on;
+  input.addEventListener('change', () => onChange(input.checked));
+  row.append(name, input);
+  return row;
 }
 
 export class Screens {
@@ -117,9 +197,13 @@ export class Screens {
   }
 
   /**
-   * @param {{bestWave:number, coins:number, credits:string, onPlay:() => void}} opts
+   * The main menu. Callback style rather than a Promise: it stays up
+   * indefinitely, and its buttons lead to other screens that come back here.
+   *
+   * @param {{bestWave:number, coins:number, credits:string, weaponName:string,
+   *          onPlay:() => void, onWeapons:() => void, onSettings:() => void}} opts
    */
-  showTitle({ bestWave, coins, credits, onPlay }) {
+  showMenu({ bestWave, coins, credits, weaponName, onPlay, onWeapons, onSettings }) {
     const root = this._open('screen--title');
 
     const heading = document.createElement('h1');
@@ -151,34 +235,219 @@ export class Screens {
     stats.append(bestRow, coinsRow);
 
     const playBtn = this._makeButton('PLAY', 'screen-btn--primary');
+    const weaponsBtn = this._makeButton(`WEAPON: ${weaponName}`);
+    const settingsBtn = this._makeButton('SETTINGS');
 
     const creditsEl = document.createElement('p');
     creditsEl.className = 'screen-credits';
     creditsEl.textContent = credits;
 
-    root.append(heading, portraitsWrap, portraitsCaption, stats, playBtn, creditsEl);
+    root.append(heading, portraitsWrap, portraitsCaption, stats, playBtn, weaponsBtn, settingsBtn, creditsEl);
 
-    let started = false;
-    const start = () => {
-      if (started) return;
-      started = true;
+    // Unlike the old single-button title, tapping the backdrop does NOT start
+    // a run — with three buttons here a stray tap next to SETTINGS starting
+    // the game would be an unpleasant surprise. Enter/Space still play.
+    let acted = false;
+    const once = (fn) => () => {
+      if (acted) return;
+      acted = true;
       cleanup();
-      onPlay();
+      fn();
     };
+    const start = once(onPlay);
     const onKeydown = (e) => {
       if (e.key === ' ' || e.key === 'Enter') start();
     };
-    const cleanup = () => {
-      root.removeEventListener('click', start);
-      window.removeEventListener('keydown', onKeydown);
-    };
+    const cleanup = () => window.removeEventListener('keydown', onKeydown);
 
-    playBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      start();
-    });
-    root.addEventListener('click', start); // Tap anywhere on the panel.
+    playBtn.addEventListener('click', start);
+    weaponsBtn.addEventListener('click', once(onWeapons));
+    settingsBtn.addEventListener('click', once(onSettings));
     window.addEventListener('keydown', onKeydown);
+  }
+
+  /**
+   * Weapon select. Picking a card only highlights it — a second, explicit
+   * action equips it, so the player can read what each one does before
+   * committing (the see-before-you-commit idea behind any decent weapon menu).
+   *
+   * @param {{weapons: {id:string, def:object}[], current:string, confirmLabel?:string}} opts
+   * @returns {Promise<string>} The chosen weapon id; the current one if cancelled.
+   */
+  showWeaponSelect({ weapons, current, confirmLabel = 'START' }) {
+    return new Promise((resolve) => {
+      const root = this._open('screen--weapons');
+
+      const heading = document.createElement('h1');
+      heading.className = 'screen-heading';
+      heading.textContent = 'CHOOSE YOUR WEAPON';
+
+      const sub = document.createElement('p');
+      sub.className = 'screen-sub';
+      sub.textContent = 'All six are unlocked. None is strictly best.';
+
+      let selected = weapons.some((w) => w.id === current) ? current : weapons[0].id;
+
+      const list = document.createElement('div');
+      list.className = 'weapon-list';
+      /** @type {Map<string, HTMLButtonElement>} */
+      const cards = new Map();
+
+      for (const { id, def } of weapons) {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'weapon-card';
+        card.dataset.weapon = id;
+
+        const name = document.createElement('span');
+        name.className = 'weapon-card-name';
+        name.textContent = def.name;
+
+        const blurb = document.createElement('span');
+        blurb.className = 'weapon-card-blurb';
+        blurb.textContent = def.blurb ?? '';
+
+        const statsEl = document.createElement('span');
+        statsEl.className = 'weapon-card-stats';
+        statsEl.append(
+          statBar('DMG', def.dmg * (def.pellets ?? 1), 120),
+          statBar('RATE', def.rate, 12),
+          statBar('RANGE', def.range, 80),
+        );
+
+        card.append(name, blurb, statsEl);
+        card.addEventListener('click', () => {
+          this._audio.play('ui-click');
+          select(id);
+        });
+        list.appendChild(card);
+        cards.set(id, card);
+      }
+
+      const confirmBtn = this._makeButton(confirmLabel, 'screen-btn--primary');
+      root.append(heading, sub, list, confirmBtn);
+
+      const select = (id) => {
+        selected = id;
+        for (const [cardId, el] of cards) el.classList.toggle('is-selected', cardId === id);
+      };
+      select(selected);
+
+      const finish = (id) => {
+        cleanup();
+        this._disableButtons(root);
+        resolve(id);
+      };
+      const onKeydown = (e) => {
+        // 1-6 jump straight to a weapon; Enter takes whatever is highlighted.
+        const n = Number(e.key);
+        if (Number.isInteger(n) && n >= 1 && n <= weapons.length) {
+          select(weapons[n - 1].id);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === ' ') finish(selected);
+        else if (e.key === 'Escape') finish(current);
+      };
+      const cleanup = () => window.removeEventListener('keydown', onKeydown);
+
+      confirmBtn.addEventListener('click', () => finish(selected));
+      window.addEventListener('keydown', onKeydown);
+    });
+  }
+
+  /**
+   * The manual pause menu — Escape, or the touch HUD's pause button. It
+   * replaces the HUD's old bare "PAUSED" text panel outright. An involuntary
+   * pause (an ad, a backgrounded tab) shows nothing at all, because something
+   * else is already covering the screen in both cases.
+   *
+   * @returns {Promise<'resume'|'settings'|'title'>}
+   */
+  showPause() {
+    return new Promise((resolve) => {
+      const root = this._open('screen--pause');
+
+      const heading = document.createElement('h1');
+      heading.className = 'screen-heading';
+      heading.textContent = 'PAUSED';
+
+      const resumeBtn = this._makeButton('RESUME', 'screen-btn--primary');
+      const settingsBtn = this._makeButton('SETTINGS');
+      const titleBtn = this._makeButton('QUIT TO TITLE');
+
+      root.append(heading, resumeBtn, settingsBtn, titleBtn);
+
+      const finish = (choice) => {
+        cleanup();
+        this._disableButtons(root);
+        resolve(choice);
+      };
+      const onKeydown = (e) => {
+        // Escape both opens and closes the pause menu; `Game` suppresses its
+        // own Escape handling while a screen is open, so this is the only
+        // listener that acts on it here.
+        if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') finish('resume');
+      };
+      const cleanup = () => window.removeEventListener('keydown', onKeydown);
+
+      resumeBtn.addEventListener('click', () => finish('resume'));
+      settingsBtn.addEventListener('click', () => finish('settings'));
+      titleBtn.addEventListener('click', () => finish('title'));
+      window.addEventListener('keydown', onKeydown);
+    });
+  }
+
+  /**
+   * Settings. Resolves with the prefs patch to persist — the caller applies
+   * and stores it, this screen only collects it.
+   *
+   * @param {{prefs: object, touch: boolean, muted: boolean}} opts
+   * @returns {Promise<{sensMouse:number, sensTouch:number, invertY:boolean, showFps:boolean, muted:boolean}>}
+   */
+  showSettings({ prefs, touch, muted }) {
+    return new Promise((resolve) => {
+      const root = this._open('screen--settings');
+
+      const heading = document.createElement('h1');
+      heading.className = 'screen-heading';
+      heading.textContent = 'SETTINGS';
+
+      const state = {
+        // A slider needs a concrete number; `null` in stored prefs means
+        // "whatever the config says", which is a multiplier of 1.
+        sensMouse: prefs.sensMouse ?? 1,
+        sensTouch: prefs.sensTouch ?? 1,
+        invertY: prefs.invertY,
+        showFps: prefs.showFps,
+        muted,
+      };
+
+      const fields = document.createElement('div');
+      fields.className = 'settings-fields';
+      const sensKey = touch ? 'sensTouch' : 'sensMouse';
+      fields.append(
+        slider(touch ? 'LOOK SENSITIVITY' : 'MOUSE SENSITIVITY', state[sensKey], (v) => { state[sensKey] = v; }),
+        toggle('SOUND', !state.muted, (on) => { state.muted = !on; }),
+        toggle('INVERT LOOK', state.invertY, (on) => { state.invertY = on; }),
+        toggle('SHOW FPS', state.showFps, (on) => { state.showFps = on; }),
+      );
+
+      const backBtn = this._makeButton('BACK', 'screen-btn--primary');
+      root.append(heading, fields, backBtn);
+
+      const finish = () => {
+        cleanup();
+        this._disableButtons(root);
+        resolve({ ...state });
+      };
+      const onKeydown = (e) => {
+        if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') finish();
+      };
+      const cleanup = () => window.removeEventListener('keydown', onKeydown);
+
+      backBtn.addEventListener('click', finish);
+      window.addEventListener('keydown', onKeydown);
+    });
   }
 
   /**

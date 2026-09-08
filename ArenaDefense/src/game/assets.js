@@ -22,6 +22,8 @@ const AUDIO_NAMES = [
   'ui-click', 'ui-place', 'ui-deny', 'wave-start', 'boss-alert', 'coin',
   'pistol-shot-1', 'turret-shot-1', 'impact-heavy', 'zombie-death-1',
   'zombie-attack-1', 'explosion-metal', 'mechanical-clunk', 'upgrade-confirm',
+  // Per-weapon shot sounds; see `config.player.weapons.types[*].sound`.
+  'pistol-shot-2', 'gunfire', 'cannon-shot-1', 'sniper-shot-1',
 ];
 
 const RETRY_ATTEMPTS = 3;

@@ -1,6 +1,10 @@
-// First-person player controller: movement, look, the held gun (fire +
-// recoil + walk sway), health/regen/invulnerability, and touch auto-fire's
-// `aimTarget` cone test.
+// First-person player controller: movement, look, the equipped weapon (fire +
+// recoil + walk sway + the viewmodel), health/regen/invulnerability, and the
+// `aimTarget` cone test that touch aim-assist uses.
+//
+// The weapon is swappable (`setWeapon`) — `this.gun` points at an entry in
+// `config.player.weapons.types`, chosen on the weapon-select screen and again
+// in any build phase.
 //
 // Recoil: one spring in `core/recoil.js` drives both the viewmodel (slide
 // back, rise, muzzle-up tilt) and a pitch offset on the *rendered* camera
@@ -24,6 +28,7 @@
 // frame 0, so any caller wanting to grant invulnerability can just write
 // `player.invulnUntil = world.time + seconds`.
 import * as THREE from 'three';
+import { coerceWeaponId, resolveWeapon } from '../core/weapons.js';
 import { clampToArena } from '../core/arenaGeometry.js';
 import {
   createRecoilSpring,
@@ -59,7 +64,9 @@ export class Player {
     this.speed = p.speed;
     this.radius = p.radius;
     this.eyeHeight = p.eyeHeight;
-    this.gun = p.gun;
+    /** @type {object} The current weapon's def from `config.player.weapons.types`. Swap with `setWeapon`. */
+    this.gun = resolveWeapon(p.defaultWeapon, config);
+    this.weaponId = p.defaultWeapon;
 
     this._time = 0;
     this._lastDamageT = -Infinity;
@@ -75,16 +82,61 @@ export class Player {
 
     camera.rotation.order = 'YXZ';
 
-    this._viewmodel = assets.propMesh('Gun_03');
+    this._assets = assets;
     this._viewmodelBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
-    this._viewmodel.position.copy(this._viewmodelBasePos);
+    /** @type {THREE.Mesh|null} Rebuilt by `setWeapon`; see `_buildViewmodel`. */
+    this._viewmodel = null;
+    this._buildViewmodel();
+  }
+
+  /**
+   * Points the player at a different weapon and rebuilds the viewmodel.
+   * Unknown ids fall back to `config.player.defaultWeapon` rather than
+   * throwing, so a stale id in saved preferences can't break a boot.
+   *
+   * @param {string} id
+   * @returns {string} The id actually equipped.
+   */
+  setWeapon(id) {
+    const resolved = coerceWeaponId(id, this._config);
+    if (resolved === this.weaponId && this._viewmodel) return resolved;
+    this.weaponId = resolved;
+    this.gun = resolveWeapon(resolved, this._config);
+    this._buildViewmodel();
+    // Don't let a swap hand out a free shot: the new weapon starts on its own
+    // cooldown rather than inheriting however long the old one had been idle.
+    this._lastFireT = this._time;
+    return resolved;
+  }
+
+  /**
+   * Only two gun meshes exist in `props.glb`, so weapons are told apart by
+   * tint and scale — the same approach `Turrets#_buildHead` takes for turret
+   * heads. `propMesh` hands back its own material clone, so tinting one
+   * weapon never touches another.
+   */
+  _buildViewmodel() {
+    if (this._viewmodel) {
+      this._camera.remove(this._viewmodel);
+      // Only the material: `propMesh` clones that per call, but SHARES
+      // geometry with every other instance of the same mesh name — and
+      // `Gun_02` is also the gun turret's barrel (`Turrets#_buildHead`).
+      this._viewmodel.material?.dispose?.();
+    }
+    const mesh = this._assets.propMesh(this.gun.model);
+    mesh.scale.multiplyScalar(this.gun.scale ?? 1);
+    if (mesh.material?.color) mesh.material.color.setHex(this.gun.color);
+    mesh.position.copy(this._viewmodelBasePos);
     // `assets.propMesh` bakes the model's own orientation into the mesh, so
     // the recoil tilt has to be an *offset* from it rather than a bare
     // `rotation.set`. Euler order here is the default 'XYZ' (R = Rx*Ry*Rz),
     // so adding to `.x` is equivalent to left-multiplying an extra Rx — a
     // muzzle-up tilt in the camera's frame whatever the baked yaw/roll is.
-    this._viewmodelBaseRot = this._viewmodel.rotation.clone();
-    camera.add(this._viewmodel);
+    // Recaptured per mesh, since a weapon swap builds a new one with its own
+    // baked orientation.
+    this._viewmodelBaseRot = mesh.rotation.clone();
+    this._camera.add(mesh);
+    this._viewmodel = mesh;
   }
 
   /** Resets position/orientation/health for a fresh run; keeps the camera/viewmodel objects. */
@@ -132,7 +184,9 @@ export class Player {
       this.hp = Math.min(p.hp, this.hp + p.regenPerS * dt);
     }
 
-    const r = p.gun.recoil;
+    // The equipped weapon's own amplitudes — the spring itself (stepped
+    // below) is shared, so a heavier weapon kicks harder without retuning it.
+    const r = this.gun.recoil;
     stepRecoilSpring(this._recoil, dt, cfg);
     const kick = this._recoil.value;
 
@@ -175,7 +229,11 @@ export class Player {
   }
 
   /**
-   * @returns {{ origin: THREE.Vector3, dir: THREE.Vector3 } | null} `null` while on cooldown or dead.
+   * @returns {{ origin: THREE.Vector3, dir: THREE.Vector3 } | null} `null`
+   *   while on cooldown or dead. Both vectors are SCRATCH — they are reused
+   *   by the next `fire()` call, so a caller that needs to keep either past
+   *   the current fixed step must copy it. `Game#_handleFiring` consumes
+   *   both within the step, and `Effects#tracer` copies what it is given.
    */
   fire() {
     if (!this.alive) return null;
@@ -187,8 +245,10 @@ export class Player {
     // Position is unaffected by the kick (it offsets rotation only), so the
     // camera is still the right source for the muzzle origin.
     this._camera.getWorldPosition(this._fireOrigin);
+    // Scratch vectors, not clones: `Game#_handleFiring` consumes both within
+    // the same fixed step and `Effects#tracer` copies what it is given.
     this._aimDirection(this._fireDir);
-    return { origin: this._fireOrigin.clone(), dir: this._fireDir.clone() };
+    return { origin: this._fireOrigin, dir: this._fireDir };
   }
 
   /**
@@ -207,7 +267,9 @@ export class Player {
 
   /**
    * Nearest candidate within `gun.coneDegTouch` of the current view direction
-   * — used by touch auto-fire. `candidate.radius` is accepted for a future
+   * — used by touch aim-assist (it used to drive auto-fire outright, before
+   * the touch layer had a fire button; `Game#_handleFiring` now bends a
+   * deliberately-fired touch shot onto this target instead). `candidate.radius` is accepted for a future
    * radius-aware cone/occlusion test but unused in v1.
    *
    * @param {{x:number,y:number,z:number,radius:number}[]} candidates
@@ -217,7 +279,7 @@ export class Player {
     if (candidates.length === 0) return -1;
     this._camera.getWorldPosition(this._fireOrigin);
     this._aimDirection(this._fireDir);
-    const cosLimit = Math.cos(this._config.player.gun.coneDegTouch * DEG2RAD);
+    const cosLimit = Math.cos(this.gun.coneDegTouch * DEG2RAD);
 
     let best = -1;
     let bestDist = Infinity;

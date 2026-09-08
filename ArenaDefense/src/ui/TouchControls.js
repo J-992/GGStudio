@@ -3,8 +3,11 @@
 // verbatim) drives movement, and a right-half look pad (a deltas-only port of
 // `AimPad.ts` — it accumulates pointer travel instead of reporting absolute
 // points, since `ui/input.js` wants pixel deltas to match `KeyboardMouse`'s
-// `movementX/Y`) drives looking. No fire button: `Game.js` decides when to
-// auto-fire from `player.aimTarget(...)`.
+// `movementX/Y`) drives looking. A dedicated fire button (`.touch-fire`,
+// bottom-right) drives `fire`, level-triggered exactly like `KeyboardMouse`'s
+// left mouse button — `Game.js` gates firing on `frame.fire` for both input
+// modes and separately bends a touch shot onto a nearby enemy via
+// `player.aimTarget(...)` (aim-assist, not auto-fire).
 //
 // Implements the same `sample()/freeze()/dispose()` contract as
 // `KeyboardMouse`, plus `hide()/show()` so `Game`/screens can pull the whole
@@ -42,6 +45,7 @@ export class TouchControls {
     this._lookGesture = null; // { pointerId, lastX, lastY }
     this._pendingLookDX = 0;
     this._pendingLookDY = 0;
+    this._fireGesture = null; // { pointerId }
 
     const ui = document.getElementById('ui');
 
@@ -66,7 +70,19 @@ export class TouchControls {
     this._stickKnob.className = 'touch-stick__knob';
     this._stick.append(this._stickBase, this._stickKnob);
 
-    this._root.append(this._moveZone, this._lookZone, this._stick);
+    // Fire button: a child of `.touch-layer` itself (a sibling of
+    // `_moveZone`/`_lookZone`, NOT of `Hud`'s `.hud-controls`) — deliberately,
+    // see the long comment on `Hud.js`'s `_controls` field. `.touch-zone--
+    // move`/`--look` cover the whole screen inside `.touch-layer`'s own
+    // stacking context, so a button placed anywhere outside that context
+    // (e.g. nested under `.hud`) could never out-stack them; only a sibling
+    // *inside* `.touch-layer` can paint above them and actually receive taps.
+    this._fireBtn = document.createElement('div');
+    this._fireBtn.className = 'touch-fire';
+    this._fireBtn.setAttribute('role', 'button');
+    this._fireBtn.setAttribute('aria-label', 'Fire');
+
+    this._root.append(this._moveZone, this._lookZone, this._stick, this._fireBtn);
     ui.appendChild(this._root);
 
     this._onJoyDown = this._onJoyDown.bind(this);
@@ -75,6 +91,8 @@ export class TouchControls {
     this._onLookDown = this._onLookDown.bind(this);
     this._onLookMove = this._onLookMove.bind(this);
     this._onLookEnd = this._onLookEnd.bind(this);
+    this._onFireDown = this._onFireDown.bind(this);
+    this._onFireUp = this._onFireUp.bind(this);
 
     this._moveZone.addEventListener('pointerdown', this._onJoyDown, NON_PASSIVE);
     this._moveZone.addEventListener('pointermove', this._onJoyMove, NON_PASSIVE);
@@ -87,6 +105,16 @@ export class TouchControls {
     this._lookZone.addEventListener('pointerup', this._onLookEnd, NON_PASSIVE);
     this._lookZone.addEventListener('pointercancel', this._onLookEnd, NON_PASSIVE);
     this._lookZone.addEventListener('lostpointercapture', this._onLookEnd, NON_PASSIVE);
+
+    // Deliberately NOT using `setPointerCapture` here (unlike the joystick/
+    // look zones above): capturing would suppress `pointerleave` for the
+    // captured pointer, and a finger sliding off the button while still down
+    // must release fire via `pointerleave`, not stay latched until an
+    // eventual `pointerup` that may never target this element.
+    this._fireBtn.addEventListener('pointerdown', this._onFireDown, NON_PASSIVE);
+    this._fireBtn.addEventListener('pointerup', this._onFireUp, NON_PASSIVE);
+    this._fireBtn.addEventListener('pointercancel', this._onFireUp, NON_PASSIVE);
+    this._fireBtn.addEventListener('pointerleave', this._onFireUp, NON_PASSIVE);
   }
 
   /** @param {boolean} frozen */
@@ -128,7 +156,7 @@ export class TouchControls {
       moveY: this._joyVector.y,
       lookDX,
       lookDY,
-      fire: false,
+      fire: this._fireGesture !== null,
       select: 0,
       ready: false,
       pause: false,
@@ -147,6 +175,10 @@ export class TouchControls {
     this._lookZone.removeEventListener('pointerup', this._onLookEnd);
     this._lookZone.removeEventListener('pointercancel', this._onLookEnd);
     this._lookZone.removeEventListener('lostpointercapture', this._onLookEnd);
+    this._fireBtn.removeEventListener('pointerdown', this._onFireDown);
+    this._fireBtn.removeEventListener('pointerup', this._onFireUp);
+    this._fireBtn.removeEventListener('pointercancel', this._onFireUp);
+    this._fireBtn.removeEventListener('pointerleave', this._onFireUp);
     this._root.remove();
   }
 
@@ -164,6 +196,10 @@ export class TouchControls {
     }
     this._pendingLookDX = 0;
     this._pendingLookDY = 0;
+    if (this._fireGesture !== null) {
+      this._fireGesture = null;
+      this._fireBtn.classList.remove('is-active');
+    }
   }
 
   /** Centre of the fixed stick, in client coordinates. */
@@ -232,6 +268,28 @@ export class TouchControls {
     if (this._lookGesture === null || e.pointerId !== this._lookGesture.pointerId) return;
     this._lookGesture = null;
     this._releaseCapture(this._lookZone, e.pointerId);
+    e.preventDefault();
+  }
+
+  /**
+   * Level-triggered fire, exactly like `KeyboardMouse`'s left mouse button:
+   * `sample()` reports `fire: true` for every frame between this and the
+   * matching `_onFireUp` (11 shots/sec is well within a `pointerdown..up`
+   * span's precision — there's no edge-triggering/debounce here to fight).
+   * @param {PointerEvent} e
+   */
+  _onFireDown(e) {
+    if (this._frozen || !this._visible || this._fireGesture !== null) return;
+    this._fireGesture = { pointerId: e.pointerId };
+    this._fireBtn.classList.add('is-active');
+    e.preventDefault();
+  }
+
+  /** @param {PointerEvent} e */
+  _onFireUp(e) {
+    if (this._fireGesture === null || e.pointerId !== this._fireGesture.pointerId) return;
+    this._fireGesture = null;
+    this._fireBtn.classList.remove('is-active');
     e.preventDefault();
   }
 

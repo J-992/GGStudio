@@ -507,6 +507,57 @@ body.keyboard .touch-layer {
   transition: none;
 }
 
+/* Fire button (`TouchControls.js`'s `_fireBtn`) — last child of
+   `.touch-layer`, sibling to `.touch-zone--move/--look` and `.touch-stick`,
+   NOT nested under `.hud` (see the long comment beside that field's JS and
+   the matching one on `.hud-controls` above): `.touch-zone--look` covers
+   the entire right half of the screen inside `.touch-layer`'s own stacking
+   context, so only a sibling *inside that same context* can ever paint
+   above it or receive the tap — nothing outside `.touch-layer` could win
+   that hit-test no matter its z-index.
+   Two things have to both be true for this to actually fire on tap:
+   1. `.touch-layer` is `pointer-events: none` at the layer level (so taps
+      fall through to the canvas everywhere the layer has no visible
+      control); `.touch-zone` opts back in with its own `pointer-events:
+      auto`. `.touch-fire` isn't a `.touch-zone`, so it needs that same
+      opt-in declared directly here — without it this button would
+      silently inherit `none` and eat taps for nothing.
+   2. It overlaps `.touch-zone--look` (z-index 9) in that same stacking
+      context, and DOM order alone (last child) is not a reliable enough
+      win against a sibling that sets its own z-index — so this sets a
+      z-index higher than both the look zone and the stick (10) to make
+      the win explicit rather than incidental.
+   `body.keyboard .touch-layer { display: none; }` above already hides this
+   along with the rest of the layer on non-touch input, so no separate
+   "touch only" rule is needed here. */
+.touch-fire {
+  position: absolute;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  width: 84px;
+  height: 84px;
+  min-width: 64px;
+  min-height: 64px;
+  border-radius: 50%;
+  border: 3px solid #f6eedd;
+  background: rgba(224, 82, 63, 0.55);
+  box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.15), 0 2px 6px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 11;
+  transition: background 80ms ease-out, transform 80ms ease-out;
+}
+
+/* Held/pressed state — this is hold-to-fire at up to 11 shots/sec, so the
+   player needs an unmistakable "the trigger is down" cue at a glance, not
+   just on release. Brighter fill + a visible press-in makes that obvious
+   even at a glance while thumbing the look zone with the other hand. */
+.touch-fire.is-active {
+  background: rgba(255, 75, 62, 0.85);
+  border-color: #ffd76b;
+  transform: scale(0.92);
+}
+
 /* ================================================================
    DEBUG STATS (src/game/Game.js, ?debug=1)
 ================================================================ */
@@ -1088,4 +1139,406 @@ body.touch .bo-help--keyboard {
   font-size: 11px;
   line-height: 1.5;
   opacity: 0.55;
+}
+
+/* ----------------------------------------------------------------
+   TITLE — now stacks three buttons (PLAY primary, WEAPON + SETTINGS
+   secondary) where it used to have just one. `.screen-btn` on its own only
+   sets a *minimum* width, so PLAY/`WEAPON: <name>`/SETTINGS would each
+   size to their own text and stack with mismatched edges; pin them to a
+   shared width so the stack reads as one deliberate column. The panel
+   itself already scrolls (`.screen`'s `overflow-y: auto`) if a narrow
+   landscape phone can't fit heading + portraits + stats + 3 buttons +
+   credits, so no extra height handling is needed here — just tighten the
+   gap between the buttons themselves so that scroll is rarely needed.
+---------------------------------------------------------------- */
+.screen--title .screen-btn {
+  width: min(90vw, 260px);
+}
+
+.screen--title .screen-btn + .screen-btn {
+  margin-top: -6px;
+}
+
+/* ----------------------------------------------------------------
+   WEAPON SELECT (`.screen--weapons`, `Screens#showWeaponSelect`)
+   A scrollable card grid above the fixed CONFIRM button. `.screen` is
+   already `overflow-y: auto`, but that would let a tall card grid push the
+   confirm button below the fold — the grid needs its own scroll region
+   (capped height) so CONFIRM stays reachable without hunting for it.
+---------------------------------------------------------------- */
+.weapon-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  width: min(94vw, 640px);
+  /* Caps the grid so 6 cards scroll internally rather than shoving the
+     confirm button off-screen; `.screen` still handles the rare case where
+     even heading + capped grid + button don't fit a very short viewport. */
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+  padding: 2px; /* keeps the focus ring on edge cards from being clipped */
+  box-sizing: border-box;
+}
+
+@media (min-width: 480px) {
+  .weapon-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 820px) {
+  .weapon-list {
+    grid-template-columns: repeat(3, 1fr);
+    width: min(90vw, 900px);
+  }
+}
+
+.weapon-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 48px;
+  padding: 12px;
+  border: 2px solid rgba(246, 238, 221, 0.25);
+  border-radius: 12px;
+  background: rgba(246, 238, 221, 0.06);
+  color: #f6eedd;
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 120ms ease-out, border-color 120ms ease-out;
+}
+
+.weapon-card:hover {
+  background: rgba(246, 238, 221, 0.12);
+  border-color: rgba(246, 238, 221, 0.4);
+}
+
+/* The whole point of this screen: the highlighted card must read as
+   unmistakably "chosen" before the player commits with CONFIRM. Same
+   accent-red-on-tint treatment as `.bo-chip.is-selected` elsewhere in this
+   file, so "selected" means the same thing everywhere in the UI. */
+.weapon-card.is-selected {
+  border-color: #ff4b3e;
+  background: rgba(224, 82, 63, 0.25);
+}
+
+.weapon-card:focus-visible {
+  outline: 3px solid #ff4b3e;
+  outline-offset: 2px;
+}
+
+.weapon-card:disabled {
+  opacity: 0.4;
+}
+
+.weapon-card-name {
+  font-size: 17px;
+  letter-spacing: 0.04em;
+}
+
+.weapon-card-blurb {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  opacity: 0.65;
+  /* Clamp to two lines so a long blurb can't push a card's stat bars out of
+     alignment with its shorter neighbours in the same grid row. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.weapon-card-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  margin-top: auto; /* pins stats to the card's bottom edge regardless of blurb length */
+}
+
+.weapon-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.weapon-stat-label {
+  flex: 0 0 44px; /* fixed so every bar's track starts at the same x across a card */
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.weapon-stat-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(246, 238, 221, 0.15);
+  overflow: hidden;
+}
+
+/* Width is set inline per-card by `Screens.js`'s `statBar()` — this only
+   supplies colour/shape, never a size. */
+.weapon-stat-fill {
+  display: block;
+  height: 100%;
+  background: #ff4b3e;
+  border-radius: inherit;
+}
+
+/* ----------------------------------------------------------------
+   PAUSE (`.screen--pause`, `Screens#showPause`)
+   Reuses the base `.screen`/`.screen-heading`/`.screen-btn` styling as-is —
+   it only needs its own backdrop. Title/death/run-end always appear over an
+   already-idle scene (loading screen, or gameplay that has already
+   stopped), so a flat scrim reads fine; pause is the one screen that pops
+   up over *live* gameplay motion, where a flat scrim alone can look like a
+   dropped frame rather than an intentional menu. A touch more opacity plus
+   a blur makes the "you are now in a menu" state unambiguous.
+   `backdrop-filter` is a pure progressive enhancement — engines without it
+   just keep the flat scrim underneath, no fallback rule needed.
+---------------------------------------------------------------- */
+.screen--pause {
+  background: rgba(10, 6, 4, 0.8);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+/* ----------------------------------------------------------------
+   SETTINGS (`.screen--settings`, `Screens#showSettings`)
+---------------------------------------------------------------- */
+.settings-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(92vw, 420px);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-label {
+  /* Fixed width (rather than e.g. `flex: 1`) is what keeps every row's
+     control starting at the same x — some rows are label+slider+value,
+     others just label+toggle, and only a fixed label column lines both up. */
+  flex: 0 0 132px;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  opacity: 0.9;
+}
+
+.settings-slider {
+  flex: 1 1 auto;
+  min-width: 100px;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.settings-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 2px solid rgba(246, 238, 221, 0.25);
+}
+
+.settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px; /* >=28px so it's easy to grab on a phone */
+  height: 28px;
+  margin-top: -11px; /* centers the 28px thumb on the 6px WebKit track */
+  border-radius: 50%;
+  background: #ff4b3e;
+  border: 3px solid #1b1310;
+  cursor: pointer;
+}
+
+.settings-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 2px solid rgba(246, 238, 221, 0.25);
+}
+
+.settings-slider::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #ff4b3e;
+  border: 3px solid #1b1310;
+  cursor: pointer;
+}
+
+/* `:focus-visible` on vendor slider pseudo-elements (`::-webkit-slider-thumb`
+   etc.) has inconsistent engine support, so the reliable cross-browser way
+   to show a visible focus state here is an outline on the whole control
+   rather than trying to chain the pseudo-elements. */
+.settings-slider:focus-visible {
+  outline: 3px solid #ff4b3e;
+  outline-offset: 4px;
+}
+
+.settings-toggle {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 0 0 auto;
+  margin: 0 0 0 auto; /* pushes the toggle to the row's right edge */
+  width: 48px; /* >=48px tap-target width per the file-wide convention */
+  height: 28px;
+  border: 2px solid rgba(246, 238, 221, 0.35);
+  border-radius: 999px;
+  background: rgba(246, 238, 221, 0.08);
+  position: relative;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out;
+}
+
+.settings-toggle::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #f6eedd;
+  transition: transform 120ms ease-out;
+}
+
+.settings-toggle:checked {
+  background: rgba(224, 82, 63, 0.55);
+  border-color: #ff4b3e;
+}
+
+.settings-toggle:checked::before {
+  transform: translateX(20px);
+}
+
+.settings-toggle:focus-visible {
+  outline: 3px solid #ff4b3e;
+  outline-offset: 3px;
+}
+
+.settings-value {
+  flex: 0 0 54px;
+  /* Fixed width + tabular figures so the row doesn't reflow as the slider
+     readout's digit count changes (e.g. "0.80x" -> "1.00x"). */
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .weapon-card,
+  .settings-toggle,
+  .settings-toggle::before,
+  .touch-fire {
+    transition: none;
+  }
+}
+
+/* ----------------------------------------------------------------
+   BUILD OVERLAY — weapon row (`.bo-weapons`/`.bo-weapon-chip`,
+   `BuildOverlay#_buildWeaponChips`)
+   Six weapon chips do not fit one phone-width row the way the (typically
+   fewer) turret chips above them do. Wrapping to a second row was the other
+   option, but this overlay is already vertically tight — `.bo-mapwrap` alone
+   claims up to 480px, and a wrapped second chip row would be exactly the
+   kind of extra height that pushes `.bo-ready` off a short viewport. A
+   single-row horizontal scroller keeps this row's height fixed regardless
+   of chip count, so it can only ever compete for width, and it's capped to
+   the map's own width so it never grows wide enough to overlap anything
+   beside it either.
+---------------------------------------------------------------- */
+.bo-weapons {
+  display: flex;
+  gap: 8px;
+  max-width: min(92vmin, 480px); /* mirrors `.bo-mapwrap`'s own cap */
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scrollbar-width: none; /* Firefox */
+}
+
+.bo-weapons::-webkit-scrollbar {
+  display: none;
+}
+
+.bo-weapon-chip {
+  /* One notch over `.bo-chip`'s own 44px — the file-wide >=48px tap-target
+     convention used everywhere else in this pass. */
+  min-height: 48px;
+  flex: none; /* keep each chip's natural width in the scrolling row instead of shrinking to fit */
+  /* Gold tint (echoes `.screen-stat--earned`'s #ffd76b) instead of
+     `.bo-chip`'s neutral resting border — the only visual cue that tells a
+     weapon chip apart from a turret chip at rest, since both otherwise
+     share the same base look on purpose. */
+  border-color: rgba(255, 215, 107, 0.35);
+  /* Turret chips start dim (`.bo-chip`'s base 0.55 opacity) until
+     `.is-affordable` lands. Weapons are free and all unlocked from the
+     start, so no such class is ever applied here — without this override a
+     weapon chip would just sit dimmed forever, waiting on a class that will
+     never arrive. `.bo-chip.is-selected`'s existing rule has higher
+     specificity than this single-class selector, so it still wins
+     unchanged: a selected weapon chip gets the same red-accent treatment as
+     a selected turret chip. */
+  opacity: 1;
+}
+
+/* ----------------------------------------------------------------
+   HUD — FPS readout (`.hud-fps`, `Hud.js`, toggled by `setFpsVisible`)
+   Every screen corner is already claimed by another HUD element (stats
+   top-left, combo top-right, controls bottom-right, the touch stick
+   bottom-left in touch mode) and the top-center strip holds the build
+   countdown/boss bar, so this sits in the band just below all of that
+   instead. `.hud-stats` starts at `max(10px, safe-area-inset-top)` and, at
+   4 stacked rows, runs roughly 90px tall; combo/countdown/boss are all
+   shorter and finish well before that. Clearing 90px past wherever
+   `.hud-stats` starts guarantees no vertical overlap with any of them
+   regardless of viewport width — including narrow phones, where
+   `.hud-stats`'s fixed-width bar can reach close to horizontal center, so
+   horizontal centering here would otherwise risk overlapping it on exactly
+   those screens if the two occupied the same vertical band.
+   No `pointer-events` rule is needed: this is a plain read-only child of
+   `.hud`, `#ui > .hud` (near the top of this file) is already
+   `pointer-events: none`, and nothing here sets it back to `auto` — unlike
+   `.hud-controls`' buttons, which deliberately escape `.hud` to stay
+   tappable (see that rule's comment), this has no reason to.
+---------------------------------------------------------------- */
+.hud-fps {
+  position: absolute;
+  top: max(100px, calc(env(safe-area-inset-top) + 90px));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.hud-fps[hidden] {
+  display: none;
 }

@@ -10,7 +10,12 @@ import {
 } from '../src/core/recoil.js';
 
 const STEP = CONFIG.timing.fixedStep;
-const RECOIL = CONFIG.player.gun.recoil;
+// The spring's own constants are shared by every weapon; the amplitudes it
+// drives are per-weapon. These tests exercise the spring against the default
+// weapon, which is the one its impulse was normalized against.
+const SPRING = CONFIG.player.recoil;
+const BASE_WEAPON = CONFIG.player.weapons.types[CONFIG.player.defaultWeapon];
+const RECOIL = { ...SPRING, ...BASE_WEAPON.recoil };
 
 /** Steps `spring` for `seconds`, kicking every `1/rate` seconds when `rate` is given. */
 function simulate(spring, seconds, rate = 0) {
@@ -65,7 +70,7 @@ test('critically damped: a single shot never dips below rest on the way back', (
 
 test('sustained fire stacks, then plateaus below maxValue', () => {
   const s = createRecoilSpring();
-  const peak = simulate(s, 10, CONFIG.player.gun.rate);
+  const peak = simulate(s, 10, BASE_WEAPON.rate);
   assert.ok(peak > 1.15, `sustained peak ${peak} shows no stacking over a single shot`);
   assert.ok(peak <= RECOIL.maxValue, `sustained peak ${peak} exceeded maxValue ${RECOIL.maxValue}`);
   // Headroom: the plateau should sit under the clamp rather than riding it,
@@ -78,8 +83,8 @@ test('the camera punch stays a small fraction of the touch auto-fire cone', () =
   // aim from yaw/pitch — so this is a readability bound, not a correctness
   // one: a punch far larger than the cone would read as a camera spasm.
   const s = createRecoilSpring();
-  const peakDeg = simulate(s, 10, CONFIG.player.gun.rate) * RECOIL.camPitchDeg;
-  assert.ok(peakDeg < CONFIG.player.gun.coneDegTouch * 0.5, `camera punch ${peakDeg}deg is too large`);
+  const peakDeg = simulate(s, 10, BASE_WEAPON.rate) * RECOIL.camPitchDeg;
+  assert.ok(peakDeg < BASE_WEAPON.coneDegTouch * 0.5, `camera punch ${peakDeg}deg is too large`);
 });
 
 test('a long dt stays finite and bounded, and the spring recovers afterwards', () => {

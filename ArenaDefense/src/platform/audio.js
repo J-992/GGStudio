@@ -46,6 +46,13 @@ export class Audio {
   }
 
   /**
+   * @returns {boolean} Whether playback is currently muted.
+   */
+  get muted() {
+    return this._muted;
+  }
+
+  /**
    * @param {boolean} muted
    */
   setMuted(muted) {

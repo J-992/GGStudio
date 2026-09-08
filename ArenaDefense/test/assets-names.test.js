@@ -20,6 +20,8 @@ import { fileURLToPath } from 'node:url';
 import { CONFIG } from '../src/config.js';
 
 const MODELS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'assets', 'models');
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const AUDIO_DIR = path.join(ROOT, 'public', 'assets', 'audio');
 
 /** @returns {{ scenes: string[], nodes: string[], meshes: string[] }} */
 function readGltfJson(file) {
@@ -64,5 +66,30 @@ test('every model the config asks for exists in the shipped GLBs', () => {
 
   for (const [name, def] of Object.entries(CONFIG.turrets.types)) {
     assert.ok(available.has(def.base), `turret "${name}" wants base mesh "${def.base}", which no GLB provides`);
+  }
+
+  for (const [name, def] of Object.entries(CONFIG.player.weapons.types)) {
+    assert.ok(available.has(def.model), `weapon "${name}" wants mesh "${def.model}", which no GLB provides`);
+  }
+});
+
+test('every weapon sound is shipped, and registered for loading', () => {
+  // `AUDIO_NAMES` lives in `game/assets.js`, which imports three.js and so
+  // cannot be imported under `node --test` (same reason this file parses GLB
+  // containers by hand rather than using the loader). Read the list out of
+  // the source instead — a weapon whose sound ships but is never fetched is
+  // just as broken as one whose sound is missing.
+  const assetsSrc = fs.readFileSync(path.join(ROOT, 'src', 'game', 'assets.js'), 'utf8');
+  const listed = new Set([...assetsSrc.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]));
+
+  for (const [name, def] of Object.entries(CONFIG.player.weapons.types)) {
+    assert.ok(
+      fs.existsSync(path.join(AUDIO_DIR, `${def.sound}.ogg`)),
+      `weapon "${name}" wants sound "${def.sound}.ogg", which is not in public/assets/audio`,
+    );
+    assert.ok(
+      listed.has(def.sound),
+      `weapon "${name}" wants sound "${def.sound}", which is not in AUDIO_NAMES in game/assets.js`,
+    );
   }
 });

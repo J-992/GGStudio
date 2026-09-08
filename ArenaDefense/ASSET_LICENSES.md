@@ -96,6 +96,10 @@ Copied directly from `zombie-motorworks/public/assets/audio/` (ordinary Git blob
 | `audio/explosion-metal.ogg` | [Mechanical explosion — Spring Spring](https://opengameart.org/content/mechanical-explosion) | CC0 | Trimmed, faded, normalised, encoded as Opus. |
 | `audio/mechanical-clunk.ogg` | [87 clickety clips — OwlishMedia](https://opengameart.org/content/87-clickety-clips) | CC0 | A recorded mechanism sound selected, trimmed, normalised, encoded as Opus. |
 | `audio/upgrade-confirm.ogg` | Derived from the CC0 `mechanical-clunk.ogg` and `pickup-ding.ogg` sources above | CC0 | A short mechanism transient and two tightly faded, interval-pitched bell layers, filtered, mixed, limited, encoded as Opus (by zombie-motorworks; copied verbatim here). |
+| `audio/pistol-shot-2.ogg` | [The Free Firearm Sound Library — Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney](https://opengameart.org/content/the-free-firearm-sound-library) | CC0 | A second 1911 field recording trimmed, faded, normalised, and encoded as Opus (by zombie-motorworks; copied verbatim here). Fires the M4A1. |
+| `audio/sniper-shot-1.ogg` | [The Free Firearm Sound Library — Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney](https://opengameart.org/content/the-free-firearm-sound-library) | CC0 | A Mosin-Nagant field recording trimmed, faded, normalised, and encoded as Opus (by zombie-motorworks; copied verbatim here). Fires the M82. |
+| `audio/gunfire.ogg` | [Random gunfire SFX — iamoneabe](https://opengameart.org/content/random-gunfire-sfx) | CC0 | Converted from the supplied WAV to Opus (by zombie-motorworks; copied verbatim here). Fires the AK-47. |
+| `audio/cannon-shot-1.ogg` | [Cannon Shot — qubodup](https://freesound.org/people/qubodup/sounds/187767/) | CC0 / US government public-domain source | A cannon report separated from the source recording, low-end shaped, loudness-matched, limited, faded, encoded as Opus (by zombie-motorworks; copied verbatim here). Fires the SPAS-12. |
 
 CC0 requires no attribution.
 

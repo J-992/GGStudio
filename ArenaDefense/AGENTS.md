@@ -17,6 +17,16 @@ with `node --test`; that is the whole point of keeping it free of three.js and
 the DOM (see below) — a wave/economy/combo balance regression fails in CI
 instead of in a playtest.
 
+`test/projectiles.test.js` is the one deliberate exception that tests a
+`src/game/` module. `Projectiles` only builds an `InstancedMesh` and does
+maths on typed arrays, so it runs headlessly with no WebGL context, and it is
+registered unconditionally in `Game`'s constructor and ticks from boot — so a
+fault in it takes the whole game down on the first frame rather than
+degrading something. It shipped once with an out-of-scope loop bound that
+threw on the first tick and got past `node --check`, the unit suite and a
+successful build, because a `ReferenceError` only fires when the line runs.
+That is what the test is for; don't delete it as an architecture violation.
+
 ## Things that look like bugs and are not
 
 - `src/config.js` holds every tunable number — wave tables, enemy/turret

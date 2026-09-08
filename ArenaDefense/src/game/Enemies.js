@@ -707,13 +707,16 @@ export class Enemies {
    * @param {THREE.Vector3} origin
    * @param {THREE.Vector3} dir Normalized.
    * @param {number} maxDist
+   * @param {Set<number>|null} [skip] Pool indices to ignore — how a piercing
+   *   weapon walks past the enemies it has already hit on this shot.
    * @returns {{idx:number, point:{x:number,y:number,z:number}, dist:number}|null}
    */
-  raycast(origin, dir, maxDist) {
+  raycast(origin, dir, maxDist, skip = null) {
     let best = null;
     let bestDist = maxDist;
     for (let i = 0; i < this._cap; i++) {
       if (!this._alive[i]) continue;
+      if (skip?.has(i)) continue;
       const typeDef = this._cfg.enemies.types[this._type[i]];
       const hit = cylinderHit(origin, dir, this._x[i], this._z[i], typeDef.radius, typeDef.hitHeight, bestDist);
       if (hit && hit.dist < bestDist) {

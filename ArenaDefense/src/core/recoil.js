@@ -4,8 +4,9 @@
  * One normalized scalar. A shot adds a *velocity* impulse rather than
  * stepping the value, so the kick ramps in over ~1/sqrt(stiffness) seconds
  * and eases back to exactly 0 — a punch, not a pop. `game/Player.js`
- * multiplies the value by the per-channel amplitudes in
- * `CONFIG.player.gun.recoil` (viewmodel slide/rise/pitch, camera pitch).
+ * multiplies the value by the per-channel amplitudes on the equipped weapon
+ * (`player.gun.recoil`: viewmodel slide/rise/pitch, camera pitch), while the
+ * spring constants themselves live once in `CONFIG.player.recoil`.
  *
  * `impulse` is normalized so one shot peaks the value at ~1.0; sustained
  * fire at `gun.rate` overlaps on the tail and plateaus around 1.3. Nothing
@@ -78,7 +79,9 @@ export function kickRecoilSpring(spring, impulse) {
  */
 export function stepRecoilSpring(spring, dt, cfg) {
   if (!(dt > 0)) return;
-  const r = cfg.player.gun.recoil;
+  // The spring constants are shared by every weapon (`config.player.recoil`);
+  // only the amplitudes it drives are per-weapon.
+  const r = cfg.player.recoil;
 
   const steps = Math.min(MAX_SUBSTEPS, Math.max(1, Math.ceil(dt / SUBSTEP_S)));
   const h = dt / steps;
