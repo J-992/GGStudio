@@ -20,7 +20,7 @@ underlying scheme resets its own edge/delta accumulators on read, so calling
  * @property {number} moveY      -1..1, positive = forward.
  * @property {number} lookDX     Pixels of look movement this frame, +x = right. Touch and mouse share this convention (touch is a delta-accumulating pad, mouse is `movementX`).
  * @property {number} lookDY     Pixels of look movement this frame, +y = down.
- * @property {boolean} fire      Level-triggered: true every frame the fire input is held (keyboard: left mouse button down; touch: always false — Game decides auto-fire from `player.aimTarget`).
+ * @property {boolean} fire      Level-triggered: true every frame the fire input is held (keyboard: left mouse button down; touch, since "P8 additions": the dedicated `.touch-fire` button in `ui/TouchControls.js`, held). Stale as of P8: this used to read "touch: always false — Game decides auto-fire from `player.aimTarget`" — `Game#_handleFiring` now gates firing on this field alone for both modes, and `player.aimTarget` only decides touch aim-assist (bending a held shot onto a nearby enemy) and the reticle color, never whether to fire at all. See "P8 additions" below.
  * @property {0|1|2|3} select    Edge-triggered turret-type pick (keyboard 1/2/3 keys only in P2; touch has no equivalent — BuildOverlay (P4) reads its own DOM taps directly, not through InputFrame).
  * @property {boolean} ready     Edge-triggered "Ready" (keyboard Space/Enter only in P2).
  * @property {boolean} pause     Edge-triggered pause toggle (keyboard Escape only in P2; unused by Game in P2 — see "Known P2 scope cuts" below).
@@ -102,7 +102,11 @@ maps directly onto `u0,v0`..`u1,v1` with no inversion.
 ## `Player` (`src/game/Player.js`)
 
 Public fields: `x, z, yaw, pitch, hp, alive, invulnUntil, speed, radius,
-eyeHeight, gun` (a reference to `config.player.gun`).
+eyeHeight, gun, weaponId`. Stale as of P8: `gun` used to be "a reference to
+`config.player.gun`" — that single frozen weapon shape is gone. `gun` is now
+the *equipped* weapon's def, `config.player.weapons.types[weaponId]`, swapped
+at runtime with `setWeapon(id)` below — see "P8 additions" for the roster
+shape.
 
 Yaw/pitch convention: yaw `0` looks toward `-z` (matching
 `core/arenaGeometry`'s "gate angle 0 = north/-z"), increasing clockwise.
@@ -118,6 +122,16 @@ for a future revive system to grant invulnerability.
 
 ```js
 class Player {
+  /**
+   * Points the player at a different weapon and rebuilds the viewmodel.
+   * Added in P8 — see "P8 additions" for the full roster/rendering story.
+   * @param {string} id
+   * @returns {string} The id actually equipped — `coerceWeaponId(id, cfg)`,
+   *   so an unknown/stale id falls back to `config.player.defaultWeapon`
+   *   rather than throwing.
+   */
+  setWeapon(id) {}
+
   /** @param {number} dt @param {InputFrame} frame */
   update(dt, frame) {}
 
@@ -132,9 +146,12 @@ class Player {
 
   /**
    * Nearest candidate within `gun.coneDegTouch` of the current view
-   * direction, or -1. Used by touch auto-fire; P3 passes
-   * `world.enemies.targets()`. `candidate.radius` is accepted for a future
-   * radius-aware test but unused in v1.
+   * direction, or -1. Stale as of P8: this used to read "Used by touch
+   * auto-fire" — touch now fires from its own button (`InputFrame.fire`,
+   * above), and this method's only remaining job is touch aim-assist
+   * (bending a held shot onto the return value) plus the reticle color; see
+   * "P8 additions". P3 passes `world.enemies.targets()`. `candidate.radius`
+   * is accepted for a future radius-aware test but unused in v1.
    * @param {{x:number,y:number,z:number,radius:number}[]} candidates
    * @returns {number}
    */
@@ -195,6 +212,7 @@ class Game {
    *   turrets: null | { list(): any[] },
    *   boss: null | object,
    *   billboards: null | object,
+   *   projectiles: null | object,  // Projectiles (P8); never null in practice, same as billboards — see "P8 additions".
    *   effects: Effects,
    *   bus: EventBus,
    *   time: number,           // seconds, fixed-step clock; see Player's clock note.
@@ -366,11 +384,15 @@ class Enemies {
    * Cylinder hit test (`typeDef.radius`, `typeDef.hitHeight`) per alive
    * enemy, nearest hit wins. Used by `Game.js` for the player's hitscan gun.
    * @param {THREE.Vector3} origin @param {THREE.Vector3} dir Normalized. @param {number} maxDist
+   * @param {Set<number>|null} [skip] Added in P8: pool indices to ignore —
+   *   how a piercing weapon walks past enemies it has already hit on this
+   *   shot. `null`/omitted (every pre-P8 call site) behaves exactly as
+   *   before. See "P8 additions".
    * @returns {{idx:number, point:{x:number,y:number,z:number}, dist:number}|null}
    */
-  raycast(origin, dir, maxDist) {}
+  raycast(origin, dir, maxDist, skip = null) {}
 
-  /** @returns {{x:number,y:number,z:number,radius:number}[]} Centred at half `hitHeight` — feeds `player.aimTarget` for touch auto-fire. */
+  /** @returns {{x:number,y:number,z:number,radius:number}[]} Centred at half `hitHeight` — feeds `player.aimTarget`, which as of P8 uses this for touch aim-assist rather than deciding whether to fire (see "P8 additions"). */
   targets() {}
 
   /** @returns {{idx:number,x:number,y:number,z:number,radius:number}[]} For turret targeting — `idx` is the real pool index `damageAt`/`applySlow` expect, `y` centred at half `hitHeight`. */
@@ -940,7 +962,7 @@ class Game {
    *   requestRevive: () => Promise<boolean>,   // default: async () => false
    *   requestDoubler: () => Promise<boolean>,  // default: async () => false
    *   onRunStart: (() => void) | null,          // default: null. Called synchronously at the very top of every fresh-run start (title's Play, run-end's Play Again, and the `?wave=N` dev shortcut) — this is where P7's `commercialBreak()` + `gameplayStart()` pairing goes.
-   *   onRunStop: (() => void) | null,           // default: null. Called synchronously the instant gameplay stops for good this run — entering `death`, or a clean clear of `run.finalWave` — pairs with Poki's `gameplayStop()`. Never called twice for the same run-ending event.
+   *   onRunStop: (() => void) | null,           // default: null. Called synchronously the instant gameplay stops for good this run — entering `death`, or a clean clear of `run.finalWave` — pairs with Poki's `gameplayStop()`. Never called twice for the same run-ending event. Stale as of P8: a third trigger exists now — quitting to title from the pause menu also calls this, right before `state.go('runEnd')`; see "P8 additions".
    * }}
    */
   hooks;
@@ -1084,8 +1106,15 @@ class Screens {
   /** Removes any mounted screen and restores input + pointer-lock state. Idempotent. */
   hide() {}
 
-  /** Callback style (stays up indefinitely until the player acts — no Promise to await). @param {{bestWave:number, coins:number, credits:string, onPlay:() => void}} opts */
-  showTitle(opts) {}
+  /**
+   * Stale as of P8: renamed to `showMenu` and given two more buttons/callbacks
+   * — see "P8 additions" for the current shape. Left here, struck through in
+   * spirit, only so a reader following an old reference to `showTitle` lands
+   * on an explanation instead of a dead end.
+   *
+   * Callback style (stays up indefinitely until the player acts — no Promise to await). @param {{bestWave:number, coins:number, credits:string, onPlay:() => void}} opts
+   */
+  showTitle(opts) {} // P8: renamed showMenu(opts) — opts gained weaponName/onWeapons/onSettings.
 
   /** @param {{wave:number, canRevive:boolean}} opts @returns {Promise<'revive'|'end'>} */
   showDeath(opts) {}
@@ -1105,11 +1134,14 @@ own `hide()` (via its `_open()`) is what actually clears that disabled DOM.
 All three screens render into `#ui` (mobile-first, `Lilita One`, buttons
 ≥48px tall — see the `/* P6 screens */` block in `style.css`); every button
 is reachable by click/tap and by keyboard (title: Space/Enter/click-
-anywhere; death: Enter/Space picks revive-if-offered-else-end, Escape ends;
-run-end: Enter/Space picks "again", Escape picks "title"). `showTitle`'s
-portraits come from `assetUrl('assets/sprites/portrait-<name>.webp')` for
-the four names actually shipped in `manifest.json`'s `sprites.portraits`
-(`patapim`, `tungtung`, `bombardiro`, `tralalero`).
+anywhere — **stale as of P8**: the menu's tap-anywhere-starts behaviour is
+gone now that it has three buttons instead of one, see "P8 additions";
+death: Enter/Space picks revive-if-offered-else-end, Escape ends; run-end:
+Enter/Space picks "again", Escape picks "title"). `showTitle`'s (P8:
+`showMenu`'s) portraits come from
+`assetUrl('assets/sprites/portrait-<name>.webp')` for the four names
+actually shipped in `manifest.json`'s `sprites.portraits` (`patapim`,
+`tungtung`, `bombardiro`, `tralalero`).
 
 `Game.resume()` (the `visibilitychange` pause/resume pair, unrelated to any
 screen) now checks `!screens.isOpen` before unfreezing input, so a
@@ -1236,7 +1268,10 @@ could never observe an "unpause" key through the normal frame pipeline once
 paused — mirrors `ui/Screens.js`'s own pattern of a dedicated raw listener).
 Toggling calls `pause()`/`resume()` (reusing their existing input-freeze/
 audio-suspend/`screens.isOpen`-guard behaviour) plus `hud.setPaused(bool)`
-and `hooks.onPause`/`onResume`. Guarded so it only engages during `build`/
+and `hooks.onPause`/`onResume`. **Stale as of P8**: `_setManualPause` now
+calls `hud.setPaused(false)` on *both* legs (paused and unpaused) — see
+"P8 additions" for why (a real pause menu screen replaced the bare "PAUSED"
+panel this call used to show). Guarded so it only engages during `build`/
 `wave` and never while a screen is open. `visibilitychange`'s own
 `resume()` call now also checks `!this._manualPaused` first, so a
 backgrounded-then-restored tab can't silently cancel a pause the player set
@@ -1279,7 +1314,7 @@ as before P7.
 
 ```js
 class Hud {
-  setPaused(paused) {}     // shows/hides a centred "PAUSED" panel over the (still-visible) HUD.
+  setPaused(paused) {}     // shows/hides a centred "PAUSED" panel over the (still-visible) HUD. As of P8 no caller ever passes `true` any more — see "P8 additions".
   onPauseTap(fn) {}        // touch-only pause button (hidden via CSS under body.keyboard).
   onMuteTap(fn) {}         // fn(newMutedState) — caller applies it (audio.setMuted, storage).
   setMuted(muted) {}       // visual-only; does not fire onMuteTap's callback.
@@ -1379,10 +1414,521 @@ just `x{kills}` below the first tier) — still hidden while `kills <= 0`.
 ### Removed
 
 The `title-panel*`/`placeholder-title` CSS (P2's placeholder title, now
-`ui/Screens.js`'s `showTitle`) and `src/main.js`'s `installTitlePanel`
+`ui/Screens.js`'s `showTitle` — itself renamed `showMenu` and expanded in
+P8, see "P8 additions") and `src/main.js`'s `installTitlePanel`
 function are gone. `Game.js`'s old `RUN_END_DISPLAY_S`-timed
 toast-and-return-to-title for `death`/`waveClear -> runEnd` is replaced by
 the flow above; nothing on the frozen P2/P3/P4 API list (`registerSystem`,
 `world` shape, `getSnapshot`, state enter/exit hooks, `game.economy`) was
 removed or reshaped — `game.combo`/`game.save`/`game.hooks` and the
 `screens` constructor dependency are additive.
+
+## P8 additions
+
+P7 called itself "final"; P8 landed anyway. Everything below lives in
+`core/{arenaGeometry,weapons,prefs,stateMachine}.js`, `game/Game.js`,
+`game/Player.js`, `game/Enemies.js` (one signature change, documented in
+place above), `game/Projectiles.js` (new), `game/buildPhase.js`,
+`platform/{storage,audio}.js`, `game/assets.js`, and
+`ui/{Screens,BuildOverlay,Hud,input,TouchControls}.js`. Six things landed
+together: shots that miss now land somewhere; the single `config.player.gun`
+became a six-weapon roster; multi-pellet spread and piercing; a real
+menu/weapon-select/pause/settings screen flow; touch got a fire button plus
+device preferences (sensitivity, invert, FPS, last weapon); and the RPG-7's
+rocket got its own projectile pool. No new bus event was added by any of
+this — checked every `bus.emit` call site in the diff, not assumed; the P2
+table above is still complete.
+
+### `core/arenaGeometry.js`: `rayArenaHit`
+
+```js
+/**
+ * Nearest hit of a ray against the arena's two solid surfaces: the floor
+ * (`y = 0`, only where inside the wall) and the wall (a vertical cylinder of
+ * `arena.radius`, capped at `arena.wallHeight`).
+ * @param {{x:number, y:number, z:number}} origin
+ * @param {{x:number, y:number, z:number}} dir Need not be normalised; `dist` is in units of `dir`'s length.
+ * @param {number} maxDist Hits beyond this are discarded (the weapon's range).
+ * @param {import('./types.js').GameConfig} cfg
+ * @returns {{x:number, y:number, z:number, dist:number, surface:'ground'|'wall'} | null}
+ */
+export function rayArenaHit(origin, dir, maxDist, cfg) {}
+```
+
+The player is always inside the cylinder, so a level or downward shot always
+hits one of the two surfaces; only a shot angled out over the wall top
+returns `null`. Two call sites: `Game#_resolvePellet` (a hitscan pellet that
+hit no enemy or boss lands here instead of vanishing into empty space) and
+`Projectiles#_nearestHit` (a rocket that reaches the arena's edge without
+hitting anything detonates against it). Both compare its `dist` against
+whatever else the same ray might have hit and take the nearer.
+
+### Weapon roster (`config.js`, `core/weapons.js`)
+
+`config.player.gun` — the single frozen `{dmg, rate, range, coneDegTouch,
+recoilKick}` shape — is gone. In its place: `config.player.defaultWeapon`
+(a weapon id) and `config.player.weapons`, shaped exactly like
+`config.turrets` (an `order` array plus a `types` record), so `core/
+weapons.js` and the select-screen UI reuse the same "resolve a def by id,
+iterate `order` for display" pattern the turret chips already use. Six ids
+ship (`pistol`, `ak47`, `m4a1`, `spas12`, `m82`, `rpg7`), each a
+`{name, blurb, dmg, rate, range, spreadDeg, pellets, recoilKick,
+coneDegTouch, model, color, scale, sound}` — `m82` also carries `pierce`,
+`rpg7` also carries `projSpeed`/`splash`/`splashDmg`. Deliberately
+**sidegrades, not a power ladder**: every weapon is unlocked from wave 1, and
+each lands in the same 70-110 effective-DPS band, separated by range/spread/
+burst shape instead — a strictly better weapon would flatten the whole run
+(this reasoning is a code comment in `config.js`, not this file's own
+editorializing). `model` is one of the two gun meshes in `props.glb` — a
+weapon is told apart by `color`/`scale`, the same trick `Turrets#_buildHead`
+already uses for turret heads (see "P4 additions" above) — and `sound` is a
+name from `game/assets.js`'s `AUDIO_NAMES` (four new files shipped:
+`pistol-shot-2`, `gunfire`, `cannon-shot-1`, `sniper-shot-1`).
+
+```js
+/** @returns {string[]} Weapon ids in display order. @param {GameConfig} cfg */
+export function weaponIds(cfg) {}
+
+/** @returns {object|null} The weapon def, or `null` for an unknown id.
+ *  @param {string} id @param {GameConfig} cfg */
+export function resolveWeapon(id, cfg) {}
+
+/** @returns {string} `id` if it resolves, else `cfg.player.defaultWeapon`.
+ *  @param {string|null|undefined} id @param {GameConfig} cfg */
+export function coerceWeaponId(id, cfg) {}
+
+/** Steps `delta` places through `order`, wrapping.
+ *  @param {string} id @param {string[]} order @param {number} delta @returns {string} */
+export function nextWeapon(id, order, delta) {}
+
+/**
+ * One direction per pellet, scattered uniformly across the weapon's spread
+ * cone (`spreadDeg` of 0, or one pellet, returns the aim direction itself).
+ * Vectors are plain `{x,y,z}` — `core/` may not import three.js.
+ * @param {{x:number,y:number,z:number}} dir Aim direction; need not be normalised.
+ * @param {number} spreadDeg Half-angle of the cone, in degrees.
+ * @param {number} pellets How many directions to produce (>= 1).
+ * @param {() => number} rand Returns [0,1). Injected — see below.
+ * @returns {{x:number,y:number,z:number}[]} `pellets` unit vectors.
+ */
+export function spreadDirs(dir, spreadDeg, pellets, rand) {}
+```
+
+**Why `spreadDirs` takes an injected `rand` instead of importing
+`core/rng.js`**: `core/rng.js`'s seeded stream exists so a run's *seed*
+reproduces its *spawns* — drawing from that same stream once per pellet
+would make wave composition depend on how much the player fired, which
+breaks the one property the seed is for. `spreadDirs`'s one real call site
+(`Game#_handleFiring`) passes `Math.random`, the same source `Effects.js`
+already uses for cosmetic scatter; tests pass a seeded stand-in instead,
+which is the other reason for injecting it — `spreadDirs` is deterministic
+under `node --test` with no faked-global gymnastics.
+
+`nextWeapon` is exported and tested but has no call site yet in `Game.js` —
+weapon switching mid-run happens only through the build-phase chip row and
+the menu's weapon-select screen (both call `equipWeapon(id)` directly with
+a concrete id), not a next/previous cycle. Flagged here, same spirit as
+earlier packages' "flagged for whoever touches this file next" notes, in
+case a future package wants a keybind for it.
+
+### `Player` additions
+
+```js
+class Player {
+  /**
+   * Points the player at a different weapon and rebuilds the viewmodel.
+   * @param {string} id
+   * @returns {string} The id actually equipped (`coerceWeaponId(id, cfg)` —
+   *   an unknown/stale id, e.g. from an older saved preference, falls back
+   *   to `config.player.defaultWeapon` rather than throwing).
+   */
+  setWeapon(id) {}
+}
+```
+
+`gun` (see the corrected "Public fields" line above) is now
+`config.player.weapons.types[weaponId]`, and `weaponId` is a new public
+field. Swapping resets the fire cooldown against the *new* weapon's own
+timer (`_lastFireT = this._time`) rather than inheriting however long the
+old weapon had been idle — a swap must never hand out a free instant shot.
+Only two gun meshes exist in `props.glb` (`Gun_02`, `Gun_03`), so, exactly
+like `Turrets#_buildHead`'s turret heads, weapons are told apart by tint and
+scale rather than six distinct models — `assets.propMesh(gun.model)` already
+hands back a per-call material clone, so tinting one weapon's viewmodel
+never touches the shared turret barrel mesh or another weapon's own
+viewmodel.
+
+**`aimTarget`'s role narrowed.** Before P8, `Game` used
+`aimTarget(targets) >= 0` to decide *whether to fire at all* on touch (there
+was no touch fire button). Now that there is one (`InputFrame.fire`, see
+below), `aimTarget` only feeds **aim-assist**: `Game#_handleFiring` still
+calls it every frame for the reticle color, and when the player is actually
+holding the touch fire button and it returns a hit, the fired shot's
+direction is bent onto that target before resolving. The method itself is
+unchanged (same cone test, same `-1`-or-index return) — only what its caller
+does with the result changed.
+
+### `Game#_handleFiring` / multi-pellet, piercing, and misses that land
+
+`_handleFiring` now reads `this.world.player.gun` — the *equipped* weapon —
+rather than `config.player.gun`, so a swapped weapon's stats actually take
+effect. It still gates on `frame.fire` alone (both modes now — no more
+`frame.mode === 'touch' ? targetIndex >= 0 : frame.fire` branch), applies the
+touch aim-assist bend described above, then dispatches on the weapon's own
+shape:
+
+- **`gun.projSpeed` truthy** (only `rpg7` today): `world.projectiles.launch(shot.origin, shot.dir, gun)` — see `Projectiles` below. Damage resolves on impact, not this frame.
+- **Otherwise** (every hitscan weapon): `spreadDirs(shot.dir, gun.spreadDeg, gun.pellets, Math.random)` produces one direction per pellet (`1` for every weapon but `spas12`, which fires `9`), and `_resolvePellet(origin, dir, gun)` runs once per direction.
+
+```js
+/**
+ * One hitscan pellet: damages the nearest enemy or boss it meets, and
+ * leaves a mark wherever it stops — on a body, or failing that on the arena
+ * itself. A weapon with `pierce` carries on through each enemy it kills or
+ * wounds, up to that many bodies; the boss always stops a piercing shot
+ * outright rather than being hit once per pellet pass.
+ * @param {THREE.Vector3} origin @param {THREE.Vector3} dir Normalized. @param {object} gun
+ */
+_resolvePellet(origin, dir, gun) {}
+```
+
+Piercing walks `Enemies#raycast`'s new `skip` parameter forward: each
+enemy the pellet has already damaged this pass goes into a `Set` passed to
+the *next* `raycast` call, so the same pellet never re-hits (or gets stuck
+re-detecting) a body it already passed through. A pellet that hits nobody —
+the common case for a wide `spas12` spread, or any shot into open air — now
+calls `rayArenaHit(origin, dir, gun.range, cfg)`: on a hit, a small
+`effects.burst` in `cfg.effects.impact`'s `groundColor`/`wallColor` (by
+`surface`) marks the spot and the tracer runs there instead of to a bare
+`range`-distance point in empty space; on a genuine miss over the wall top,
+the tracer still runs to the max-range point as before. `Effects#flash`
+(previously dead code, documented but never called anywhere in the P2-P7
+codebase) is now used for real: gated behind the new `config.effects.
+muzzleFlash` boolean, called once per shot (not per pellet) at
+`shot.origin`.
+
+**Shot sound**, throttled: every weapon has a `sound` name; `_playShotSound`
+falls back to `pistol-shot-1` if that name somehow isn't in
+`assets.audioBuffers` (mirrors `Turrets#_fire`'s own graceful-degradation
+pattern), and enforces a `SHOT_SOUND_MIN_INTERVAL_S` (0.07s) floor —
+unthrottled shot audio was fine with one 6/s pistol, but the `m4a1`'s 11/s
+would otherwise stack overlapping voices well past what the mixer should
+carry, so it now uses the same floor `Enemies`/`Turrets` already apply to
+their own sounds.
+
+### `game/Projectiles.js` (new)
+
+```js
+class Projectiles {
+  /** @param {THREE.Scene} scene @param {import('../core/types.js').GameConfig} cfg @param {import('../platform/audio.js').Audio} audio */
+  constructor(scene, cfg, audio) {}
+
+  /**
+   * Fires one projectile. Silently drops the shot if the pool (`cfg.
+   * projectiles.cap`, 16) is exhausted — never throws.
+   * @param {THREE.Vector3} origin @param {THREE.Vector3} dir Need not be pre-normalized.
+   * @param {object} gun Weapon def with `projSpeed`, `splash`, `splashDmg`, `dmg`, `range`, `sound`.
+   */
+  launch(origin, dir, gun) {}
+
+  /** @param {number} dt @param {object} world The `Game.world` bag. */
+  update(dt, world) {}
+
+  /** Drops every projectile still in flight — called from `Game#_startRun` alongside `enemies.clear()`, so a rocket launched in a dying run's last seconds can't arrive and explode into the next one. */
+  clear() {}
+
+  dispose() {}
+}
+```
+
+Structure mirrors `Enemies.js`'s own internal projectile pool almost
+exactly (fixed-capacity SoA typed arrays + free-list, one `InstancedMesh`
+for every live shot, hidden slots zero-scaled) but cannot reuse it: that
+pool is private to `Enemies`, moves only on the XZ plane, and only ever
+damages the player/turrets — a player rocket needs full 3D velocity and
+needs to damage enemies/the boss instead. Registered via
+`game.registerSystem('projectiles', projectiles)`, so it runs in the normal
+per-step systems pass; `world.projectiles` is constructed unconditionally in
+the `Game` constructor and is never `null` (same convention as `billboards`
+— contrast `world.turrets`/`world.boss`, still `null`-until-registered).
+
+**Hit detection is a swept continuous test, not stepped sub-sampling.**
+Every candidate a rocket can detonate against already exposes an exact
+ray-vs-shape test over an arbitrary distance: `Enemies#raycast` (ray vs.
+per-type cylinder), `Boss#hitTest` (ray vs. the boss's cylinder), and this
+package's own `rayArenaHit` (ray vs. floor/wall). `_nearestHit(origin, dir,
+maxDist, world)` casts all three, from the projectile's position at the
+start of the fixed step, along its direction of travel, out to exactly the
+distance it covers that step, and detonates against the nearest. This is
+mathematically exact — a fast rocket cannot tunnel through a body between
+two frames, because the whole segment between them is swept, not just its
+two endpoints — which is strictly stronger than discrete sub-stepping
+against a fixed contact radius (itself only an approximation of the same
+continuous test), so that's what's used instead.
+
+`_detonate` applies `splashDmg` in a radius via `enemies.damageRadius` (and,
+if the boss is within the same radius, `boss.damage`), plus a direct-hit
+bonus `dmg` to whatever was actually struck; spawns `cfg.effects.explosion`'s
+burst; and plays the weapon's sound through its own per-name throttle
+(`cfg.effects.explosion.soundMinIntervalS`), independent of `Game.js`'s own
+`_playShotSound` floor — the two never compete because a projectile weapon
+never reaches `_playShotSound` at all (it plays its *launch* sound there,
+same as any other weapon, then its *detonation* sound here).
+
+`Projectiles` is the one `src/game/` module with unit tests
+(`test/projectiles.test.js`). Everything else there needs a renderer, a DOM,
+or both; this class only builds an `InstancedMesh` and does maths on typed
+arrays, so it constructs and ticks headlessly with no WebGL context.
+
+That exception is deliberate rather than incidental. The system is registered
+unconditionally in `Game`'s constructor and runs every fixed step from boot,
+so a fault in it is not an edge case — it takes the whole game down on the
+first frame. `update()` shipped for part of P8 with an out-of-scope loop
+bound (`cap`, a `const` local to the constructor), which threw
+`ReferenceError` on the first tick and was caught by neither `node --check`,
+nor the unit suite, nor a successful `vite build`: a `ReferenceError` is only
+raised when the line actually runs, and nothing ran it. The tests cover
+construction, a tick with an empty pool, detonation against the wall and the
+floor, splash reaching the enemy pool, the swept collision test's
+anti-tunnelling guarantee, `clear()`, and pool exhaustion.
+
+### `ui/Screens.js`: `showMenu`, `showWeaponSelect`, `showPause`, `showSettings`
+
+```js
+class Screens {
+  /**
+   * The main menu (`showTitle` above, renamed and expanded). Callback style,
+   * same reason as before: it stays up indefinitely, and its own buttons
+   * lead to other screens that come back here rather than resolving once.
+   * Unlike the old single-button title, tapping the backdrop no longer
+   * starts a run — with three buttons, a stray tap next to SETTINGS
+   * silently starting the game would be an unpleasant surprise. Enter/Space
+   * still plays.
+   * @param {{bestWave:number, coins:number, credits:string, weaponName:string,
+   *          onPlay:() => void, onWeapons:() => void, onSettings:() => void}} opts
+   */
+  showMenu(opts) {}
+
+  /**
+   * Weapon select. Picking a card only highlights it; a second, explicit
+   * action (the confirm button, Enter/Space, or Escape-to-cancel) commits —
+   * see-before-you-commit, so the player can read a weapon's blurb/stat bars
+   * before swapping away from whatever they're using. 1-6 jump straight to
+   * a card by index.
+   * @param {{weapons: {id:string, def:object}[], current:string, confirmLabel?:string}} opts
+   * @returns {Promise<string>} The chosen id; `current` if cancelled (Escape).
+   */
+  showWeaponSelect(opts) {}
+
+  /**
+   * The manual pause menu — replaces the HUD's old bare "PAUSED" text panel
+   * outright (see the corrected "Manual pause" note under "P7 additions"
+   * above). Escape both opens (`Game`'s listener) and closes (this screen's
+   * own listener) it.
+   * @returns {Promise<'resume'|'settings'|'title'>}
+   */
+  showPause() {}
+
+  /**
+   * Settings. Resolves with the full patch to persist; this screen only
+   * collects it; the caller applies and stores it (`Game#_runSettingsFlow`).
+   * Only the slider matching the *current* input mode (`touch` ? `sensTouch`
+   * : `sensMouse`) is actually editable — the other axis passes through
+   * unchanged in the resolved object (seeded from the stored value, or `1` if
+   * it was `null`), so opening Settings on one input device and touching
+   * anything at all pins the *other* device's sensitivity from "unset,
+   * follow config" to a concrete `1` the first time it's saved.
+   * @param {{prefs: object, touch: boolean, muted: boolean}} opts
+   * @returns {Promise<{sensMouse:number, sensTouch:number, invertY:boolean, showFps:boolean, muted:boolean}>}
+   */
+  showSettings(opts) {}
+}
+```
+
+Reasoning worth carrying over precisely, from the code itself: **why weapon
+select resolves BEFORE `_startRun` rather than being folded into it** —
+`_startRun`'s very first act is `hooks.onRunStart?.()`, which in the real
+Poki wiring (`main.js`) is `commercialBreak().then(gameplayStart)`. A DOM
+screen mounted *under* a Poki ad iframe is exactly the ordering Poki's own
+review flags, so Menu → Play routes through `_playFromMenu()`:
+`showWeaponSelect` (labelled `START`) resolves and equips its choice
+first, and only then does `_startRun()` run and open the ad. The build
+overlay's own weapon row (`onSelectWeapon`, below) is unaffected — it can
+freely swap mid-build since no ad is anywhere nearby.
+
+All four screens share `Screens`' existing conventions (documented under
+"P6 additions" above): `_open()`/`hide()` freeze input and release pointer
+lock for as long as they're up, buttons disable rather than remove on
+choice, and they render into the same `#ui` node with the same visual
+language (new CSS in the `/* P8 screens */`-shaped block of `style.css`:
+`.weapon-card`, `.weapon-stat*`, `.settings-row`/`.settings-slider`/
+`.settings-toggle`, `.screen--pause`).
+
+### `Game` orchestration additions
+
+```js
+class Game {
+  /**
+   * Equips a weapon and remembers the choice (`savePrefs({weapon: id})`).
+   * Public because `ui/BuildOverlay.js`'s weapon-swap chip row is wired from
+   * `game/buildPhase.js`, outside this class.
+   * @param {string} id
+   */
+  equipWeapon(id) {}
+}
+```
+
+**Boot-time weapon**: the constructor calls `world.player.setWeapon(
+coerceWeaponId(this._prefs.weapon, config))` and `_applyPrefs()` before
+`state.go('title')` — before anything is shown, including the `?wave=N` dev
+shortcut, which now starts on whatever weapon was last equipped (or the
+default) rather than forcing a choice.
+
+**Why preferences (`core/prefs.js` + `platform/storage.js`) live under
+their own `arenadefense.prefs` key, not `core/storage.js`'s save shape** —
+straight from the code comment: `core/storage.js`'s persisted shape is
+exactly `{coins, bestWave, unlocks}`, and `test/storage.test.js` asserts
+that key set exactly. Preferences (sensitivity, invert, FPS toggle, last
+weapon) are *device* state, not *run progress* — the same reasoning that
+already put the mute flag under its own `arenadefense.muted` key in P7.
+`loadPrefs()`/`savePrefs(patch)` (merge-and-persist) sit in `platform/
+storage.js`; sanitizing (`sanitizePrefs`, clamping, type-coercion, never
+throwing on a corrupt/hand-edited value) is pure and lives in `core/
+prefs.js`, same read/write-vs-sanitize split `core/storage.js` and
+`platform/storage.js` already have.
+
+**Why sensitivity is stored as a multiplier, not a resolved value**:
+`DEFAULT_PREFS.sensMouse`/`sensTouch` are `null` — meaning "use whatever
+`config.player.lookSens*` says" — rather than a copy of that number. A
+slider always writes a **multiplier** in `[SENS_MIN, SENS_MAX]` (0.25..3)
+on top of the configured base; storing the resolved absolute value instead
+would freeze a player's sensitivity at whatever the config said the day
+they first touched the slider, so a later balance retune of `config.player.
+lookSens*` would never reach a player who has ever saved a preference.
+`Input#setLookSensitivity({mouse, touch, invertY})` applies the multiplier
+in `Input#frame()` — the one place every scheme's raw `sample()` becomes an
+`InputFrame` — rather than inside each scheme, so a silent scheme swap
+(`_handleMediaChange`, e.g. a mouse docked to a tablet mid-session) can
+never lose the setting, and `Player.js` still does its own multiplication
+by the frozen `config.player.lookSens*` constant unchanged: the two compose
+to `config x multiplier`. `invertY` flips `lookDY`'s sign in the same place,
+since `Player.js` applies one identical multiplier to both axes and exposes
+no separate invert knob.
+
+**Touch fire button** (`ui/TouchControls.js`): `.touch-fire`, a sibling of
+the move/look zones inside `.touch-layer`'s own stacking context (not
+nested under `.hud` — same "only a sibling of `.touch-layer` can out-stack
+its full-screen zones" reasoning `Hud.js`'s mute/pause buttons already
+established in "P7 additions"). Level-triggered exactly like
+`KeyboardMouse`'s left mouse button (`sample().fire` is `true` for every
+frame between `pointerdown` and the matching release); releases on
+`pointerup`/`pointercancel`/**`pointerleave`** rather than
+`setPointerCapture`-then-`pointerup` alone, deliberately — capturing the
+pointer would suppress `pointerleave` for it, and a finger sliding off the
+button while still down must stop firing via `pointerleave`, not stay
+latched until an eventual `pointerup` that may never target this element
+again.
+
+**The two new state-machine edges** (`core/stateMachine.js`):
+`TRANSITIONS.build` gained `'runEnd'` and `TRANSITIONS.wave` gained
+`'runEnd'`, alongside their pre-existing targets (`build → wave` and
+`wave → {waveClear, death}` respectively are unchanged, purely additive).
+Both are the pause menu's "QUIT TO TITLE": abandoning a run still has to
+end it *through* `runEnd`, exactly like a death or a victory, because
+`_runRunEndFlow` is what persists coins — going straight to `title` would
+silently throw away whatever the run had banked. Concretely,
+`_runPauseFlow`'s `'title'` branch does `hooks.onRunStop?.()`,
+`state.go('runEnd')`, `bus.emit('state:changed', {state:'runEnd'})`, then
+`_runRunEndFlow(false)` — the identical `state.go('runEnd')` +
+`state:changed` pairing `_runDeathFlow`'s decline path and the final-wave
+victory chain (both P6) already use before calling the same
+`_runRunEndFlow`, so no third bookkeeping path exists for "how a run ends."
+**What "banked so far"
+actually means on a quit**: `_runRunEndFlow` reads `economy.bankedCoins` —
+coins from waves *already cleared* (`bankWave()` on each clean clear). Any
+coins still `pendingCoins` from the wave in progress when the player quit
+are neither explicitly banked nor explicitly discarded — they're simply
+never read, and `_startRun`'s next `new Economy(cfg)` replaces the instance
+outright — so the net effect is identical to a death's `discardPending()`,
+just implicit rather than an explicit call. A quit mid-build (no wave in
+progress, `pendingCoins` always 0 there) has no pending coins to lose at
+all.
+
+**Why `Hud#setPaused`'s bare "PAUSED" panel now has no caller that sets it
+`true`**: the real pause menu (`Screens#showPause`) replaced it —
+`_setManualPause(paused)` now calls `hud.setPaused(false)` on *both* the
+pause and resume legs (a reset, not a toggle), and opens/awaits
+`_runPauseFlow()`'s screen separately. Nothing else needs the old panel:
+every *involuntary* pause (the case P2's own scope-cut note anticipated) is
+already covered by something else fully covering the screen — Poki's ad
+iframe during an ad-triggered pause, or the browser's own chrome during a
+backgrounded/unfocused tab — so there was never a scenario left where a
+bare text panel was the only thing telling the player they were paused. The
+method itself is left in place (a future caller could still use it), just
+unreached today.
+
+### `ui/BuildOverlay.js` / `game/buildPhase.js`: weapon-swap chip row
+
+```js
+class BuildOverlay {
+  /** @type {((id:string) => void)|null} */ onSelectWeapon;
+  /** Pure local state — does NOT itself invoke `onSelectWeapon` (same
+   *  set-vs-fire split `setSelectedType`/its chip click handler already
+   *  use for turrets), so a caller can sync the displayed selection without
+   *  re-triggering its own callback. @param {string} id */
+  setSelectedWeapon(id) {}
+}
+```
+
+One `.bo-chip`/`.bo-weapon-chip` per `cfg.player.weapons.order` entry,
+mirroring `_buildChips()`'s turret-chip pattern — but with no
+`.is-affordable` state to toggle at all, since every weapon is free and
+unlocked from wave 1 (the asymmetry with turret chips is deliberate, not a
+missed case). No number-key hotkey either: `_attachKeys` already binds 1/2/3
+to turret-type selection, and overloading the same `window` `keydown`
+listener with six more digits would make one handler juggle two unrelated
+pickers. `installBuildPhase` wires `overlay.onSelectWeapon = (id) => {
+if (game.state.state !== 'build') return; game.equipWeapon(id); ... }` —
+guarded to the build phase only, and, unlike `onPlace`/`onUpgrade`/
+`onRepair`, spends nothing from `game.economy` (there is no cost).
+
+### `ui/Hud.js`: FPS readout
+
+```js
+class Hud {
+  setFpsVisible(visible) {}  // hidden by default until called.
+  setFps(fps) {}             // e.g. "62 FPS".
+}
+```
+
+Driven by a settings-screen toggle (`Game#_applyPrefs` calls
+`setFpsVisible`; `Game#_debugTick` calls `setFps` on the same
+`DEBUG_REFRESH_S` cadence the `?debug=1` overlay already used, and — also
+new — that overlay's own debug element is no longer required for
+`_debugTick` to run its fps math at all, so the HUD readout works with or
+without `?debug=1`). Unlike `.hud-controls` (the mute/pause buttons, a
+sibling of `.hud` for the stacking-context reasons "P7 additions" documents
+at length), the FPS readout is an ordinary read-only child of `.hud` itself
+— it never needs to receive a tap, so it has no reason to escape `.hud`'s
+own (lower) stacking context.
+
+### `platform/audio.js`: `muted` getter
+
+```js
+class Audio {
+  /** @returns {boolean} */
+  get muted() {}
+}
+```
+
+One line, added so `Game#_runSettingsFlow` can seed the settings screen's
+mute toggle from the audio system's own live state (`this._audio.muted`)
+rather than needing a second source of truth for it.
+
+### Bus events (`game.bus`, `core/events.js`)
+
+No new event was added — checked, not assumed: every `bus.emit` call in the
+diff is either `state:changed` (the pause-menu quit path re-emitting it for
+`'runEnd'`, exactly like every other `state`/`bus` pairing already in the
+codebase) or the pre-existing `player:fired`. The tables under "P2/P3/P5
+additions" above are still the complete list.
