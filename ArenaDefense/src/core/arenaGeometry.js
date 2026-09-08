@@ -56,6 +56,27 @@ export function slotPositions(cfg) {
 }
 
 /**
+ * The 9 build slots with their coordinates already in build-overlay map units
+ * (see {@link worldToMap}) rather than world metres.
+ *
+ * The overlay draws slots straight into its `viewBox="-100 -100 200 200"`, so
+ * it needs map units, not metres. Doing that conversion here — pure, and
+ * covered by `node --test` — keeps the overlay from having to remember it:
+ * plotting `slotPositions`' raw metres puts all 9 slots in a blob around the
+ * origin at roughly a third of their true radius, close enough together that
+ * the 3 slots sharing a gate overlap.
+ *
+ * @param {import('./types.js').GameConfig} cfg
+ * @returns {{ id: number, gateId: number, angleDeg: number, x: number, z: number }[]} `x`/`z` in map units.
+ */
+export function slotMapPositions(cfg) {
+  return slotPositions(cfg).map((slot) => {
+    const { x, z } = worldToMap(slot.x, slot.z, cfg);
+    return { id: slot.id, gateId: slot.gateId, angleDeg: slot.angleDeg, x, z };
+  });
+}
+
+/**
  * World metres -> normalised build-overlay map units (matching the overlay's
  * `viewBox="-100 -100 200 200"`, arena wall at ~90).
  *

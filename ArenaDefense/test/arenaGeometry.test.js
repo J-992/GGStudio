@@ -2,7 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CONFIG } from '../src/config.js';
-import { gatePositions, slotPositions, worldToMap, mapToWorld, clampToArena } from '../src/core/arenaGeometry.js';
+import {
+  gatePositions,
+  slotPositions,
+  slotMapPositions,
+  worldToMap,
+  mapToWorld,
+  clampToArena,
+} from '../src/core/arenaGeometry.js';
 
 /** Smallest angular distance between two angles in degrees, 0..180. */
 function angleDist(a, b) {
@@ -40,6 +47,47 @@ test('no slot sits within ±gateWidth degrees of any gate angle', () => {
         `slot ${slot.id} at ${slot.angleDeg}deg is only ${d}deg from gate at ${gateAngle}deg`,
       );
     }
+  }
+});
+
+test('slotMapPositions places every slot on the same map-unit radius, well outside the hub', () => {
+  const slots = slotMapPositions(CONFIG);
+  const expected = CONFIG.arena.slotRadius * (90 / CONFIG.arena.radius);
+  assert.equal(slots.length, 9);
+  for (const slot of slots) {
+    const r = Math.hypot(slot.x, slot.z);
+    assert.ok(Math.abs(r - expected) < 1e-9, `slot ${slot.id} map radius ${r}, expected ${expected}`);
+  }
+  // Guards the regression this function exists for: plotting raw world metres
+  // put the slots at ~16 map units instead of ~55, a blob around the origin.
+  assert.ok(expected > 40, `slots would render bunched at the map centre (radius ${expected})`);
+});
+
+test('slotMapPositions keeps same-gate slots far enough apart not to overlap', () => {
+  const slots = slotMapPositions(CONFIG);
+  // SLOT_VISUAL_R in BuildOverlay.js is 6 map units, so anything at or under
+  // 12 apart draws as overlapping rings with unreadable stacked cost labels.
+  const minGap = 2 * 6;
+  for (const a of slots) {
+    for (const b of slots) {
+      if (a.id >= b.id) continue;
+      const gap = Math.hypot(a.x - b.x, a.z - b.z);
+      assert.ok(gap > minGap, `slots ${a.id} and ${b.id} are only ${gap} map units apart`);
+    }
+  }
+});
+
+test('slotMapPositions agrees with worldToMap applied to slotPositions', () => {
+  const world = slotPositions(CONFIG);
+  const mapped = slotMapPositions(CONFIG);
+  assert.equal(world.length, mapped.length);
+  for (let i = 0; i < world.length; i++) {
+    const expected = worldToMap(world[i].x, world[i].z, CONFIG);
+    assert.equal(mapped[i].id, world[i].id);
+    assert.equal(mapped[i].gateId, world[i].gateId);
+    assert.equal(mapped[i].angleDeg, world[i].angleDeg);
+    assert.ok(Math.abs(mapped[i].x - expected.x) < 1e-9);
+    assert.ok(Math.abs(mapped[i].z - expected.z) < 1e-9);
   }
 });
 

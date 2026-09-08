@@ -10,7 +10,7 @@
 // after construction and calls `open/close/setCountdown/setEnergy/refresh`
 // — see this file's "P4 additions" entry in `docs/INTERFACES.md` for the
 // full callback/method contract.
-import { slotPositions, worldToMap } from '../core/arenaGeometry.js';
+import { slotMapPositions, worldToMap } from '../core/arenaGeometry.js';
 import { upgradeCost, repairCost } from '../core/turretLogic.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -103,7 +103,8 @@ export class BuildOverlay {
     /** @type {((e:KeyboardEvent) => void)|null} */
     this._keydownHandler = null;
 
-    this._slots = slotPositions(cfg);
+    // Map units, not world metres — these go straight into the SVG transform.
+    this._slots = slotMapPositions(cfg);
 
     this._root = document.getElementById('overlay');
     this._buildDom();
@@ -230,7 +231,7 @@ export class BuildOverlay {
 
   /**
    * @param {SVGElement} parent
-   * @param {{id:number, x:number, z:number}} slot
+   * @param {{id:number, x:number, z:number}} slot `x`/`z` in map units, from `slotMapPositions`.
    */
   _buildSlotVisual(parent, slot) {
     const g = svgEl('g', { class: 'bo-slot is-empty', transform: `translate(${slot.x} ${slot.z})` });
