@@ -205,10 +205,36 @@ test('turretHitDamage leaves damage alone when it cannot one-shot anyway', () =>
   assert.equal(turretHitDamage(40, 0, CONFIG), 40);
 });
 
-test('two capped turret hits still kill: the cap is per-hit, not a floor on hp', () => {
-  const typeDef = CONFIG.enemies.types.shambler;
-  const hpMax = hpFor(typeDef, 1);
+test('the cap is per-hit, not a floor on hp: three capped hits still kill', () => {
+  // `maxDamageFracPerHit` is 1/3, so the strongest turret in the game needs
+  // exactly three shots on the weakest enemy — no more (the cap must not
+  // outrun the health pool) and no fewer (that's the whole point).
+  const hpMax = hpFor(CONFIG.enemies.types.shambler, 1);
   const { dmg } = statsFor('cannon', 2, CONFIG);
   const applied = turretHitDamage(dmg, hpMax, CONFIG);
-  assert.ok(applied * 2 >= hpMax, `two hits of ${applied} do not finish ${hpMax} hp`);
+  assert.ok(applied * 2 < hpMax, `two hits of ${applied} already finish ${hpMax} hp`);
+  assert.ok(applied * 3 >= hpMax, `three hits of ${applied} do not finish ${hpMax} hp`);
+});
+
+test('no turret needs more shots than cfg.turrets.maxDamageFracPerHit implies', () => {
+  // The cap sets the *floor* on shots-to-kill; a turret whose raw damage is
+  // already below it keeps its own (longer) time-to-kill. What must never
+  // happen is the cap itself stretching a kill past `1 / frac` hits.
+  const shots = Math.ceil(1 / CONFIG.turrets.maxDamageFracPerHit);
+  for (const type of TYPES) {
+    const levels = CONFIG.turrets.types[type].levels.length;
+    for (let level = 0; level < levels; level++) {
+      const { dmg } = statsFor(type, level, CONFIG);
+      for (const [name, typeDef] of Object.entries(CONFIG.enemies.types)) {
+        const hpMax = hpFor(typeDef, 1);
+        const applied = turretHitDamage(dmg, hpMax, CONFIG);
+        if (applied < dmg) {
+          assert.ok(
+            applied * shots >= hpMax,
+            `${type} L${level} capped to ${applied} needs more than ${shots} hits on a ${name}`,
+          );
+        }
+      }
+    }
+  }
 });

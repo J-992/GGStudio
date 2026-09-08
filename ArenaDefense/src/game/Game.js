@@ -321,6 +321,9 @@ export class Game {
       wave: this._wave,
       activeGates: this.world.activeGates,
       energy: this._economy.energy,
+      // Run total, the same banked+pending sum `_syncHud` shows — the build
+      // overlay reads it because the HUD is hidden while the overlay is up.
+      coins: this._economy.bankedCoins + this._economy.pendingCoins,
       economy: this._economy,
       scheduler: this._scheduler,
       player: { x: this.world.player.x, z: this.world.player.z, yaw: this.world.player.yaw },

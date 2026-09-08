@@ -178,6 +178,28 @@ html, body {
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
 }
 
+/* The coin count is the only number that outlives the run, so it gets the
+   loudest treatment of the three readouts: gold, bigger glyphs and a bigger
+   icon than the shared `.hud-icon`/`.hud-text` sizes above. */
+.hud-coins {
+  gap: 8px;
+  color: #ffd76b;
+}
+
+.hud-coins .hud-icon {
+  width: 26px;
+  height: 26px;
+  color: #ffd76b;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.65));
+}
+
+.hud-coins .hud-text {
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  font-size: 22px;
+  letter-spacing: 0.03em;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.7);
+}
+
 .hud-wave {
   font-size: 13px;
   letter-spacing: 0.06em;
@@ -683,6 +705,55 @@ body.keyboard .touch-layer {
 .bo-energy__value {
   font-size: 15px;
   letter-spacing: 0.04em;
+}
+
+/* Mirrors `.bo-energy` on the opposite corner. The HUD is hidden for the
+   whole build phase, so this is the only coin readout on this screen — same
+   gold treatment as `.hud-coins`. */
+.bo-coins {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 999px;
+  color: #ffd76b;
+}
+
+.bo-coins__icon {
+  width: 24px;
+  height: 24px;
+}
+
+.bo-coins__value {
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  font-size: 20px;
+  letter-spacing: 0.03em;
+}
+
+.bo-hints {
+  flex: none;
+  margin: 0;
+  text-align: center;
+}
+
+.bo-hint {
+  margin: 0;
+  max-width: min(92vw, 480px);
+  font-size: 12px;
+  line-height: 1.35;
+  opacity: 0.75;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+/* Same `body.touch`/`body.keyboard` switch the `.hud-hint` rules above use
+   (set by ui/input.js) — only the wording for the live input mode shows. */
+body.keyboard .bo-hint--touch,
+body.touch .bo-hint--keyboard {
+  display: none;
 }
 
 .bo-chips {

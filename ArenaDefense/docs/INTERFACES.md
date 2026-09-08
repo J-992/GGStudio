@@ -414,12 +414,13 @@ class Enemies {
 **Turrets never one-shot.** A hit tagged `source: 'turret'` (direct or
 splash — `damageRadius` funnels through `damageAt`) is clamped by
 `turretLogic.turretHitDamage` to `cfg.turrets.maxDamageFracPerHit` of the
-target's *max* HP, so even a maxed cannon's 85 splash takes two shots to
-finish a 30hp shambler. The cap is relative to max HP, so it never blocks
-the follow-up shot from killing, and it leaves damage untouched against
-anything big enough not to be one-shot anyway (`tungtung`, the boss —
-`Boss#damage` isn't capped at all). Knockback scales off the *applied*
-(post-cap) damage. Turrets soften and stagger; the kill stays the player's.
+target's *max* HP — 1/3, so every enemy takes at least three turret hits and
+even a maxed cannon's 85 splash needs three shots on a 30hp shambler. The cap
+is relative to max HP, so it never blocks the last of those shots from
+killing, and it leaves damage untouched against anything big enough not to be
+capped anyway (`tungtung`, the boss — `Boss#damage` isn't capped at all).
+Knockback scales off the *applied* (post-cap) damage. Turrets soften and
+stagger; the kill stays the player's.
 
 Rendering: two `InstancedMesh`es (one per voxel model, `zed_1`/shambler and
 `zed_3`/spitter, each sized `cfg.enemies.cap`) built from
@@ -523,7 +524,9 @@ class Game {
 ```
 
 `getSnapshot()` additionally carries `economy` and `scheduler` (the raw
-instances, alongside the pre-existing `energy`/`wave`/`activeGates` fields).
+instances, alongside the pre-existing `energy`/`wave`/`activeGates` fields)
+and `coins`, the banked+pending run total `_syncHud` shows — `BuildOverlay`
+reads it because the HUD is hidden while the build overlay is up.
 
 Player firing (`_handleFiring`) now does a real hitscan: `world.enemies
 .raycast(shot.origin, shot.dir, gun.range)`, and on a hit,
@@ -667,6 +670,7 @@ class BuildOverlay {
   close() {}
   setCountdown(secondsLeft) {}
   setEnergy(n) {}
+  setCoins(n) {}
   setSelectedType(type) {}
   refresh(snapshot) {}
   /** @type {boolean} */
@@ -694,6 +698,15 @@ number before calling `onPlace`/`onUpgrade`/`onRepair` at all, purely for
 snappy feedback tied to the tapped element — `buildPhase.js` re-checks
 affordability itself before spending regardless, since the overlay's cached
 energy can be up to 250ms stale (see `refresh`'s polling interval below).
+
+Shows the run's coin total (`setCoins`, fed by `BuildSnapshot.coins` on every
+`refresh`) as well as energy: `buildPhase.js` calls `hud.show(false)` for the
+whole build phase, so without it the player has no coin readout on the one
+screen where they are deciding what to spend. It also carries the game's only
+statement of what this screen's controls are — a `.bo-hint--touch` /
+`.bo-hint--keyboard` pair, shown by the same `body.touch`/`body.keyboard`
+switch `Hud`'s hints use — since nothing else tells a player that a dashed
+ring is tappable.
 
 `InputFrame.select`/`.ready` have no touch equivalent in P2/P3 (documented
 on `InputFrame` above), so this file attaches its own `window` `keydown`

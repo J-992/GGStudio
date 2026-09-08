@@ -148,6 +148,17 @@ export class BuildOverlay {
   }
 
   /**
+   * Run total (banked + pending), matching `Hud#setCoins` — the HUD is hidden
+   * for the whole build phase (`buildPhase.js` calls `hud.show(false)`), so
+   * without this the player's coin count simply disappears while they are
+   * deciding what to spend on.
+   * @param {number} coins
+   */
+  setCoins(coins) {
+    this._coinsValue.textContent = `${Math.floor(coins)}`;
+  }
+
+  /**
    * @param {string} type
    */
   setSelectedType(type) {
@@ -166,6 +177,7 @@ export class BuildOverlay {
     this._renderSlots();
     this._renderPlayer(snapshot.player);
     this.setEnergy(snapshot.energy);
+    this.setCoins(snapshot.coins ?? 0);
 
     if (this._sheetSlotId !== null) {
       const rec = this._turretsById.get(this._sheetSlotId);
@@ -180,8 +192,10 @@ export class BuildOverlay {
     this._wrap = htmlEl('div', 'bo');
     this._root.appendChild(this._wrap);
 
-    this._buildMap();
     this._buildEnergy();
+    this._buildCoins();
+    this._buildMap();
+    this._buildHint();
     this._buildChips();
     this._buildReady();
     this._buildSheet();
@@ -274,6 +288,38 @@ export class BuildOverlay {
     icon.appendChild(use);
     this._energyValue = htmlEl('span', 'bo-energy__value');
     box.append(icon, this._energyValue);
+    this._wrap.appendChild(box);
+  }
+
+  _buildCoins() {
+    const box = htmlEl('div', 'bo-coins');
+    const icon = svgEl('svg', { class: 'icon bo-coins__icon' });
+    const use = document.createElementNS(SVG_NS, 'use');
+    use.setAttribute('href', '#icon-coin');
+    icon.appendChild(use);
+    this._coinsValue = htmlEl('span', 'bo-coins__value');
+    this._coinsValue.textContent = '0';
+    box.append(icon, this._coinsValue);
+    this._wrap.appendChild(box);
+  }
+
+  /**
+   * The build map is the one screen with no tutorial anywhere else in the
+   * game — nothing on it says a dashed ring is tappable — so it states the
+   * three actions outright. Touch and keyboard wordings are both built and
+   * `style.css` shows whichever matches `body.touch`/`body.keyboard`, the
+   * same switch `Hud`'s own hints use (`ui/input.js` sets the class).
+   */
+  _buildHint() {
+    const box = htmlEl('div', 'bo-hints');
+
+    const touch = htmlEl('p', 'bo-hint bo-hint--touch');
+    touch.textContent = 'Tap a ring to build · tap a turret to upgrade or repair · READY starts the wave';
+
+    const keyboard = htmlEl('p', 'bo-hint bo-hint--keyboard');
+    keyboard.textContent = '1/2/3 pick a turret · click a ring to build · click a turret to upgrade or repair · Space starts the wave';
+
+    box.append(touch, keyboard);
     this._wrap.appendChild(box);
   }
 

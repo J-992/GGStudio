@@ -159,11 +159,12 @@ export function fireReady(turret, dt, stats) {
 
 /**
  * Caps one turret hit at `cfg.turrets.maxDamageFracPerHit` of the target's max
- * HP, so a turret always needs at least two shots to finish anything — however
- * far its damage has been upgraded past a weak enemy's health pool. The cap is
- * relative to *max* HP (not current), so it doesn't stop the second shot from
- * killing, and it leaves a turret's damage untouched against anything with
- * enough HP not to be one-shot in the first place (the boss, `tungtung`).
+ * HP, so a turret always needs at least `1 / maxDamageFracPerHit` shots (3 at
+ * the configured 1/3) to finish anything — however far its damage has been
+ * upgraded past a weak enemy's health pool. The cap is relative to *max* HP
+ * (not current), so it doesn't stop the last of those shots from killing, and
+ * it leaves a turret's damage untouched against anything with enough HP not to
+ * be capped in the first place (the boss, `tungtung`).
  *
  * @param {number} dmg Raw per-shot damage from {@link statsFor}.
  * @param {number} hpMax Target's max HP (already wave-scaled by `hpMul`).
