@@ -677,7 +677,14 @@ export class Game {
       const due = this._scheduler.update(dt, this.world.enemies.alive);
       for (const entry of due) {
         const gateId = this.world.activeGates[entry.gateId];
-        this.world.enemies.spawn(entry.enemy, gateId, this._currentWaveDef.hpMul, this._rollVariant());
+        this.world.enemies.spawn(
+          entry.enemy,
+          gateId,
+          this._currentWaveDef.hpMul,
+          this._rollVariant(),
+          this._wave,
+          this._rollArmed(entry.enemy),
+        );
       }
     }
 
@@ -1185,6 +1192,29 @@ export class Game {
     // Float drift, or weights summing under 1: fall back to the last entry
     // rather than returning undefined and silently unscaling the enemy.
     return order[order.length - 1];
+  }
+
+  /**
+   * Decides whether one spawn carries a gun.
+   *
+   * Only shamblers are rolled for. Spitters are `kind: 'ranged'` already and
+   * `Enemies#spawn` arms them from the wave's tier unconditionally, so passing
+   * `true` here would be redundant; `tungtung` is a flat sprite billboard with
+   * nowhere to hang a mesh gun.
+   *
+   * Same seeded stream as `_rollVariant` for the same reason — an armed
+   * shambler shoots instead of charging, which changes how a wave plays, so it
+   * is gameplay randomness and belongs on `core/rng.js`.
+   *
+   * @param {string} typeName
+   * @returns {boolean}
+   */
+  _rollArmed(typeName) {
+    if (typeName !== 'shambler') return false;
+    const { from, start, perWave, max } = this._config.enemies.weapons.armedShare;
+    if (this._wave < from) return false;
+    const share = Math.min(max, start + perWave * (this._wave - from));
+    return this._variantRng() < share;
   }
 
   /**

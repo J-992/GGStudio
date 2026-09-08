@@ -109,3 +109,28 @@ CC0 requires no attribution.
 2. **`Shared/voxel/env/Buildings` FBX pack** (guns, turret bases, barricade, barbed wire, both `Props_*_diffuse.png` atlases, `VoxelApocalypse_Character.png`) — no identified vendor or licence. Fallback: procedural geometry behind a config flag.
 3. **CC BY-ND** on the Zed characters and graveyard dressing — format conversion of unmodified geometry, attribution required and carried through `credits` + this file.
 4. `Gun_02`'s own texture reference (`VoxelApocalypseZombie_Export-78-Weapon_Gun-2.png`) does not exist anywhere in this monorepo checkout, so that mesh ships untextured (flat colour) rather than blocking the build.
+5. **Rigging the Zed characters is a derivative, and CC BY-ND forbids derivatives.**
+   Recorded here rather than left implicit, because it is the one item on this
+   list that a Poki submission review could reasonably stop on.
+   - `glb-rigger/zed_1.rig.json`, `zed_3.rig.json` and the `glb-rigger/out/*.rigged.glb`
+     they produce split each Zed into a 13-bone rigid hierarchy. That is a
+     modification of the geometry's structure, not a format conversion.
+   - **Nothing rigged ships today.** Those files live outside this game's
+     `public/` tree and no build step reads them; the walking enemies in the
+     shipped build use the procedural gait in `src/game/Enemies.js`, which
+     touches no asset bytes. This item is a gate on integrating the rig, not a
+     description of what is currently in `dist/`.
+   - **The two games in this monorepo contradict each other on item 3 above.**
+     `zombie-motorworks/ASSET_LICENSES.md` carries a section headed
+     *"Blocking issue: CC BY-ND forbids what this game does to these models"*
+     about these same models and this same tool, and holds that even the
+     quantise + meshopt step is a derivative — which, if correct, means the
+     Zed `.glb` files ArenaDefense already ships are derivatives too, and item
+     3's "format conversion of unmodified geometry" reading is wrong. That
+     game resolved it by rigging only its own generated characters and leaving
+     the Zeds bob-only.
+   - Ways to clear it, cheapest first: keep the procedural gait and never
+     integrate the rig; email Max Parata (the models are donation-ware and the
+     listing invites contact) for written permission, which would settle both
+     games at once; or replace the Zeds with a CC0 character that permits
+     derivatives.

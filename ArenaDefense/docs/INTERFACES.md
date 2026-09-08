@@ -382,9 +382,18 @@ class Enemies {
    *   wave's active-gate pair; `Game.js` does `activeGates[entry.gateId]`
    *   before calling this, so this file never sees the 0/1 pair-relative index.
    * @param {number} [hpMul]
+   * @param {string} [variant] A key of `cfg.enemies.variants.types` — the size
+   *   variant. Rolled by `Game#_rollVariant` off the seeded stream.
+   * @param {number} [wave] Wave number, used to pick the weapon tier out of
+   *   `cfg.enemies.weapons.tiers` (highest `from` <= wave). Frozen at spawn, so
+   *   an enemy never re-arms or upgrades mid-life.
+   * @param {boolean} [armed] Whether a `kind: 'melee'` type spawns carrying a
+   *   gun, making it behave as `kind: 'ranged'`. Rolled by `Game#_rollArmed`
+   *   off the same seeded stream. Ignored for types that are already
+   *   `kind: 'ranged'` — those resolve a tier unconditionally.
    * @returns {number} Pool index, or -1 when at cap.
    */
-  spawn(typeName, gateId, hpMul) {}
+  spawn(typeName, gateId, hpMul, variant, wave, armed) {}
 
   /** @param {number} dt @param {object} world The `Game.world` bag. */
   update(dt, world) {}
@@ -467,9 +476,16 @@ Rendering: two `InstancedMesh`es (one per voxel model, `zed_1`/shambler and
 slot per `tungtung` via `Billboards.alloc/free/set`, plus a 64-capacity
 `InstancedMesh` of spheres for spitter projectiles (hit-tests the player and
 every `world.turrets?.list()` entry at a 0.5 m radius each step, expiring
-past `1.5 × typeDef.range`). All four meshes together are the "4 draw calls
-for all smalls" the P3 brief's acceptance check refers to (plus whatever
-`Billboards.js` itself adds for `tungtung`/a boss — see below).
+past `1.5 × typeDef.range`), plus one shared `enemy-guns` `InstancedMesh`
+(`cfg.enemies.cap` capacity, one merged body+barrel geometry, per-instance
+colour via `setColorAt`) for every armed enemy's held weapon. Weapon tiers
+differ in stats and colour but never in silhouette, so one mesh serves all of
+them: the gun costs exactly one draw call no matter how many enemies are armed
+or how many tiers are in play. Its instance index is the enemy's own pool
+index, so a kill or a `clear()` zero-scales that slot unconditionally. These
+meshes together are the "4 draw calls for all smalls" the P3 brief's acceptance
+check refers to, now 5 with the guns (plus whatever `Billboards.js` itself adds
+for `tungtung`/a boss — see below).
 
 Sounds (each with its own minimum replay interval so a crowd of zombies
 doesn't spam the mixer): `zombie-attack-1` on a melee hit landing (player or
@@ -534,7 +550,7 @@ In addition to P2's table:
 | --- | --- | --- |
 | `enemy:spawned` | `{ idx, type, gate }` | `Enemies#spawn` successfully allocates a pool slot. |
 | `enemy:killed` | `{ idx, type, x, z, source, energy }` | An enemy's hp reaches 0 via `damageAt`/`damageRadius`, from any source. `Game.js` subscribes to this itself to add `energy` to `game.economy` — no other listener needs to. |
-| `wave:started` | `{ wave, boss }` | `Game.js` enters `wave` (right after the `build -> wave` `state:changed`) and builds that wave's `SpawnScheduler`. `boss` is the wave's `cfg.waves[n].boss` string or `null`. |
+| `wave:started` | `{ wave, boss }` | `Game.js` enters `wave` (right after the `build -> wave` `state:changed`) and builds that wave's `SpawnScheduler`. `boss` is the wave's `waveDef(cfg, n).boss` string or `null` (generated from `cfg.waveCurve`/`cfg.run`, not read from a literal table). |
 | `wave:cleared` | `{ wave }` | The wave-clear condition (`scheduler.done && enemies.alive === 0 && !world.boss?.alive`) is met — emitted right after the `wave -> waveClear` `state:changed`, on both an intermediate clear and the final-wave (victory) clear. |
 
 ### `Game` additions
@@ -912,8 +928,8 @@ toward `addsAlive` when the returned index is `>= 0`, so a saturated cap
 never permanently blocks this boss's own cast cadence.
 
 **Add spawn position — v1 compromise**: the plan brief's "spawn at the
-boss's own feet" is not implemented literally. `Enemies#spawn(typeName,
-gateId, hpMul)`'s frozen contract only ever positions a new enemy at a real
+boss's own feet" is not implemented literally. `Enemies#spawn`'s
+contract only ever positions a new enemy at a real
 arena gate (with small cosmetic jitter) — it exposes no method to place or
 teleport an enemy to an arbitrary world point. `Boss.js` instead spawns the
 add at the boss's *nearest* gate. Fixing this properly would mean adding a

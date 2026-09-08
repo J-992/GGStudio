@@ -14,6 +14,13 @@
 // about individual melee/impact sounds. Documented in
 // `docs/INTERFACES.md`'s "P3 additions" section.
 import * as THREE from 'three';
+// Merges the two boxes that make up the held-gun silhouette into ONE
+// `BufferGeometry` at construction time, so all armed enemies (any mix of
+// tiers/types) still share a single `InstancedMesh` — see `_buildGunMesh`.
+// This ships in the `three` package itself (examples/jsm), not a new
+// dependency; `weaponMesh.js`'s hand-authored multi-mesh `Group`s aren't an
+// option here because an `InstancedMesh` instance can't own children.
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { gatePositions, clampToArena } from '../core/arenaGeometry.js';
 import {
   chooseTarget, steer, attackReady, tickCooldown, hpFor,
@@ -37,6 +44,20 @@ const MELEE_SOUND_MIN_INTERVAL_S = 0.12;
 const IMPACT_SOUND_MIN_INTERVAL_S = 0.15;
 const DEATH_SOUND_MIN_INTERVAL_S = 0.05;
 
+// Held-gun silhouette, in local (pre-`hold`-offset, pre-`hold.scale`) metres.
+// `cfg.enemies.weapons.hold` positions/sizes the WHOLE gun on the body; these
+// two are its own invented internal proportions (there is nowhere in config
+// for "how chunky is the receiver block" to live) — NOT config, per the
+// brief, but named here so they're one obvious edit if the silhouette reads
+// wrong. Report these to the config owner if they should move.
+const GUN_BODY_SIZE = { x: 0.09, y: 0.11, z: 0.24 };
+const GUN_BARREL_SIZE = { x: 0.035, y: 0.035, z: 0.42 };
+// Fallback `hold` used only if `cfg.enemies.weapons.hold` is ever missing
+// (config already ships it — see AGENTS.md's weapons block — this just
+// mirrors `_resolveTypeDef`'s "safe to land before the caller side exists"
+// defensiveness rather than throwing mid-frame on a partial config).
+const DEFAULT_HOLD = { forward: 0, side: 0, height: 0, scale: 1 };
+
 // Zed OBJ→GLB conversion assumed the model's forward is +Z (see
 // `public/assets/manifest.json`'s `facingAxisNote`, unverified). Flip to
 // `Math.PI` here if walking smalls look like they're facing backwards.
@@ -52,6 +73,15 @@ const _quatKick = new THREE.Quaternion();
 const _kickAxis = new THREE.Vector3();
 const _pos = new THREE.Vector3();
 const _scale = new THREE.Vector3();
+// Held-gun scratch, kept separate from `_scale` above: the body's `_scale`
+// carries hit-squash/heel-strike, which a rigid gun should not inherit (see
+// `_updateGunInstance`). `_matrix`/`_place` ARE reused for the gun after the
+// body's `setMatrixAt` call — that call copies the composed matrix out
+// immediately, so there is nothing left to alias.
+const _gunPos = new THREE.Vector3();
+const _gunOffset = new THREE.Vector3();
+const _gunScale = new THREE.Vector3();
+const _gunColor = new THREE.Color();
 
 /**
  * Axis-aligned (Y) swept-cylinder ray test, radius `radius`, extending from
@@ -165,13 +195,25 @@ export class Enemies {
     this._sizeMul = new Float32Array(cap).fill(1);
     /** @type {string[]} */
     this._variant = new Array(cap).fill('normal');
+    // Weapon tier this enemy resolved to AT SPAWN (its `id` into
+    // `cfg.enemies.weapons.tiers`, e.g. `'pistol'`), or `null` for an enemy
+    // that never carries a gun (a melee shambler that didn't roll armed, or
+    // `tungtung`, which can't hold anything at all). Frozen for that
+    // enemy's whole life the same way `hpMul` already is — a shambler armed
+    // at wave 7 keeps its `scrap` pistol even if the run is still on that
+    // enemy by wave 12; it does not silently re-arm mid-life. The second
+    // cache-key dimension into `_resolveTypeDef`, alongside `_variant`.
+    /** @type {(string|null)[]} */
+    this._tierId = new Array(cap).fill(null);
 
-    // (type, variant) -> frozen EnemyTypeDef with hp/speed/knockbackScale
-    // pre-multiplied by that variant's config. Built lazily, at most
-    // `types x variants` entries (e.g. 3x3=9) for the life of this pool, so
-    // that `update()`'s per-enemy per-fixed-step hot loop can index into it
-    // instead of allocating a scaled copy of `typeDef` every tick — see
-    // `_resolveTypeDef`.
+    // (type, variant, tier) -> frozen EnemyTypeDef with hp/speed/
+    // knockbackScale pre-multiplied by that variant's config, and — when a
+    // weapon tier is present — `kind`/`dmg`/`cooldown`/`projSpeed`/`range`
+    // overridden from that tier plus `armed: true` and `weaponColor`. Built
+    // lazily, at most `types x variants x (tiers + 1)` entries (e.g.
+    // 3x3x5=45) for the life of this pool, so that `update()`'s per-enemy
+    // per-fixed-step hot loop can index into it instead of allocating a
+    // scaled copy of `typeDef` every tick — see `_resolveTypeDef`.
     /** @type {Map<string, import('../core/types.js').EnemyTypeDef>} */
     this._variantDefCache = new Map();
 
@@ -186,6 +228,7 @@ export class Enemies {
     this._buildVoxelMesh('zed_3');
 
     this._buildProjectiles();
+    this._buildGunMesh();
   }
 
   /**
@@ -241,21 +284,95 @@ export class Enemies {
     this._projDirty = false;
   }
 
+  /**
+   * Builds the ONE shared `InstancedMesh` every held gun renders through —
+   * every tier, on both `shambler` and `spitter`, at cap (35) capacity.
+   *
+   * Why one shared mesh rather than one per tier (or per type): a tier is
+   * only a colour + a handful of combat numbers, never a different
+   * silhouette, so the geometry is identical across tiers — splitting by
+   * tier would multiply draw calls (up to 4, one per `cfg.enemies.weapons.
+   * tiers` entry) for zero visual gain. Colour is carried per-INSTANCE
+   * instead (`InstancedMesh#setColorAt`, native support, no shader of our
+   * own) so arming, say, ten shamblers across four different tiers still
+   * costs exactly the one draw call this mesh already was. That draw call
+   * is the entire cost of this feature: `README`'s budget gates at 40 and
+   * `Enemies.js` issued 3 before this (`zed_1`, `zed_3`, the projectile
+   * mesh) — this makes 4, regardless of the enemy cap or how many are armed
+   * at once.
+   *
+   * Capacity is `this._cap`, one instance per POOL INDEX — not a separate
+   * slot allocator like `_voxelModels` (which is keyed per MODEL because
+   * `zed_1`/`zed_3` are two different meshes sharing the one pool). A gun
+   * has no such split: every pool index owns at most one gun instance for
+   * its entire life, so the pool index IS the gun instance index, and an
+   * unarmed or dead enemy's instance is just left/forced to `ZERO_SCALE`
+   * (see `_updateVoxelInstance`, `_kill`, `clear`) rather than freed back to
+   * a list — there is nothing to free, the next occupant of that index
+   * overwrites it next frame regardless of whether IT is armed.
+   */
+  _buildGunMesh() {
+    const body = new THREE.BoxGeometry(GUN_BODY_SIZE.x, GUN_BODY_SIZE.y, GUN_BODY_SIZE.z);
+    const barrel = new THREE.BoxGeometry(GUN_BARREL_SIZE.x, GUN_BARREL_SIZE.y, GUN_BARREL_SIZE.z);
+    // Baked into the BARREL's geometry, not the per-instance matrix: the
+    // barrel sits forward of the body block, contiguous with it, so both
+    // parts move as one rigid gun off a single instance transform. "Forward"
+    // here is local +Z to match this file's own body convention (see
+    // `FACING_FIX`'s comment on the zed model) — the gun rides the same
+    // `_quat` the body does (see `_updateGunInstance`), so if `FACING_FIX`
+    // ever flips because the body reads backwards, the gun flips with it for
+    // free rather than needing its own separate correction.
+    barrel.translate(0, 0, GUN_BODY_SIZE.z / 2 + GUN_BARREL_SIZE.z / 2);
+    const geometry = mergeGeometries([body, barrel]);
+    body.dispose();
+    barrel.dispose();
+
+    // Unlit, like the projectile mesh above: a held gun in a crowd of up to
+    // 35 is not worth a lighting pass, and MeshBasicMaterial is what lets
+    // per-instance `setColorAt` read straight through as the tier colour
+    // with no per-mesh tint to fight (default material colour is white).
+    const material = new THREE.MeshBasicMaterial();
+    const mesh = new THREE.InstancedMesh(geometry, material, this._cap);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    mesh.count = this._cap;
+    mesh.name = 'enemy-guns';
+    this._scene.add(mesh);
+
+    for (let i = 0; i < this._cap; i++) mesh.setMatrixAt(i, ZERO_SCALE);
+    mesh.instanceMatrix.needsUpdate = true;
+
+    this._gunMesh = mesh;
+    this._gunDirty = false;
+  }
+
   /** @returns {number} Count of currently-alive enemies. */
   get alive() {
     return this._aliveCount;
   }
 
   /**
-   * Resolves the `EnemyTypeDef` a given (type, variant) pair should use for
-   * everything EXCEPT the hitbox/visual scale: `hp`, `speed` and
-   * `knockbackScale` pre-multiplied by `cfg.enemies.variants.types[variant]`,
-   * every other field inherited untouched from `cfg.enemies.types[typeName]`
-   * (in particular `energy`, which must stay variant-invariant — see
-   * `AGENTS.md`/`test/waves.test.js`'s wave-1 energy pin). Deliberately does
-   * NOT touch `radius`/`hitHeight`: those scale per INSTANCE via `_sizeMul`
-   * (`_radiusOf`/`_hitHeightOf` below), not per (type, variant), so they stay
-   * off this object and are read straight from the base def there.
+   * Resolves the `EnemyTypeDef` a given (type, variant, weapon tier) triple
+   * should use for everything EXCEPT the hitbox/visual scale: `hp`, `speed`
+   * and `knockbackScale` pre-multiplied by `cfg.enemies.variants.
+   * types[variant]`, `kind`/`dmg`/`cooldown`/`projSpeed`/`range` overridden
+   * from `tierId`'s entry in `cfg.enemies.weapons.tiers` when one is given
+   * (plus `armed: true` and `weaponColor`, read by the gun render/muzzle
+   * code below), every other field inherited untouched from
+   * `cfg.enemies.types[typeName]` (in particular `energy`, which must stay
+   * variant- AND weapon-invariant — see `AGENTS.md`/`test/waves.test.js`'s
+   * wave-1 energy pin: arming a shambler must not change what killing it is
+   * worth). Deliberately does NOT touch `radius`/`hitHeight`: those scale
+   * per INSTANCE via `_sizeMul` (`_radiusOf`/`_hitHeightOf` below), not per
+   * key, so they stay off this object and are read straight from the base
+   * def there.
+   *
+   * Forcing `kind: 'ranged'` on an armed resolution is the seam that makes
+   * the tier's numbers actually apply: `_performAttack` branches on
+   * `typeDef.kind` to decide melee hit vs `_spawnProjectile`, so an armed
+   * shambler resolving through here with `kind: 'ranged'` takes the same gun
+   * path a spitter already does — nothing else in this file has to know
+   * "shambler" and "armed" are even related.
    *
    * Cached (frozen, built once per key) rather than computed per call: this
    * backs `_typeDefAt`, which `update()` calls once per alive enemy per fixed
@@ -264,24 +381,40 @@ export class Enemies {
    *
    * @param {string} typeName
    * @param {string} variant
+   * @param {string|null} [tierId] `id` into `cfg.enemies.weapons.tiers`, or
+   *   `null`/omitted for an unarmed (melee, no gun) resolution.
    * @returns {import('../core/types.js').EnemyTypeDef}
    */
-  _resolveTypeDef(typeName, variant) {
-    const key = `${typeName} ${variant}`;
+  _resolveTypeDef(typeName, variant, tierId = null) {
+    const key = `${typeName} ${variant} ${tierId ?? '-'}`;
     let def = this._variantDefCache.get(key);
     if (def) return def;
 
     const base = this._cfg.enemies.types[typeName];
-    // No variants block configured yet, or an unrecognized variant key:
-    // fall back to the base def unscaled rather than throwing, so this
-    // mechanism is safe to land before the config/caller side exists.
+    // No variants/weapons block configured yet, or an unrecognized key:
+    // fall back to the base def unscaled/unarmed rather than throwing, so
+    // this mechanism is safe to land before the config/caller side exists —
+    // same defensiveness the variant lookup already had.
     const variantCfg = this._cfg.enemies.variants?.types?.[variant];
-    def = variantCfg
+    const tier = tierId ? this._cfg.enemies.weapons?.tiers?.find((t) => t.id === tierId) : null;
+
+    def = (variantCfg || tier)
       ? Object.freeze({
           ...base,
-          hp: base.hp * (variantCfg.hp ?? 1),
-          speed: base.speed * (variantCfg.speed ?? 1),
-          knockbackScale: (base.knockbackScale ?? 1) * (variantCfg.knockback ?? 1),
+          hp: base.hp * (variantCfg?.hp ?? 1),
+          speed: base.speed * (variantCfg?.speed ?? 1),
+          knockbackScale: (base.knockbackScale ?? 1) * (variantCfg?.knockback ?? 1),
+          ...(tier
+            ? {
+                kind: 'ranged',
+                dmg: tier.dmg,
+                cooldown: tier.cooldown,
+                projSpeed: tier.projSpeed,
+                range: tier.range,
+                armed: true,
+                weaponColor: tier.color,
+              }
+            : {}),
         })
       : base;
     this._variantDefCache.set(key, def);
@@ -291,10 +424,32 @@ export class Enemies {
   /**
    * @param {number} i Pool index.
    * @returns {import('../core/types.js').EnemyTypeDef} This enemy's
-   *   variant-adjusted type def — see `_resolveTypeDef`.
+   *   variant- and weapon-tier-adjusted type def — see `_resolveTypeDef`.
    */
   _typeDefAt(i) {
-    return this._resolveTypeDef(this._type[i], this._variant[i]);
+    return this._resolveTypeDef(this._type[i], this._variant[i], this._tierId[i]);
+  }
+
+  /**
+   * Which `cfg.enemies.weapons.tiers` entry a spawn on wave `wave` should
+   * carry — the highest `from` that is `<= wave`, same rule the config
+   * comment states. Pure function of config + wave, so unlike whether a
+   * given shambler spawn is armed at all (a random draw the CALLER must make
+   * from the seeded stream — see `spawn()`), this needs no external input
+   * and is fine to resolve in here.
+   *
+   * @param {number} wave
+   * @returns {object|null} A tier entry, or `null` when `cfg.enemies.
+   *   weapons.tiers` is empty/missing.
+   */
+  _weaponTierForWave(wave) {
+    const tiers = this._cfg.enemies.weapons?.tiers;
+    if (!tiers || tiers.length === 0) return null;
+    let best = null;
+    for (const t of tiers) {
+      if (t.from <= wave && (!best || t.from > best.from)) best = t;
+    }
+    return best ?? tiers[0];
   }
 
   /** @param {number} i Pool index. @returns {number} Hitbox/arena-clamp radius, scaled by this enemy's size variant. */
@@ -316,13 +471,44 @@ export class Enemies {
    *   not cosmetic, so — unlike the position jitter below — it is NOT decided
    *   in here with `Math.random()`: the caller passes it in, already drawn
    *   from the seeded `core/rng.js` stream, so a seed still reproduces a run.
+   * @param {number} [wave] Current wave number; defaults to 1 for callers
+   *   that don't track waves (`Boss.js`'s `addType` adds — see its own
+   *   comment on this being a frozen, minimal positional contract). Selects
+   *   the weapon tier (`cfg.enemies.weapons.tiers`, highest `from` <= wave —
+   *   see `_weaponTierForWave`) for any spawn that ends up weapon-driven:
+   *   always for a base `kind: 'ranged'` type (`spitter`), and for a base
+   *   `kind: 'melee'` type only when `armed` is also true. Deliberately NOT
+   *   randomness-sensitive — the tier is a pure function of the wave, so it
+   *   is safe to resolve from a plain number rather than the seeded stream.
+   * @param {boolean} [armed] Whether THIS spawn should carry a gun, for a
+   *   base `kind: 'melee'` type (in practice: `shambler`; never pass `true`
+   *   for `tungtung` — it's a sprite billboard with no mesh to hold
+   *   anything, and nothing here stops you, it would just render a gun
+   *   floating with no body attached to it). This is GAMEPLAY (an armed
+   *   shambler shoots instead of only charging), so — like `variant` above —
+   *   it must be a coin-flip the CALLER already drew from the seeded stream
+   *   (`cfg.enemies.weapons.armedShare`, ramping by wave), never rolled in
+   *   here with `Math.random()`. Ignored for a base `kind: 'ranged'` type:
+   *   those resolve through the weapon tier unconditionally regardless of
+   *   this flag, since being armed is inherent to what they already are
+   *   (`spitter` "is already ... always armed" — the caller does not need to
+   *   special-case it).
    * @returns {number} Pool index, or -1 when at cap.
    */
-  spawn(typeName, gateId, hpMul = 1, variant = 'normal') {
+  spawn(typeName, gateId, hpMul = 1, variant = 'normal', wave = 1, armed = false) {
     const idx = this._free.pop();
     if (idx === undefined) return -1;
 
-    const typeDef = this._resolveTypeDef(typeName, variant);
+    const baseDef = this._cfg.enemies.types[typeName];
+    // Ranged types are inherently weapon-driven every spawn; melee types
+    // only when the caller rolled this one armed — see the `armed` param
+    // doc above for why that split is the caller's decision and this one
+    // (ranged-always) is not.
+    const weaponDriven = baseDef.kind === 'ranged' || armed;
+    const tier = weaponDriven ? this._weaponTierForWave(wave) : null;
+    const tierId = tier ? tier.id : null;
+
+    const typeDef = this._resolveTypeDef(typeName, variant, tierId);
     const sizeMul = this._cfg.enemies.variants?.types?.[variant]?.size ?? 1;
     const gate = this._gates.find((g) => g.id === gateId) ?? this._gates[gateId % this._gates.length];
     // Cosmetic-only spawn jitter — per AGENTS.md this must not share the
@@ -332,6 +518,7 @@ export class Enemies {
 
     this._type[idx] = typeName;
     this._variant[idx] = variant;
+    this._tierId[idx] = tierId;
     this._sizeMul[idx] = sizeMul;
     this._x[idx] = x;
     this._z[idx] = z;
@@ -474,6 +661,14 @@ export class Enemies {
       this._projMesh.instanceMatrix.needsUpdate = true;
       this._projDirty = false;
     }
+    if (this._gunDirty) {
+      this._gunMesh.instanceMatrix.needsUpdate = true;
+      // `instanceColor` only exists once something has called `setColorAt`
+      // (see `InstancedMesh#setColorAt`) — null on a run with nothing armed
+      // yet.
+      if (this._gunMesh.instanceColor) this._gunMesh.instanceColor.needsUpdate = true;
+      this._gunDirty = false;
+    }
     this._billboards.update(dt);
   }
 
@@ -552,6 +747,54 @@ export class Enemies {
     _matrix.multiplyMatrices(_place, pool.localMatrix);
     pool.mesh.setMatrixAt(slot, _matrix);
     pool.dirty = true;
+
+    // Held gun. Runs for every voxel enemy each frame (not just newly-armed
+    // ones) and unconditionally zero-scales the unarmed case, the same way
+    // `pool.mesh` above is fully rewritten for every alive instance rather
+    // than only the ones that moved — simplest correct sync, and cheap at
+    // this cap. `_kill`/`clear` are what zero a DEAD enemy's leftover gun
+    // instance; this only ever runs on a live one.
+    if (typeDef.armed) {
+      this._updateGunInstance(i, typeDef);
+    } else {
+      this._gunMesh.setMatrixAt(i, ZERO_SCALE);
+      this._gunDirty = true;
+    }
+  }
+
+  /**
+   * Composes armed enemy `i`'s held-gun instance from the SAME `_pos`/
+   * `_quat` `_updateVoxelInstance` (the caller, immediately above) just
+   * finished building for its body — bob/roll/sway/lean/hit-tilt all
+   * included — plus `cfg.enemies.weapons.hold`'s body-local offset, so the
+   * gun visibly rides the gait instead of gliding level through it.
+   *
+   * `_matrix`/`_place` are reused here: the body compose just above already
+   * copied its result out via `setMatrixAt`, so there is nothing left
+   * aliased in them. `_scale` is NOT reused for the gun's own scale — it may
+   * carry this frame's hit-squash/heel-strike, which a rigid gun should not
+   * inherit — hence the dedicated `_gunScale`/`_gunOffset`/`_gunPos` scratch.
+   *
+   * @param {number} i
+   * @param {import('../core/types.js').EnemyTypeDef} typeDef
+   */
+  _updateGunInstance(i, typeDef) {
+    const hold = this._cfg.enemies.weapons?.hold ?? DEFAULT_HOLD;
+    const sizeMul = this._sizeMul[i];
+
+    // Offset authored in the body's own local frame (+X right, +Y up, +Z
+    // forward — see `_buildGunMesh`'s note on matching `FACING_FIX`), then
+    // rotated into world space by the SAME quaternion the body just used, so
+    // it swings with the yaw/lean/roll/kick-tilt rather than staying level.
+    _gunOffset.set(hold.side, hold.height, hold.forward).multiplyScalar(sizeMul);
+    _gunOffset.applyQuaternion(_quat);
+    _gunPos.copy(_pos).add(_gunOffset);
+
+    _gunScale.setScalar(hold.scale * sizeMul);
+    _place.compose(_gunPos, _quat, _gunScale);
+    this._gunMesh.setMatrixAt(i, _place);
+    this._gunMesh.setColorAt(i, _gunColor.setHex(typeDef.weaponColor ?? 0xffffff));
+    this._gunDirty = true;
   }
 
   /**
@@ -614,19 +857,61 @@ export class Enemies {
     const idx = this._projFree.pop();
     if (idx === undefined) return; // pool exhausted: drop the shot, never throw.
 
-    const dx = target.x - this._x[i];
-    const dz = target.z - this._z[i];
+    // An armed enemy fires from its gun, not its chest — everything else
+    // (unarmed-ranged fallback, should `cfg.enemies.weapons` ever be absent
+    // — see `_resolveTypeDef`) keeps the old chest-centre origin.
+    const muzzle = typeDef.armed ? this._muzzleWorldPos(i) : null;
+    const originX = muzzle ? muzzle.x : this._x[i];
+    const originY = muzzle ? muzzle.y : this._hitHeightOf(i) * 0.5;
+    const originZ = muzzle ? muzzle.z : this._z[i];
+
+    const dx = target.x - originX;
+    const dz = target.z - originZ;
     const d = Math.hypot(dx, dz) || 1;
 
-    this._projX[idx] = this._x[i];
-    this._projY[idx] = this._hitHeightOf(i) * 0.5;
-    this._projZ[idx] = this._z[i];
+    this._projX[idx] = originX;
+    this._projY[idx] = originY;
+    this._projZ[idx] = originZ;
     this._projVX[idx] = (dx / d) * typeDef.projSpeed;
     this._projVZ[idx] = (dz / d) * typeDef.projSpeed;
     this._projDmg[idx] = typeDef.dmg;
     this._projMaxDist[idx] = typeDef.range * 1.5; // margin: the target may have moved by the time the shot lands.
     this._projTraveled[idx] = 0;
     this._projActive[idx] = 1;
+  }
+
+  /**
+   * World-space muzzle point for `i`'s held gun, from its base yaw and
+   * `cfg.enemies.weapons.hold` — NOT the fully wobbled gait pose
+   * `_updateVoxelInstance`/`_updateGunInstance` compose for rendering
+   * (bob/roll/sway/lean/kick-tilt). This runs from `_performAttack`, mid
+   * per-enemy simulation step, before that enemy's render pass this same
+   * tick even happens — re-deriving the full gait quaternion here just to
+   * nudge a spawn point by centimetres is not worth the trig, and the
+   * projectile visibly leaving from roughly the gun (rather than dead
+   * centre of the body) is the whole ask. The gun's RENDERED position still
+   * gets the full treatment.
+   *
+   * @param {number} i
+   * @returns {{x:number, y:number, z:number}}
+   */
+  _muzzleWorldPos(i) {
+    const hold = this._cfg.enemies.weapons?.hold ?? DEFAULT_HOLD;
+    const sizeMul = this._sizeMul[i];
+    const yaw = this._yaw[i];
+    // Forward/right in this file's yaw convention (yaw 0 = -z, increasing
+    // clockwise — see the `_yaw[i] = Math.atan2(...)` comment in `update()`
+    // and `_applyKnockback`'s "back" derivation for the same forward vector;
+    // right is forward rotated -90 deg about +Y).
+    const fwdX = Math.sin(yaw);
+    const fwdZ = -Math.cos(yaw);
+    const rightX = Math.cos(yaw);
+    const rightZ = Math.sin(yaw);
+    return {
+      x: this._x[i] + (fwdX * hold.forward + rightX * hold.side) * sizeMul,
+      y: hold.height * sizeMul,
+      z: this._z[i] + (fwdZ * hold.forward + rightZ * hold.side) * sizeMul,
+    };
   }
 
   /**
@@ -827,7 +1112,17 @@ export class Enemies {
     this._slotId[idx] = -1;
     this._renderKind[idx] = null;
     this._type[idx] = null;
+    this._tierId[idx] = null;
     this._free.push(idx);
+
+    // Unconditional, same as the voxel/billboard frees just above: cheaper
+    // to always zero the gun instance than to check whether this enemy was
+    // armed. The gun mesh has no free-list of its own (see `_buildGunMesh`)
+    // — `idx` IS its instance index — so this is the only place a dead
+    // enemy's held gun stops being drawn; `_updateVoxelInstance` only runs
+    // on the living.
+    this._gunMesh.setMatrixAt(idx, ZERO_SCALE);
+    this._gunDirty = true;
 
     this._worldRef?.effects?.burst(x, y, z, 0xff5533, 10);
     this._playThrottled('zombie-death-1', DEATH_SOUND_MIN_INTERVAL_S);
@@ -916,6 +1211,7 @@ export class Enemies {
       this._slotId[i] = -1;
       this._renderKind[i] = null;
       this._type[i] = null;
+      this._tierId[i] = null;
       this._kickVX[i] = 0;
       this._kickVZ[i] = 0;
     }
@@ -932,6 +1228,13 @@ export class Enemies {
       }
       pool.mesh.instanceMatrix.needsUpdate = true;
     }
+
+    // Gun instances aren't pool-scoped by model like the voxel bodies above
+    // (see `_buildGunMesh`) — one shared mesh, index == pool index — so this
+    // is a flat sweep over the whole cap rather than a per-model loop.
+    for (let i = 0; i < this._cap; i++) this._gunMesh.setMatrixAt(i, ZERO_SCALE);
+    this._gunMesh.instanceMatrix.needsUpdate = true;
+    this._gunDirty = false;
 
     for (let i = 0; i < PROJECTILE_CAP; i++) {
       if (this._projActive[i]) this._freeProjectile(i);
@@ -951,5 +1254,8 @@ export class Enemies {
     this._projMesh.geometry.dispose();
     this._projMesh.material.dispose();
     this._projMesh.removeFromParent();
+    this._gunMesh.geometry.dispose();
+    this._gunMesh.material.dispose();
+    this._gunMesh.removeFromParent();
   }
 }
