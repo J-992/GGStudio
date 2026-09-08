@@ -13,12 +13,12 @@ import { SENS_MIN, SENS_MAX } from '../core/prefs.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// The four brainrot portraits actually shipped in `public/assets/sprites/`
-// (see `manifest.json`'s `sprites.portraits` — bombardiro/tralalero are
-// stub bosses in `cfg.bosses` but still get a portrait so the title screen
-// can tease them; assassino/lirili have sprite atlas cells but no portrait
-// crop yet).
-const TITLE_PORTRAITS = ['patapim', 'tungtung', 'bombardiro', 'tralalero'];
+// The five bosses, in the order `cfg.run.bossOrder` fights them — so the
+// title screen reads left-to-right as the run does. Every one is a real
+// fight now; `tungtung` used to sit in this row under a "BOSSES" caption
+// despite being an ordinary enemy, and its portrait is no longer shipped.
+// See `manifest.json`'s `sprites.portraits`.
+const TITLE_PORTRAITS = ['patapim', 'lirili', 'bombardiro', 'tralalero', 'assassino'];
 
 /**
  * @param {string} id Icon symbol id (from `index.html`'s inline sprite sheet), without the leading `#`.

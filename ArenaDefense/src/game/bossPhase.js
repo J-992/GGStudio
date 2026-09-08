@@ -38,9 +38,11 @@ export function installBoss(game, { boss, hud, audio, cfg }) {
     if (!bossName) return;
     // `wave:started`'s payload already carries the wave def's resolved
     // `boss` string (`Game.js`'s `_startWave()`: `def.boss ?? null`) — no
-    // need to re-look up `waveDef(cfg, game.wave)` ourselves.
+    // need to re-look up `waveDef(cfg, game.wave)` ourselves. Pass it on:
+    // `Boss#spawn`'s second argument defaults to `'patapim'`, so dropping it
+    // here would put patapim in all five boss waves.
     const gateId = game.activeGates[0] ?? 0;
-    boss.spawn(gateId);
+    boss.spawn(gateId, bossName);
     audio.play('boss-alert');
   });
 
