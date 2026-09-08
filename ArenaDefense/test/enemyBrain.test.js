@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CONFIG } from '../src/config.js';
-import { chooseTarget, steer, attackReady, tickCooldown, hpFor } from '../src/core/enemyBrain.js';
+import {
+  chooseTarget, steer, attackReady, tickCooldown, hpFor,
+  knockbackSpeed, decayKnockback, staggerFactor, knockbackTilt, knockbackIntensity,
+} from '../src/core/enemyBrain.js';
 
 test('melee picks the nearest turret over a farther player', () => {
   const enemy = { x: 0, z: 0, type: 'shambler' };
@@ -114,4 +117,66 @@ test('hpFor scales base hp by hpMul', () => {
   const typeDef = CONFIG.enemies.types.shambler;
   assert.equal(hpFor(typeDef, 1), typeDef.hp);
   assert.equal(hpFor(typeDef, 1.5), typeDef.hp * 1.5);
+});
+
+test('knockbackSpeed scales with damage, per-type resistance, and clamps', () => {
+  const shambler = CONFIG.enemies.types.shambler;
+  const tungtung = CONFIG.enemies.types.tungtung;
+  const k = CONFIG.enemies.knockback;
+
+  // A reference-damage hit lands exactly the reference impulse.
+  assert.ok(Math.abs(knockbackSpeed(k.refDmg, shambler, CONFIG) - k.speed) < 1e-9);
+  // Twice the damage, twice the shove.
+  assert.ok(
+    knockbackSpeed(k.refDmg * 2, shambler, CONFIG) >
+      knockbackSpeed(k.refDmg, shambler, CONFIG),
+  );
+  // A heavy body barely budges compared to a light one taking the same hit.
+  assert.ok(knockbackSpeed(k.refDmg, tungtung, CONFIG) < knockbackSpeed(k.refDmg, shambler, CONFIG));
+  // Even a cannon shell can't launch anything past its type's cap.
+  assert.ok(knockbackSpeed(1e6, shambler, CONFIG) <= k.maxSpeed * shambler.knockbackScale + 1e-9);
+  assert.equal(knockbackSpeed(0, shambler, CONFIG), 0);
+  assert.equal(knockbackSpeed(-50, shambler, CONFIG), 0);
+});
+
+test('decayKnockback shrinks the impulse and snaps to a dead stop', () => {
+  const { vx, vz } = decayKnockback(6, 0, 1 / 60, CONFIG);
+  assert.ok(vx > 0 && vx < 6);
+  assert.equal(vz, 0);
+
+  // Below stopSpeed it must reach exactly zero, never creep forever.
+  const stopped = decayKnockback(CONFIG.enemies.knockback.stopSpeed * 0.5, 0, 1 / 60, CONFIG);
+  assert.deepEqual(stopped, { vx: 0, vz: 0 });
+
+  // And it does so within a fraction of a second of a full-strength hit.
+  let v = { vx: CONFIG.enemies.knockback.maxSpeed, vz: 0 };
+  let steps = 0;
+  while ((v.vx !== 0 || v.vz !== 0) && steps < 600) {
+    v = decayKnockback(v.vx, v.vz, 1 / 60, CONFIG);
+    steps++;
+  }
+  assert.ok(steps / 60 < 0.6, `knockback lasted ${steps / 60}s`);
+});
+
+test('knockback intensity, tilt and stagger stay bounded and monotonic', () => {
+  const shambler = CONFIG.enemies.types.shambler;
+  const k = CONFIG.enemies.knockback;
+  const max = k.maxSpeed * shambler.knockbackScale;
+
+  assert.equal(knockbackIntensity(0, shambler, CONFIG), 0);
+  assert.equal(knockbackIntensity(max * 10, shambler, CONFIG), 1);
+  assert.equal(knockbackTilt(0, shambler, CONFIG), 0);
+  assert.ok(Math.abs(knockbackTilt(max, shambler, CONFIG) - k.tiltRad) < 1e-9);
+
+  // Untouched enemies keep all of their own steering; a shoved one loses most of it.
+  assert.equal(staggerFactor(0, shambler, CONFIG), 1);
+  assert.ok(Math.abs(staggerFactor(max, shambler, CONFIG) - (1 - k.staggerDamp)) < 1e-9);
+
+  let prev = -1;
+  for (let i = 0; i <= 20; i++) {
+    const tilt = knockbackTilt((max * i) / 20, shambler, CONFIG);
+    assert.ok(tilt >= prev, 'tilt must grow with the impulse');
+    assert.ok(tilt >= 0 && tilt <= k.tiltRad + 1e-9);
+    prev = tilt;
+  }
 });

@@ -98,7 +98,11 @@ test('splash reaches the enemy pool, and a direct hit is damaged on top', () => 
   assert.equal(splash, RPG.splash);
   assert.equal(splashDmg, RPG.splashDmg);
   assert.equal(source, 'rpg7');
-  assert.deepEqual(calls.direct, [[3, RPG.dmg, 'rpg7']], 'the struck enemy also takes direct damage');
+  assert.equal(calls.direct.length, 1, 'the struck enemy also takes direct damage');
+  const [idx, dmg, src, knock] = calls.direct[0];
+  assert.deepEqual([idx, dmg, src], [3, RPG.dmg, 'rpg7']);
+  // Knocked back along the rocket's heading, like a hitscan pellet.
+  assert.ok(knock.x > 0 && Math.abs(knock.z) < 1e-9, 'shoved along the rocket heading');
 });
 
 test('a fast rocket cannot tunnel through an enemy between fixed steps', () => {

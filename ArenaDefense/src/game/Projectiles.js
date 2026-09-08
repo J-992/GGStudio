@@ -148,7 +148,10 @@ export class Projectiles {
 
       const hit = this._nearestHit(_origin, _dir, step, world);
       if (hit) {
-        this._detonate(hit.point, this._dmg[i], this._splash[i], this._splashDmg[i], this._sound[i], hit, world);
+        this._detonate(
+          hit.point, this._dmg[i], this._splash[i], this._splashDmg[i], this._sound[i],
+          hit, world, this._dirX[i], this._dirZ[i],
+        );
         this._freeProjectile(i);
         continue;
       }
@@ -218,11 +221,15 @@ export class Projectiles {
    * @param {string} sound
    * @param {{kind:'enemy'|'boss'|'arena', idx?:number}} hit
    * @param {object} world
+   * @param {number} [dirX] Rocket heading, for the direct hit's knockback.
+   * @param {number} [dirZ]
    */
-  _detonate(point, dmg, splash, splashDmg, sound, hit, world) {
+  _detonate(point, dmg, splash, splashDmg, sound, hit, world, dirX = 0, dirZ = 0) {
     world.enemies?.damageRadius?.(point.x, point.z, splash, splashDmg, 'rpg7');
     if (hit.kind === 'enemy') {
-      world.enemies?.damageAt?.(hit.idx, dmg, 'rpg7');
+      // Shove the directly-struck body along the rocket's own heading, the
+      // same way a hitscan pellet does (`Game#_resolvePellet`).
+      world.enemies?.damageAt?.(hit.idx, dmg, 'rpg7', { x: dirX, z: dirZ });
     }
 
     const boss = world.boss;

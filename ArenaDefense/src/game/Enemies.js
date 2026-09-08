@@ -15,8 +15,11 @@
 // `docs/INTERFACES.md`'s "P3 additions" section.
 import * as THREE from 'three';
 import { gatePositions, clampToArena } from '../core/arenaGeometry.js';
-import { chooseTarget, steer, attackReady, tickCooldown, hpFor } from '../core/enemyBrain.js';
-import { bob, hitFlash } from '../core/spriteAnim.js';
+import {
+  chooseTarget, steer, attackReady, tickCooldown, hpFor,
+  knockbackSpeed, decayKnockback, staggerFactor, knockbackTilt, knockbackIntensity,
+} from '../core/enemyBrain.js';
+import { bob, hitFlash, hitSquash } from '../core/spriteAnim.js';
 
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
@@ -42,7 +45,10 @@ const _place = new THREE.Matrix4();
 const _quat = new THREE.Quaternion();
 const _quatYaw = new THREE.Quaternion();
 const _quatLean = new THREE.Quaternion();
+const _quatKick = new THREE.Quaternion();
+const _kickAxis = new THREE.Vector3();
 const _pos = new THREE.Vector3();
+const _scale = new THREE.Vector3();
 const _scaleOne = new THREE.Vector3(1, 1, 1);
 
 /**
@@ -132,6 +138,11 @@ export class Enemies {
     this._targetKind = new Uint8Array(cap); // 0 = player, 1 = turret
     this._targetId = new Int32Array(cap).fill(-1);
     this._hitAt = new Float32Array(cap).fill(-Infinity);
+    // Knockback velocity (m/s) left over from recent hits: added to the
+    // enemy's own steering each step and decayed towards zero, and the
+    // source of the lean/squash the body plays while it's being shoved.
+    this._kickVX = new Float32Array(cap);
+    this._kickVZ = new Float32Array(cap);
     this._walkPhase = new Float32Array(cap);
     this._gate = new Int32Array(cap).fill(-1);
     /** @type {(('voxel'|'sprite')|null)[]} */
@@ -239,6 +250,8 @@ export class Enemies {
     this._targetKind[idx] = 0;
     this._targetId[idx] = -1;
     this._hitAt[idx] = -Infinity;
+    this._kickVX[idx] = 0;
+    this._kickVZ[idx] = 0;
     this._walkPhase[idx] = 0;
     this._gate[idx] = gateId;
     this._renderKind[idx] = typeDef.render;
@@ -299,11 +312,23 @@ export class Enemies {
       const speedMul = this._time < this._slowUntil[i] ? this._slowFactor[i] : 1;
       const moving = Math.abs(vx) > 1e-4 || Math.abs(vz) > 1e-4;
 
-      const nx = this._x[i] + vx * speedMul * dt;
-      const nz = this._z[i] + vz * speedMul * dt;
+      // A hit shoves the body: its own steering is damped for as long as the
+      // knockback lasts (the stagger) and the leftover impulse is added on
+      // top, so the enemy visibly loses ground instead of walking through it.
+      const kickSpeed = Math.hypot(this._kickVX[i], this._kickVZ[i]);
+      const stagger = kickSpeed > 0 ? staggerFactor(kickSpeed, typeDef, cfg) : 1;
+
+      const nx = this._x[i] + (vx * speedMul * stagger + this._kickVX[i]) * dt;
+      const nz = this._z[i] + (vz * speedMul * stagger + this._kickVZ[i]) * dt;
       const clamped = clampToArena(nx, nz, cfg.arena.radius - typeDef.radius);
       this._x[i] = clamped.x;
       this._z[i] = clamped.z;
+
+      if (kickSpeed > 0) {
+        const decayed = decayKnockback(this._kickVX[i], this._kickVZ[i], dt, cfg);
+        this._kickVX[i] = decayed.vx;
+        this._kickVZ[i] = decayed.vz;
+      }
 
       if (moving) {
         // Matches Player.js/arenaGeometry's yaw convention: yaw 0 = -z,
@@ -357,11 +382,29 @@ export class Enemies {
     const bobY = moving ? Math.sin(phase) * VOXEL_BOB_AMP : 0;
     const lean = moving ? Math.sin(phase) * VOXEL_LEAN_RAD : 0;
 
+    const kickX = this._kickVX[i];
+    const kickZ = this._kickVZ[i];
+    const kickSpeed = Math.hypot(kickX, kickZ);
+    const hit = kickSpeed > 0 ? knockbackIntensity(kickSpeed, typeDef, this._cfg) : 0;
+    const squash = hit > 0 ? hitSquash(hit, this._cfg) : null;
+
     _pos.set(this._x[i], bobY, this._z[i]);
     _quatYaw.setFromAxisAngle(Y_AXIS, this._yaw[i] + FACING_FIX);
     _quatLean.setFromAxisAngle(Z_AXIS, lean);
     _quat.copy(_quatYaw).multiply(_quatLean);
-    _place.compose(_pos, _quat, _scaleOne);
+
+    if (hit > 0) {
+      // Tilt the body's top *towards* the push, around the world axis
+      // perpendicular to it — the classic "knocked off balance" lean. World
+      // space, so it pre-multiplies the yaw/walk-lean rotation rather than
+      // rotating with the model.
+      _kickAxis.set(kickZ / kickSpeed, 0, -kickX / kickSpeed);
+      _quatKick.setFromAxisAngle(_kickAxis, knockbackTilt(kickSpeed, typeDef, this._cfg));
+      _quat.premultiply(_quatKick);
+    }
+
+    if (squash) _scale.set(squash.sx, squash.sy, squash.sx);
+    _place.compose(_pos, _quat, squash ? _scale : _scaleOne);
     _matrix.multiplyMatrices(_place, pool.localMatrix);
     pool.mesh.setMatrixAt(slot, _matrix);
     pool.dirty = true;
@@ -376,6 +419,14 @@ export class Enemies {
     const slot = this._slotId[i];
     if (slot < 0) return;
     const anim = bob(this._walkPhase[i], moving ? typeDef.speed : 0, this._cfg);
+    const kickSpeed = Math.hypot(this._kickVX[i], this._kickVZ[i]);
+    if (kickSpeed > 0) {
+      // Billboards carry no rotation, so a sprite plays the hit as the
+      // knockback slide (already in `_x`/`_z`) plus this flinch squash.
+      const squash = hitSquash(knockbackIntensity(kickSpeed, typeDef, this._cfg), this._cfg);
+      anim.sx *= squash.sx;
+      anim.sy *= squash.sy;
+    }
     const flash = hitFlash(this._time - this._hitAt[i], this._cfg);
     this._billboards.set(slot, this._x[i], this._z[i], anim, flash);
   }
@@ -499,12 +550,14 @@ export class Enemies {
    * @param {number} idx
    * @param {number} dmg
    * @param {string} source Free-form origin tag (`'player'`, a turret type name, ...).
+   * @param {{x:number, z:number}} [dir] Push direction (need not be normalized). Omitted/zero pushes the enemy straight backwards from its own facing.
    * @returns {boolean} Whether this hit killed the enemy.
    */
-  damageAt(idx, dmg, source) {
+  damageAt(idx, dmg, source, dir) {
     if (idx < 0 || !this._alive[idx]) return false;
     this._hp[idx] -= dmg;
     this._hitAt[idx] = this._time;
+    this._applyKnockback(idx, dmg, dir);
     if (this._hp[idx] <= 0) {
       this._kill(idx, source);
       return true;
@@ -527,9 +580,60 @@ export class Enemies {
       if (!this._alive[i]) continue;
       const dx = this._x[i] - x;
       const dz = this._z[i] - z;
-      if (dx * dx + dz * dz <= r2 && this.damageAt(i, dmg, source)) kills++;
+      // A blast throws every body radially outwards from where it landed.
+      if (dx * dx + dz * dz <= r2 && this.damageAt(i, dmg, source, { x: dx, z: dz })) kills++;
     }
     return kills;
+  }
+
+  /**
+   * Damage-free shove — the revive push in `Game.js` uses it to physically
+   * clear the ring of enemies around the player.
+   *
+   * @param {number} idx
+   * @param {{x:number, z:number}} dir Need not be normalized; zero shoves the enemy backwards from its own facing.
+   * @param {number} speed Impulse in m/s, before the type's `knockbackScale` cap.
+   */
+  knockback(idx, dir, speed) {
+    if (idx < 0 || !this._alive[idx]) return;
+    this._applyKnockback(idx, speed, dir, true);
+  }
+
+  /**
+   * Adds one hit's impulse to whatever knockback is already in flight,
+   * clamped so rapid fire staggers an enemy without launching it.
+   *
+   * @param {number} idx
+   * @param {number} amount Damage dealt, or — with `rawSpeed` — an impulse in m/s.
+   * @param {{x:number, z:number}} [dir]
+   * @param {boolean} [rawSpeed] Treat `amount` as a speed rather than damage.
+   */
+  _applyKnockback(idx, amount, dir, rawSpeed = false) {
+    const typeDef = this._cfg.enemies.types[this._type[idx]];
+    const impulse = rawSpeed
+      ? Math.max(0, amount) * (typeDef.knockbackScale ?? 1)
+      : knockbackSpeed(amount, typeDef, this._cfg);
+    if (impulse <= 0) return;
+
+    let dx = dir?.x ?? 0;
+    let dz = dir?.z ?? 0;
+    let d = Math.hypot(dx, dz);
+    if (d < 1e-4) {
+      // No direction from the hit (or the blast landed dead centre): shove
+      // the enemy backwards along its own facing — yaw 0 = -z, so forward is
+      // (sin, -cos) and back is (-sin, cos).
+      dx = -Math.sin(this._yaw[idx]);
+      dz = Math.cos(this._yaw[idx]);
+      d = 1;
+    }
+
+    const vx = this._kickVX[idx] + (dx / d) * impulse;
+    const vz = this._kickVZ[idx] + (dz / d) * impulse;
+    const speed = Math.hypot(vx, vz);
+    const max = this._cfg.enemies.knockback.maxSpeed * (typeDef.knockbackScale ?? 1);
+    const clampMul = speed > max ? max / speed : 1;
+    this._kickVX[idx] = vx * clampMul;
+    this._kickVZ[idx] = vz * clampMul;
   }
 
   /**
@@ -661,6 +765,8 @@ export class Enemies {
       this._slotId[i] = -1;
       this._renderKind[i] = null;
       this._type[i] = null;
+      this._kickVX[i] = 0;
+      this._kickVZ[i] = 0;
     }
     this._aliveCount = 0;
     this._free = [];

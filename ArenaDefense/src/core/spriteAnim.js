@@ -62,3 +62,18 @@ export function hitFlash(tSince, cfg) {
   if (flashS <= 0) return 0;
   return clamp01(1 - Math.max(0, tSince) / flashS);
 }
+
+/**
+ * Flinch squash for a body taking a hit: it compresses along its own height
+ * and widens as the impulse lands, easing back as the knockback decays.
+ * Multiplies (rather than replaces) the walk `bob` squash so a hit reads on
+ * top of the walk cycle instead of freezing it.
+ *
+ * @param {number} intensity 0..1, from `core/enemyBrain.knockbackIntensity`.
+ * @param {import('./types.js').GameConfig} cfg
+ * @returns {{ sx:number, sy:number }} Scale multipliers, 1/1 when untouched.
+ */
+export function hitSquash(intensity, cfg) {
+  const amount = cfg.enemies.knockback.squash * clamp01(intensity);
+  return { sx: 1 + amount, sy: 1 - amount };
+}

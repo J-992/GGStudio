@@ -113,6 +113,20 @@ Yaw/pitch convention: yaw `0` looks toward `-z` (matching
 Pitch is positive looking up, clamped to `±pitchLimitDeg`. Camera uses Euler
 order `'YXZ'`, `rotation.y = -yaw`, `rotation.x = pitch`.
 
+**Recoil is a rendering offset, not aim.** `update()` writes
+`rotation.x = clamp(pitch + kick * camPitchDeg)` where `kick` is the
+`core/recoil.js` spring value; `this.pitch`/`this.yaw` themselves are never
+written by recoil, so the punch fully self-recovers and nothing outside
+`Player` should try to compensate for it. Because the rendered camera
+carries that offset, `fire()` and `aimTarget()` derive their direction from
+`yaw`/`pitch` analytically (`_aimDirection`) instead of reading
+`camera.getWorldDirection()` — otherwise every shot after the first in a
+burst would drift high and the effective `coneDegTouch` for touch auto-fire
+would shrink. The shot origin still comes from `camera.getWorldPosition()`,
+which the kick does not touch (it offsets rotation only). Net contract: the
+gun and the view kick, but a shot always goes exactly where the player is
+aiming.
+
 **Clock**: `invulnUntil` and `fire()`'s cooldown compare against the
 player's own fixed-step clock (`_time`, accumulated one `dt` per
 `update()` call). This is numerically identical to `Game`'s `world.time`
@@ -141,7 +155,7 @@ class Player {
   /** @param {number} n Ignored while dead or `world.time < invulnUntil`. */
   takeDamage(n) {}
 
-  /** Resets position/orientation/health for a new run (camera/viewmodel objects persist). */
+  /** Resets position/orientation/health for a new run (camera/viewmodel objects persist), and returns the recoil spring to exact rest — value *and* velocity, so no leftover kick bleeds into the first frame. */
   reset() {}
 
   /**
@@ -362,12 +376,24 @@ class Enemies {
    * @param {number} idx
    * @param {number} dmg
    * @param {string} source Free-form origin tag: `'player'`, `'turret'`, ...
+   * @param {{x:number,z:number}} [dir] Hit-reaction push direction (need not be
+   *   normalized) — the bullet's direction, or turret→enemy. Omitted or zero
+   *   shoves the enemy straight backwards from its own facing.
    * @returns {boolean} Whether this hit killed the enemy.
    */
-  damageAt(idx, dmg, source) {}
+  damageAt(idx, dmg, source, dir) {}
 
-  /** Splash damage; returns the number of kills it caused. @returns {number} */
+  /** Splash damage; returns the number of kills it caused. Each body is thrown radially outwards from `(x, z)`. @returns {number} */
   damageRadius(x, z, r, dmg, source) {}
+
+  /**
+   * Damage-free hit reaction — the revive push uses it. See "Hit reaction
+   * (knockback)" below.
+   * @param {number} idx
+   * @param {{x:number,z:number}} dir Radial push direction; zero shoves the enemy backwards from its own facing.
+   * @param {number} speed Impulse in m/s, scaled by the type's `knockbackScale`.
+   */
+  knockback(idx, dir, speed) {}
 
   /**
    * @param {number} idx
@@ -512,8 +538,30 @@ instances, alongside the pre-existing `energy`/`wave`/`activeGates` fields).
 
 Player firing (`_handleFiring`) now does a real hitscan: `world.enemies
 .raycast(shot.origin, shot.dir, gun.range)`, and on a hit,
-`damageAt(hit.idx, gun.dmg, 'player')`, a tracer to the hit point (instead of
-the max-range point), and a small `effects.burst` at the hit point.
+`damageAt(hit.idx, gun.dmg, 'player', { x: shot.dir.x, z: shot.dir.z })`, a
+tracer to the hit point (instead of the max-range point), and a small
+`effects.burst` at the hit point.
+
+## Hit reaction (knockback)
+
+Every hit on a pool enemy shoves its body: `damageAt`'s optional `dir` is
+turned into a knockback velocity (`core/enemyBrain.knockbackSpeed`, scaled by
+damage and the type's `knockbackScale`, capped and stackable) held in
+`Enemies`' `_kickVX/_kickVZ` arrays. Per fixed step that velocity is added to
+the enemy's own steering, which is itself damped by
+`staggerFactor` while the kick lasts, then decayed by `decayKnockback` (it
+snaps to zero below `stopSpeed`, so a hit never leaves a permanent drift).
+Every tunable lives in `cfg.enemies.knockback`.
+
+The same impulse drives the visuals, via
+`knockbackIntensity` (0..1): voxel enemies tilt `knockbackTilt` radians about
+the world axis perpendicular to the push (pre-multiplied onto the yaw/walk
+rotation, pivoting at the feet) and play `spriteAnim.hitSquash`; sprite
+enemies, which carry no rotation, play the knockback slide plus that squash
+on top of their walk `bob`, alongside the pre-existing `hitFlash`. Direction
+per source: the player's bullet direction, turret→enemy for gun/tesla, and
+radially outwards from the blast centre for cannon splash. The boss has no
+knockback — it keeps its `hitFlash` only.
 
 `?wave=N` (1..`run.finalWave`) skips the title screen and starts the run
 directly at wave N's build phase — used for owner verification (P5's boss at
@@ -1062,20 +1110,16 @@ then full hp, `alive = true`, `invulnUntil = world.time +
 invulnAfterReviveS`, `_pushEnemiesFromPlayer()` (below), `hud.show(true)`,
 `state.go('wave')`.
 
-**Deviation — "push enemies away" is a stun, not a reposition.** The plan
-brief calls for pushing nearby enemies outward on revive. `Enemies.js`'s
-frozen public contract (P3's "P3 additions" section above) exposes exactly
-one per-enemy mutator besides damage: `applySlow(idx, factor, durS)` — no
-`setPosition`/knockback of any kind, and P6 is not in a position to add one
-(out of this package's owned-files list, same reasoning P5 gave for not
-adding an add-spawn-position setter). `_pushEnemiesFromPlayer` instead
-calls `world.enemies.positions()`, finds every entry within
-`revivePushRadius` of the player, and `applySlow(idx, 0.05,
-invulnAfterReviveS)`s each one — a near-stun for exactly the same window
-the player is invulnerable for. Enemies don't visually leap backward, but
-the player gets equivalent practical breathing room. Flagged here for
-whichever package next touches `Enemies.js`, same spirit as P5's add-spawn
-flag above.
+**"Push enemies away" is a real shove plus a stun.** The plan brief calls
+for pushing nearby enemies outward on revive. This was originally a stun
+only — `Enemies.js` exposed no positional mutator besides damage — and is
+now both, since the hit-reaction work added one:
+`_pushEnemiesFromPlayer` calls `world.enemies.positions()`, and for every
+entry within `revivePushRadius` of the player fires
+`knockback(idx, {x: dx, z: dz}, player.revivePushSpeed)` (radially outwards
+— bodies lean and stagger back exactly as they do off a bullet) followed by
+`applySlow(idx, 0.05, invulnAfterReviveS)`, a near-stun for exactly the same
+window the player is invulnerable for.
 
 ### Run-end flow
 
@@ -1932,3 +1976,84 @@ diff is either `state:changed` (the pause-menu quit path re-emitting it for
 `'runEnd'`, exactly like every other `state`/`bus` pairing already in the
 codebase) or the pre-existing `player:fired`. The tables under "P2/P3/P5
 additions" above are still the complete list.
+## Weapon recoil
+
+### `core/recoil.js` (pure)
+
+```js
+/** @typedef {{ value: number, velocity: number }} RecoilSpring */
+
+/** @returns {RecoilSpring} At rest. */
+export function createRecoilSpring() {}
+
+/** Returns the spring to exact rest (value *and* velocity). @param {RecoilSpring} spring */
+export function resetRecoilSpring(spring) {}
+
+/** Adds one shot's signed velocity impulse; repeated kicks stack. @param {RecoilSpring} spring @param {number} impulse */
+export function kickRecoilSpring(spring, impulse) {}
+
+/** Semi-implicit Euler step of `x'' = -stiffness*x - damping*x'`. @param {RecoilSpring} spring @param {number} dt @param {GameConfig} cfg */
+export function stepRecoilSpring(spring, dt, cfg) {}
+```
+
+One normalized scalar, no three.js/DOM and no `core/rng.js` — fully
+deterministic, which is what lets `test/recoil.test.js` pin its properties.
+
+A shot adds a **velocity** impulse rather than stepping the value, so the
+kick ramps in over ~4 frames and eases back out: a punch, not a pop.
+`CONFIG.player.gun.recoil.impulse` is normalized so a single shot peaks
+`value` at ~1.0, which makes every amplitude in that block readable as
+"per shot". `damping` is exactly `2*sqrt(stiffness)` (critically damped), so
+the value never overshoots below rest — the property that makes it safe to
+drive the camera pitch with, since an undershoot would swing the view *below*
+the player's aim. Sustained fire at `gun.rate` overlaps on the tail and
+plateaus around 1.3x a single shot; `maxValue` bounds that stack.
+
+The step sub-divides `dt` to ~1/480s (capped at 8 sub-steps). This is for
+**accuracy, not stability**: at the raw 1/60 fixed step the explicit damping
+term eats most of a fresh impulse in the first step and the kick peaks at
+about half its analytic height. Sub-stepping also makes the felt response
+independent of `timing.fixedStep`. The `maxValue` clamp doubles as the
+divergence guard for a pathological `dt` — the spring saturates and then
+recovers rather than blowing up.
+
+`game/Player.js` owns all the three.js: it multiplies the one spring value by
+the four amplitudes in `CONFIG.player.gun.recoil` — `viewBackM` (viewmodel
+slides toward the eye), `viewUpM` (and up — the pre-recoil code slid it
+*down*, which read as a dip), `viewPitchDeg` (muzzle-up tilt, the channel
+that carries the read), and `camPitchDeg` (the view punch). The viewmodel
+tilt is applied as `rotation.x = baseRot.x + kick * viewPitchDeg`, an offset
+from the orientation `assets.propMesh` bakes in from the model, never a bare
+`rotation.set`.
+
+Pause/resume needs no handling: `Game#pause()` stops the fixed-step loop, so
+the spring simply freezes mid-kick and continues on resume.
+
+### Where the recoil numbers live (reconciled with the weapon roster)
+
+This landed alongside the P8 weapon roster, which removed `CONFIG.player.gun`
+outright. The recoil config is therefore split in two rather than sitting in
+one `gun.recoil` block:
+
+- **`CONFIG.player.recoil`** — `stiffness`, `damping`, `maxValue`. Shared by
+  every weapon, because they are normalization and stability constants rather
+  than feel knobs, and `stepRecoilSpring(spring, dt, cfg)` reads them from
+  here.
+- **`CONFIG.player.weapons.types[*].recoil`** — `impulse`, `viewBackM`,
+  `viewUpM`, `viewPitchDeg`, `camPitchDeg`. Per weapon, read through
+  `player.gun.recoil` (the equipped weapon), which is what lets a SPAS-12 kick
+  roughly two and a half times as hard as the M9 without retuning the spring.
+
+`impulse` stays at the normalized `46.5` on every weapon. That value is what
+makes one shot peak the spring at ~1.0, so each amplitude reads directly as
+"per shot"; scaling it per weapon as well would push into `maxValue`'s clamp
+and count the weapon's heft twice. `camPitchDeg` is scaled far more gently
+than the viewmodel channels (`1 + (heft - 1) * 0.35`), because it moves where
+the player is actually aiming rather than just the gun on screen — every
+weapon stays under the "camera punch below half the aim cone" bound the
+recoil tests pin.
+
+`Player.js`'s hardcoded `RECOIL_DECAY_PER_S` is gone, per `AGENTS.md`'s
+"every tunable number lives in `config.js`". `Player#_buildViewmodel`
+re-captures `_viewmodelBaseRot` on every weapon swap, since each weapon's
+mesh carries its own baked orientation for the tilt to offset from.

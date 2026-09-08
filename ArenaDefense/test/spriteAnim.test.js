@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CONFIG } from '../src/config.js';
-import { bob, castRaise, hitFlash } from '../src/core/spriteAnim.js';
+import { bob, castRaise, hitFlash, hitSquash } from '../src/core/spriteAnim.js';
 
 test('bob stays within cfg.sprites bounds across many t/speed samples', () => {
   const { bobAmp, squash } = CONFIG.sprites;
@@ -43,4 +43,17 @@ test('hitFlash decays from 1 to 0 over flashS and stays clamped', () => {
   assert.ok(Math.abs(hitFlash(flashS / 2, CONFIG) - 0.5) < 1e-9);
   assert.equal(hitFlash(flashS * 10, CONFIG), 0);
   assert.equal(hitFlash(-1, CONFIG), 1);
+});
+
+test('hitSquash flattens and widens with intensity, and is neutral at rest', () => {
+  const { squash } = CONFIG.enemies.knockback;
+  assert.deepEqual(hitSquash(0, CONFIG), { sx: 1, sy: 1 });
+
+  const full = hitSquash(1, CONFIG);
+  assert.ok(Math.abs(full.sx - (1 + squash)) < 1e-9);
+  assert.ok(Math.abs(full.sy - (1 - squash)) < 1e-9);
+
+  // Out-of-range intensities clamp instead of turning the body inside out.
+  assert.deepEqual(hitSquash(5, CONFIG), full);
+  assert.deepEqual(hitSquash(-1, CONFIG), { sx: 1, sy: 1 });
 });

@@ -44,6 +44,17 @@ export const CONFIG = Object.freeze(deepFreeze({
     pitchLimitDeg: 75,
     invulnAfterReviveS: 3,
     revivePushRadius: 8,
+    revivePushSpeed: 8, // m/s impulse the revive shove lands on each enemy in range.
+
+    // The recoil spring itself: shared by every weapon, because these are
+    // normalization and stability constants rather than feel knobs.
+    // `core/recoil.js` integrates them into one value; each weapon's own
+    // `recoil` block below scales that value into metres and degrees.
+    recoil: {
+      stiffness: 256, // omega0 = 16 rad/s -> peaks ~4 frames after the shot
+      damping: 32,    // exactly 2*omega0: critically damped, never overshoots
+      maxValue: 1.8,  // ceiling over the ~1.3 sustained plateau
+    },
 
     // The weapon a player starts a run with when they have never picked one.
     defaultWeapon: 'pistol',
@@ -69,6 +80,17 @@ export const CONFIG = Object.freeze(deepFreeze({
     // crosshair is on. The RPG-7's 27 single-target DPS looks far off the band
     // on purpose — its damage is the splash, over a 4.5 m radius.
     //
+    // `recoil` scales `player.recoil`'s shared spring into this weapon's own
+    // kick. `impulse` stays at the normalized 46.5 for every weapon — that is
+    // what makes one shot peak the spring at ~1.0, so each amplitude below
+    // reads directly as "per shot"; scaling it too would just push into
+    // `maxValue`'s clamp and count the weapon's heft twice. `camPitchDeg`
+    // grows far more gently than the viewmodel channels, because it moves
+    // where the player is actually aiming rather than just the gun on screen.
+    // The pistol carries the baseline the spring was tuned against; the
+    // SPAS-12 and M82 kick two to three times as hard, which is most of what
+    // makes a slow, heavy weapon feel slow and heavy.
+    //
     // `model` is a mesh from `props.glb` (only two guns exist — weapons are
     // told apart by `color`/`scale`, the same way turret heads are);
     // `sound` is a name from `AUDIO_NAMES` in `game/assets.js`.
@@ -78,37 +100,43 @@ export const CONFIG = Object.freeze(deepFreeze({
         pistol: {
           name: 'M9', blurb: 'Sidearm. Accurate, endless reach, unspectacular.',
           dmg: 14, rate: 6, range: 45, spreadDeg: 0.35, pellets: 1,
-          recoilKick: 0.04, coneDegTouch: 7,
+          coneDegTouch: 7,
+          recoil: { impulse: 46.5, viewBackM: 0.085, viewUpM: 0.022, viewPitchDeg: 7.0, camPitchDeg: 1.0 },
           model: 'Gun_03', color: 0xcfd4dc, scale: 1.0, sound: 'pistol-shot-1',
         },
         ak47: {
           name: 'AK-47', blurb: 'Hits hard, wanders wide. Punishing past mid range.',
           dmg: 13, rate: 8, range: 40, spreadDeg: 3.5, pellets: 1,
-          recoilKick: 0.075, coneDegTouch: 7,
+          coneDegTouch: 7,
+          recoil: { impulse: 46.5, viewBackM: 0.1148, viewUpM: 0.0297, viewPitchDeg: 9.45, camPitchDeg: 1.12 },
           model: 'Gun_02', color: 0x8a5a2b, scale: 1.15, sound: 'gunfire',
         },
         m4a1: {
           name: 'M4A1', blurb: 'Faster and tighter than the AK, less per shot.',
           dmg: 10, rate: 11, range: 45, spreadDeg: 2.4, pellets: 1,
-          recoilKick: 0.05, coneDegTouch: 7,
+          coneDegTouch: 7,
+          recoil: { impulse: 46.5, viewBackM: 0.068, viewUpM: 0.0176, viewPitchDeg: 5.6, camPitchDeg: 0.93 },
           model: 'Gun_02', color: 0x4a4f57, scale: 1.05, sound: 'pistol-shot-2',
         },
         spas12: {
           name: 'SPAS-12', blurb: 'Nine pellets. Devastating close, useless far.',
           dmg: 7, rate: 1.5, range: 16, spreadDeg: 9, pellets: 9,
-          recoilKick: 0.16, coneDegTouch: 12,
+          coneDegTouch: 12,
+          recoil: { impulse: 46.5, viewBackM: 0.221, viewUpM: 0.0572, viewPitchDeg: 18.2, camPitchDeg: 1.56 },
           model: 'Gun_02', color: 0x2f3540, scale: 1.25, sound: 'cannon-shot-1',
         },
         m82: {
           name: 'M82', blurb: 'One shot, one kill, straight through the queue.',
           dmg: 110, rate: 0.8, range: 80, spreadDeg: 0, pellets: 1, pierce: 3,
-          recoilKick: 0.22, coneDegTouch: 4,
+          coneDegTouch: 4,
+          recoil: { impulse: 46.5, viewBackM: 0.272, viewUpM: 0.0704, viewPitchDeg: 22.4, camPitchDeg: 1.77 },
           model: 'Gun_02', color: 0x6d7b52, scale: 1.4, sound: 'sniper-shot-1',
         },
         rpg7: {
           name: 'RPG-7', blurb: 'Travels, then removes the crowd around it.',
           dmg: 60, rate: 0.45, range: 60, spreadDeg: 1.0, pellets: 1,
-          recoilKick: 0.3, coneDegTouch: 7,
+          coneDegTouch: 7,
+          recoil: { impulse: 46.5, viewBackM: 0.306, viewUpM: 0.0792, viewPitchDeg: 25.2, camPitchDeg: 1.91 },
           projSpeed: 30, splash: 4.5, splashDmg: 45,
           model: 'Gun_02', color: 0x3d5a3d, scale: 1.5, sound: 'explosion-metal',
         },
@@ -120,20 +148,30 @@ export const CONFIG = Object.freeze(deepFreeze({
     cap: 35,
     separationRadius: 1.2,
     separationForce: 3,
+    // Hit reaction: every point of damage shoves the body back along the
+    // shot direction, staggers its advance and tilts it away from the hit.
+    // `speed` is the impulse a `refDmg` hit lands (one pistol shot), scaled
+    // per type by `knockbackScale` below.
+    knockback: {
+      speed: 3.0, refDmg: 12, maxSpeed: 8, decayS: 0.1, stopSpeed: 0.2,
+      tiltRad: 0.55, squash: 0.16, staggerDamp: 0.6,
+    },
     types: {
       shambler: {
         render: 'voxel', model: 'zed_1', hp: 30, speed: 4.2, kind: 'melee',
         dmg: 8, range: 1.6, cooldown: 1.0, energy: 10, radius: 0.5, hitHeight: 1.8,
+        knockbackScale: 1,
       },
       spitter: {
         render: 'voxel', model: 'zed_3', hp: 24, speed: 4.3, kind: 'ranged',
         dmg: 6, range: 12, keepDistance: 9, preferPlayerRange: 16, cooldown: 1.8,
         projSpeed: 14, energy: 14, radius: 0.5, hitHeight: 1.8,
+        knockbackScale: 1.15,
       },
       tungtung: {
         render: 'sprite', sprite: 'tungtung', height: 2.2, hp: 110, speed: 4.1,
         kind: 'melee', dmg: 18, range: 2.0, cooldown: 1.4, lunge: 3.0, energy: 30,
-        radius: 0.6, hitHeight: 2.2,
+        radius: 0.6, hitHeight: 2.2, knockbackScale: 0.45,
       },
     },
   },

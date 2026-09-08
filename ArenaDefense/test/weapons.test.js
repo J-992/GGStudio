@@ -25,9 +25,22 @@ test('every weapon in `order` has a def with the keys the firing path reads', ()
   for (const id of ids) {
     const w = resolveWeapon(id, CONFIG);
     assert.ok(w, `${id} is in order but has no def`);
-    for (const key of ['name', 'dmg', 'rate', 'range', 'spreadDeg', 'pellets', 'recoilKick', 'coneDegTouch', 'model', 'color', 'sound']) {
+    for (const key of ['name', 'dmg', 'rate', 'range', 'spreadDeg', 'pellets', 'coneDegTouch', 'model', 'color', 'sound', 'recoil']) {
       assert.ok(w[key] !== undefined, `${id} is missing ${key}`);
     }
+    for (const key of ['impulse', 'viewBackM', 'viewUpM', 'viewPitchDeg', 'camPitchDeg']) {
+      assert.ok(typeof w.recoil[key] === 'number', `${id}.recoil is missing ${key}`);
+    }
+    // The spring peaks at ~1.0 per shot only because every weapon shares the
+    // normalized impulse; a per-weapon value would hit `maxValue`'s clamp and
+    // count the weapon's heft twice. Heft belongs in the amplitudes.
+    assert.equal(w.recoil.impulse, 46.5, `${id}.recoil.impulse must stay normalized`);
+    // Camera punch must stay well inside the aim cone, or a burst walks the
+    // view off the target the player was pointing at.
+    assert.ok(
+      w.recoil.camPitchDeg < w.coneDegTouch * 0.5,
+      `${id}'s camera punch (${w.recoil.camPitchDeg}deg) is too large for its ${w.coneDegTouch}deg cone`,
+    );
     assert.ok(w.dmg > 0 && w.rate > 0 && w.range > 0, `${id} has a non-positive core stat`);
     assert.ok(Number.isInteger(w.pellets) && w.pellets >= 1, `${id}.pellets must be a positive integer`);
     assert.ok(w.spreadDeg >= 0, `${id}.spreadDeg must not be negative`);

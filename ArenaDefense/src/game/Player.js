@@ -6,6 +6,13 @@
 // `config.player.weapons.types`, chosen on the weapon-select screen and again
 // in any build phase.
 //
+// Recoil: one spring in `core/recoil.js` drives both the viewmodel (slide
+// back, rise, muzzle-up tilt) and a pitch offset on the *rendered* camera
+// rotation. `this.pitch`/`this.yaw` are never written by it, so the punch
+// self-recovers to exactly where the player was aiming. Aim direction is
+// derived from yaw/pitch by `_aimDirection` rather than read off the camera
+// matrix, which is what keeps the kick cosmetic — see that method.
+//
 // Yaw/pitch convention: yaw 0 looks toward -z (matching `core/arenaGeometry`'s
 // "gate angle 0 points north/-z"), and increases clockwise — turning the
 // camera right. Pitch is positive looking up. The camera uses Euler order
@@ -23,11 +30,17 @@
 import * as THREE from 'three';
 import { coerceWeaponId, resolveWeapon } from '../core/weapons.js';
 import { clampToArena } from '../core/arenaGeometry.js';
+import {
+  createRecoilSpring,
+  kickRecoilSpring,
+  resetRecoilSpring,
+  stepRecoilSpring,
+} from '../core/recoil.js';
 
 const DEG2RAD = Math.PI / 180;
 const WALK_BOB_SPEED = 10;
 const WALK_BOB_AMOUNT = 0.03;
-const RECOIL_DECAY_PER_S = 6;
+const WALK_SWAY_AMOUNT = 0.01;
 
 export class Player {
   /**
@@ -59,7 +72,7 @@ export class Player {
     this._lastDamageT = -Infinity;
     this._lastFireT = -Infinity;
     this._walkPhase = 0;
-    this._recoil = 0;
+    this._recoil = createRecoilSpring();
 
     this._forward = new THREE.Vector3();
     this._right = new THREE.Vector3();
@@ -114,6 +127,14 @@ export class Player {
     mesh.scale.multiplyScalar(this.gun.scale ?? 1);
     if (mesh.material?.color) mesh.material.color.setHex(this.gun.color);
     mesh.position.copy(this._viewmodelBasePos);
+    // `assets.propMesh` bakes the model's own orientation into the mesh, so
+    // the recoil tilt has to be an *offset* from it rather than a bare
+    // `rotation.set`. Euler order here is the default 'XYZ' (R = Rx*Ry*Rz),
+    // so adding to `.x` is equivalent to left-multiplying an extra Rx — a
+    // muzzle-up tilt in the camera's frame whatever the baked yaw/roll is.
+    // Recaptured per mesh, since a weapon swap builds a new one with its own
+    // baked orientation.
+    this._viewmodelBaseRot = mesh.rotation.clone();
     this._camera.add(mesh);
     this._viewmodel = mesh;
   }
@@ -129,7 +150,7 @@ export class Player {
     this.alive = true;
     this.invulnUntil = 0;
     this._lastFireT = -Infinity;
-    this._recoil = 0;
+    resetRecoilSpring(this._recoil);
   }
 
   /**
@@ -163,18 +184,48 @@ export class Player {
       this.hp = Math.min(p.hp, this.hp + p.regenPerS * dt);
     }
 
+    // The equipped weapon's own amplitudes — the spring itself (stepped
+    // below) is shared, so a heavier weapon kicks harder without retuning it.
+    const r = this.gun.recoil;
+    stepRecoilSpring(this._recoil, dt, cfg);
+    const kick = this._recoil.value;
+
     this._walkPhase += moving ? dt * WALK_BOB_SPEED : 0;
     const bob = moving ? Math.sin(this._walkPhase) * WALK_BOB_AMOUNT : 0;
     this._camera.position.set(this.x, this.eyeHeight + bob, this.z);
-    this._camera.rotation.set(this.pitch, -this.yaw, 0);
+    // The kick is an additive offset on the *rendered* rotation only —
+    // `this.pitch` stays the player's own aim, so the view returns to exactly
+    // where they left it with nothing to compensate for. Re-clamped with the
+    // same `limit` so a kick can never push the view past `pitchLimitDeg`.
+    const viewPitch = this.pitch + kick * r.camPitchDeg * DEG2RAD;
+    this._camera.rotation.set(Math.min(limit, Math.max(-limit, viewPitch)), -this.yaw, 0);
 
-    this._recoil = Math.max(0, this._recoil - dt * RECOIL_DECAY_PER_S);
-    const sway = moving ? Math.sin(this._walkPhase * 0.5) * 0.01 : 0;
+    const sway = moving ? Math.sin(this._walkPhase * 0.5) * WALK_SWAY_AMOUNT : 0;
     this._viewmodel.position.set(
       this._viewmodelBasePos.x + sway,
-      this._viewmodelBasePos.y - this._recoil * 0.5,
-      this._viewmodelBasePos.z + this._recoil,
+      this._viewmodelBasePos.y + kick * r.viewUpM,
+      this._viewmodelBasePos.z + kick * r.viewBackM,
     );
+    this._viewmodel.rotation.x = this._viewmodelBaseRot.x + kick * r.viewPitchDeg * DEG2RAD;
+  }
+
+  /**
+   * The view direction implied by `yaw`/`pitch`, as the analytic form of the
+   * camera's `'YXZ'` / `rotation.y = -yaw` / `rotation.x = pitch` convention
+   * — the pitched sibling of the flat `this._forward` built in `update`.
+   *
+   * Deliberately *not* `camera.getWorldDirection()`: the rendered camera
+   * carries the recoil pitch offset, and reading direction off it would send
+   * every shot after the first in a burst high and shrink the effective
+   * `coneDegTouch` for touch auto-fire. Deriving from yaw/pitch keeps the
+   * kick purely cosmetic — shots always go where the player is aiming.
+   *
+   * @param {THREE.Vector3} out Written in place and returned.
+   * @returns {THREE.Vector3}
+   */
+  _aimDirection(out) {
+    const cosPitch = Math.cos(this.pitch);
+    return out.set(cosPitch * Math.sin(this.yaw), Math.sin(this.pitch), -cosPitch * Math.cos(this.yaw));
   }
 
   /**
@@ -189,12 +240,14 @@ export class Player {
     const cooldownS = 1 / this.gun.rate;
     if (this._time - this._lastFireT < cooldownS) return null;
     this._lastFireT = this._time;
-    this._recoil = Math.min(this.gun.recoilKick * 3, this._recoil + this.gun.recoilKick);
+    kickRecoilSpring(this._recoil, this.gun.recoil.impulse);
 
+    // Position is unaffected by the kick (it offsets rotation only), so the
+    // camera is still the right source for the muzzle origin.
     this._camera.getWorldPosition(this._fireOrigin);
-    this._camera.getWorldDirection(this._fireDir);
     // Scratch vectors, not clones: `Game#_handleFiring` consumes both within
     // the same fixed step and `Effects#tracer` copies what it is given.
+    this._aimDirection(this._fireDir);
     return { origin: this._fireOrigin, dir: this._fireDir };
   }
 
@@ -225,7 +278,7 @@ export class Player {
   aimTarget(candidates) {
     if (candidates.length === 0) return -1;
     this._camera.getWorldPosition(this._fireOrigin);
-    this._camera.getWorldDirection(this._fireDir);
+    this._aimDirection(this._fireDir);
     const cosLimit = Math.cos(this.gun.coneDegTouch * DEG2RAD);
 
     let best = -1;

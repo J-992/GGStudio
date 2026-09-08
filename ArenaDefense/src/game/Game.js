@@ -796,14 +796,12 @@ export class Game {
   }
 
   /**
-   * "Push enemies away" on revive, approximated within `Enemies`' frozen,
-   * mutator-free-on-position public API (`docs/INTERFACES.md`'s P3
-   * additions — `applySlow` is the only per-enemy mutator it exposes
-   * besides damage): every enemy within `revivePushRadius` of the player is
-   * stunned (`applySlow` at a near-zero speed factor) for
-   * `invulnAfterReviveS` seconds, the same window the player is
-   * invulnerable for — enemies don't visually leap backward, but the
-   * player gets the same practical breathing room a knockback would buy.
+   * "Push enemies away" on revive: every enemy within `revivePushRadius` of
+   * the player is thrown radially outwards (`Enemies#knockback`, the same
+   * hit-reaction impulse a bullet lands, so the shove is visible — bodies
+   * lean and stagger back) and stunned (`applySlow` at a near-zero speed
+   * factor) for `invulnAfterReviveS` seconds, the same window the player is
+   * invulnerable for.
    */
   _pushEnemiesFromPlayer() {
     const p = this._config.player;
@@ -814,6 +812,7 @@ export class Game {
       const dx = e.x - px;
       const dz = e.z - pz;
       if (dx * dx + dz * dz <= r2) {
+        this.world.enemies.knockback(e.idx, { x: dx, z: dz }, p.revivePushSpeed);
         this.world.enemies.applySlow(e.idx, REVIVE_STUN_FACTOR, p.invulnAfterReviveS);
       }
     }
@@ -974,7 +973,10 @@ export class Game {
       }
       if (!enemyHit) break;
 
-      this.world.enemies.damageAt(enemyHit.idx, gun.dmg, 'player');
+      // Knockback follows the shot: the body is shoved along the pellet's own
+      // horizontal direction, so it reads as reacting to *this* hit — and for
+      // a shotgun each pellet shoves along its own spread direction.
+      this.world.enemies.damageAt(enemyHit.idx, gun.dmg, 'player', { x: dir.x, z: dir.z });
       lastPoint = enemyHit.point;
       this.world.effects.burst(
         enemyHit.point.x, enemyHit.point.y, enemyHit.point.z,
