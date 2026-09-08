@@ -112,8 +112,8 @@ export const CONFIG = Object.freeze(deepFreeze({
           model: 'Gun_02', color: 0x8a5a2b, scale: 1.15, sound: 'gunfire',
         },
         m4a1: {
-          name: 'M4A1', blurb: 'Faster and tighter than the AK, less per shot.',
-          dmg: 10, rate: 11, range: 45, spreadDeg: 2.4, pellets: 1,
+          name: 'M4A1', blurb: 'The easiest to land, and the slowest to kill.',
+          dmg: 8, rate: 10, range: 38, spreadDeg: 2.8, pellets: 1,
           coneDegTouch: 7,
           recoil: { impulse: 46.5, viewBackM: 0.068, viewUpM: 0.0176, viewPitchDeg: 5.6, camPitchDeg: 0.93 },
           model: 'Gun_02', color: 0x4a4f57, scale: 1.05, sound: 'pistol-shot-2',
