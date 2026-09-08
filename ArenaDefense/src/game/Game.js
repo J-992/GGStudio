@@ -679,8 +679,7 @@ export class Game {
    */
   equipWeapon(id) {
     const equipped = this.world.player.setWeapon(id);
-    savePrefs({ weapon: equipped });
-    this._prefs = { ...this._prefs, weapon: equipped };
+    this._prefs = savePrefs({ weapon: equipped });
   }
 
   /**
