@@ -10,7 +10,7 @@
 // after construction and calls `open/close/setCountdown/setEnergy/refresh`
 // — see this file's "P4 additions" entry in `docs/INTERFACES.md` for the
 // full callback/method contract.
-import { slotPositions, worldToMap } from '../core/arenaGeometry.js';
+import { slotMapPositions, worldToMap } from '../core/arenaGeometry.js';
 import { upgradeCost, repairCost } from '../core/turretLogic.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -103,7 +103,9 @@ export class BuildOverlay {
     /** @type {((e:KeyboardEvent) => void)|null} */
     this._keydownHandler = null;
 
-    this._slots = slotPositions(cfg);
+    // Map units, not world metres: everything in `_buildMap` below writes
+    // straight into the `viewBox="-100 -100 200 200"` coordinate system.
+    this._slots = slotMapPositions(cfg);
 
     this._root = document.getElementById('overlay');
     this._buildDom();

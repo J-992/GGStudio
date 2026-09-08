@@ -358,6 +358,7 @@ class Enemies {
    * @param {number} idx
    * @param {number} dmg
    * @param {string} source Free-form origin tag: `'player'`, `'turret'`, ...
+   *   `'turret'` is the one tag with a rule attached — see the cap below.
    * @param {{x:number,z:number}} [dir] Hit-reaction push direction (need not be
    *   normalized) — the bullet's direction, or turret→enemy. Omitted or zero
    *   shoves the enemy straight backwards from its own facing.
@@ -409,6 +410,16 @@ class Enemies {
   clear() {}
 }
 ```
+
+**Turrets never one-shot.** A hit tagged `source: 'turret'` (direct or
+splash — `damageRadius` funnels through `damageAt`) is clamped by
+`turretLogic.turretHitDamage` to `cfg.turrets.maxDamageFracPerHit` of the
+target's *max* HP, so even a maxed cannon's 85 splash takes two shots to
+finish a 30hp shambler. The cap is relative to max HP, so it never blocks
+the follow-up shot from killing, and it leaves damage untouched against
+anything big enough not to be one-shot anyway (`tungtung`, the boss —
+`Boss#damage` isn't capped at all). Knockback scales off the *applied*
+(post-cap) damage. Turrets soften and stagger; the kill stays the player's.
 
 Rendering: two `InstancedMesh`es (one per voxel model, `zed_1`/shambler and
 `zed_3`/spitter, each sized `cfg.enemies.cap`) built from
@@ -671,7 +682,11 @@ class BuildOverlay {
 ```
 
 Renders into the `#overlay` node `index.html` already reserves (never
-recreates it). `worldToMap`/`arenaGeometry`'s "+z world = down on screen"
+recreates it). Slot markers come from `arenaGeometry.slotMapPositions(cfg)`,
+**not** `slotPositions(cfg)`: everything drawn here is in the map units of
+`viewBox="-100 -100 200 200"` (arena wall at 90), and raw world metres put
+all 9 slots inside the middle ~16 units, where the 3 markers of a gate draw
+on top of each other. `worldToMap`/`arenaGeometry`'s "+z world = down on screen"
 convention needs no flip anywhere in this file — SVG's own y-axis already
 increases downward, and `worldToMap` is a uniform scale. Does its own
 affordability pre-check (shake + `ui-deny`) against its last-known energy

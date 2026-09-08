@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CONFIG } from '../src/config.js';
-import { statsFor, upgradeCost, repairCost, pickTarget, fireReady } from '../src/core/turretLogic.js';
+import {
+  statsFor, upgradeCost, repairCost, pickTarget, fireReady, turretHitDamage,
+} from '../src/core/turretLogic.js';
+import { hpFor } from '../src/core/enemyBrain.js';
 
 const TYPES = CONFIG.turrets.order;
 
@@ -173,4 +176,39 @@ test('fireReady: does not fire again before its cooldown elapses', () => {
   assert.equal(fireReady(turret, 0.5, stats), false);
   assert.equal(fireReady(turret, 0.4, stats), false);
   assert.equal(fireReady(turret, 0.1, stats), true); // 0.5 + 0.4 + 0.1 = 1.0s elapsed
+});
+
+test('no turret type, at any level, one-shots any enemy on any wave', () => {
+  const hpMuls = CONFIG.waves.map((w) => w.hpMul);
+  for (const type of TYPES) {
+    const levels = CONFIG.turrets.types[type].levels.length;
+    for (let level = 0; level < levels; level++) {
+      const { dmg } = statsFor(type, level, CONFIG);
+      for (const [name, typeDef] of Object.entries(CONFIG.enemies.types)) {
+        for (const hpMul of hpMuls) {
+          const hpMax = hpFor(typeDef, hpMul);
+          const applied = turretHitDamage(dmg, hpMax, CONFIG);
+          assert.ok(
+            applied < hpMax,
+            `${type} L${level} deals ${applied} to a ${name} with ${hpMax} hp — a one-shot`,
+          );
+        }
+      }
+    }
+  }
+});
+
+test('turretHitDamage leaves damage alone when it cannot one-shot anyway', () => {
+  // A 40-damage cannon shell against the 900hp boss is nowhere near the cap.
+  assert.equal(turretHitDamage(40, 900, CONFIG), 40);
+  // Degenerate inputs pass through rather than producing a zero-damage hit.
+  assert.equal(turretHitDamage(40, 0, CONFIG), 40);
+});
+
+test('two capped turret hits still kill: the cap is per-hit, not a floor on hp', () => {
+  const typeDef = CONFIG.enemies.types.shambler;
+  const hpMax = hpFor(typeDef, 1);
+  const { dmg } = statsFor('cannon', 2, CONFIG);
+  const applied = turretHitDamage(dmg, hpMax, CONFIG);
+  assert.ok(applied * 2 >= hpMax, `two hits of ${applied} do not finish ${hpMax} hp`);
 });
