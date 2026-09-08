@@ -52,7 +52,6 @@ const _quatKick = new THREE.Quaternion();
 const _kickAxis = new THREE.Vector3();
 const _pos = new THREE.Vector3();
 const _scale = new THREE.Vector3();
-const _scaleOne = new THREE.Vector3(1, 1, 1);
 
 /**
  * Axis-aligned (Y) swept-cylinder ray test, radius `radius`, extending from
@@ -151,6 +150,25 @@ export class Enemies {
     /** @type {(('voxel'|'sprite')|null)[]} */
     this._renderKind = new Array(cap).fill(null);
     this._slotId = new Int32Array(cap).fill(-1);
+    // Size variant (small/normal/large, or whatever `cfg.enemies.variants`
+    // defines): `_sizeMul` drives everything geometric — voxel/sprite render
+    // scale and the hitbox (`_radiusOf`/`_hitHeightOf` below) — and is read
+    // straight off `cfg.enemies.variants.types[variant].size` at spawn time.
+    // `_variant` is kept alongside it only as the cache key into
+    // `_variantDefCache` (see `_resolveTypeDef`); the two must always be set
+    // together in `spawn()`.
+    this._sizeMul = new Float32Array(cap).fill(1);
+    /** @type {string[]} */
+    this._variant = new Array(cap).fill('normal');
+
+    // (type, variant) -> frozen EnemyTypeDef with hp/speed/knockbackScale
+    // pre-multiplied by that variant's config. Built lazily, at most
+    // `types x variants` entries (e.g. 3x3=9) for the life of this pool, so
+    // that `update()`'s per-enemy per-fixed-step hot loop can index into it
+    // instead of allocating a scaled copy of `typeDef` every tick — see
+    // `_resolveTypeDef`.
+    /** @type {Map<string, import('../core/types.js').EnemyTypeDef>} */
+    this._variantDefCache = new Map();
 
     /** @type {number[]} Free-list of pool indices. */
     this._free = [];

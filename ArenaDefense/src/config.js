@@ -145,6 +145,12 @@ export const CONFIG = Object.freeze(deepFreeze({
   },
 
   enemies: {
+    // Speeds sit BELOW `player.speed` (4.0) on purpose. They used to be 4.1-4.3,
+    // so every enemy outran the player with no sprint to escape with — you
+    // could never break contact, which is what made a wave feel frantic rather
+    // than tense. The margin is small: backing off works, standing still does
+    // not. `tungtung`'s `lunge` closing burst is a fixed distance and does NOT
+    // scale with speed, so it grew proportionally more dangerous here.
     cap: 35,
     separationRadius: 1.2,
     separationForce: 3,
@@ -158,18 +164,18 @@ export const CONFIG = Object.freeze(deepFreeze({
     },
     types: {
       shambler: {
-        render: 'voxel', model: 'zed_1', hp: 30, speed: 4.2, kind: 'melee',
+        render: 'voxel', model: 'zed_1', hp: 30, speed: 3.4, kind: 'melee',
         dmg: 8, range: 1.6, cooldown: 1.0, energy: 10, radius: 0.5, hitHeight: 1.8,
         knockbackScale: 1,
       },
       spitter: {
-        render: 'voxel', model: 'zed_3', hp: 24, speed: 4.3, kind: 'ranged',
+        render: 'voxel', model: 'zed_3', hp: 24, speed: 3.5, kind: 'ranged',
         dmg: 6, range: 12, keepDistance: 9, preferPlayerRange: 16, cooldown: 1.8,
         projSpeed: 14, energy: 14, radius: 0.5, hitHeight: 1.8,
         knockbackScale: 1.15,
       },
       tungtung: {
-        render: 'sprite', sprite: 'tungtung', height: 2.2, hp: 110, speed: 4.1,
+        render: 'sprite', sprite: 'tungtung', height: 2.2, hp: 110, speed: 3.3,
         kind: 'melee', dmg: 18, range: 2.0, cooldown: 1.4, lunge: 3.0, energy: 30,
         radius: 0.6, hitHeight: 2.2, knockbackScale: 0.45,
       },
@@ -235,63 +241,72 @@ export const CONFIG = Object.freeze(deepFreeze({
     ],
   },
 
+  // Wave LENGTH is set by the spawn counts; `maxAlive` is a concurrency
+  // throttle, not a total. `SpawnScheduler` holds entries back when the cap is
+  // reached and retries them, so raising `n` while leaving `maxAlive` alone
+  // makes a wave run longer rather than get denser — and keeps every wave
+  // inside `enemies.cap`, which `test/waves.test.js` enforces.
+  //
+  // Wave 1 is deliberately untouched: its total energy is pinned to the gun
+  // turret's cost (5 kills x 10 = 50) by that same test, so the player can
+  // always afford exactly one turret after it.
   waves: [
     { n: 1, hpMul: 1.0, maxAlive: 8, spawns: [{ enemy: 'shambler', n: 5, everyS: 1.5 }] }, // 5 kills x 10 energy = 50 = gun cost (test-enforced)
-    { n: 2, hpMul: 1.0, maxAlive: 10, spawns: [{ enemy: 'shambler', n: 8, everyS: 1.2 }] },
+    { n: 2, hpMul: 1.0, maxAlive: 10, spawns: [{ enemy: 'shambler', n: 13, everyS: 1.2 }] },
     {
       n: 3, hpMul: 1.0, maxAlive: 12,
       spawns: [
-        { enemy: 'shambler', n: 8, everyS: 1.2 },
-        { enemy: 'spitter', n: 3, everyS: 3, startS: 4 },
+        { enemy: 'shambler', n: 13, everyS: 1.2 },
+        { enemy: 'spitter', n: 5, everyS: 3, startS: 4 },
       ],
     },
     {
       n: 4, hpMul: 1.1, maxAlive: 14,
       spawns: [
-        { enemy: 'shambler', n: 10, everyS: 1.0 },
-        { enemy: 'spitter', n: 4, everyS: 2.5, startS: 3 },
-        { enemy: 'tungtung', n: 1, everyS: 1, startS: 12 },
+        { enemy: 'shambler', n: 16, everyS: 1.0 },
+        { enemy: 'spitter', n: 7, everyS: 2.5, startS: 3 },
+        { enemy: 'tungtung', n: 2, everyS: 6, startS: 12 },
       ],
     },
     { n: 5, hpMul: 1.0, maxAlive: 8, boss: 'patapim', spawns: [] },
     {
       n: 6, hpMul: 1.15, maxAlive: 16,
       spawns: [
-        { enemy: 'shambler', n: 10, everyS: 1.0 },
-        { enemy: 'spitter', n: 5, everyS: 2.2, startS: 2 },
-        { enemy: 'tungtung', n: 2, everyS: 6, startS: 8 },
+        { enemy: 'shambler', n: 16, everyS: 1.0 },
+        { enemy: 'spitter', n: 8, everyS: 2.2, startS: 2 },
+        { enemy: 'tungtung', n: 3, everyS: 6, startS: 8 },
       ],
     },
     {
       n: 7, hpMul: 1.2, maxAlive: 18,
       spawns: [
-        { enemy: 'shambler', n: 12, everyS: 0.9 },
-        { enemy: 'spitter', n: 6, everyS: 2.0, startS: 2 },
-        { enemy: 'tungtung', n: 3, everyS: 5, startS: 6 },
+        { enemy: 'shambler', n: 19, everyS: 0.9 },
+        { enemy: 'spitter', n: 10, everyS: 2.0, startS: 2 },
+        { enemy: 'tungtung', n: 5, everyS: 5, startS: 6 },
       ],
     },
     {
       n: 8, hpMul: 1.3, maxAlive: 22,
       spawns: [
-        { enemy: 'shambler', n: 8, everyS: 1.0 },
-        { enemy: 'spitter', n: 8, everyS: 1.6, startS: 1 },
-        { enemy: 'tungtung', n: 4, everyS: 4, startS: 5 },
+        { enemy: 'shambler', n: 13, everyS: 1.0 },
+        { enemy: 'spitter', n: 13, everyS: 1.6, startS: 1 },
+        { enemy: 'tungtung', n: 6, everyS: 4, startS: 5 },
       ],
     },
     {
       n: 9, hpMul: 1.4, maxAlive: 26,
       spawns: [
-        { enemy: 'shambler', n: 14, everyS: 0.8 },
-        { enemy: 'spitter', n: 8, everyS: 1.5, startS: 2 },
-        { enemy: 'tungtung', n: 5, everyS: 4, startS: 4 },
+        { enemy: 'shambler', n: 22, everyS: 0.8 },
+        { enemy: 'spitter', n: 13, everyS: 1.5, startS: 2 },
+        { enemy: 'tungtung', n: 8, everyS: 4, startS: 4 },
       ],
     },
     {
       n: 10, hpMul: 1.5, maxAlive: 30,
       spawns: [
-        { enemy: 'shambler', n: 12, everyS: 0.8 },
-        { enemy: 'spitter', n: 10, everyS: 1.3, startS: 1 },
-        { enemy: 'tungtung', n: 7, everyS: 3.5, startS: 3 },
+        { enemy: 'shambler', n: 19, everyS: 0.8 },
+        { enemy: 'spitter', n: 16, everyS: 1.3, startS: 1 },
+        { enemy: 'tungtung', n: 11, everyS: 3.5, startS: 3 },
       ],
     },
   ],

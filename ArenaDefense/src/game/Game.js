@@ -178,6 +178,12 @@ export class Game {
      *  direct transition so there is exactly ONE path out of `build` — see
      *  `requestReady`. */
     this._readyRequested = false;
+    /** Kills so far this wave, and the wave's total spawn count — the numerator
+     *  and denominator of the HUD progress bar. Killed-of-total rather than
+     *  spawned-of-total: the latter reads as 100% while a dozen enemies are
+     *  still alive. */
+    this._waveKills = 0;
+    this._waveTotal = 0;
     this._prevGatePair = null;
     this._gateRng = makeRng((Date.now() ^ 0x9e3779b9) >>> 0);
 
@@ -237,6 +243,9 @@ export class Game {
     this.bus.on('enemy:killed', (e) => {
       this._economy.addEnergy(e.energy);
       this._combo.onKill(this.world.time);
+      // Only ordinary enemies count toward wave progress: the boss is not part
+      // of the wave's spawn list, so counting it would push the bar past full.
+      if (!e.boss) this._waveKills++;
       // P5's `Boss.js` tags a boss kill's payload with `boss:true` and
       // `coins` (see docs/INTERFACES.md's P5 additions) — energy is added
       // above unconditionally like any other kill (it's already on every
@@ -607,7 +616,7 @@ export class Game {
       if (this._waveClearTimer <= 0) {
         this._wave += 1;
         this._buildTimer = this._config.build.durationS;
-    this._readyRequested = false;
+        this._readyRequested = false;
         this._pickGates();
         this._hud.setWave(this._wave, this._config.run.finalWave);
         this.state.go('build');
@@ -637,6 +646,12 @@ export class Game {
   _startWave() {
     const def = waveDef(this._config, this._wave);
     this._currentWaveDef = def;
+    // Progress bar numerator and denominator, from THIS wave's def — read
+    // after the assignment above, not before it. Boss waves carry no ordinary
+    // spawns, so the total is 0 and `_waveProgress` hides the bar rather than
+    // dividing by it.
+    this._waveKills = 0;
+    this._waveTotal = def.spawns.reduce((sum, g) => sum + g.n, 0);
     const cap = Math.min(def.maxAlive, this._config.enemies.cap);
     this._scheduler = new SpawnScheduler(flattenSpawns(def), cap);
     this._audio.play('wave-start');
@@ -1128,5 +1143,21 @@ export class Game {
     this._hud.setHp(this.world.player.hp, this._config.player.hp);
     this._hud.setEnergy(this._economy.energy);
     this._hud.setCoins(this._economy.bankedCoins + this._economy.pendingCoins);
+    this._hud.setWaveProgress(this._waveProgress());
+  }
+
+  /**
+   * Wave progress as 0..1, or `null` when there is nothing meaningful to show:
+   * outside the wave itself, and on a boss wave — which has no ordinary spawns,
+   * so its denominator is 0 and the boss's own health bar is the readout that
+   * matters there.
+   *
+   * @returns {number|null}
+   */
+  _waveProgress() {
+    const state = this.state.state;
+    if (state !== 'wave' && state !== 'waveClear') return null;
+    if (this._waveTotal <= 0) return null;
+    return Math.min(1, this._waveKills / this._waveTotal);
   }
 }
