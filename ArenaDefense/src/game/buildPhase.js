@@ -64,6 +64,7 @@ export function installBuildPhase(game, { turrets, overlay, audio, hud, cfg }) {
     overlay.open(game.getSnapshot());
     overlay.setCountdown(latestSecondsLeft);
     overlay.setEnergy(economy().energy);
+    overlay.setSelectedWeapon(game.world.player.weaponId);
     startRefreshLoop();
   }
 
@@ -154,6 +155,15 @@ export function installBuildPhase(game, { turrets, overlay, audio, hud, cfg }) {
     hud.setEnergy(economy().energy);
     audio.play('upgrade-confirm');
     refresh();
+  };
+
+  // Weapons cost nothing and are all unlocked, so unlike `onPlace` there is
+  // no economy check here — swapping between waves is free.
+  overlay.onSelectWeapon = (id) => {
+    if (game.state.state !== 'build') return;
+    game.equipWeapon(id);
+    overlay.setSelectedWeapon(game.world.player.weaponId);
+    audio.play('ui-place');
   };
 
   overlay.onReady = () => {

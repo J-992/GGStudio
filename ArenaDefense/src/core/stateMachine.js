@@ -28,8 +28,12 @@
 export const TRANSITIONS = Object.freeze({
   boot: Object.freeze(['title']),
   title: Object.freeze(['build']),
-  build: Object.freeze(['wave']),
-  wave: Object.freeze(['waveClear', 'death']),
+  // `-> runEnd` from either in-run state is the pause menu's "quit to title":
+  // abandoning a run ends it, and it has to end through `runEnd` so the coins
+  // earned so far are banked exactly like any other ending. Going straight to
+  // `title` would silently throw away the run's pending coins.
+  build: Object.freeze(['wave', 'runEnd']),
+  wave: Object.freeze(['waveClear', 'death', 'runEnd']),
   waveClear: Object.freeze(['build', 'runEnd']),
   death: Object.freeze(['wave', 'runEnd']),
   runEnd: Object.freeze(['title', 'build']),

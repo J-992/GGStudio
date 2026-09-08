@@ -8,6 +8,8 @@ test('accepts every transition in the table', () => {
     ['boot', 'title'],
     ['title', 'build'],
     ['build', 'wave'],
+    ['build', 'runEnd'],
+    ['wave', 'runEnd'],
     ['wave', 'waveClear'],
     ['wave', 'death'],
     ['waveClear', 'build'],

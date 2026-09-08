@@ -7,6 +7,8 @@
 // `core/storage.js` expects (see its `SaveIO` typedef in `core/types.js`) —
 // this file never touches `JSON.parse`/sanitizing itself, that's `core/
 // storage.js`'s job.
+import { sanitizePrefs } from '../core/prefs.js';
+
 const PROBE_KEY = '__arenadefense_probe__';
 
 /** Deliberately its own key, NOT part of `core/storage.js`'s
@@ -81,4 +83,32 @@ export function loadMuted() {
 /** @param {boolean} muted */
 export function saveMuted(muted) {
   storageIO.set(MUTE_KEY, muted ? '1' : '0');
+}
+
+// Device preferences (look sensitivity, invert-look, FPS readout, last weapon
+// picked). Under their own key for the same reason the mute flag is: they
+// belong to the device, not to a run, and `core/storage.js`'s
+// `{coins, bestWave, unlocks}` shape is test-enforced.
+const PREFS_KEY = 'arenadefense.prefs';
+
+/** @returns {ReturnType<typeof sanitizePrefs>} Defaults if never set, unavailable, or corrupt. */
+export function loadPrefs() {
+  const raw = storageIO.get(PREFS_KEY);
+  if (!raw) return sanitizePrefs(null);
+  try {
+    return sanitizePrefs(JSON.parse(raw));
+  } catch {
+    // Truncated or hand-edited value — fall back rather than break the boot.
+    return sanitizePrefs(null);
+  }
+}
+
+/**
+ * @param {Partial<ReturnType<typeof sanitizePrefs>>} patch Merged over what is stored.
+ * @returns {ReturnType<typeof sanitizePrefs>} The full prefs after the merge.
+ */
+export function savePrefs(patch) {
+  const next = sanitizePrefs({ ...loadPrefs(), ...patch });
+  storageIO.set(PREFS_KEY, JSON.stringify(next));
+  return next;
 }

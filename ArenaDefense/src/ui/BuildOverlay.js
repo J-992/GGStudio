@@ -6,12 +6,14 @@
 // `#overlay` node index.html already reserves.
 //
 // Constructed once (`new BuildOverlay(cfg, audio)`) and driven from outside
-// by `game/buildPhase.js`, which sets `onPlace/onUpgrade/onRepair/onReady`
-// after construction and calls `open/close/setCountdown/setEnergy/refresh`
-// — see this file's "P4 additions" entry in `docs/INTERFACES.md` for the
-// full callback/method contract.
+// by `game/buildPhase.js`, which sets
+// `onPlace/onUpgrade/onRepair/onReady/onSelectWeapon` after construction and
+// calls `open/close/setCountdown/setEnergy/refresh` — see this file's "P4
+// additions" entry in `docs/INTERFACES.md` for the full callback/method
+// contract.
 import { slotPositions, worldToMap } from '../core/arenaGeometry.js';
 import { upgradeCost, repairCost } from '../core/turretLogic.js';
+import { resolveWeapon } from '../core/weapons.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const MAP_R = 90; // matches worldToMap(cfg.arena.radius, 0, cfg).x === 90.
@@ -93,9 +95,12 @@ export class BuildOverlay {
     this.onRepair = null;
     /** @type {(() => void)|null} */
     this.onReady = null;
+    /** @type {((id:string) => void)|null} */
+    this.onSelectWeapon = null;
 
     this.isOpen = false;
     this._selectedType = cfg.turrets.order[0];
+    this._selectedWeapon = cfg.player.defaultWeapon;
     this._sheetSlotId = /** @type {number|null} */ (null);
     this._lastEnergy = 0;
     /** @type {Map<number, import('../core/types.js').TurretRecord>|null} */
@@ -156,6 +161,21 @@ export class BuildOverlay {
   }
 
   /**
+   * Sets the player's currently-selected weapon and re-renders the `.bo-chip`
+   * row for it — pure local state, same convention as `setSelectedType`. It
+   * does NOT itself invoke `onSelectWeapon`; that fires from the chip's click
+   * handler (see `_buildWeaponChips`), the same split `setSelectedType`/
+   * `_onSlotTap` use for turrets, so a caller (`buildPhase.js`) can sync the
+   * displayed selection from outside without re-triggering its own callback.
+   * @param {string} id
+   */
+  setSelectedWeapon(id) {
+    if (!resolveWeapon(id, this._cfg)) return; // unknown id — ignored.
+    this._selectedWeapon = id;
+    this._renderWeaponChips();
+  }
+
+  /**
    * @param {import('../core/types.js').BuildSnapshot} snapshot
    */
   refresh(snapshot) {
@@ -181,6 +201,7 @@ export class BuildOverlay {
     this._buildMap();
     this._buildEnergy();
     this._buildChips();
+    this._buildWeaponChips();
     this._buildReady();
     this._buildSheet();
   }
@@ -293,6 +314,38 @@ export class BuildOverlay {
       this._chips.set(type, chip);
     }
     this._wrap.appendChild(box);
+  }
+
+  /**
+   * The weapon-swap row: one `.bo-chip`/`.bo-weapon-chip` per
+   * `cfg.player.weapons.order` entry (all six unlocked from the start —
+   * mirrors `_buildChips()`'s turret-chip pattern, but for a roster with no
+   * cost/affordability axis at all, see `_renderWeaponChips`).
+   */
+  _buildWeaponChips() {
+    const box = htmlEl('div', 'bo-weapons');
+    /** @type {Map<string, HTMLElement>} */
+    this._weaponChips = new Map();
+    for (const id of this._cfg.player.weapons.order) {
+      const def = this._cfg.player.weapons.types[id];
+      const chip = /** @type {HTMLButtonElement} */ (htmlEl('button', 'bo-chip bo-weapon-chip'));
+      chip.type = 'button';
+      const name = htmlEl('span', 'bo-chip__name');
+      name.textContent = def.name;
+      chip.appendChild(name);
+      // Click/tap only, deliberately no number-key hotkey: `_attachKeys`
+      // below already binds 1/2/3 (window keydown) to turret types, and
+      // overloading that same listener with more digits for six weapons
+      // would make one handler juggle two unrelated pickers.
+      chip.addEventListener('click', () => {
+        this.setSelectedWeapon(id);
+        this.onSelectWeapon?.(id);
+      });
+      box.appendChild(chip);
+      this._weaponChips.set(id, chip);
+    }
+    this._wrap.appendChild(box);
+    this._renderWeaponChips();
   }
 
   _buildReady() {
@@ -493,6 +546,18 @@ export class BuildOverlay {
       const def = this._cfg.turrets.types[type];
       chip.classList.toggle('is-selected', type === this._selectedType);
       chip.classList.toggle('is-affordable', this._lastEnergy >= def.cost);
+    }
+  }
+
+  _renderWeaponChips() {
+    for (const id of this._cfg.player.weapons.order) {
+      const chip = this._weaponChips.get(id);
+      chip.classList.toggle('is-selected', id === this._selectedWeapon);
+      // No `.is-affordable` toggle here (unlike `_renderChips()` above):
+      // every weapon in `cfg.player.weapons` is free and unlocked from wave
+      // 1 (see the roster comment in `config.js`), so there is no
+      // affordability state to reflect for weapons — the asymmetry with the
+      // turret chips is deliberate, not a missed case.
     }
   }
 

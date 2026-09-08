@@ -29,10 +29,11 @@ import { makeRng } from '../core/rng.js';
 import { pickActiveGates, waveDef, flattenSpawns } from '../core/waves.js';
 import { SpawnScheduler } from '../core/spawner.js';
 import { slotPositions, rayArenaHit } from '../core/arenaGeometry.js';
-import { spreadDirs } from '../core/weapons.js';
+import { spreadDirs, weaponIds, resolveWeapon, coerceWeaponId } from '../core/weapons.js';
+import { effectiveSens } from '../core/prefs.js';
 import { loadSave, saveSave } from '../core/storage.js';
 import { coinsForRun, applyDoubler, bestWaveAfter } from '../core/runFlow.js';
-import { storageIO } from '../platform/storage.js';
+import { storageIO, loadPrefs, savePrefs, saveMuted } from '../platform/storage.js';
 import { Player } from './Player.js';
 import { Arena } from './Arena.js';
 import { Effects } from './Effects.js';
@@ -187,6 +188,9 @@ export class Game {
     this._paused = false;
     this._lastHp = undefined;
     this._lastShotSoundT = -Infinity;
+    /** Device preferences (sensitivity, invert-look, FPS, last weapon). Kept
+     *  out of `core/storage.js`'s run-progress save shape — see `core/prefs.js`. */
+    this._prefs = loadPrefs();
     this._lastMs = null;
     this._accumulator = 0;
     this._rafId = null;
@@ -231,6 +235,12 @@ export class Game {
     });
 
     this._setupDebug();
+
+    // Equip the weapon the player last chose and apply their settings before
+    // anything is shown. `coerceWeaponId` absorbs a stale id from an older
+    // roster, so a saved preference can never stop the game booting.
+    this.world.player.setWeapon(coerceWeaponId(this._prefs.weapon, config));
+    this._applyPrefs();
 
     const devWave = this._parseDevWaveParam();
     this.state.go('title');
@@ -375,11 +385,14 @@ export class Game {
    * flags desynced.
    */
   _togglePauseGuarded() {
+    // While the pause menu itself is up, Escape belongs to that screen (it
+    // resolves 'resume'), not to this listener.
     if (this._screens.isOpen) return;
     if (this._manualPaused) {
       this._setManualPause(false);
     } else if (!this._paused && (this.state.state === 'build' || this.state.state === 'wave')) {
       this._setManualPause(true);
+      void this._runPauseFlow();
     }
   }
 
@@ -389,7 +402,10 @@ export class Game {
   _setManualPause(paused) {
     if (paused === this._manualPaused) return;
     this._manualPaused = paused;
-    this._hud.setPaused(paused);
+    // The bare "PAUSED" panel is for pauses the player did not ask for (an
+    // ad, a backgrounded tab). A deliberate pause gets the real menu instead,
+    // opened by `_togglePauseGuarded`.
+    this._hud.setPaused(false);
     if (paused) {
       this.pause();
       this.hooks.onPause?.();
@@ -412,15 +428,19 @@ export class Game {
    * @param {number} frameDt
    */
   _debugTick(frameDt) {
-    if (!this._debugEl) return;
     this._debugFrames++;
     this._debugAccum += frameDt;
     if (this._debugAccum < DEBUG_REFRESH_S) return;
     const fps = Math.round(this._debugFrames / this._debugAccum);
-    const calls = this._renderer.info.render.calls;
-    const alive = this.world.enemies?.alive ?? 0;
-    const cap = this._config.enemies.cap;
-    this._debugEl.textContent = `${fps} fps · ${calls} draws · ${alive}/${cap} alive`;
+    // The HUD readout is a player-facing setting ("SHOW FPS"), so it is fed
+    // regardless of whether the `?debug` overlay element exists.
+    this._hud.setFps(fps);
+    if (this._debugEl) {
+      const calls = this._renderer.info.render.calls;
+      const alive = this.world.enemies?.alive ?? 0;
+      const cap = this._config.enemies.cap;
+      this._debugEl.textContent = `${fps} fps · ${calls} draws · ${alive}/${cap} alive`;
+    }
     this._debugAccum = 0;
     this._debugFrames = 0;
   }
@@ -596,15 +616,128 @@ export class Game {
     this._waveClearTimer = this._config.timing.waveClearDelayS;
   }
 
-  /** Shows the title screen (boot, and after a run ends and the player picks "title"). */
+  /** Shows the main menu (boot, and after a run ends and the player picks "title"). */
   _showTitleScreen() {
     this._hud.show(false);
-    this._screens.showTitle({
+    this._screens.showMenu({
       bestWave: this._save.bestWave,
       coins: this._save.coins,
       credits: this._config.credits,
-      onPlay: () => this._startRun(),
+      weaponName: this.world.player.gun.name,
+      onPlay: () => { void this._playFromMenu(); },
+      onWeapons: () => { void this._runWeaponSelectFlow(); },
+      onSettings: () => { void this._runSettingsFlow(() => this._showTitleScreen()); },
     });
+  }
+
+  /**
+   * Menu Play: pick a weapon, then start the run.
+   *
+   * The select screen deliberately resolves BEFORE `_startRun`, because
+   * `_startRun`'s first act is `hooks.onRunStart()` -> `commercialBreak()`.
+   * A DOM screen sitting under a Poki ad iframe is exactly the thing Poki's
+   * review flags, so the order is menu -> select -> ad -> build.
+   */
+  async _playFromMenu() {
+    await this._runWeaponSelectFlow('START');
+    this._startRun();
+  }
+
+  /**
+   * Shows weapon select, equips the result, and persists it. Returns to the
+   * menu afterwards unless a caller is going to mount something else.
+   *
+   * @param {string|null} [confirmLabel] `null` re-shows the menu when done
+   *   (the menu's own WEAPON button); a label means the caller takes over.
+   * @returns {Promise<string>} The equipped weapon id.
+   */
+  async _runWeaponSelectFlow(confirmLabel = null) {
+    const chosen = await this._screens.showWeaponSelect({
+      weapons: weaponIds(this._config).map((id) => ({ id, def: resolveWeapon(id, this._config) })),
+      current: this.world.player.weaponId,
+      confirmLabel: confirmLabel ?? 'EQUIP',
+    });
+    this.equipWeapon(chosen);
+    if (confirmLabel === null) this._showTitleScreen();
+    return chosen;
+  }
+
+  /**
+   * Equips a weapon and remembers the choice. Public because the build-phase
+   * overlay's weapon row goes through `game/buildPhase.js`, which is wired
+   * from outside this class.
+   *
+   * @param {string} id
+   */
+  equipWeapon(id) {
+    const equipped = this.world.player.setWeapon(id);
+    savePrefs({ weapon: equipped });
+    this._prefs = { ...this._prefs, weapon: equipped };
+  }
+
+  /**
+   * Settings, then whatever the caller wants shown next — the panel is
+   * reachable from both the menu and the pause menu, and has to return to
+   * whichever one opened it.
+   *
+   * @param {() => void} onDone
+   */
+  async _runSettingsFlow(onDone) {
+    const next = await this._screens.showSettings({
+      prefs: this._prefs,
+      touch: this._input.mode === 'touch',
+      muted: this._audio.muted,
+    });
+    this._prefs = savePrefs({
+      sensMouse: next.sensMouse,
+      sensTouch: next.sensTouch,
+      invertY: next.invertY,
+      showFps: next.showFps,
+    });
+    this._applyPrefs();
+    this._audio.setMuted(next.muted);
+    this._hud.setMuted(next.muted);
+    saveMuted(next.muted);
+    onDone();
+  }
+
+  /** Pushes the current preferences into the systems that read them. */
+  _applyPrefs() {
+    this._input.setLookSensitivity({
+      mouse: effectiveSens(this._prefs.sensMouse, this._config.player.lookSensMouse),
+      touch: effectiveSens(this._prefs.sensTouch, this._config.player.lookSensTouch),
+      invertY: this._prefs.invertY,
+    });
+    this._hud.setFpsVisible(this._prefs.showFps);
+  }
+
+  /**
+   * The manual pause menu, run to a conclusion. Kept out of `_setManualPause`
+   * so that path stays synchronous for its callers.
+   */
+  async _runPauseFlow() {
+    for (;;) {
+      const choice = await this._screens.showPause();
+      if (choice === 'settings') {
+        // Await the panel, then loop back to the pause menu behind it.
+        await new Promise((done) => { void this._runSettingsFlow(done); });
+        continue;
+      }
+      if (choice === 'title') {
+        // Abandoning a run still ends it through `runEnd`, so the coins
+        // earned so far are banked the same as any other ending.
+        this._screens.hide();
+        this._setManualPause(false);
+        this.hooks.onRunStop?.();
+        this.state.go('runEnd');
+        this.bus.emit('state:changed', { state: 'runEnd' });
+        void this._runRunEndFlow(false);
+        return;
+      }
+      this._screens.hide();
+      this._setManualPause(false);
+      return;
+    }
   }
 
   /**
