@@ -1,0 +1,5 @@
+node_modules/
+dist/
+art-src/
+*.log
+.DS_Store

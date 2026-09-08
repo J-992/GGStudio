@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Arena Defense</title>
+  <meta name="description" content="Arena Defense - a first-person wave-based tower defense in a circular arena. Hold the line with turrets and your own gun, then survive the boss." />
+  <meta name="theme-color" content="#1b1310" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231b1310'/%3E%3Ccircle cx='16' cy='16' r='10' fill='none' stroke='%23e0523f' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23e0523f'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/src/ui/style.css" />
+
+  <!-- Must run before anything resolves a relative URL.
+
+       Poki serves a build from a directory URL that arrives *without* a
+       trailing slash: games.poki.com serves it at `/<gameId>/<buildId>?tag=...`.
+       Per RFC 3986 the base for a document-relative reference is everything
+       up to the last `/`, so `./assets/x` there resolves to
+       `/<gameId>/assets/x` - the build directory itself is dropped and every
+       asset 404s. That is invisible locally, where the game is served from a
+       root path, and fatal on Poki: the bundle never loads, no JS runs, and
+       the static loading screen sits there forever.
+
+       So the build directory is computed once, here, and everything that
+       builds a URL uses it instead of `./` - the bundle tags Vite injects
+       (rewritten by the `pokiBaseUrl` plugin in vite.config.js) and the
+       runtime asset loaders (assets.js, platform/audio.js) alike.
+
+       Deliberately *not* a `<base href>` element, which would fix the same
+       problem in one line but re-point every `<use href="#icon-...">` in the
+       icon sprite at an external document, blanking every icon in the UI. -->
+  <script>
+    window.__ASSET_BASE__ = (function () {
+      var path = location.pathname;
+      // A trailing `foo.html` is a file; drop it. Anything else is the
+      // directory itself, whether or not the slash survived.
+      if (/\.[^/]*$/.test(path)) return path.replace(/[^/]*$/, '');
+      return path.charAt(path.length - 1) === '/' ? path : path + '/';
+    })();
+  </script>
+
+  <!-- The one external request a Poki build is allowed to make. Loaded ahead
+       of the module bundle so `window.PokiSDK` exists by the time boot runs;
+       it must NOT be `async`/`defer`, or the wrapper's first look finds
+       nothing and the whole session reports as unmonetized. Vite's `mode`
+       determines whether this tag survives the build: `strip-poki-sdk-tag`
+       in vite.config.js removes this whole line for the plain (non-Poki)
+       build, so that distribution's index.html never mentions the SDK's
+       domain at all. Everything past this point is bundled - no other
+       fonts, CDNs, or remote assets. -->
+  <script src="https://game-cdn.poki.com/scripts/v2/poki-sdk.js"></script>
+</head>
+<body>
+
+  <!-- ============================================================
+       ICON SPRITE SHEET
+       Single-colour inline SVG symbols, referenced everywhere via
+       <svg class="icon"><use href="#icon-name"/></svg>. Never fetched
+       over the network - fill="currentColor" so icons inherit color.
+       Paths taken from Shared/Icon/SVG/No Background (heart, target,
+       plus, sound) and simplified/hand-drawn to match that flat single-
+       colour style where the pack has no equivalent (coin, timer, spanner -
+       see ArenaDefense/README.md for the substitution notes).
+  ============================================================ -->
+  <svg style="display:none" aria-hidden="true">
+
+    <!-- Shared/Icon/SVG/No Background/Icon (27).svg -->
+    <symbol id="icon-heart" viewBox="0 0 29.58 26.86">
+      <path d="m20.71,0c-2.28,0-4.36.87-5.93,2.29-1.57-1.42-3.64-2.29-5.93-2.29C3.97,0,0,3.97,0,8.86c0,2.58,1.11,4.9,2.87,6.52.07.11.14.23.24.33l10.39,10.63c.67.69,1.79.69,2.46,0l10.39-10.63s0,0,0-.01c1.97-1.63,3.22-4.08,3.22-6.83,0-4.89-3.97-8.86-8.86-8.86Z"/>
+    </symbol>
+
+    <!-- Shared/Icon/SVG/No Background/Icon (48).svg (medallion), used as the
+         coin/reward icon - the pack ships no plain currency disc. -->
+    <symbol id="icon-coin" viewBox="0 0 30.64 36.66">
+      <path d="m29.04,29.25l-4.09-8.86c1.87-2.11,3.02-4.88,3.02-7.93,0-6.61-5.36-11.96-11.96-11.96S4.04,5.86,4.04,12.46c0,2.58.82,4.96,2.21,6.91-.13.16-.24.33-.33.52L1.6,29.25c-.1.22-1.02,2.03-1.04,2.26l5.87-.45c.05.01.1.03.14.06l3.47,4.76c.16-.16.94-2.04,1.04-2.26l4.24-9.18,4.24,9.18c.1.22.89,2.09,1.04,2.26l3.47-4.76s.09-.05.14-.06l5.87.45c-.02-.22-.94-2.04-1.04-2.26ZM15.89,5.93c3.56,0,6.45,2.89,6.45,6.45s-2.89,6.45-6.45,6.45-6.45-2.89-6.45-6.45,2.89-6.45,6.45-6.45Z"/>
+    </symbol>
+
+    <!-- Shared/Icon/SVG/No Background/Icon (13).svg -->
+    <symbol id="icon-target" viewBox="0 0 28.26 28.26">
+      <path d="m14.13,10.72c-1.89,0-3.41,1.53-3.41,3.41h0c0,1.89,1.53,3.41,3.41,3.41s3.41-1.53,3.41-3.41h0c0-1.89-1.53-3.41-3.41-3.41Z"/>
+      <path d="m14.13,0C6.33,0,0,6.33,0,14.13s6.33,14.13,14.13,14.13,14.13-6.33,14.13-14.13S21.94,0,14.13,0Zm-.13,21.65c-4.21,0-7.62-3.41-7.62-7.62s3.41-7.62,7.62-7.62,7.62,3.41,7.62,7.62-3.41,7.62-7.62,7.62Z"/>
+    </symbol>
+
+    <!-- Hand-drawn: the icon pack has no clock/hourglass. Flat disc + hands,
+         matching the pack's single-colour silhouette style. -->
+    <symbol id="icon-timer" viewBox="0 0 24 24">
+      <path d="M12 2a1 1 0 0 1 1 1v.09A9 9 0 1 1 10 3.09V3a1 1 0 0 1 1-1h1Zm-1 5a1.25 1.25 0 0 0-1.25 1.25v4.13c0 .4.19.78.51 1.02l3.1 2.3a1.25 1.25 0 0 0 1.49-2l-2.6-1.93V8.25A1.25 1.25 0 0 0 11 7Z"/>
+      <path d="M9 0a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2H9Z"/>
+    </symbol>
+
+    <!-- Hand-drawn: the icon pack has no wrench/spanner (repair). Flat
+         silhouette, matching stroke weight of the rest of the sprite sheet. -->
+    <symbol id="icon-spanner" viewBox="0 0 24 24">
+      <path d="M17.5 3a4.5 4.5 0 0 0-4.39 5.5L4 17.61a2 2 0 1 0 2.83 2.83L15.94 11.4A4.5 4.5 0 0 0 21.5 6.5a4.47 4.47 0 0 0-.5-2.06l-2.7 2.7a1.25 1.25 0 0 1-1.77 0l-.7-.7a1.25 1.25 0 0 1 0-1.77l2.7-2.7A4.47 4.47 0 0 0 17.5 3Z"/>
+    </symbol>
+
+    <!-- Shared/Icon/SVG/No Background/Icon (47).svg -->
+    <symbol id="icon-plus" viewBox="0 0 28.94 28.94">
+      <path d="m26.15,10.07h-7.28V2.52c0-1.39-1.13-2.52-2.52-2.52h-3.77c-1.39,0-2.52,1.13-2.52,2.52v7.55H2.79c-1.54,0-2.79,1.25-2.79,2.79v3.23c0,1.54,1.25,2.79,2.79,2.79h7.28v7.55c0,1.39,1.13,2.52,2.52,2.52h3.77c1.39,0,2.52-1.13,2.52-2.52v-7.55h7.28c1.54,0,2.79-1.25,2.79-2.79v-3.23c0-1.54-1.25-2.79-2.79-2.79Z"/>
+    </symbol>
+
+    <!-- Hand-drawn: the icon pack has no pause glyph. Two flat bars,
+         matching stroke weight of the rest of the sprite sheet. -->
+    <symbol id="icon-pause" viewBox="0 0 24 24">
+      <rect x="5" y="3" width="5.5" height="18" rx="1.4"/>
+      <rect x="13.5" y="3" width="5.5" height="18" rx="1.4"/>
+    </symbol>
+
+    <!-- Shared/Icon/SVG/No Background/Icon (51).svg -->
+    <symbol id="icon-sound" viewBox="0 0 32.87 27.56">
+      <path d="m13.03,21.66H2.78C1.25,21.66,0,20.41,0,18.88v-10.04C0,7.3,1.25,6.06,2.78,6.06h10.25c1.53,0,2.78,1.24,2.78,2.78v10.04c0,1.53-1.24,2.78-2.78,2.78Z"/>
+      <path d="m1.25,11.48L18.29.44c1.82-1.18,4.23.13,4.23,2.3v22.07c0,2.17-2.41,3.48-4.23,2.3L1.25,16.08c-1.67-1.08-1.67-3.52,0-4.6Z"/>
+      <path d="m26.76,4.08c.99,1.04,3.89,4.36,4.05,9.27.18,5.43-3.12,9.14-4.05,10.12" fill="none" stroke="currentColor" stroke-width="4.1" stroke-miterlimit="10"/>
+      <path d="m28.07,4.97l-.66.91c-.54.75-1.42.75-1.96,0h0c-.54-.75-.54-1.95,0-2.7l.66-.91c.54-.75,1.42-.75,1.96,0h0c.54.75.54,1.95,0,2.7Z"/>
+      <path d="m26.42,25.16l-.73-.84c-.6-.68-.71-1.87-.24-2.65h0c.47-.78,1.33-.86,1.93-.17l.73.84c.6.68.71,1.87.24,2.65h0c-.47.78-1.33.86-1.93.17Z"/>
+    </symbol>
+
+  </svg>
+
+  <!-- ============================================================
+       GAME CANVAS
+       Full-viewport WebGL surface. Focusable so keyboard input works
+       right after a click without a separate hidden input trick.
+  ============================================================ -->
+  <canvas id="scene" tabindex="0"></canvas>
+
+  <!-- ============================================================
+       HUD
+       Energy/coins/health/wave readouts and touch controls. Sits above
+       gameplay at all times; individual children opt back into pointer
+       events (see style.css).
+  ============================================================ -->
+  <div id="ui"></div>
+
+  <!-- ============================================================
+       BUILD-PHASE OVERLAY
+       BuildOverlay's <svg viewBox="-100 -100 200 200"> map lives inside
+       this node. Hidden outside the `build` state; the 3D scene keeps
+       rendering behind it.
+  ============================================================ -->
+  <div id="overlay" hidden></div>
+
+  <!-- ============================================================
+       LOADING
+       Shown from first paint until main.js hides it after assets are
+       ready and PokiSDK.gameLoadingFinished() has been called.
+  ============================================================ -->
+  <div id="loading">
+    <p class="loading-title">ARENA DEFENSE</p>
+    <p class="loading-status">Loading&hellip;</p>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "game_id": "REPLACE_WITH_POKI_GAME_ID",
+  "build_dir": "dist",
+  "ggs": {
+    "package_manager": "npm",
+    "install": "npm ci",
+    "build": "npm run build:poki",
+    "verify": ["npm run check"],
+    "max_bytes": 4194304,
+    "node_version": "22",
+    "token_git_secret_name": "POKI_UPLOAD_TOKEN_ARENADEFENSE",
+    "ignore_origins": ["(^|\\.)jcgt\\.org$"]
+  }
+}

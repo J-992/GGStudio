@@ -1,0 +1,74 @@
+{
+  "_comment": "Pixel coords + normalized UVs into brainrot.webp (1024x1024, 4x4 grid of 256px cells, top-left origin, y-down — u=x/1024, v=y/1024). Each sprite is alpha-cropped, fit to its cell by the longer side, and bottom-aligned (feet on the cell floor). aspect = cropped-art width/height.",
+  "atlas": "sprites/brainrot.webp",
+  "size": 1024,
+  "cell": 256,
+  "sprites": {
+    "patapim": {
+      "x": 0,
+      "y": 0,
+      "w": 256,
+      "h": 256,
+      "u0": 0,
+      "v0": 0,
+      "u1": 0.25,
+      "v1": 0.25,
+      "aspect": 0.7386363636363636
+    },
+    "tungtung": {
+      "x": 256,
+      "y": 0,
+      "w": 256,
+      "h": 256,
+      "u0": 0.25,
+      "v0": 0,
+      "u1": 0.5,
+      "v1": 0.25,
+      "aspect": 0.48579545454545453
+    },
+    "bombardiro": {
+      "x": 512,
+      "y": 0,
+      "w": 256,
+      "h": 256,
+      "u0": 0.5,
+      "v0": 0,
+      "u1": 0.75,
+      "v1": 0.25,
+      "aspect": 1.13915857605178
+    },
+    "tralalero": {
+      "x": 768,
+      "y": 0,
+      "w": 256,
+      "h": 256,
+      "u0": 0.75,
+      "v0": 0,
+      "u1": 1,
+      "v1": 0.25,
+      "aspect": 1.1318327974276527
+    },
+    "assassino": {
+      "x": 0,
+      "y": 256,
+      "w": 256,
+      "h": 256,
+      "u0": 0,
+      "v0": 0.25,
+      "u1": 0.25,
+      "v1": 0.5,
+      "aspect": 1.0507462686567164
+    },
+    "lirili": {
+      "x": 256,
+      "y": 256,
+      "w": 256,
+      "h": 256,
+      "u0": 0.25,
+      "v0": 0.25,
+      "u1": 0.5,
+      "v1": 0.5,
+      "aspect": 0.7670454545454546
+    }
+  }
+}

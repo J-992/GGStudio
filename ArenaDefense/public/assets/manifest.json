@@ -1,0 +1,209 @@
+{
+  "generatedBy": "scripts/build-assets.mjs",
+  "models": {
+    "models/zed_1.glb": {
+      "meshes": [
+        "zed_1"
+      ],
+      "heightM": 1.8,
+      "facingAxis": "+Z",
+      "facingAxisNote": "Assumed from OBJ proportions (X=width > Z=depth); not visually verified — flip in code if the walk direction looks backwards.",
+      "feetAtY0": true
+    },
+    "models/zed_3.glb": {
+      "meshes": [
+        "zed_3"
+      ],
+      "heightM": 1.8,
+      "facingAxis": "+Z",
+      "facingAxisNote": "Same assumption as zed_1.",
+      "feetAtY0": true
+    },
+    "models/dressing.glb": {
+      "meshes": [
+        "SM-7-Fence",
+        "SM-8-Pillar",
+        "SM-3-Tomb1"
+      ],
+      "sharedTexture": true,
+      "feetAtY0": true,
+      "units": "metres, as authored (no rescale)"
+    },
+    "models/rocks.glb": {
+      "meshes": [
+        "Rock_1",
+        "Rock_2",
+        "Rock_4"
+      ],
+      "feetAtY0": true,
+      "textures": 0,
+      "units": "metres, as authored (no rescale)"
+    },
+    "models/props.glb": {
+      "meshes": [
+        "Gun_03",
+        "Gun_02",
+        "AmmoBox_5",
+        "AttachedBoxes",
+        "Barricade_03",
+        "BarbedWires"
+      ],
+      "images": 2,
+      "fbxScale": 0.01,
+      "groundedMeshes": [
+        "AmmoBox_5",
+        "AttachedBoxes",
+        "Barricade_03",
+        "BarbedWires"
+      ],
+      "ungroundedMeshes": [
+        "Gun_03",
+        "Gun_02"
+      ],
+      "ungroundedNote": "Gun_03/Gun_02 keep their authored grip/mount pivot instead of being re-grounded to their bbox floor, so Player.js has a sane attach point for a handheld viewmodel."
+    }
+  },
+  "sprites": {
+    "sprites/brainrot.webp": {
+      "size": 1024,
+      "cell": 256,
+      "names": [
+        "patapim",
+        "tungtung",
+        "bombardiro",
+        "tralalero",
+        "assassino",
+        "lirili"
+      ]
+    },
+    "sprites/brainrot.json": {
+      "rects": {
+        "patapim": {
+          "x": 0,
+          "y": 0,
+          "w": 256,
+          "h": 256,
+          "u0": 0,
+          "v0": 0,
+          "u1": 0.25,
+          "v1": 0.25,
+          "aspect": 0.7386363636363636
+        },
+        "tungtung": {
+          "x": 256,
+          "y": 0,
+          "w": 256,
+          "h": 256,
+          "u0": 0.25,
+          "v0": 0,
+          "u1": 0.5,
+          "v1": 0.25,
+          "aspect": 0.48579545454545453
+        },
+        "bombardiro": {
+          "x": 512,
+          "y": 0,
+          "w": 256,
+          "h": 256,
+          "u0": 0.5,
+          "v0": 0,
+          "u1": 0.75,
+          "v1": 0.25,
+          "aspect": 1.13915857605178
+        },
+        "tralalero": {
+          "x": 768,
+          "y": 0,
+          "w": 256,
+          "h": 256,
+          "u0": 0.75,
+          "v0": 0,
+          "u1": 1,
+          "v1": 0.25,
+          "aspect": 1.1318327974276527
+        },
+        "assassino": {
+          "x": 0,
+          "y": 256,
+          "w": 256,
+          "h": 256,
+          "u0": 0,
+          "v0": 0.25,
+          "u1": 0.25,
+          "v1": 0.5,
+          "aspect": 1.0507462686567164
+        },
+        "lirili": {
+          "x": 256,
+          "y": 256,
+          "w": 256,
+          "h": 256,
+          "u0": 0.25,
+          "v0": 0.25,
+          "u1": 0.5,
+          "v1": 0.5,
+          "aspect": 0.7670454545454546
+        }
+      }
+    },
+    "portraits": [
+      "sprites/portrait-patapim.webp",
+      "sprites/portrait-tungtung.webp",
+      "sprites/portrait-bombardiro.webp",
+      "sprites/portrait-tralalero.webp"
+    ]
+  },
+  "fonts": [
+    "fonts/LilitaOne-Regular.ttf",
+    "fonts/OFL.txt"
+  ],
+  "audio": {
+    "ui": [
+      "audio/ui-click.ogg",
+      "audio/ui-place.ogg",
+      "audio/ui-deny.ogg",
+      "audio/wave-start.ogg",
+      "audio/boss-alert.ogg",
+      "audio/coin.ogg"
+    ],
+    "combat": [
+      "audio/pistol-shot-1.ogg",
+      "audio/turret-shot-1.ogg",
+      "audio/impact-heavy.ogg",
+      "audio/zombie-death-1.ogg",
+      "audio/zombie-attack-1.ogg",
+      "audio/explosion-metal.ogg",
+      "audio/mechanical-clunk.ogg",
+      "audio/upgrade-confirm.ogg"
+    ]
+  },
+  "files": {
+    "models/zed_1.glb": 16952,
+    "models/zed_3.glb": 19600,
+    "models/dressing.glb": 21784,
+    "models/rocks.glb": 18080,
+    "models/props.glb": 166604,
+    "sprites/brainrot.webp": 117212,
+    "sprites/brainrot.json": 1525,
+    "sprites/portrait-patapim.webp": 6130,
+    "sprites/portrait-tungtung.webp": 4800,
+    "sprites/portrait-bombardiro.webp": 9018,
+    "sprites/portrait-tralalero.webp": 7928,
+    "fonts/LilitaOne-Regular.ttf": 26828,
+    "fonts/OFL.txt": 4486,
+    "audio/ui-click.ogg": 7854,
+    "audio/ui-place.ogg": 38791,
+    "audio/ui-deny.ogg": 72176,
+    "audio/wave-start.ogg": 43818,
+    "audio/boss-alert.ogg": 63162,
+    "audio/coin.ogg": 12997,
+    "audio/pistol-shot-1.ogg": 29463,
+    "audio/turret-shot-1.ogg": 27503,
+    "audio/impact-heavy.ogg": 7232,
+    "audio/zombie-death-1.ogg": 16839,
+    "audio/zombie-attack-1.ogg": 5980,
+    "audio/explosion-metal.ogg": 15929,
+    "audio/mechanical-clunk.ogg": 4436,
+    "audio/upgrade-confirm.ogg": 7322
+  }
+}

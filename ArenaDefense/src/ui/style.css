@@ -1,0 +1,960 @@
+/* Minimal shell styling — P2 (`ui/{Hud,BuildOverlay,Screens}.js`) owns the
+   real HUD/overlay layout. This file only has to stop the canvas scrolling
+   and give the placeholder boot screen somewhere to sit.
+
+   Font: `Lilita One` (`public/assets/fonts/LilitaOne-Regular.ttf`) is loaded
+   at boot via `new FontFace('Lilita One', 'url(' + window.__ASSET_BASE__ +
+   'assets/fonts/LilitaOne-Regular.ttf)')`, NOT a `@font-face` rule here —
+   a CSS `url()` is resolved against the stylesheet's own location, which is
+   exactly the relative-path problem `window.__ASSET_BASE__` exists to avoid
+   (see the comment in `index.html`). Loading it from JS lets it use the same
+   asset-base global as every other runtime fetch. */
+
+:root {
+  color-scheme: dark;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1b1310;
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  outline: none;
+}
+
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  color: #f6eedd;
+}
+
+#ui > * {
+  pointer-events: auto;
+}
+
+/* `.hud` and `.touch-layer` are full-screen (`inset: 0`) overlays sitting
+   directly in `#ui`, so the blanket `#ui > *` rule above (an ID selector,
+   which outranks these two plain classes on specificity alone) would make
+   them each swallow every click/touch on the whole screen — including the
+   canvas click that requests pointer lock. These two overrides need to beat
+   that ID selector, hence matching on `#ui > .hud`/`#ui > .touch-layer`
+   rather than just `.hud`/`.touch-layer`. Pointer input reaches specific
+   children (`.touch-zone`, `.touch-stick`) via their own `pointer-events:
+   auto`, set further down. */
+#ui > .hud,
+#ui > .touch-layer {
+  pointer-events: none;
+}
+
+.placeholder-title {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  font-size: clamp(28px, 6vw, 56px);
+  letter-spacing: 0.08em;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 6, 4, 0.55);
+}
+
+#overlay[hidden] {
+  display: none;
+}
+
+#loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #1b1310;
+  color: #f6eedd;
+}
+
+#loading[hidden] {
+  display: none;
+}
+
+.loading-title {
+  margin: 0;
+  font-size: clamp(24px, 5vw, 40px);
+  letter-spacing: 0.08em;
+}
+
+.loading-status {
+  margin: 0;
+  opacity: 0.7;
+  font-size: 14px;
+}
+
+.icon {
+  width: 1em;
+  height: 1em;
+  fill: currentColor;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* ================================================================
+   HUD (src/ui/Hud.js)
+================================================================ */
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.hud-stats {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hud-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hud-icon {
+  width: 18px;
+  height: 18px;
+  color: #f6eedd;
+  flex: none;
+}
+
+.hud-bar {
+  width: 120px;
+  height: 12px;
+  border: 2px solid #0c0806;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.hud-bar__fill {
+  height: 100%;
+  width: 100%;
+  background: #e0523f;
+  transition: width 120ms ease-out;
+}
+
+.hud-bar--hp .hud-bar__fill {
+  background: #e0523f;
+}
+
+.hud-text {
+  font-size: 13px;
+  min-width: 1.6em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.hud-wave {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  opacity: 0.85;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.hud-build-countdown {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+}
+
+.hud-build-countdown[hidden] {
+  display: none;
+}
+
+.hud-boss {
+  position: absolute;
+  top: max(46px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(60vw, 420px);
+  height: 10px;
+  border: 2px solid #0c0806;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.hud-boss[hidden] {
+  display: none;
+}
+
+.hud-boss__fill {
+  height: 100%;
+  width: 100%;
+  background: #b3263d;
+  transition: width 150ms ease-out;
+}
+
+.hud-combo {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hud-combo[hidden] {
+  display: none;
+}
+
+.hud-combo__fill {
+  width: 70px;
+  height: 8px;
+  border-radius: 3px;
+  background: #f2c14e;
+}
+
+.hud-combo__text {
+  font-size: 13px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.hud-reticle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 28px;
+  pointer-events: none;
+}
+
+.hud-reticle__ring {
+  position: absolute;
+  inset: 0;
+  border: 2px solid rgba(246, 238, 221, 0.7);
+  border-radius: 50%;
+}
+
+.hud-reticle__dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(246, 238, 221, 0.9);
+}
+
+.hud-reticle.is-target .hud-reticle__ring {
+  border-color: #ff4b3e;
+}
+
+.hud-reticle.is-target .hud-reticle__dot {
+  background: #ff4b3e;
+}
+
+.hud-hint {
+  position: absolute;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  opacity: 0.7;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+/* Device detection toggles `body.touch`/`body.keyboard` (see ui/input.js);
+   only the matching hint is ever shown. */
+body.keyboard .hud-hint--touch,
+body.touch .hud-hint--keyboard {
+  display: none;
+}
+
+.hud-toast {
+  position: absolute;
+  bottom: max(70px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  padding: 6px 14px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 160ms ease-out, transform 160ms ease-out;
+}
+
+.hud-toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.hud-paused {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(26px, 6vw, 46px);
+  letter-spacing: 0.1em;
+  padding: 10px 26px;
+  background: rgba(10, 6, 4, 0.6);
+  border-radius: 8px;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.hud-paused[hidden] {
+  display: none;
+}
+
+/* P7 additions: mute (both input modes) + pause (touch only). Appended
+   directly to `#ui` (see the doc comment in `Hud.js`'s constructor) rather
+   than nested inside `.hud`, specifically so `z-index` here is compared
+   against `.touch-layer` (8) and its `.touch-zone--move`/`--look` children
+   (9/10) at their SHARED parent (`#ui`) — a z-index set on a `.hud`
+   descendant is capped inside `.hud`'s own (lower, 5) stacking context and
+   could never win that comparison no matter how high it were set. */
+.hud-controls {
+  position: absolute;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 12;
+}
+
+.hud-icon-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 14, 10, 0.55);
+  color: #f6eedd;
+  cursor: pointer;
+}
+
+.hud-icon-btn .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.hud-icon-btn.is-muted {
+  color: #ff4b3e;
+}
+
+/* Keyboard sessions already have Escape — the touch layer is the one that
+   needs an on-screen pause affordance. */
+body.keyboard .hud-pause-btn {
+  display: none;
+}
+
+/* ================================================================
+   TOUCH CONTROLS (src/ui/TouchControls.js)
+================================================================ */
+.touch-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Only shown at all in touch mode — keyboard sessions never pay for an
+   invisible input shield. */
+body.keyboard .touch-layer {
+  display: none;
+}
+
+.touch-zone {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-zone--move {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  z-index: 9;
+}
+
+.touch-zone--look {
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  z-index: 9;
+}
+
+.touch-stick {
+  position: absolute;
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + var(--joystick-radius, 56px));
+  left: calc(max(16px, env(safe-area-inset-left)) + var(--joystick-radius, 56px));
+  width: 0;
+  height: 0;
+  opacity: 0.7;
+  pointer-events: none;
+  touch-action: none;
+  z-index: 10;
+}
+
+.touch-stick.is-engaged {
+  opacity: 1;
+}
+
+.touch-stick__base,
+.touch-stick__knob {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.touch-stick__base {
+  width: calc(var(--joystick-radius, 56px) * 2);
+  height: calc(var(--joystick-radius, 56px) * 2);
+  margin: calc(var(--joystick-radius, 56px) * -1);
+  border: 3px solid #f6eedd;
+  border-radius: 50%;
+  background: rgba(20, 14, 10, 0.46);
+}
+
+.touch-stick__knob {
+  width: 52px;
+  height: 52px;
+  margin: -26px;
+  border: 3px solid #e0523f;
+  border-radius: 50%;
+  background: rgba(224, 82, 63, 0.86);
+  transition: transform 110ms ease-out;
+}
+
+.touch-stick.is-engaged .touch-stick__knob {
+  transition: none;
+}
+
+/* ================================================================
+   DEBUG STATS (src/game/Game.js, ?debug=1)
+================================================================ */
+.debug-stats {
+  position: absolute;
+  top: max(4px, env(safe-area-inset-top));
+  right: max(4px, env(safe-area-inset-right));
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  color: #9ee08a;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 30;
+}
+
+/* ================================================================
+   P4 build overlay (src/ui/BuildOverlay.js)
+   Renders into the existing `#overlay` node (see the base `#overlay`/
+   `#overlay[hidden]` rules near the top of this file, which this block
+   does not touch) — a top-down SVG map plus HTML chrome, full-bleed.
+================================================================ */
+.bo {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+           max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  box-sizing: border-box;
+}
+
+.bo-mapwrap {
+  width: min(92vmin, 480px);
+  height: min(92vmin, 480px);
+  flex: none;
+}
+
+.bo-map {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.bo-wall {
+  fill: rgba(246, 238, 221, 0.05);
+  stroke: rgba(246, 238, 221, 0.55);
+  stroke-width: 1.4;
+}
+
+.bo-gate-arc {
+  fill: none;
+  stroke: rgba(150, 130, 110, 0.7);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.bo-gate-arc.is-active {
+  stroke: #ff4b3e;
+  animation: bo-gate-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes bo-gate-pulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+
+.bo-gate-closed {
+  stroke: rgba(246, 238, 221, 0.5);
+  stroke-width: 2;
+}
+
+.bo-gate-closed.is-hidden {
+  display: none;
+}
+
+.bo-slot-ring {
+  fill: none;
+  stroke: rgba(246, 238, 221, 0.6);
+  stroke-width: 1.2;
+  stroke-dasharray: 2.4 2;
+}
+
+.bo-slot.is-occupied .bo-slot-ring,
+.bo-slot.is-destroyed .bo-slot-ring {
+  stroke-dasharray: none;
+  stroke: rgba(246, 238, 221, 0.85);
+}
+
+.bo-slot-fill {
+  fill: transparent;
+}
+
+.bo-slot-cost {
+  fill: rgba(246, 238, 221, 0.85);
+  font-size: 5px;
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  pointer-events: none;
+}
+
+.bo-slot.is-occupied .bo-slot-cost,
+.bo-slot.is-destroyed .bo-slot-cost {
+  display: none;
+}
+
+.bo-slot-pip {
+  fill: rgba(246, 238, 221, 0.9);
+  opacity: 0;
+}
+
+/* `BuildOverlay#_renderSlots` doesn't reset a destroyed slot's leftover
+   per-instance fill colour / pip opacity from when it was alive — cheaper to
+   force both here (a destroyed slot never needs its own colour or level
+   read) than to touch every property in JS on every kill. */
+.bo-slot.is-destroyed .bo-slot-fill {
+  fill: rgba(120, 108, 96, 0.35) !important;
+}
+
+.bo-slot.is-destroyed .bo-slot-pip {
+  opacity: 0 !important;
+}
+
+.bo-slot-hpbg {
+  fill: rgba(0, 0, 0, 0.5);
+}
+
+.bo-slot.is-empty .bo-slot-hpbg,
+.bo-slot.is-destroyed .bo-slot-hpbg {
+  display: none;
+}
+
+.bo-slot-hpfill {
+  fill: #6fd66f;
+}
+
+.bo-slot-hpfill.is-low {
+  fill: #e0523f;
+}
+
+.bo-slot.is-empty .bo-slot-hpfill,
+.bo-slot.is-destroyed .bo-slot-hpfill {
+  display: none;
+}
+
+.bo-slot-x {
+  stroke: rgba(246, 238, 221, 0.55);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  display: none;
+}
+
+.bo-slot.is-destroyed .bo-slot-x {
+  display: block;
+}
+
+.bo-slot-hit {
+  fill: transparent;
+  stroke: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* Applied directly to whatever element was denied (a slot's hit circle, or
+   a sheet button) by `BuildOverlay#_deny` — deliberately not scoped under
+   `.bo-slot`, since the same deny feedback is reused on HTML buttons too. */
+.is-denied {
+  animation: bo-shake 320ms ease-in-out;
+}
+
+@keyframes bo-shake {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(-1.6px, 0); }
+  40% { transform: translate(1.6px, 0); }
+  60% { transform: translate(-1.2px, 0); }
+  80% { transform: translate(1.2px, 0); }
+}
+
+.bo-player {
+  fill: #ffd76b;
+  stroke: rgba(0, 0, 0, 0.5);
+  stroke-width: 0.4;
+}
+
+.bo-energy {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 999px;
+  color: #f6eedd;
+}
+
+.bo-energy__icon {
+  width: 16px;
+  height: 16px;
+}
+
+.bo-energy__value {
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+
+.bo-chips {
+  display: flex;
+  gap: 8px;
+}
+
+.bo-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 72px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 2px solid rgba(246, 238, 221, 0.35);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #f6eedd;
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  opacity: 0.55;
+  touch-action: manipulation;
+}
+
+.bo-chip.is-affordable {
+  opacity: 1;
+}
+
+.bo-chip.is-selected {
+  border-color: #ff4b3e;
+  background: rgba(224, 82, 63, 0.25);
+}
+
+.bo-chip__name {
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.bo-chip__cost {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.bo-ready {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  min-width: 44px;
+  min-height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #f6eedd;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+}
+
+.bo-ready__ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.bo-ready__ring-bg {
+  fill: none;
+  stroke: rgba(246, 238, 221, 0.2);
+  stroke-width: 3;
+}
+
+.bo-ready__ring-fill {
+  fill: none;
+  stroke: #ff4b3e;
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 200ms linear;
+}
+
+.bo-ready__label {
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  z-index: 1;
+}
+
+.bo-ready__seconds {
+  font-size: 15px;
+  z-index: 1;
+}
+
+.bo-sheet {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 6, 4, 0.5);
+  z-index: 2;
+}
+
+.bo-sheet[hidden] {
+  display: none;
+}
+
+.bo-sheet__card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+  padding: 16px;
+  background: #1f1712;
+  border: 2px solid rgba(246, 238, 221, 0.25);
+  border-radius: 12px;
+  color: #f6eedd;
+}
+
+.bo-sheet__title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  letter-spacing: 0.05em;
+  text-align: center;
+}
+
+.bo-sheet__btn {
+  min-height: 44px;
+  border: 2px solid rgba(246, 238, 221, 0.35);
+  border-radius: 8px;
+  background: rgba(246, 238, 221, 0.08);
+  color: #f6eedd;
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  touch-action: manipulation;
+}
+
+.bo-sheet__btn:disabled {
+  opacity: 0.4;
+}
+
+.bo-sheet__btn--close {
+  background: transparent;
+  border-color: rgba(246, 238, 221, 0.2);
+  opacity: 0.75;
+}
+
+/* P6 screens */
+/* ================================================================
+   TITLE / DEATH / RUN-END SCREENS (src/ui/Screens.js)
+   Full-viewport panels mounted into #ui; Screens#hide() removes them and
+   restores input. Buttons are >=48px tall for a comfortable touch target.
+================================================================ */
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+           max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  box-sizing: border-box;
+  text-align: center;
+  background: rgba(10, 6, 4, 0.86);
+  color: #f6eedd;
+  touch-action: manipulation;
+  overflow-y: auto;
+}
+
+.screen-heading {
+  margin: 0;
+  font-size: clamp(30px, 7vw, 56px);
+  letter-spacing: 0.06em;
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.6);
+}
+
+.screen-heading--death {
+  color: #ff6b57;
+}
+
+.screen-sub {
+  margin: 0;
+  font-size: clamp(14px, 3vw, 18px);
+  opacity: 0.85;
+}
+
+.screen-portraits {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: min(90vw, 420px);
+}
+
+.screen-portrait {
+  width: clamp(48px, 14vw, 76px);
+  height: clamp(48px, 14vw, 76px);
+  object-fit: contain;
+  background: rgba(246, 238, 221, 0.08);
+  border: 2px solid rgba(246, 238, 221, 0.25);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.screen-portraits-caption {
+  margin: -6px 0 0;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  opacity: 0.6;
+}
+
+.screen-stats {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: 15px;
+}
+
+.screen-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.screen-stat--earned {
+  font-size: 17px;
+  color: #ffd76b;
+}
+
+.screen-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.screen-btn {
+  min-width: 220px;
+  min-height: 52px;
+  padding: 10px 22px;
+  border: 2px solid rgba(246, 238, 221, 0.35);
+  border-radius: 12px;
+  background: rgba(246, 238, 221, 0.08);
+  color: #f6eedd;
+  font-family: 'Lilita One', ui-rounded, system-ui, sans-serif;
+  font-size: 17px;
+  letter-spacing: 0.05em;
+  touch-action: manipulation;
+}
+
+.screen-btn:disabled {
+  opacity: 0.4;
+}
+
+.screen-btn--primary {
+  border-color: #ff4b3e;
+  background: rgba(224, 82, 63, 0.35);
+}
+
+.screen-btn[hidden] {
+  display: none;
+}
+
+.screen-credits {
+  margin: 6px 0 0;
+  max-width: min(90vw, 480px);
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0.55;
+}
